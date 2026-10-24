@@ -3,15 +3,16 @@
 These cases apply the [registry](../representation/registry.md), its
 [machine-readable catalog](../representation/trrm-1.registry.json),
 [metadata](../il-metadata.md) and [Body contracts](../il-instruction-set.md).
-The selected schema is `trrm/1-draft-register-il-1`; `(1, 0)` alone is not
+The selected schema is `trrm/1-draft-layout-queries-1`; `(1, 0)` alone is not
 schema agreement.
 
 [Fixed operand, typed-record and complete artifact vectors](il-registry-vectors.json)
 include literal octets, expected fields and logical programs. RequirementFailure
 vectors exercise Boolean and uint8-mask conditions, true/false outcomes and
-distinct register selectors; BlockEntryState vectors distinguish value and
-place-handle inputs. Complete
-artifacts contain their header, directory, Module, String, TypeSpec,
+distinct register selectors; BlockEntryState vectors distinguish value,
+place-handle and TypeIdentity inputs. The vectors include all 32 Body map
+masks, FieldMap/FieldPath rows and the TypeIdentity E/U comparison matrix.
+Complete artifacts contain their header, directory, Module, String, TypeSpec,
 MethodDef, MethodSig, Param where needed, and Body sections. The integer
 artifact exercises tiny and long register instructions in one stream. The
 instruction vectors cover representative tiny/short/long layouts; a separate
@@ -37,7 +38,7 @@ internal check organization.
 |---|---|---|
 | RREG-01 | Enumerate the instruction-byte namespace | `00..0F` are one-byte tiny tuples, `10..BF` two-byte short forms and `C0..FF` four-byte long forms; no width prefix exists |
 | RREG-02 | Compare the registry with displayed metadata/instruction tables | Exact tiny/short/long assignments, controls, record layouts and section strides agree; the registry remains the numeric authority |
-| RREG-03 | Enumerate all assigned instruction and record values | T0..T15, assigned short forms, `C0..CC`, `D0..DD`, `E0..E8`, `EA..EB`, and record kinds `01..0B` match the machine registry |
+| RREG-03 | Enumerate all assigned instruction and record values | T0..T15, assigned short forms, `C0..CC`, `D0..DE`, `E0..E8`, `EA..EB`, and record kinds `01..0B` match the machine registry |
 | RREG-04 | Decode an unlisted primary byte or family control | Reject it; reserved capacity does not create an escape, operation, profile or compatibility alias |
 | RREG-05 | A producer emits `F0` as a prefix, recursively decodes an operand byte, or uses an unassigned primary | Reject the required Body; the stream has fixed 1/2/4-byte instructions and no recursive decoding |
 | RREG-06 | A long family uses R14 as a writable result, a non-R15 register in an unused register field, an invalid selector or a nonzero reserved field | Reject; unused register fields require R15, while reserved non-register bits require zero |
@@ -51,10 +52,12 @@ internal check organization.
 | RREG-14 | A required operation/call uses assigned rows but one required capability carrier is absent | No support claim for the affected semantics; row presence alone is not support, and no permanent category-wide profile cap is implied |
 | RREG-15 | A failure is raised by an operation/call with an exact failure contract or source `throw e;` carries an exception object | Preserve that failure/event contract; the operation opcode does not replace exception-object transport or handler-region metadata |
 | RREG-16 | B3/E7 references a `RequirementFailure` record | Resolve its explicit Boolean or uint8-mask kind, register and predicate; exercise true/false conditions and distinct registers without reevaluating the predicate |
-| RREG-17 | A `BlockEntryState` row carries a live register | `carrierKind=0` requires a value type and `accessKind=0`; `carrierKind=1` requires a referent type and assigned place access; preserve dynamic backing/loan/provenance facts through verified edges |
+| RREG-17 | A `BlockEntryState` row carries a live register | `carrierKind=0` requires a value type and `accessKind=0`; `carrierKind=1` requires a referent type and assigned place access; `carrierKind=2` requires zero unused type/access fields and exact TypeIdentity evidence through live edges |
 | RREG-18 | A Body TypeMap entry refers to a TypeSpec row | Use the Body token kind `11`; general TypeSpecRef row form `00` is not an alias in this field |
 | RREG-19 | A tiny/short Home, reference or place store is selected | Accept only `sourceUse=1` with a Copy-eligible source and valid destination state/authority; full Home `D6` admits its explicit Transfer/BorrowRead modes when dependencies are derivable; other modes or per-store formal/dependency facts require SemanticStore |
 | RREG-20 | `C0 01 F0 10` uses R15 in the unused result slot | Accept R15 as the role-specific unused field; reject a different register there, while reserved non-register bits remain zero |
+| RREG-21 | Compare the Body map inventory and schema | Stream Bodies use byte-2 `mapMask`, conditional map counts and prefix `17 + 4*popcount(mapMask)`; FieldMap is four bytes per entry and all five maps use independent `u16` indexes |
+| RREG-22 | Retained query/path content lacks required Feature 13 support, or a FieldPath token targets an absent table | Reject affected use; a number, section shape or matching `(1,0)` format pair does not supply support |
 
 ## 2. Encoding and admission
 
@@ -62,9 +65,9 @@ internal check organization.
 |---|---|---|
 | RENC-01 | A Body uses a tiny, short or long instruction form | Decode fixed length from the primary byte; do not read a prefix, shared width class or block mode |
 | RENC-02 | An exact operation has both a short and long encoding | Ordinary reading accepts both; canonical writer/audit selects the shortest exact form |
-| RENC-03 | Body implementation kind is `01..05` | Read the exact descriptor or 33-byte instruction-stream prefix; never infer the kind from row contents |
+| RENC-03 | Body implementation kind is `01..05` | Read the exact descriptor or the kind-01 prefix determined by `mapMask`; never infer the kind or count layout from row contents |
 | RENC-04 | Body-local index is `0`, `0xFFFF` with count 65,536, or just outside the count | Accept the in-range endpoints; reject out-of-range values without implicit widening |
-| RENC-05 | HomeMap, TypeMap, MethodMap, ConstantMap, Block or record count crosses 65,536 | Reject 65,537-entry inventories; counts use `u32`, indexes remain `u16` |
+| RENC-05 | HomeMap, TypeMap, MethodMap, FieldMap, ConstantMap, Block or record count crosses its bound | Reject 65,537-entry map/Block/record inventories; map bits serialize only their `u32` count words and indexes remain `u16` |
 | RENC-06 | Block table or instruction bytes are truncated, overlapped, gapped or do not end in one terminator per block | Reject before affected use |
 | RENC-07 | `recordOffsets` has an invalid count, range, order or final extent | Reject; each record's exact header/payload extent must be consumed |
 | RENC-08 | Unknown record kind, reserved flags or invalid record-control combination occurs | Reject before affected use |
@@ -73,7 +76,7 @@ internal check organization.
 | RENC-11 | TypeMap includes TypeSpec, TypeDef, type Import, F2, F3 or Body pseudo token | Resolve each token to one complete type; F3 uses an assigned family over an atomic argument; pseudo bases are zero-based TypeMap indexes and cycles reject |
 | RENC-12 | TypeSpecRef uses `0xF4..0xFE`, `0xFF`, or an invalid F3 payload | Reject unassigned token kinds, reserved indirection and type-inapplicable combinations |
 | RENC-13 | A complete-type field uses TypeSpec row, F2 or eligible F3 | Resolve to the same complete type; nested type-valued fields follow TypeSpecRef rules; `genericTypeSpec` remains row-only |
-| RENC-14 | TypeMap/MethodMap/ConstantMap order changes consistently, or contains duplicates/unused entries | Ordinary reading preserves meaning; a complete canonicality audit checks first-use order, reuse and omission |
+| RENC-14 | TypeMap/MethodMap/FieldMap/ConstantMap order changes consistently, or contains duplicates/unused entries | Ordinary reading preserves meaning; a complete canonicality audit checks first-use order, reuse and omission; canonical Body prefixes omit empty-map count words |
 | RENC-15 | Required unknown section, unowned Feature row or unsupported retained manifest is present | Reject affected use; these do not establish a support claim |
 | RENC-16 | Unknown `8000..FFFF` section uses self-contained, slotted or discard policy | Verify framing and the registered nonsemantic policy; ignore or preserve only as that policy permits |
 | RENC-17 | A type is used with an operation outside its assigned type matrix | Reject unsupported required use; type identity alone does not assign an operation |
@@ -85,6 +88,13 @@ internal check organization.
 | RENC-23 | Typed-record order changes, or duplicate/unused records are retained | Ordinary reading preserves all referenced meanings; canonical writers use first logical use, reuse equivalent records and omit unused entries |
 | RENC-24 | Short `B0 2A` or `90 2A` carries a Block/CallSite index above 15 | Consume the full operand byte as index 42, not a register-nibble pair |
 | RENC-25 | Short `B1 43` carries a Boolean register and ConditionalEdge index | Split the operand byte into low `x=R3` and high `y=record index 4` nibbles |
+| RENC-26 | Kind-01 Body uses any of the 32 map masks | Parse only set-bit count words in Home/Type/Method/Field/Constant order; the exact prefix sizes are 17/21/25/29/33/37 bytes as `popcount` ranges 0..5 |
+| RENC-27 | A set map bit has a serialized zero count | Ordinary reading accepts the empty-present map; canonical writers omit its bit/count and a scoped prefix-canonicality audit rejects it |
+| RENC-28 | `mapMask` has a reserved bit, a missing present-map count, missing mandatory count or truncated map payload | Reject framing before affected use; do not repair by treating payload bytes as an absent count |
+| RENC-29 | FieldMap token is a FieldDef DefId, FieldDef Import or FieldPath token | Resolve kind `14` as DefId, `1C` as an Import expecting FieldDef, and `1D` as a FieldPath row only in FieldMap; reject bare rows, wrong kinds and invalid endpoints |
+| RENC-30 | FieldPath row has a root TypeSpecRef and ordered FieldDef/Import steps | Require nonzero `fieldCount`, exact variable-row extent and exact owner/substitution at every step; no nested FieldPath token is allowed in a row |
+| RENC-31 | `DE` query kind selects each operand map and destination boundary | Kinds 1/2/5 select TypeMap; 3/4 select FieldMap; all fifteen destinations per kind are assigned, R14/kinds 0 and 6..F reject |
+| RENC-32 | `DE` kind 5 produces or discards a TypeIdentity | It has no TypeSpec code or `TargetLayoutDependency` row; require exact identity evidence and reject storage/call/constant/public-type escapes |
 
 ## 3. Integer, Boolean and conversion families
 
@@ -92,7 +102,7 @@ internal check organization.
 |---|---|---|
 | RINT-01 | `C1` selects Boolean NOT or integer bitwise NOT | Boolean NOT accepts only `bool`; bitwise NOT accepts the assigned integer identities and preserves the declared width |
 | RINT-02 | `C1` selects AND/OR/XOR | Accept equal integer types or two `bool` values; Boolean forms are eager and two-valued |
-| RINT-03 | `C2` selects relation, equality or inequality; `40`/`41` consume or test the relation | Equality/inequality accept the assigned scalar identities; ordering admits only its specified domains, and relation output is one-hot uint8 |
+| RINT-03 | `C2` selects relation, equality or inequality; `40`/`41` consume or test the relation | Numeric/scalar equality and ordering remain unchanged; TypeIdentity uses existing binary controls with E/U only, and relation output remains ordinary one-hot uint8 |
 | RINT-04 | `C0` checked/wrapping controls or `C7..C9` recipes use each integer primitive | Preserve exact type and width; checked forms use ordered overflow failures, wrapping forms use modulo `2^w`, and C9 clamps each mathematical node, including signed-minimum/unsigned saturating negation |
 | RINT-05 | `C0` controls divide, remainder or DivRem exercise zero and signed minimum / `-1` | Divide fails for zero and signed quotient overflow; remainder for signed minimum `% -1` is zero; combined DivRem fails once and publishes neither result |
 | RINT-06 | `C1` shift controls use signed/unsigned data types and legal count boundaries | Validate the source count in `[0,width)` before conversion; signed arithmetic right-shifts sign-fill and logical shifts zero-fill |
@@ -100,6 +110,9 @@ internal check organization.
 | RINT-08 | `D0..D3` convert integer source/destination pairs | D0 follows the selected ordinary pair contract, D1 wraps integers, D2 saturates admitted pairs and D3 requires an exact representation-valid pair |
 | RINT-09 | A source conversion is outside an assigned instruction pair | Do not infer conversion from a type code; require an exact selected callable or other assigned contract |
 | RINT-10 | ConstantMap carries an integer value, including a signed bit pattern or value beyond 64 bits | Preserve the exact typed ConstantSource representation; do not synthesize an inline bit-width form or truncate a wide value |
+| RINT-11 | `C2 00` or short `40` compares two TypeIdentity values | Return exactly E=`2` for identical complete identities or U=`8` for distinct identities; no L/G or signaling behavior |
+| RINT-12 | TypeIdentity relation/boolean results feed existing predicate consumers | Ordinary `ne` mask `D` matches U; ordered `lt/le/gt/ge` and ordered-not-equal mask `5` do not; no new predicate or `C2` control is allocated |
+| RINT-13 | All sixteen predicate masks consume TypeIdentity relation outcomes | Preserve the existing bit-test truth table on E=`2`/U=`8`; only exact comparison evidence may justify a type-test refinement, not an arbitrary uint8 mask |
 
 ## 4. Floating and decimal families
 
@@ -129,10 +142,12 @@ internal check organization.
 |---|---|---|
 | RDISP-01 | Checked and wrapping integer addition use the same operand type | Display `add.checked` versus `add.wrap`; retain distinct overflow behavior and result obligations |
 | RDISP-02 | Integer and floating addition share the semantic root `add` | Display their complete types and retain distinct arithmetic, rounding and failure contracts; do not infer one common operation policy |
-| RDISP-03 | A selected source query is shown in semantic IL | Reuse its existing source identity and contract; do not create a Core member, opcode or alternate query, and retain the selected `ICountable.Count : nint` witness for `countof(Place)` |
+| RDISP-03 | A selected source query is shown in semantic IL | Reuse its existing source identity and contract; `DE` supplies the assigned TypeOf/layout forms, while Count is an ordinary constant or call, not a universal opcode; retain the selected `ICountable.Count : nint` witness for `countof(Place)` |
 | RDISP-04 | `const` displays a value produced by required evaluation or optional folding | Required execution retains its `ConstantExecution` request and dependencies; optional folding needs no optimizer-history record. The display encodes neither provenance, and required work cannot fall back to runtime |
 | RDISP-05 | A semantic operation is compiled by JIT/AOT or lowered to target IR/assembly | Preserve its typed source contract and actual dependencies; the display does not prescribe a machine instruction, helper, or runtime support API |
 | RDISP-06 | A reader/writer exposes a wire operation family or enum key beside a semantic display | Keep registry identifiers and operand schemas authoritative for encoding; display spelling is neither a binary alias nor a new allocation |
+| RDISP-07 | `typeof` is displayed or used for metadata type recipes | A runtime TypeIdentity is internal comparison data only; metadata-only recipes bind their complete type reference without a reflection object or executed TypeOf |
+| RDISP-08 | `countof(Type/known-shape)` or `countof(Place)` is represented in semantic IL | Use an ordinary typed `nint` constant for resolved shape counts or the exact bound `ICountable.Count` call for a live Place; no universal Count/Length opcode or `length` alias |
 
 ## 6. Rewriting and evidence
 
@@ -142,7 +157,7 @@ internal check organization.
 | RREW-02 | Opcode-valued octets also occur in operands, constants, record payloads or offsets | Rewrite only decoded operation starts; other namespaces retain their own values |
 | RREW-03 | An operation changes from one-byte to four-byte form or vice versa | Rebuild affected Block code offsets/lengths, `codeByteLength` and the containing Body section offsets |
 | RREW-04 | A TypeSpec row token moves while its TypeMap entry remains | Rebuild the fixed TypeMap token; zero-based `u16` local references remain unchanged |
-| RREW-05 | TypeMap, MethodMap or ConstantMap order changes | Remap every instruction and typed-record index in its namespace; preserve resolved types, exact Import expectations and typed constant identity |
+| RREW-05 | TypeMap, MethodMap, FieldMap or ConstantMap order changes | Remap every instruction and typed-record index in its namespace; preserve resolved types, exact Import expectations, FieldPath identities and typed constant identity |
 | RREW-06 | A FieldDef, MethodDef or Import token is remapped | Rebuild the exact fixed-width token; do not substitute equal names, signatures or row bytes |
 | RREW-07 | Record order or record payload length changes | Rebuild all record indexes/offsets and every instruction/record reference |
 | RREW-08 | Block order or code layout changes | Remap every branch target, Block entry reference, SourceMap slot and instruction ordinal; preserve the same CFG and operation order |
@@ -152,3 +167,6 @@ internal check organization.
 | RREW-12 | Packing/replacement changes nominal origins, imported expectations or shared structural context | Apply the complete identity/compatibility relation; equal strings, rows or layouts are not proof |
 | RREW-13 | A SourceMap instruction slot has selector 1 and section kind `0020`, an invalid Block index or stale step role | Reject selected mapping use or regenerate/drop the optional section under its registered policy |
 | RREW-14 | An optimizer changes CFG, effects, cleanup, lifetimes or operation order while re-encoding | Preserve all selected observations and rebuild affected Body/SourceMap metadata; byte reallocation alone is not a general transformation proof |
+| RREW-15 | A stream Body map is added, removed or reordered | Rebuild `mapMask`, present count words, 17..37-byte prefix, map payload starts, every affected index and Body/section extent; never byte-substitute a stale prefix |
+| RREW-16 | A FieldPath row or `TargetLayoutDependencyField` range is remapped | Rebuild the complete root TypeSpecRef, ordered FieldDef/Import steps, exclusive `004A` ranges and all FieldMap tokens; never persist Body-local FieldMap indexes globally |
+| RREW-17 | TypeIdentity is aliased, merged, conditionally selected or folded | Reconstruct exact per-edge identity evidence and carrier-2 flow; fold only to ordinary bool/uint8/control flow while retaining identity and refinement obligations |

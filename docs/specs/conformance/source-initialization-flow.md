@@ -5,6 +5,9 @@ Assume otherwise valid visible declarations and complete types. `T` in value
 patterns uses the default Copy-capable formal domain; owning outputs use valid
 declared initialization, dependency, and synchronous cleanup contracts.
 These are specified outcomes, not executed compiler tests.
+Type-identity source tests retain their ordinary successful-edge refinement;
+their TypeIdentity register representation and capability gates are exercised
+in [IL registry conformance](il-registry.md).
 
 ## Scope, vacancy, and joins
 

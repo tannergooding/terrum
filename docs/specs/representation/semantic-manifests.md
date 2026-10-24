@@ -8,7 +8,7 @@ These rules define `trrm-semantic-manifest/1`, the physical manifest for
 The artifact still uses one exact encoding schema. A Module's semantic edition
 does not select another row layout, opcode catalog or decoder.
 
-The current draft schema is `trrm/1-draft-register-il-1`, still format `(1, 0)`.
+The current draft schema is `trrm/1-draft-layout-queries-1`, still format `(1, 0)`.
 [Format versioning](format-versioning.md) requires exact out-of-band draft
 agreement, not compatibility with an earlier same-pair preview. There is no
 new header field, release marker or schema-ID record.
@@ -49,6 +49,15 @@ unwinding is a separate capability and is not a prerequisite for ordinary
 rootless values, calls, exports or data imports. Feature IDs `9..12` remain
 assigned at revision `1`, with their full semantic and representation
 registrations pending. Each registered `(featureId, ruleRevision)` defines:
+
+Feature `13=LayoutQueries`, revision `1`, is registered with no unconditional
+Feature prerequisites. It covers retained `DE` kinds 1..5, the internal
+TypeIdentity carrier/merge/comparison/conditional-selection flow, Body
+FieldMap and global FieldPath, FieldDef Import/Export declaration binding,
+and retained target-layout field-path dependencies. Other retained
+constant, target, witness, runtime or generic-evidence uses still require
+their own complete prerequisite closure. The five-map `mapMask` framing is
+common schema structure and does not itself require Feature 13.
 
 | Required definition | Obligation |
 |---|---|
@@ -101,9 +110,10 @@ repeated IDs; explicit scoped canonicality audits reject deviations. No uniquely
 minimal generating set, globally unique row interning or whole-artifact byte
 image is required.
 
-The registry assigns native Feature IDs `1..7` and Feature IDs `9..12` for
-proof/value/execution capabilities; the latter still lack complete prerequisite
-closure and required record schemas. A module with no required Feature rows
+The registry assigns native Feature IDs `1..7`, Feature IDs `9..12` for
+proof/value/execution capabilities, and Feature 13 for layout queries. IDs
+`9..12` still lack complete prerequisite closure and required record schemas.
+A module with no required Feature rows
 uses `(0, 0)`;
 that representation does not redefine edition `1` as a reduced conformance
 floor. The assigned Feature codec permits bounded inspection of unsupported
@@ -126,6 +136,16 @@ metadata. A support claim includes each exact requirement or an explicitly
 applicable directed compatibility mapping.
 It never chooses a larger revision, assumes symmetry/transitivity or rewrites the
 required identity to the implementation's revision.
+
+Feature 13 is required when retained content uses any `DE` kind, TypeIdentity
+carrier/comparison/conditional flow, a nonempty FieldMap, a FieldPath row,
+FieldDef Import/Export binding under Feature 13, or the associated
+retained path/dependency representation. Declaration-only FieldDef
+Imports/Exports require the binding capability even if no query survives.
+An absent or empty-present FieldMap, `mapMask`, metadata-only type recipe or
+ordinary fixed-count constant/live Count call alone does not require Feature
+13. A fully eliminated closed identity operation requires it only if the
+retained closure still uses this capability.
 
 Support includes the actual required representation, target, runtime and retained
 contracts, not just catalog recognition. Every retained dependency Module keeps
@@ -163,12 +183,15 @@ producer-authored accepted bit.
 
 [Manifest cases and bytes](../conformance/il-semantic-manifests.md) cover these
 fields, exact support/closure, scoped access and finite re-encoding. Current
-artifact vectors now carry governing edition `1`; all non-Module payloads and
-Body instruction bytes retain their previous meanings.
+artifact vectors carry governing edition `1`. The current exact draft schema
+also assigns its masked Body prefix and layout-query operations; earlier
+same-pair previews are not aliases and do not retain those interpretations.
 
 The current draft registers native Features `1..7`, but registration does
-not establish compiler or runtime support. Features `9..12` and other richer
-capabilities still have incomplete schemas or codecs. The
+not establish compiler or runtime support. Feature 13 is registered for
+layout queries and TypeIdentity but still requires implementation support and
+its conditional target/generic/constant prerequisites. Features `9..12` and
+other richer capabilities still have incomplete schemas or codecs. The
 [logical-record inventory](logical-records.md) identifies remaining access,
 witness, constant/program, handler/cause, phase, dependency, owner and root
 gates. General source checking, arbitrary contract/body truth, native

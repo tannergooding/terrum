@@ -119,6 +119,52 @@ spelling. It does not expose that implementation through ordinary lookup.
 Getter or property naming cannot conceal a different result or caller-unsafe
 requirement. Other accessor kinds require their own admitted schemas.
 
+### FieldDef Import/Export and layout-path obligations
+
+The registered layout-query capability admits FieldDef in both
+`Import.expectedLocalDefId` and `Export.localDefId`; their row widths do not
+change. A FieldDef expectation is a consumer-local stub in its expected
+TypeDef's checked contiguous field range. Its owner TypeDef binds separately
+through the exact selected ModuleRef/provider. The nonempty export key must
+select one public provider-local FieldDef with a public owner; that owner must
+be the exact provider TypeDef selected for the expected owner. No search by
+field name, equal layout or another provider/key is permitted.
+A stub declares no independent storage or initializer.
+A direct FieldMap DefId naming the local expected stub cannot bypass that
+stub's Import; affected use requires the satisfied binding to the exact
+provider FieldDef. A later rewrite may use the provider DefId only after
+preserving the original expectation and every relied-on obligation.
+
+Compare the complete owner and field contracts. Correspond owner formals by
+kind and ordinal, apply each use's complete ordered type/constant substitution,
+and compare the resulting nominal origin, representation, qualifications,
+field type, static/mutable role and access exactly. Equal widths, carriers,
+assignability or field names do not satisfy the expectation. For every
+retained complete Layout variant, compare exact target-profile/default
+selection, layout kind, Blittable commitment, declared alignment/packing and
+the complete ordered LayoutField correspondence; the queried instance field
+must occur exactly once at its expected position. Private layout facts do not
+export private access.
+
+A FieldPath binding starts from its complete root TypeSpecRef and resolves
+each ordered FieldDef/Import step under the current owner substitution. Each
+step must belong to the exact immediate containing type; the next owner is
+derived from the preceding field's complete substituted type. Static fields,
+non-inline transitions, wrong owners and missing generic/layout evidence
+reject. FieldMap direct FieldDef/Import tokens are only the one-field,
+exact-non-generic-owner shorthand; constructed, qualified, generic or nested
+paths use the global FieldPath signature. `TargetLayoutDependencyField`
+preserves each global FieldDef/Import identity in the observation's ordered,
+exclusively owned range.
+
+Metadata FieldDef Import/Export does not bind native symbols or authorize
+field loads/stores, initialization, address formation, marshalling or
+reflection. `NativeImport`/`NativeExport` retain their separate static
+declaration contracts. A satisfied Import may be rewritten to a direct
+FieldDef reference only after all expected identity, access, representation
+and dependency obligations—and any stronger provider facts relied on—remain
+retained.
+
 ## 3. Bounds, predicates and retained observations
 
 Only an explicitly defined contract dimension has a strengthening relation.
@@ -227,6 +273,16 @@ resolved producer definition. Module identities, required semantics and all rema
 declaration/value/code/load/layout/cleanup obligations survive that rewrite.
 Omitting an unneeded Import is not omitting its required meaning.
 
+Packing/remapping a FieldMap or FieldPath resolves its `DefId`, Import,
+FieldPath row, root TypeSpecRef and ordered steps in their schema/module
+contexts. Cloning a FieldPath for a different using Module must preserve
+each expected Import and owner substitution; replacing an Import token with
+a direct FieldDef reference cannot erase the original expectation or any
+provider facts used by a retained offset. TypeIdentity comparisons and
+closed folds likewise preserve exact complete identity, substitution,
+execution evidence and guarded refinement. New row numbers, TypeMap indexes,
+names, hashes or equal offsets do not establish replacement compatibility.
+
 Preserve the caller's retained expectation. A provider's extra guarantee is
 not silently substituted into an interface requirement, generic contract or
 consumer metadata. If compilation/optimization relies on a stronger published
@@ -259,13 +315,15 @@ argument mapping/default values and witness bindings.
 
 ## 6. Representation and conformance boundary
 
-The current schema's assigned String, Import/Export, TypeSpec, MethodSig/Param
-and Effects shapes support their stated bounded inspection/comparison duties.
-Their recognition does not activate general TRRM import execution or any
-unrepresented language contract. In particular, generic/witness exports,
-predicate programs, source-unit access, richer outputs/ownership, complete
-layout commitments and target ABIs still need their complete physical
-representations and admission rules.
+The current schema's assigned String, Import/Export, TypeSpec, MethodSig/Param,
+FieldMap/FieldPath, layout-dependency and Effects shapes support their stated
+bounded inspection/comparison duties. FieldDef Import/Export binds metadata
+declarations for layout paths; it does not activate general executable field
+access. Representation recognition does not activate general TRRM import
+execution or any unrepresented language contract. Generic/witness exports,
+predicate programs, source-unit access, richer outputs/ownership and full
+target/runtime implementation or replacement coupling still require their
+complete physical representations and admission rules.
 
 Target/runtime and rule compatibility use exact supported identities or
 expressly defined applicable mappings. Numeric revision ordering, a broader

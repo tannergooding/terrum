@@ -1,12 +1,12 @@
 {
   "registry_format": 1,
-  "schema": "trrm/1-draft-register-il-1",
+  "schema": "trrm/1-draft-layout-queries-1",
   "format_pair": [1, 0],
   "semantic_owners": ["../il-metadata.md", "../il-instruction-set.md", "contract-clauses.md", "reader-trust.md", "encoding-canonicality.md", "resource-accounting.md", "format-versioning.md", "semantic-manifests.md", "requirements-and-admission.md"],
-  "semantic_manifest": {"rule":"trrm-semantic-manifest/1","identity_width":32,"zero_identity":"invalid","governing_editions":[{"id":1,"name":"trrm-1-ga/1","baseline_profile":"capability-compositional-trrm-1","baseline_features":[]}],"features":[{"id":1,"name":"NativeBoundaryContracts","rule_revision":1,"governing_editions":[1],"prerequisites":[],"scope":"Native import/export bindings, NativeCallable contracts, native function-pointer identities, target layout facts, and complete structural/binding validation; no native Body execution."},{"id":2,"name":"RootlessNativeValues","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1]],"scope":"Admitted native scalar/address/function-pointer and Blittable Copy values, fields/places, pointer operations, unsafe authorization, initialization and backing-flow facts."},{"id":3,"name":"DirectNativeCalls","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1],[2,1]],"scope":"Native callable imports and selected dependency calls with target ABI staging, results and source-independent consumers."},{"id":4,"name":"NativeExportEntries","rule_revision":1,"governing_editions":[1],"prerequisites":[[3,1]],"scope":"Explicit method/data exports, native address formation, indirect calls, pointer transport and resolved code origins."},{"id":5,"name":"NativeInterfaceCalls","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1],[2,1]],"scope":"Ordinary interface calls through the selected target's native vtable ABI and effective per-method NativeCallable contracts."},{"id":6,"name":"NativeDataImports","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1],[2,1]],"scope":"Direct static/data imports through Link or Dynamic resolution using admitted rootless representations and provider mutability authority."},{"id":7,"name":"NativeExceptionUnwind","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1]],"scope":"Selected target/runtime native exception unwinding into Terrum, event normalization, NativeException materialization and contained reverse-boundary behavior."}],"feature_granularity":"coherent-optional-capabilities","feature_rule_revision":"exact","prerequisites":"catalog-derived-complete-closure","compatibility_mappings":[],"ordinary_feature_lists":"equivalent-order-and-identical-duplicates","canonical_feature_lists":"unsigned-id-order-without-repeated-ids"},
+  "semantic_manifest": {"rule":"trrm-semantic-manifest/1","identity_width":32,"zero_identity":"invalid","governing_editions":[{"id":1,"name":"trrm-1-ga/1","baseline_profile":"capability-compositional-trrm-1","baseline_features":[]}],"features":[{"id":1,"name":"NativeBoundaryContracts","rule_revision":1,"governing_editions":[1],"prerequisites":[],"scope":"Native import/export bindings, NativeCallable contracts, native function-pointer identities, target layout facts, and complete structural/binding validation; no native Body execution."},{"id":2,"name":"RootlessNativeValues","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1]],"scope":"Admitted native scalar/address/function-pointer and Blittable Copy values, fields/places, pointer operations, unsafe authorization, initialization and backing-flow facts."},{"id":3,"name":"DirectNativeCalls","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1],[2,1]],"scope":"Native callable imports and selected dependency calls with target ABI staging, results and source-independent consumers."},{"id":4,"name":"NativeExportEntries","rule_revision":1,"governing_editions":[1],"prerequisites":[[3,1]],"scope":"Explicit method/data exports, native address formation, indirect calls, pointer transport and resolved code origins."},{"id":5,"name":"NativeInterfaceCalls","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1],[2,1]],"scope":"Ordinary interface calls through the selected target's native vtable ABI and effective per-method NativeCallable contracts."},{"id":6,"name":"NativeDataImports","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1],[2,1]],"scope":"Direct static/data imports through Link or Dynamic resolution using admitted rootless representations and provider mutability authority."},{"id":7,"name":"NativeExceptionUnwind","rule_revision":1,"governing_editions":[1],"prerequisites":[[1,1]],"scope":"Selected target/runtime native exception unwinding into Terrum, event normalization, NativeException materialization and contained reverse-boundary behavior."},{"id":13,"name":"LayoutQueries","rule_revision":1,"governing_editions":[1],"prerequisites":[],"scope":"TypeOf and layout query instructions, internal TypeIdentity flow/comparison, FieldMap and FieldPath, FieldDef Import/Export declaration binding, and retained target-layout field-path dependencies."}],"feature_granularity":"coherent-optional-capabilities","feature_rule_revision":"exact","prerequisites":"catalog-derived-complete-closure","compatibility_mappings":[],"ordinary_feature_lists":"equivalent-order-and-identical-duplicates","canonical_feature_lists":"unsigned-id-order-without-repeated-ids"},
   "format_policy": {"rule":"trrm-format-versioning/1","released_schema_identity":"exact-format-pair","released_assignments":"stable-not-reinterpreted","assigned_released_schemas":[],"draft_pair_updates":"not-required","draft_compatibility":"not-required","draft_agreement":"out-of-band-exact-schema-and-governing-semantics","numeric_compatibility":"not-inferred","separate_schema_id_field":null,"release_marker_field":null},
   "reader_policy": {"preliminary_body_scan_required":false,"producer_truth":"producer-responsibility","reader_validation":"mandatory-structural-safe-consumption-before-affected-use","semantic_audit":"optional-scoped","required_semantics":"support-admitted-before-affected-use"},
-  "canonicality_policy": {"rule":"encoding-canonicality/1","ordinary_noncanonical":"accept-otherwise-valid","writers":"shortest-equivalent-assigned-instruction-form-fixed-u16-body-indexes-first-use-TypeMap-MethodMap-ConstantMap-records-no-unused-entries","audit":"explicit-scoped-rejection","body_form_selection":"smallest-exact-serialized-body-size-among-eligible-compact-descriptor-or-instruction-stream-tie-lowest-implementationKind","HomeMap":"distinct-identities-not-canonicalized"},
+  "canonicality_policy": {"rule":"encoding-canonicality/1","ordinary_noncanonical":"accept-otherwise-valid","writers":"shortest-equivalent-assigned-instruction-form-fixed-u16-body-indexes-first-use-TypeMap-MethodMap-FieldMap-ConstantMap-records-no-unused-entries-intern-FieldPath","audit":"explicit-scoped-rejection","body_form_selection":"smallest-exact-serialized-body-size-among-eligible-compact-descriptor-or-instruction-stream-tie-lowest-implementationKind","HomeMap":"distinct-identities-not-canonicalized","map_mask":"clear-count-and-payload-for-empty-map"},
   "resource_policy": {"rule":"resource-accounting/1","portable_minima":"unassigned","capacity":"declared-object-and-root-scopes","work":"separate-deterministic-structural-and-semantic-recipes","state":"retained-input-constructed-payload-logical-entries","exhaustion":"explicit-operation-or-claim-refusal","trusted_preliminary_scan":false},
   "instruction_encoding": {
     "selector": "01",
@@ -20,7 +20,7 @@
     "unassigned_ranges": [
       ["1B","1F"],["2C","2F"],["37","3F"],["42","4F"],["53","5F"],
       ["68","6F"],["84","8F"],["93","9F"],["B9","BF"],["CD","CF"],
-      ["DE","DF"],["E9","E9"],["EC","FF"]
+      ["DF","DF"],["E9","E9"],["EC","FF"]
     ],
     "shape_only_opcode_forms": [
       {"range":["B6","B6"],"name":"RegionExit","reason":"no assigned exitKind or region inventory"},
@@ -32,21 +32,26 @@
       "all_bits_set_or_role_specific_discard": "R15",
       "read_before_destination_publish": true
     },
+    "type_identity_flow": {"producer":"DE kind 5 TypeOf","carrier_kind":2,"unused_typeMapIndex":0,"required_accessKind":0,"allowed":["register alias/move","verified BlockEntryState/merge","C2 controls 00/01/02 and equivalent short 40","C4/C5 under ordinary uint8 predicate"],"forbidden":["Home/field/array/aggregate/optional storage","call input/result","return/capture/signature/ConstantMap","numeric conversion/bitcast/pointer/hash/reflection","direct condition use"],"open_generic_evidence":"exact complete identity from selected execution model or reject"},
     "body": {
       "implementation_kinds": [
-        {"kind":"01","name":"instruction-stream","payload":"instructionEncoding:u8, flags:u8=0, reserved:u16=0, streamPrefix"},
+        {"kind":"01","name":"instruction-stream","payload":"instructionEncoding:u8, mapMask:u8, reserved:u16=0, conditionalMapCounts, blockCount:u32, recordCount:u32, codeByteLength:u32"},
         {"kind":"02","name":"field-read","payload":"flags:u8=0, reserved:u16=0, fieldToken:u32"},
         {"kind":"03","name":"field-write","payload":"flags:u8=0, reserved:u16=0, fieldToken:u32, formalOrdinal:u16, sourceUse:u8, reserved:u8=0","sourceUse":[[1,"copy"],[2,"transfer"],[3,"borrow"]]},
         {"kind":"04","name":"field-reference","payload":"flags:u8=0, reserved:u16=0, fieldToken:u32, dependencyContractRow:u32"},
         {"kind":"05","name":"identity-forwarder","payload":"flags:u8=0, reserved:u16=0, methodToken:u32"}
       ],
-      "stream_prefix_bytes": 33,
-      "stream_prefix": "u8 implementationKind=01, u8 instructionEncoding=01, u8 flags=0, u16 reserved=0, u32 homeCount, u32 typeMapCount, u32 methodMapCount, u32 constantMapCount, u32 blockCount, u32 recordCount, u32 codeByteLength",
+      "stream_prefix_rule": "17 + 4*popcount(mapMask)",
+      "stream_prefix_min_bytes": 17,
+      "stream_prefix_max_bytes": 37,
+      "stream_prefix": "u8 implementationKind=01, u8 instructionEncoding=01, u8 mapMask bits 0..4=Home/Type/Method/Field/Constant and bits 5..7=0, u16 reserved=0, one u32 count per set map bit in that order, u32 blockCount, u32 recordCount, u32 codeByteLength",
+      "map_mask": {"byte_offset":2,"reserved_mask":"E0","bits":[[0,"HomeMap"],[1,"TypeMap"],[2,"MethodMap"],[3,"FieldMap"],[4,"ConstantMap"]],"present_count_order":"Home/Type/Method/Field/Constant","empty_present":"valid-noncanonical","canonical_writer":"omit-count-and-payload-for-empty-map"},
       "local_index": {"width_bits":16,"origin":0,"maximum_count":65536,"count_width_bits":32,"sentinel":"none"},
       "maps": [
         {"name":"HomeMap","entry_bytes":8,"fields":"u8 role, u8 flags, u16 typeMapIndex, u16 formalOrdinal, u16 reserved=0","roles":[[1,"receiver"],[2,"formal"],[3,"local"]],"flags":[[1,"rebindable-local-only"]],"constraints":"at-most-one matching receiver; formal ordinals exist, are unique and type-match after substitution; role-3 entries are distinct locals; roles 1/2 flags=0"},
         {"name":"TypeMap","entry_bytes":4,"fields":"u32 Body-specific complete-type token; TypeSpec rows use kind 11"},
         {"name":"MethodMap","entry_bytes":4,"fields":"u32 MethodDef/Import token"},
+        {"name":"FieldMap","entry_bytes":4,"fields":"u32 FieldMapToken: FieldDef DefId kind 14, FieldDef Import token kind 1C, or FieldPath row token kind 1D","constraints":"direct FieldDef/Import tokens are one-field paths only for their exact non-generic declaring owner; constructed, qualified, generic or nested paths use FieldPath"},
         {"name":"ConstantMap","entry_bytes":8,"fields":"u32 TypeSpecRef, u32 ConstantSource row"}
       ],
       "blocks": {"minimum_count":1,"maximum_count":65536,"entry_bytes":12,"fields":"u32 codeOffset, u32 codeLength, u16 entryStateRecord, u16 flags=0","order":"zero-based block index and code order","code_ranges":"nonempty, disjoint, contiguous coverage of codeByteLength"},
@@ -66,7 +71,7 @@
       {"range":["10","1A"],"members_by_primary":[["10","Move","x=destination,y=source"],["11","LoadFormal","x=destination,y=formalOrdinal"],["12","LoadAdjacentFormalPair","x=destinationBase,y=firstFormalOrdinal"],["13","LoadHome","x=destination,y=HomeIndex"],["14","StoreHomeCopyRead","x=HomeIndex,y=source; sourceUse=1"],["15","TakeHome","x=destination,y=HomeIndex"],["16","LoadConstant","x=destination,y=ConstantMapIndex"],["17","ReturnRegister","x=result,y=0"],["18","ReturnUnit","byte=0"],["19","LoadReference","x=destination,y=source"],["1A","StoreReferenceCopyRead","x=reference,y=source; sourceUse=1"]],"operand":"one byte split x=low nibble,y=high nibble"},
       {"range":["20","2B"],"members_by_primary":[["20","IntegerWrappingNegate","x=destination,y=source"],["21","IntegerWrappingAdd","x=destinationLeft,y=right"],["22","IntegerWrappingSubtract","x=destinationLeft,y=right"],["23","IntegerWrappingMultiply","x=destinationLeft,y=right"],["24","IntegerDivide","x=destinationLeft,y=right"],["25","IntegerRemainder","x=destinationLeft,y=right"],["26","StrictFloatingNegate","x=destination,y=source"],["27","StrictFloatingAdd","x=destinationLeft,y=right"],["28","StrictFloatingSubtract","x=destinationLeft,y=right"],["29","StrictFloatingMultiply","x=destinationLeft,y=right"],["2A","StrictFloatingDivide","x=destinationLeft,y=right"],["2B","StrictFloatingRemainder","x=destinationLeft,y=right"]],"operand":"one byte split x=low nibble,y=high nibble"},
       {"range":["30","36"],"members_by_primary":[["30","And","x=destinationLeft,y=right"],["31","Or","x=destinationLeft,y=right"],["32","Xor","x=destinationLeft,y=right"],["33","Not","x=destination,y=source"],["34","ShiftLeft","x=destinationData,y=count"],["35","ArithmeticRightShift","x=destinationData,y=count"],["36","LogicalRightShift","x=destinationData,y=count"]],"operand":"one byte split x=low nibble,y=high nibble"},
-      {"range":["40","41"],"members_by_primary":[["40","CompareInPlace","x=destinationLeft,y=right"],["41","SetCondition","x=conditionResult,y=predicateMask"]],"operand":"one byte split x=low nibble,y=high nibble"},
+      {"range":["40","41"],"members_by_primary":[["40","CompareInPlace","x=destinationLeft,y=right"],["41","SetCondition","x=conditionResult,y=predicateMask"]],"operand":"one byte split x=low nibble,y=high nibble","type_identity_admission":"40 is equivalent to C2 control 00 for two TypeIdentity inputs; result is E=2 for identical or U=8 for distinct"},
       {"range":["50","52"],"members_by_primary":[["50","TotalConversion","x=inPlaceRegister,y=TypeMapIndex0To15"],["51","WrappingIntegerConversion","x=inPlaceRegister,y=TypeMapIndex0To15"],["52","BitReinterpretation","x=inPlaceRegister,y=TypeMapIndex0To15"]],"operand":"one byte split x=low nibble,y=high nibble"},
       {"range":["60","67"],"members_by_primary":[["60","PlaceHome","x=destinationPlace,y=HomeIndex0To15"],["61","PlaceField","x=baseDestination,y=PlaceSelectionIndex0To15"],["62","PlaceElement","x=baseDestination,y=indexRegister"],["63","PlaceLoad","x=destination,y=place"],["64","SemanticStoreCopyRead","x=place,y=source; sourceUse=1"],["65","PlaceTake","x=destination,y=place"],["66","PlaceRetirement","x=place,y=0"],["67","ReferenceFormation","x=destination,y=place"]],"operand":"one byte split x=low nibble,y=high nibble"},
       {"range":["70","7F"],"name":"ExtractCopyField","primary_formula":"fieldOrdinal=opcode-70","operand":"one byte split x=destination register,y=aggregate register"},
@@ -78,10 +83,10 @@
     "long_families": [
       {"opcode":"C0","name":"ScalarArithmetic","payload":"control:u8, result0/result1/source0/source1 register nibbles","controls":[["01","checked add"],["02","checked subtract"],["03","checked multiply"],["04","checked negate"],["05","wrapping add"],["06","wrapping subtract"],["07","wrapping multiply"],["08","wrapping negate"],["09","saturating add"],["0A","saturating subtract"],["0B","saturating multiply"],["0C","integer divide"],["0D","integer remainder"],["0E","integer DivRem"],["0F","integer mul.full"],["20","strict floating add"],["21","strict floating subtract"],["22","strict floating multiply"],["23","strict floating divide"],["24","strict floating remainder"],["25","strict floating negate"]]},
       {"opcode":"C1","name":"BitOperation","payload":"control:u8, result0/result1/source0/source1 register nibbles","controls":[["01","and"],["02","or"],["03","xor"],["04","not"],["05","shift-left"],["06","signed-arithmetic-right"],["07","logical-right"]]},
-      {"opcode":"C2","name":"Compare","payload":"control:u8, result0/result1/source0/source1 register nibbles","controls":[["00","uint8 relation"],["01","Boolean equality"],["02","Boolean inequality"]]},
+      {"opcode":"C2","name":"Compare","payload":"control:u8, result0/result1/source0/source1 register nibbles","controls":[["00","uint8 relation"],["01","Boolean equality"],["02","Boolean inequality"]],"type_identity_admission":"two TypeIdentity inputs only; control 00 yields E=2 for identical or U=8 for known-distinct identities; controls 01/02 yield bool equality/inequality; no ordering or CB/CC admission"},
       {"opcode":"C3","name":"SetCondition","payload":"control predicate 0..15; destination/condition/unused/unused nibbles"},
-      {"opcode":"C4","name":"SelectCondition","payload":"control predicate 0..15; destination/condition/true/false nibbles"},
-      {"opcode":"C5","name":"MoveCondition","payload":"control predicate 0..15; destination/condition/value/unused nibbles"},
+      {"opcode":"C4","name":"SelectCondition","payload":"control predicate 0..15; destination/condition/true/false nibbles","type_identity_admission":"under an ordinary uint8 predicate, both alternatives and the destination must be TypeIdentity"},
+      {"opcode":"C5","name":"MoveCondition","payload":"control predicate 0..15; destination/condition/value/unused nibbles","type_identity_admission":"under an ordinary uint8 predicate, the old destination and replacement source must be TypeIdentity; the valid old value remains on the nonselected path"},
       {"opcode":"C6","name":"TernaryLogic","payload":"control truth-table byte; destination/A/B/C nibbles"},
       {"opcode":"C7","name":"IntegerWrappingRecipe","payload":"recipe control byte; destination/A/B/C nibbles"},
       {"opcode":"C8","name":"IntegerCheckedRecipe","payload":"recipe control byte; destination/A/B/C nibbles"},
@@ -103,6 +108,7 @@
       {"opcode":"DB","name":"PlaceTake","payload":"control low nibble destination, high nibble zero; u16 PlaceSelection record index"},
       {"opcode":"DC","name":"PlaceRetirement","payload":"zero control; u16 PlaceSelection record index"},
       {"opcode":"DD","name":"ReferenceFormation","payload":"control low nibble destination, high nibble zero; u16 PlaceSelection record index"},
+      {"opcode":"DE","name":"TypeIdentityAndLayoutQuery","payload":"control low nibble destination, high nibble queryKind; u16 TypeMap index for kinds 1/2/5 or FieldMap index for kinds 3/4","query_kinds":[[1,"SizeOf"],[2,"AlignOf"],[3,"OffsetOfTypePath"],[4,"OffsetOfPlace"],[5,"TypeOf"]],"results":[[1,"nint"],[2,"nint"],[3,"nint"],[4,"nint"],[5,"internal-TypeIdentity"]],"destination_registers":"R0..R13 or R15 discard; R14 invalid","valid_control_count":75,"unassigned_kinds":["00","06..0F"],"identity_result":"opaque internal TypeIdentity for kind 5; no public type or reflection object"},
       {"opcode":"E0","name":"GeneralCall","payload":"zero control; u16 CallSite record index"},
       {"opcode":"E1","name":"BoundWindowCall","payload":"control low nibble argument base, high nibble result register; u16 MethodMap index"},
       {"opcode":"E2","name":"CallableWindowCall","payload":"control low nibble callable register, high nibble argument base; payload low nibble result register, upper bits zero"},
@@ -131,7 +137,7 @@
     ],
     "record_domains": {
       "ValueSelectorKind":[[0,"None"],[1,"Register"],[2,"Home"]],
-      "BlockEntryCarrierKind":[[0,"Value"],[1,"PlaceHandle"]],
+      "BlockEntryCarrierKind":[[0,"Value"],[1,"PlaceHandle"],[2,"TypeIdentity"]],
       "RequirementConditionKind":[[1,"Boolean"],[2,"UInt8PredicateMask"]],
       "CallTargetKind":[[1,"MethodMap"],[2,"Register"],[3,"Home"]],
       "ResultSelectorKind":[[0,"None"],[1,"Register"],[2,"Home"]],
@@ -150,7 +156,7 @@
     },
     "record_constraints": {
       "CallSite.resultKind": "None with resultIndex 0 is valid for an exact unit result or a DoesNotReturn target; normal non-unit calls require a Register or Home result. DoesNotReturn calls use general CallSite forms and terminate the Block; compact window calls return normally",
-      "BlockEntryState": "Value carrier requires accessKind 0 and a complete value type; PlaceHandle requires accessKind 1..5 and a complete referent type",
+      "BlockEntryState": "Value carrier requires accessKind 0 and a complete value type; PlaceHandle requires accessKind 1..5 and a complete referent type; TypeIdentity requires unused typeMapIndex=0 and accessKind=0 and carries exact identity evidence on every live incoming edge",
       "RequirementFailure": "conditionKind 1 requires bool and predicateMask 0; conditionKind 2 requires uint8 and tests (value & predicateMask) != 0 with mask 0..15",
       "SemanticStore.placeKind": "Selects a typed internal PlaceHandle or checked writable reference; these carriers retain distinct type and authority contracts"
     },
@@ -179,7 +185,9 @@
     "typed_row": {"bytes":4,"row_bits":24,"reserved_high_bits":8,"null_word":0,"table_source":"field-or-registered-form"},
     "definition_id": {"bytes":4,"kind_bits":8,"row_bits":24,"null_word":0,"reserved_indirection_kind":"FF"},
     "token": {"bytes":4,"kind_bits":8,"value_bits":24,"ordinary_row_origin":1,"pseudo_payload_origin":"schema-defined"},
-    "token_kinds": [["11","TypeSpecRow"],["13","TypeDefRow"],["16","MethodDefRow"],["1C","ImportRow"],["F0","WrapperGenericType"],["F1","GenericWrapperType"],["F2","WellKnownType"],["F3","InlineBuiltinFamilyType"]],
+    "token_kinds": [["11","TypeSpecRow"],["13","TypeDefRow"],["16","MethodDefRow"],["1C","ImportRow"],["1D","FieldPathRow"],["F0","WrapperGenericType"],["F1","GenericWrapperType"],["F2","WellKnownType"],["F3","InlineBuiltinFamilyType"]],
+    "field_map_token": {"bytes":4,"forms":[["14","FieldDef-DefId"],["1C","ImportRow-expected-FieldDef"],["1D","FieldPathRow"]],"row_origin":1,"row_bits":24,"direct_field_constraints":"exact non-generic declaring root for one-field path","inline_multistep":"unassigned","dedicated_FieldRef_table":"unassigned"},
+    "import_export_target_sets": {"Import.expectedLocalDefId":["13:TypeDef","14:FieldDef","16:MethodDef","1E:PropertyDef"],"Export.localDefId":["13:TypeDef","14:FieldDef","16:MethodDef","1E:PropertyDef"],"FieldDef_expected_shape":"local stub in the consumer Module owner's checked FieldDef range; no independent storage or initializer","FieldDef_export_shape":"public local FieldDef with public owner in the selected provider Module"},
     "type_reference": {
       "bytes": 4,
       "row_form": {"high_byte":"00","row_bits":24,"row_origin":1,"zero":"null-only-where-field-permits"},
@@ -203,7 +211,7 @@
         "BuilderRegistration.schemaTypeSpec","BuilderRegistration.recipeTypeSpec","TextTarget.schemaTypeSpec",
         "TextCaptureShape.typeSpec","InterfaceConstDef.constantTypeSpec","AssociatedConstDef.constantTypeSpec",
         "WitnessAssociatedConst.declaringInterfaceTypeSpec","UnionCaseField.typeSpec",
-        "AssociatedRelation.declaringInterfaceTypeSpec","AssociatedRelation.requiredTypeSpec",
+        "AssociatedRelation.declaringInterfaceTypeSpec","AssociatedRelation.requiredTypeSpec","FieldPath.rootTypeSpecRef",
         "PredicateNode.resultTypeSpec","PredicateCapture.capturedTypeSpec","FrozenValueNode.typeSpec",
         "ImmutableData.ownerTypeSpec","ConstantExecution.resultTypeSpec","TargetLayoutDependency.subjectTypeSpec",
         "LogicalInputView.referentTypeSpec","Constraint.payload[complete-type-variant]",
@@ -215,6 +223,7 @@
     "body_maps": {
       "typeMap": {"count":"fixed-u32","entry":"fixed-u32-Body-TypeMap-token","index_origin":0,"accepted_kinds":["11","13","1C","F0","F1","F2","F3"]},
       "methodMap": {"count":"fixed-u32","entry":"fixed-u32-token","index_origin":0,"accepted_kinds":["16","1C"]},
+      "fieldMap": {"count":"conditional-u32-by-mapMask-bit3","entry":"fixed-u32-FieldMapToken","index_origin":0,"accepted_kinds":["14-DefId","1C-FieldDef-Import","1D-FieldPath"]},
       "constantMap": {"count":"fixed-u32","entry":"u32 TypeSpecRef,u32 ConstantSource row","index_origin":0},
       "homeMap": {"count":"fixed-u32","entry_bytes":8,"index_origin":0},
       "blockTable": {"count":"fixed-u32","entry_bytes":12,"index_origin":0},
@@ -228,6 +237,7 @@
       "well_known":"F2",
       "inline_builtin_family":"F3",
       "unqualified_nominal":"TypeDef-or-Import",
+      "field_map":"FieldDef-DefId-or-FieldDef-Import-or-FieldPath",
       "constructed_or_qualified":"F0-F1-when-exactly-representable-otherwise-TypeSpec",
       "pseudo_order_when_layer_absent":"F0",
       "pseudo_alias_without_constructor_or_modifier":"noncanonical"
@@ -277,7 +287,7 @@
       {"kind":"001D","name":"Export","policy":"0000","stride":8,"fields":"u32 localDefId, str exportKey"},
       {"kind":"001E","name":"PropertyDef","policy":"0000","stride":20,"fields":"u32 ownerTypeDef, str name, u32 typeSpec, u32 getterMethodDef, u32 flags"},
       {"kind":"001F","name":"SourceFile","policy":"0000","stride":8,"fields":"str path, u32 digestBlob?"},
-      {"kind":"0020","name":"Body","policy":"0000","stride":null,"fields":"u32 offsets[count+1], rows tagged by implementationKind; kind 01 has 33-byte stream prefix, fixed maps, fixed Block table, typed-record offsets/data and codeByteLength bytes"},
+      {"kind":"0020","name":"Body","policy":"0000","stride":null,"fields":"u32 offsets[count+1], rows tagged by implementationKind; kind 01 has 17+4*popcount(mapMask) stream prefix, conditional map counts/payloads, fixed Block table, typed-record offsets/data and codeByteLength bytes"},
       {"kind":"0021","name":"NativeImport","policy":"0000","stride":16,"fields":"u8 ownerKind, u8 resolutionMode, u8 resolutionPolicy, u8 callConv, u32 ownerRef, u32 libraryName, u32 entryName?","owner_kinds":[[1,"MethodDef"],[2,"FieldDef"]],"resolution_modes":[[1,"Link"],[2,"Dynamic"]],"resolution_policies":[[0,"not-applicable"],[1,"Default"],[2,"CompatibilitySearch"]],"calling_conventions":[[1,"Unmanaged"],[2,"Cdecl"],[3,"Stdcall"],[4,"Vectorcall"]]},
       {"kind":"0022","name":"NativeExport","policy":"0000","stride":16,"fields":"u8 ownerKind, u8 flags=0, u16 reserved=0, u32 ownerRef, u32 entryName?, u32 nativeCallableContract?","owner_kinds":[[1,"MethodDef"],[2,"FieldDef"]]},
       {"kind":"0023","name":"LayoutField","policy":"0000","stride":12,"fields":"u32 ownerLayout, u32 ordinal, u32 fieldDef"},
@@ -314,11 +324,13 @@
       {"kind":"0042","name":"ConstantExecution","policy":"0000","stride":80,"fields":"u8 sourceKind, u8 flags=0, u16 reserved=0, u32 selectedSourceRef, u32 resultTypeSpec, u32 targetProfileRef, u32 substitutionFirst, u32 substitutionCount, u32 argumentFirst, u32 argumentCount, u32 executedDependencyFirst, u32 executedDependencyCount, u32 targetLayoutDependencyFirst, u32 targetLayoutDependencyCount, u64 semanticSteps, u64 activeFrames, u64 liveStorageBytes, u64 encodedResultBytes","source_kinds":[[1,"CheckedBody"],[2,"IntrinsicRegistration"]]},
       {"kind":"0043","name":"ConstantExecutionArgument","policy":"0000","stride":8,"fields":"u8 kind, u8 flags=0, u16 reserved=0, u32 sourceRef","kinds":[[1,"FrozenValueNode"],[2,"LogicalInputView"],[3,"VacantInitDestination"],[4,"ConstantExecutionResult"]]},
       {"kind":"0044","name":"ConstantExecutionDependency","policy":"0000","stride":8,"fields":"u8 kind, u8 flags=0, u16 reserved=0, u32 targetRef","kinds":[[1,"MethodDef"],[2,"Constraint"],[3,"InterfaceWitness"],[4,"WitnessProjection"],[5,"IntrinsicRegistration"],[6,"ImmutableData"],[7,"FieldDef"],[8,"PropertyDef"],[9,"UnionCaseDef"]]},
-      {"kind":"0045","name":"TargetLayoutDependency","policy":"0000","stride":20,"fields":"u8 queryKind, u8 flags=0, u16 reserved=0, u32 subjectTypeSpec, u32 selectedTargetProfileRef, u32 fieldFirst, u32 fieldCount","query_kinds":[[1,"SizeOf"],[2,"AlignOf"],[3,"OffsetOfTypePath"],[4,"OffsetOfPlace"]]},
+      {"kind":"0045","name":"TargetLayoutDependency","policy":"0000","stride":20,"fields":"u8 queryKind, u8 flags=0, u16 reserved=0, u32 subjectTypeSpec, u32 selectedTargetProfileRef, u32 fieldFirst, u32 fieldCount","query_kinds":[[1,"SizeOf"],[2,"AlignOf"],[3,"OffsetOfTypePath"],[4,"OffsetOfPlace"]],"field_range_section":"004A"},
       {"kind":"0046","name":"LogicalInputView","policy":"0000","stride":20,"fields":"u8 backingKind, u8 flags=0, u16 reserved=0, u32 backingRef, u32 referentTypeSpec, u32 pathFirst, u32 pathCount","backing_kinds":[[1,"FrozenValueNode"],[2,"ImmutableData"],[3,"ConstantExecutionResult"]]},
       {"kind":"0047","name":"LogicalViewPathEntry","policy":"0000","stride":24,"fields":"u8 selectorKind, u8 flags=0, u16 reserved=0, u32 selectorRef, u64 indexOrRangeStart, u64 rangeCount","selector_kinds":[[1,"FieldDef"],[2,"UnionCaseField"],[3,"TupleOrdinal"],[4,"ElementIndex"],[5,"ElementRange"]]},
       {"kind":"0048","name":"TargetProfile","policy":"0000","stride":8,"fields":"u32 profileId, u32 ruleRevision"},
       {"kind":"0049","name":"TargetValueBinding","policy":"0000","stride":16,"fields":"u32 frozenValueRootRef, u32 targetProfileRef, u32 layoutDependencyFirst, u32 layoutDependencyCount"},
+      {"kind":"004A","name":"TargetLayoutDependencyField","policy":"0000","stride":4,"fields":"u32 fieldReference","reference_forms":["DefId kind 14 FieldDef","Import token kind 1C expected FieldDef"],"range_owner":"one exclusive ordered range per offset TargetLayoutDependency"},
+      {"kind":"004B","name":"FieldPath","policy":"0000","stride":null,"fields":"u32 offsets[count+1], variable rows: u32 rootTypeSpecRef, u32 fieldCount>0, fieldCount ordered u32 FieldReferences","reference_forms":["DefId kind 14 FieldDef","Import token kind 1C expected FieldDef"],"row_scope":"global structural signature; each reference resolves in every using Module context","nested_field_path_tokens":false},
       {"kind":"7F00","name":"SourceMap","policy":"0002","stride":20,"fields":"u32 slotCount, slots[slotCount], (u32 instructionSlot, u32 sourceFileSlot, u32 startUtf16, u32 lengthUtf16, u8 stepRole, u8 flags=0, u16 reserved=0)[count]"}
     ],
     "slots": {"stride":16,"fields":"u16 sectionKind, u16 selector, u32 row, u16 blockIndex, u16 reserved=0, u32 instructionOrdinal","selectors":[[0,"row"],[1,"Body-instruction"]],"selector_1_section_kind":0,"block_index_origin":0,"instruction_ordinal_origin":0},
@@ -389,7 +401,8 @@
       {"id":9,"name":"NominalUnionMetadata","rule_revision":1,"prerequisites":[],"status":"assigned-registration-pending"},
       {"id":10,"name":"PublishedPredicates","rule_revision":1,"prerequisites":[[11,1]],"status":"assigned-registration-pending"},
       {"id":11,"name":"TypedFrozenValues","rule_revision":1,"prerequisites":[[9,1]],"status":"assigned-registration-pending"},
-      {"id":12,"name":"ConstantExecution","rule_revision":1,"prerequisites":[[10,1],[11,1]],"status":"assigned-registration-pending"}
+      {"id":12,"name":"ConstantExecution","rule_revision":1,"prerequisites":[[10,1],[11,1]],"status":"assigned-registration-pending"},
+      {"id":13,"name":"LayoutQueries","rule_revision":1,"prerequisites":[],"status":"registered"}
     ],
     "constraint_kinds": [[1,"InterfaceInstance"],[2,"IntrinsicProperty"],[3,"AssociatedRelation"]],
     "intrinsic_property_codes": [[1,"Unique"],[2,"Write"],[3,"Blittable"]],

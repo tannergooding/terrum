@@ -87,7 +87,8 @@ are not prescribed.
 | Variable table | `4 * (count + 1)` index storage, data extent and selected row extents |
 | Repeated list | Encoded element count, fixed-size element product and containing extent |
 | Variable-size elements | Count, containing extent, element minima and complete per-element shape |
-| Body | Encoded row extent, implementation kind, 33-byte stream prefix, map/Block counts, record-offset index/data and code-byte extent; validate all fixed products with checked arithmetic |
+| Body | Encoded row extent, implementation kind, `17 + 4*popcount(mapMask)` stream prefix, present-map/Block counts, record-offset index/data and code-byte extent; validate all fixed products with checked arithmetic |
+| FieldMap/FieldPath | Body FieldMap count and four-byte tokens; global 24-bit FieldPath row count, variable-row offsets, nonempty step count and each four-byte FieldReference |
 | String | Encoded unit count, unit width, header, terminator and aligned extent; decoded/output capacity is separate |
 
 Body preflight derives bounded inventories from the encoded form; it does not
@@ -104,8 +105,11 @@ sentinels. Zero list counts and eligible empty Blob rows remain
 valid; empty semantic rows and unsupported form codes have no assigned
 meaning.
 
-The flattened receiver/formal inventory and every `u16`-indexed map, Home,
-Block and record inventory must fit the selected 65,536-entry bound. Register
+The flattened receiver/formal inventory and every `u16`-indexed map, including
+FieldMap, Home, Block and record inventory must fit the selected
+65,536-entry bound. Global FieldPath rows use the metadata table's 24-bit row
+bound and `u32` byte extent; each step is charged as retained input and
+structurally validated under the owning artifact/object budget. Register
 bindings are reused; computed values do not create serialized per-expression
 IDs or an unbounded value inventory.
 

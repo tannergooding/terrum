@@ -151,12 +151,14 @@ establish a support claim. Optional nonsemantic sections, debug paths, Attr
 rows, unused bits and producer-chosen labels cannot carry or activate
 required behavior.
 
-In `trrm/1-draft-register-il-1`, Module's required `governingRuleEdition` identifies
+In `trrm/1-draft-layout-queries-1`, Module's required `governingRuleEdition` identifies
 its exact baseline and its Feature range supplies explicit additional
 requirements. Edition `1` is the accepted TRRM 1.0 semantic baseline; it does
-not select a reduced execution profile. The registry assigns Feature IDs 9-12,
-while their complete registrations and prerequisite closure remain
-in integration. A module that needs no additional
+not select a reduced execution profile. The registry assigns Feature IDs 9-13. Feature 13 `LayoutQueries` covers
+retained `DE` queries, TypeIdentity flow/comparison, FieldMap/FieldPath,
+FieldDef Import/Export binding and retained layout field paths; it has no
+unconditional Feature prerequisite. Features 9-12 still lack complete
+registrations and prerequisite closure. A module that needs no additional
 registered feature uses `(0, 0)`; that empty range does not assert that the
 consumer implements every accepted TRRM 1.0 contract. Exact draft
 schema/catalog agreement remains out of band. Reserved header bytes or a
@@ -220,7 +222,7 @@ feature.
 | [Ownership and cleanup](../language/ownership-and-cleanup.md) | Complete/partial/vacant field states, transfer/repair, actual acquisitions and retirement order | Inspectable Cleanup and Drop shapes do not provide the general owner/cleanup protocol |
 | [Dependencies and views](../language/dependencies-and-views.md) | Whole source/result/capture identities, backing refinements, root/load/guard/lease and invalidation relationships | Held Dependency tags, a Span type or optional attributes cannot supply these relationships |
 | [Sharing and concurrency](../runtime/concurrent-executions.md) | Explicit capabilities/premises, actual protocols/locations, order, failure effects, lifetime and target support | Reserved atomic/fence/root bands allocate no operations or authority/progress protocols |
-| [Layout and queries](../language/registered-queries.md) | Complete type/target layout, explicit Blittable and fixed/coupled observations with rebuild/rebind obligations | [Windows x64](../targets/windows-x64-data-layout.md) completes its logical storage/schemas; missing commitment/control records remain gated, and scalar query results do not freeze a replaceable layout |
+| [Layout and queries](../language/registered-queries.md) | Complete type/target layout, explicit Blittable and fixed/coupled observations with rebuild/rebind obligations | `DE` kinds 1..5, FieldMap/FieldPath and target-layout path ranges are assigned under Feature 13; exact open-generic identity evidence, dynamic target models, complete layout/coupling support and related constant/witness prerequisites remain separate gates. Scalar query results do not freeze a replaceable layout |
 | [Managed and foreign boundaries](../data-layout-and-abi.md) | Selected allocation/root/barrier/code lifetime, representation/ABI, callbacks and unwind containment | [Windows x64 native](../targets/windows-x64.md) specifies its fixed rootless boundary; structural pointer/call shapes alone do not admit it, a collector, callbacks or exception interchange |
 | [Contained foreign failure](logical-records.md#foreign-failure-bridge-encoding-pending) | Selected paired definitions/signatures/domains, exact status/output states, eligible local mapping, affine packet/cause retirement and runtime/allocator/code dependencies | [Windows x64 failure bridge](../targets/windows-x64-failure-bridge.md) fixes its native wire; packet/local failure/callback/mapping codecs remain gated, without new Feature IDs or exception regions |
 

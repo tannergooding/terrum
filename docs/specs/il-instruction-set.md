@@ -252,21 +252,28 @@ An instruction-stream row is laid out in this exact order:
 |---|---:|---|
 | `implementationKind` | `u8` | `01` |
 | `instructionEncoding` | `u8` | `01` selects this register codec |
-| `flags` | `u8` | Zero |
+| `mapMask` | `u8` | Bits 0..4 indicate the presence of HomeMap, TypeMap, MethodMap, FieldMap and ConstantMap in that order; bits 5..7 are zero |
 | `reserved` | `u16` | Zero |
-| `homeCount` | `u32` | Count of eight-byte HomeMap entries |
-| `typeMapCount` | `u32` | Count of fixed four-byte type tokens |
-| `methodMapCount` | `u32` | Count of fixed four-byte method tokens |
-| `constantMapCount` | `u32` | Count of eight-byte constant references |
+| Present map counts | `u32` each | Only maps whose corresponding bit is set serialize a count, in Home/Type/Method/Field/Constant order; a set bit with count zero is valid noncanonical input |
 | `blockCount` | `u32` | Count of fixed 12-byte Block entries; 1..65,536 |
 | `recordCount` | `u32` | Count of typed operand records; 1..65,536 |
 | `codeByteLength` | `u32` | Exact final instruction-stream extent |
 
-After the 33-byte prefix, the row contains `HomeMap`, `TypeMap`, `MethodMap`,
-`ConstantMap`, the fixed Block table, the typed-record offset index and record
-data, and finally exactly `codeByteLength` instruction bytes. No padding is
-inserted between instructions or tables. A Body row has no unclaimed trailing
-bytes.
+Let `K=popcount(mapMask)`. The prefix is exactly `17 + 4*K` bytes (17..37):
+five initial bytes, one four-byte count per present map, then the three
+mandatory counts. An absent map has no count word or entries. Canonical
+writers clear bits for empty maps; a scoped prefix-canonicality audit rejects
+empty-present maps, while ordinary readers accept them. After the prefix,
+the row contains the present maps in Home/Type/Method/Field/Constant order,
+the fixed Block table, typed-record offset index and data, and finally
+exactly `codeByteLength` instruction bytes. No padding is inserted between
+instructions or tables. A Body row has no unclaimed trailing bytes.
+
+For effective map counts `H,T,M,F,C`, mandatory counts `B,R`, record-data
+extent `D` and code extent `L`, the exact stream Body extent is
+`17 + 4*K + 8*H + 4*T + 4*M + 4*F + 8*C + 12*B + 4*(R+1) + D + L`,
+where `K=popcount(mapMask)`. Products and sums use checked arithmetic and
+must fit the containing Body extent.
 
 All Body-local map, home, block and typed-record indexes are zero-based
 `u16` values; `0xFFFF` is an ordinary usable index. Each corresponding
@@ -281,6 +288,7 @@ byte lengths and instruction ordinals are separate `u32` domains.
 | HomeMap | `u8 role, u8 flags, u16 typeMapIndex, u16 formalOrdinal, u16 reserved=0` | `role`: 1 receiver, 2 formal, 3 local. `formalOrdinal` is zero-based for role 2 and zero otherwise. Only role 3 may set `flags` bit 0 (`rebindable`); other bits reject. Locals begin vacant; receiver/formal storage begins according to the MethodSig and parameter mode. |
 | TypeMap | `u32 token` | Fixed four-byte type token resolving a complete type under the owning module context. |
 | MethodMap | `u32 token` | Fixed four-byte MethodDef or Import token retaining the exact selected signature/contract. |
+| FieldMap | `u32 token` | Fixed four-byte FieldDef DefId, FieldDef Import token or FieldPath token; an entry grants no access or storage capability. |
 | ConstantMap | `u32 TypeSpecRef, u32 ConstantSource row` | One complete type and one exact frozen/target-constant source; the source's complete type must match. |
 
 HomeMap entries are distinct storage identities and are never deduplicated.
@@ -291,7 +299,7 @@ entries have ordinal zero and represent distinct locals; they begin vacant.
 Role-`1`/`2` entries have flags zero, and only role `3` may set the
 `rebindable` flag.
 
-Every TypeMap, MethodMap and ConstantMap index uses its own zero-based
+Every TypeMap, MethodMap, FieldMap and ConstantMap index uses its own zero-based
 namespace, regardless of equal numeric values. Map entries may be repeated;
 ordinary readers preserve meaning, while canonical writers order by first
 logical use, reuse identical tokens/values and omit unused entries.
@@ -323,6 +331,13 @@ bindings R0..R13. R14/R15 are constant/discard roles, not incoming bindings.
 `accessKind=1..5`, using the PlaceSelection access domain; `typeMapIndex`
 then names its complete referent type. A checked reference remains an
 ordinary typed value, not a place handle.
+Carrier `2=TypeIdentity` identifies an opaque internal type identity,
+not the queried type's value or a reflection object. It requires
+`typeMapIndex=0` as an unused reserved field and `accessKind=0`; zero does
+not reference TypeMap[0]. TypeIdentity is produced only by `DE` TypeOf and
+may flow through `mov`, these entry bindings/merges, and its admitted
+comparison/conditional-selection operations. It is not a stored or public
+type, constant, call value, return value, pointer or branch condition.
 
 The row declares the carrier, referent/value type and place authority class.
 Dynamic selected-target identity, backing dependencies, loans, roots and
@@ -330,6 +345,9 @@ guarded state are reconstructed from the defining operations and incoming
 edges by the mandatory per-function verifier. A merge must preserve those
 facts; if it cannot represent a required relationship, the consumer rejects
 affected use rather than treating a place handle as a value or reference.
+For TypeIdentity, every live incoming edge must supply the internal carrier
+and its exact identity evidence; the represented identities may differ across
+edges, and the merge selects the actual edge's identity.
 Home initialization, replacement, owner and cleanup states are likewise
 verified from typed Homes, operations and declared contracts; these facts
 are not assigned per-expression IDs. A consumer does not rescan a callee's
@@ -414,7 +432,9 @@ applicable to that formal and transition. These records do not authorize
 cleanup-before-evaluation, ignore failed preparation, or weaken reentrancy
 confinement.
 
-For `BlockEntryState`, `carrierKind` is `0=Value` or `1=PlaceHandle`.
+For `BlockEntryState`, `carrierKind` is `0=Value`, `1=PlaceHandle` or
+`2=TypeIdentity`. Kind 2 requires `typeMapIndex=0` and `accessKind=0`;
+the type field is unused, not TypeMap[0].
 Value rows require `accessKind=0`; place rows use `accessKind=1=Read`,
 `2=Write`, `3=Initialize`, `4=Transfer`, or `5=Reference`. The TypeMap
 entry is the complete value type for a value row and the complete referent
@@ -983,6 +1003,13 @@ domain that never produces unordered, the U bit simply never matches;
 it is not an invalid control. Predicate 0/F does not erase effects of an
 already executed comparison or its operand producers.
 
+For two TypeIdentity operands, the existing binary relation result uses
+only E=`2` for identical complete identities or U=`8` for known-distinct
+identities. Thus ordinary `ne` uses mask `D` and matches distinct identities;
+ordered-not-equal mask `5` does not. Ordered `lt/le/gt/ge` do not match U.
+No numeric or floating comparison outcome changes, and U does not represent
+missing type evidence.
+
 The `cmp` result is exactly `uint8(1)`, `uint8(2)`, `uint8(4)` or
 `uint8(8)`. Consumers accept every uint8 value, not only values with
 comparison provenance, and use the test `(value & predicate) != 0`.
@@ -1037,6 +1064,42 @@ Compact relation spellings or fused compare/set/branch forms remain possible
 physical encodings. They need not be available at every width. Their code
 size and instruction-count effects require a new study; the published
 format-pressure figures hold a different operation sequence fixed.
+
+### Internal TypeIdentity values
+
+`DE` TypeOf produces an opaque internal TypeIdentity for the selected
+complete static type. It observes no Place value, existential payload,
+hidden generic argument or object layout. The result is not the subject's
+value, `System.Type`, a reflection object, metadata pointer or public type.
+Metadata-only type recipes continue to bind their complete type reference
+without executing TypeOf or materializing a register.
+
+TypeIdentity equality uses complete type identity after the accepted
+normalization rules: transparent aliases normalize to their targets; nominal
+wrappers remain distinct despite equal layouts; qualifications and ordered
+type/constant arguments retain their exact domains and values. Physical rows,
+TypeMap indexes, names, assignability, layout equality and hashes alone never
+establish identity.
+
+TypeIdentity may be produced by TypeOf, aliased with `mov`, carried through
+`BlockEntryState` carrier 2, compared by existing binary `C2` controls
+`00..02`/short `40`, and selected with `C4`/`C5` under an ordinary uint8
+predicate. Both comparison inputs must be available general bindings with
+the TypeIdentity carrier; R14/R15 cannot manufacture an identity. For a live
+open-generic value, the selected execution model must
+supply exact complete identity evidence. Missing evidence rejects the
+affected use; there is no unresolved-identity sentinel or reflection fallback.
+The `C2` relation is total and non-signaling: identical means E; distinct
+means U. `CB`/`CC` are not extended.
+
+TypeIdentity cannot be stored in a Home, field, array, aggregate or optional;
+passed to or returned from a call; captured, serialized, or placed in a
+signature or ConstantMap; converted, bitcast, addressed, hashed, reflected or
+used directly as a condition. Internal backend spills do not define an IL
+storage or public ABI. Ordinary uint8/bool comparison results retain their
+existing uses. Closed identity comparisons may fold to ordinary uint8/bool
+constants or branches only when exact binding and any guarded refinement
+obligations remain.
 
 ### Three-input comparisons
 
@@ -1402,6 +1465,7 @@ does not abandon effects or cleanup responsibility.
 | `DB` | Place take | Control has destination register; payload is PlaceSelection record index |
 | `DC` | Place retirement | Payload is PlaceSelection record index; control is zero |
 | `DD` | Reference formation | Control has destination register; payload is PlaceSelection record index |
+| `DE` | Type identity and layout query | Control high nibble selects SizeOf, AlignOf, OffsetOfTypePath, OffsetOfPlace or TypeOf; payload is a TypeMap index for kinds 1/2/5 and FieldMap index for kinds 3/4 |
 | `E0` | General call | Payload is CallSite record index; control is zero |
 | `E1` | Bound method-window call | Payload is MethodMap index; control is argument-base/result register pair |
 | `E2` | Callable-value window call | Control is target/argument-base pair; payload low nibble is result register |
@@ -1434,10 +1498,16 @@ The `C0` ScalarArithmetic control byte is:
 The `C1` BitOperation control byte is `01=and`, `02=or`, `03=xor`,
 `04=not`, `05=shift-left`, `06=signed-arithmetic-right`,
 `07=logical-right`. Other controls reject. In `C2 Compare`,
-`00=ordered relation result`, `01=Boolean equality`, and
+`00=relation result` (ordered for numeric domains and E/U-only for
+TypeIdentity), `01=Boolean equality`, and
 `02=Boolean inequality`. The relation result is uint8 with exactly one of
 Less=1, Equal=2, Greater=4, Unordered=8; equality/inequality results are
 ordinary bool and do not manufacture an ordering for equality-only types.
+The three existing controls also admit two TypeIdentity inputs: control `00`
+produces `uint8(2)` for identical complete identities or `uint8(8)` for
+distinct identities; controls `01`/`02` produce ordinary `bool`
+equality/inequality results. TypeIdentity has no ordering and never produces
+L/G. `U` here means known-distinct identities, not an unresolved answer.
 
 For `D0..D3`, the control byte is `sourceRegister:4 | destinationRegister:4`
 (low nibble first) and the payload is a zero-based TypeMap index. For `D4`
@@ -1460,6 +1530,30 @@ zero. For `E5`, control low nibble is condition register and high nibble is
 the selected four-bit predicate. Other record/control forms require zero
 control unless their record kind assigns the field.
 
+For `DE`, the control low nibble is the destination register and the high
+nibble is the query kind. Kinds `1=SizeOf`, `2=AlignOf` and `5=TypeOf`
+select a zero-based TypeMap index; kinds `3=OffsetOfTypePath` and
+`4=OffsetOfPlace` select a zero-based FieldMap index. Kinds `1..4` produce
+the exact selected-target `nint` result; kind `5` produces an opaque internal
+TypeIdentity, not a value of its subject type or a reflection object. R0..R13
+are destinations; R15 discards the responsibility-free result; R14 and
+high-nibble kinds `0` and `6..F` reject. All 75 combinations of five query
+kinds and fifteen destinations are assigned.
+
+SizeOf/AlignOf observe the complete static type/Place representation without
+reading or evaluating a Place. Offset queries resolve a direct FieldDef/Import
+one-field token only when its exact root is the non-generic declaring type;
+otherwise they use a FieldPath token whose global `0x004B` row carries the
+complete root TypeSpecRef and ordered FieldDef/Import steps. Type-path
+OffsetOf returns the cumulative inline displacement; Place OffsetOf returns
+only the terminal field displacement in its immediate containing type. The
+query does not execute dereferences, getters, indexers or PlaceSelection.
+Layout kinds 1..4 retain one target-specific `TargetLayoutDependency`
+observation per reached occurrence; TypeOf kind 5 is not a layout
+dependency and does not read object layout.
+The query instructions use direct TypeMap/FieldMap operands; no generic
+LayoutQuery Body record is assigned, and record kind `0C` remains unassigned.
+
 For the common register family, payload nibbles occupy bytes 2 and 3:
 
 ```text
@@ -1475,7 +1569,7 @@ their separately registered payload layout above.
 
 ### Instruction codec selector
 
-Every instruction-stream Body begins with the 32-byte stream header specified
+Every instruction-stream Body begins with the variable stream prefix specified
 under [Body row layout](#body-row-layout-and-compact-implementations).
 `instructionEncoding=0x01` selects this mixed codec. All other selector
 values are unassigned and reject before affected use. The selector is not a
@@ -1486,7 +1580,7 @@ fallback.
 
 #### Explicit typed ConstantMap
 
-The Body has a ConstantMap alongside its TypeMap and MethodMap. Loading a
+The Body has a ConstantMap alongside its TypeMap, MethodMap and FieldMap. Loading a
 constant names an existing typed entry; it does not require the decoder
 to rediscover CSE or execute construction code.
 
@@ -1519,7 +1613,7 @@ maximum count is 65,536, not 65,535.
 | Item | Selected width/scope |
 |---|---|
 | Local and argument slots | Sixteen-bit method-local indices; flattened receiver/parameter inventory must fit. |
-| ConstantMap, TypeMap, MethodMap, HomeMap, Block and typed-record references | Zero-based sixteen-bit Body-local indexes; metadata tokens retain their fixed global width. |
+| ConstantMap, TypeMap, MethodMap, FieldMap, HomeMap, Block and typed-record references | Zero-based sixteen-bit Body-local indexes; metadata tokens retain their fixed global width. |
 | Operand/call/failure/edge records | Sixteen-bit Body-local indexes; RegionExit indexes are not usable until the region carrier is assigned. |
 | Inventory counts | Unsigned thirty-two-bit fields; the selected local-index codec admits counts 0..65,536 without an ambiguous sentinel. |
 | Global/module references inside map records | Keep their selected global width; a local map does not cap global table identities to sixteen bits. |
@@ -1568,11 +1662,12 @@ global operation byte or logical-ID-to-primary-byte correspondence.
 | Bit operations | AND/OR/XOR/NOT and shifts | Short `30..36` forms and long `C1` controls |
 | Ternary logic | All 256 three-input Boolean functions | `C6` with the complete truth-table byte |
 | Arithmetic recipes | Explicit three-input operation trees and policies | `C7..CA`; no silent FMA contraction |
-| Comparisons and consumers | `cmp`, `setcc`, `jcc`, `movcc`/`selectcc`, compound comparisons | `40..41`, `A0..AF`, `C2..C5`, `CB..CC` |
+| Comparisons and consumers | `cmp`, `setcc`, `jcc`, `movcc`/`selectcc`, compound comparisons; TypeIdentity uses E/U through existing binary controls | `40..41`, `A0..AF`, `C2..C5`, `CB..CC` |
 | Classification | NaN/signaling-NaN/finite/infinite/sign queries | Unassigned; no comparison-effect substitution |
 | Register transport | `mov` | Short `10` and the assigned tiny tuples |
 | Arguments/homes/constants | Loads, stores, takes and typed constants | Tiny and short forms; larger indexes in long forms or records |
-| Fields/references/indexing | Place selection/access, stores, takes and reference formation | `60..67`, `D8..DD` with typed records; no implicit native pointer or lifetime extension |
+| Fields/references/indexing | Place selection/access, stores, takes, reference formation and FieldMap-backed layout offsets | `60..67`, `D8..DD`, `DE` with typed/global path references; no implicit native pointer or lifetime extension |
+| Type identity and layout queries | TypeOf, SizeOf, AlignOf and both OffsetOf forms; Count lowers to constants or calls | `DE` kinds 1..5; no universal Count/Length opcode or reflection object |
 | Conversions | Ordinary, wrapping, saturating and bit-preserving policies | `50..52`, `D0..D3`; checked/saturating forms use long encodings |
 | Optional/aggregate values | Present/absent tests and construction, aggregate/field operations | Aggregate construction and non-Copy extraction are unassigned |
 | Calls | Bound targets, callable values and argument staging | `80..83`, `90`, `E0..E2` and CallSite records |
@@ -1633,7 +1728,6 @@ not a numeric instruction chosen by representation size or method spelling.
 | `select` | Existing `bool`, existing `T`, existing `T`; result `T` | Choose an already computed value. Does not suppress effects that produced either input. |
 | `min`, `max`, `clamp` | Same admitted numeric `T`; result `T` | Retain NaN, signed-zero, decimal representation and invalid-bound rules. Not arbitrary hardware min/max. |
 | `copysign` | Two same-format floating values; result that format | Sign-component transfer; no numeric conversion or permission to normalize payload bits. |
-| `length` | Admitted indexed/view family; family-defined count result | Placeholder for an explicitly registered length contract, not any member named Length. |
 | `divrem` | Two same integer values; two same-type results | Checks required for the quotient remain even if only the remainder is later used. |
 
 For the two-result `divrem`, a general payload can hold result0, result1,
@@ -1940,8 +2034,34 @@ may be sufficient; a dedicated opcode and result carrier are not approved.
 | `is.present` | Inspect an optional discriminator and return `bool`, without reading an absent payload or implicitly consuming the optional. |
 | Aggregate construction | Build the selected complete aggregate from already computed field values under its actual validity, construction and transfer rules. |
 | `extract.field` | Obtain one field's value from an existing aggregate value; copying or transferring a non-Copy field cannot be inferred from its bits or field number. |
-| Registered query | Evaluate an exact admitted query contract with its declared type/effect/layout requirements; do not recognize arbitrary methods by name. |
+| Registered query | Use the exact query lowering below; do not recognize arbitrary methods by name or invent an opcode from a display name. |
 | Loan/region events | Preserve specific logical access, backing and lifetime transitions; they are not automatically machine instructions or destruction of a referent. |
+
+#### Registered query lowering
+
+The accepted source contracts remain in
+[registered queries](language/registered-queries.md). In this codec,
+`typeof(Type)` and `typeof(Place)` use `DE` kind 5 to materialize the internal
+TypeIdentity only when register-level identity comparison needs a value.
+Metadata-only type recipes remain metadata references and do not execute this
+instruction.
+
+`sizeof` and `alignof` use `DE` kinds 1 and 2 with complete TypeMap subjects
+and imply an exact `nint` result. `offsetof(Type, FieldPath)` and
+`offsetof(Place)` use kinds 3 and 4 with a FieldMap token. A one-field token
+is valid only when its exact root is the unconstructed non-generic declaring
+type; otherwise the token selects a global FieldPath signature. Type-path
+offset is cumulative from its root; Place offset is terminal-only in the
+immediate containing type. These observations do not read or execute a
+Place.
+
+There is no universal Count or Length instruction. `countof(Type)` and
+`countof(KnownShapeExpression)` become ordinary exact `nint` typed constants
+after their fixed cardinality is resolved. `countof(Place)` invokes the
+selected synchronous Pure `ICountable.Count : nint` getter through ordinary
+bound-call machinery, retaining its witness, receiver, effects and
+dependencies. Remove the former `length` inventory placeholder without an
+alias; an unrelated `Count` or `Length` member remains an ordinary member.
 
 A present optional with a unit payload is distinct from absence. A presence
 test is not itself an unwrap. Accessing an optional payload needs the
@@ -2426,7 +2546,7 @@ variants, not every operation that can fail.
 | `D0..D3` | Numeric conversion policies and bit reinterpretation | TypeMap index `u16` plus source/destination registers |
 | `D4..D7` | Constant and Home load/store/take | ConstantMap/Home index `u16` plus registered register/control fields |
 | `D8..DD` | Place selection, semantic store, place load/take/retire and reference formation | Typed PlaceSelection/SemanticStore record indexes |
-| `DE..DF` | Unassigned | No additional place/view family is implied |
+| `DF` | Unassigned | No additional place/view/query family is implied |
 | `E0..E8`, `EB`; `EA` shape only | CallSite, call windows, branches, switch, require, throw and Home return; region exit awaits its carrier | Typed record/Body-local indexes or exact register fields |
 | `E9`, `EC..FF` | Unassigned | No hidden escape, native-memory, atomic or SIMD operation is implied |
 
@@ -2506,7 +2626,7 @@ operation, mixed-input full products, the ExceptionRegion/handler carrier
 and unselected higher-math/atomic/vector members have no assigned usable
 decoding. The `B6`/`EA` RegionExit shapes have no assigned exit-kind or
 region inventory and reject; `Throw` active-handler rethrow likewise
-requires the missing region carrier. The `CD..CF`, `DE..DF`, `E9` and
+requires the missing region carrier. The `CD..CF`, `DF`, `E9` and
 `EC..FF` long-primary cells are invalid, not future meanings or automatic
 escapes. Reserved space does not approve an operation, source API, runtime
 profile or native intrinsic. Missing required semantics reject; there is no
@@ -2521,7 +2641,7 @@ quiet fallback or invented marshalling.
 | Integer profiles | Development/Debug defaults to checked and Release defaults to wrapping for integer add/subtract/multiply/negate and updates; explicit IL policy is fixed and independent of consumer configuration. |
 | Special registers | R0..R13 are general, R14 is context-typed zero, and R15 is all-bits-set or a role-specific discard/unused field. Decimal BID R15 is the raw negative signaling-NaN pattern. |
 | Local limits | Body-local indexes are `u16`; corresponding inventory counts are `u32` and at most 65,536. Global references, code offsets, byte lengths and instruction ordinals use independent widths. |
-| Comparisons | `cmp` produces uint8 L=1/E=2/G=4/U=8. Consumers test any uint8 mask by nonzero intersection. Scalar `cmp3.and/or` uses low A/B and high B/C predicates and returns bool. |
+| Comparisons | Numeric `cmp` produces uint8 L=1/E=2/G=4/U=8; TypeIdentity `cmp` produces only E=2/U=8. Consumers test any uint8 mask by nonzero intersection. Scalar `cmp3.and/or` uses low A/B and high B/C predicates and returns bool; TypeIdentity is not admitted by `CB/CC`. |
 | Register movement | `mov` aliases the same value identity. It does not copy, transfer, clean up or create another owner; aliases share consumption state. |
 | Storage and places | Typed semantic stores encode initialization/replacement under explicit state, authority and source-use rules. A place is an internal typed location, not a reference or address; reference formation is explicit. |
 | Calls | Use compact windows when their invocation phases fit; otherwise use a CallSite record with captured target, formal-order completed inputs, result and restricted ordered preparation. |

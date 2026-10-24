@@ -190,9 +190,16 @@ Changing a fixed observation is incompatible; changing an unfrozen private
 layout is permitted only within its contract and after all explicitly coupled
 consumers are regenerated, rebound or invalidated.
 
-The logical contract assigns no intrinsic ID, TypeSpec/value form, clause,
-feature bit, table, section, Body operation number or physical Count witness
-codec. These coordinated representation and consumer-validation choices
-remain tracked in
-[logical records](../representation/logical-records.md#registered-query-contracts-encoding-pending)
+The physical representation is specified by the assigned `DE` query family,
+Body FieldMap and global FieldPath table in the
+[instruction set](../il-instruction-set.md#assigned-long-families) and
+[IL metadata](../il-metadata.md#body-table-and-coded-instruction-boundary),
+with Feature 13 admission and retained layout dependencies. `typeof` has an
+internal TypeIdentity carrier only when runtime comparison needs a value;
+it does not introduce a public reflection object. Fixed Type/shape
+`countof` lowers to an ordinary `nint` constant, while Place `countof`
+remains the selected Core getter call; there is no universal Count/Length
+opcode or `length` alias. These source contracts remain unchanged. Their
+cross-layer representation and consumer-validation obligations are tracked
+in [logical records](../representation/logical-records.md#registered-query-contracts-and-representation)
 and the [conformance inventory](../conformance/source-registered-queries.md).

@@ -158,3 +158,20 @@ not establish a successful binding or replacement claim.
 | IBRP-11 | Admission runs a user getter/equality/initializer/cleanup to discover compatibility | Not permitted; use declared supported records and checking evidence |
 | IBRP-12 | Contract comparison succeeds but an actual invocation violates a precondition or implementation lies | Ordinary invocation/truth rules still apply; comparison is not their proof |
 | IBRP-13 | A compatible provider is hot-swapped into running code/owners | No permission follows; require separately admitted activation, lifetime and concurrency protocols |
+
+## 7. FieldDef imports and layout paths
+
+| Case | Situation | Required result |
+|---|---|---|
+| IBFP-01 | A consumer FieldDef stub and its expected owner TypeDef bind to public exports from the exact selected Module | Bind each identity independently; the field export's owner must be the selected provider owner |
+| IBFP-02 | Provider field has the same name, type and offset but a different nominal owner | Reject; names, layout and row coincidence do not establish field identity |
+| IBFP-03 | Expected/provider owner formals are renamed or renumbered but correspond by kind/ordinal | Apply the complete owner substitution at each use and compare the resulting field contract |
+| IBFP-04 | A FieldPath step is an Import and the preceding field substitutes to a constructed next owner | Resolve the Import against that exact immediate owner; reject root-substitution reuse or a cached application for another constructed type |
+| IBFP-05 | Field type, static/mutable role, visibility or complete access differs | Reject the mismatch, including an unsafe caller attempting to bypass private visibility |
+| IBFP-06 | A complete promised Layout changes field membership/order or the queried field's position | Reject even if its current offset happens to be unchanged |
+| IBFP-07 | A non-Blittable facade omits private fields needed for implementation layout | It cannot answer the offset from the stub alone; require admitted complete implementation layout and coupling or reject |
+| IBFP-08 | FieldMap directly references a FieldDef/Import for a one-field path | Accept only when the exact root is its non-generic declaring nominal type; constructed, qualified, generic or nested paths use FieldPath |
+| IBFP-09 | FieldPath is packed/shared across modules with different Import rows or expectations | Clone/remap as needed; each using Module must preserve its own exact Import and owner obligations |
+| IBFP-10 | A satisfied FieldDef Import is replaced by a direct FieldDef DefId | Permit only when the exact provider identity and all expected/relied-on access, representation and layout obligations remain retained |
+| IBFP-11 | A native symbol or `NativeExport` shares the metadata export key | It cannot satisfy FieldDef Import; metadata declaration binding and native binding remain distinct |
+| IBFP-12 | A TypeIdentity comparison is folded or packed across provider replacement | Preserve normalized nominal identity, complete substitution/evidence and guarded refinement; equal TypeMap indexes, names or layouts do not satisfy the retained relation |

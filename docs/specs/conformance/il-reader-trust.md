@@ -19,3 +19,9 @@ authored unsafe promises.
 | ITRU-07 | An optional deeper audit examines facts outside mandatory verification | It claims only the scope and properties it actually examined; it does not prove arbitrary external behavior |
 | ITRU-08 | A consumer lacks support for a required schema or semantic feature | It rejects affected use and makes no support claim for that input |
 | ITRU-09 | A signature, checksum, producer identity or trust flag accompanies an artifact | It does not establish semantic truth or replace producer obligations or consumer verification |
+| ITRU-10 | A stream Body uses one of the 32 map masks | Derive `17 + 4*popcount(mapMask)` from the selected exact schema; check reserved bits, conditional count words, map extents and the mandatory count fields before affected use |
+| ITRU-11 | FieldMap contains DefId, Import or FieldPath token forms | Validate the kind-specific table and row bounds; do not reinterpret a FieldPath token as a FieldDef/Import or accept bare row indexes |
+| ITRU-12 | A selected FieldPath row is used | Check variable-row extent, nonzero step count, complete root TypeSpecRef and each ordered FieldDef/Import reference; no recursive FieldPath token is valid inside the row |
+| ITRU-13 | `TargetLayoutDependency.fieldFirst/fieldCount` selects offset-path references | Validate its nonempty exclusive `004A` range of FieldDef/Import references; reject Body-local map indexes or `004B` FieldPath row indexes in that namespace |
+| ITRU-14 | `BlockEntryState.carrierKind=2` carries TypeIdentity | Require unused `typeMapIndex=0` and `accessKind=0`; selected operation support and exact live-edge evidence are separate from the entry declaration |
+| ITRU-15 | Open generic TypeIdentity use lacks exact evidence in the selected execution model | Reject affected use; do not use formal IDs, equal layouts, reflection or consumer-side re-proof of producer facts |

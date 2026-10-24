@@ -407,7 +407,10 @@ They do not establish general reference metadata or executable TRRM support.
 Bodies for a bounded source-free, fail-fast scalar subset, separately from
 private semantic-module encoding. Its semantics overlap accepted contracts,
 but its retired allocations and manifests do not establish conformance to the
-selected [native-boundaries schema](specs/representation/trrm-1.registry.json).
+selected [`trrm/1-draft-layout-queries-1` schema](specs/representation/trrm-1.registry.json).
+That accepted draft adds the masked five-map stream prefix, `DE` query/
+TypeIdentity operations, FieldMap/FieldPath and their binding/dependency
+contracts; the development path has not been migrated to those assignments.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
 inputs, and invoke the shared mandatory verifier and backend; there is no
 producer-trust bypass. General imported-call linking and standard

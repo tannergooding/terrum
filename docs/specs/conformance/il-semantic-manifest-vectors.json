@@ -1,8 +1,8 @@
 {
-  "schema": "trrm/1-draft-register-il-1",
+  "schema": "trrm/1-draft-layout-queries-1",
   "format_pair": [1, 0],
   "rule": "trrm-semantic-manifest/1",
-  "scope": "Actual fixed manifest/framing bytes and explicitly schematic prerequisite/support facts; no extra capability or edition is registered.",
+  "scope": "Actual fixed manifest/framing bytes, including registered Feature 13, and explicitly schematic prerequisite/support facts; no extra edition is registered.",
   "artifacts": [
     {
       "id": "baseline-edition-1",
@@ -42,9 +42,35 @@
       "features": [[1, 1]],
       "structural_result": "known-manifest-shape",
       "semantic_result": "unknown-required-Feature"
+    },
+    {
+      "id": "feature-13-layout-queries",
+      "byte_length": 152,
+      "hex": [
+        "54 52 52 4D 01 00 00 00 20 00 00 00 03 00 00 00",
+        "98 00 00 00 20 00 00 00 00 00 00 00 00 00 00 00",
+        "01 00 00 00 01 00 00 00 50 00 00 00 30 00 00 00",
+        "02 00 00 00 01 00 00 00 80 00 00 00 10 00 00 00",
+        "04 00 00 00 01 00 00 00 90 00 00 00 08 00 00 00",
+        "01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00",
+        "00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00",
+        "01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00",
+        "00 00 00 00 08 00 00 00 00 02 00 00 4D 31 00 00",
+        "0D 00 00 00 01 00 00 00"
+      ],
+      "module_identity": "M1",
+      "governing_rule_edition": 1,
+      "features": [
+        [
+          13,
+          1
+        ]
+      ],
+      "structural_result": "valid-manifest-shape",
+      "semantic_result": "registered-Feature-13-requires-complete-retained-support"
     }
   ],
-  "fixture_catalog_scope": "The following rule/feature identities are schematic supplied facts, not Terrum registrations or evidence of their semantic truth.",
+  "fixture_catalog_scope": "The following additional rule/feature identities are schematic supplied facts, not Terrum registrations or evidence of their semantic truth.",
   "schematic_editions": [
     {"id": 1, "baseline_features": []},
     {"id": 2, "baseline_features": []}

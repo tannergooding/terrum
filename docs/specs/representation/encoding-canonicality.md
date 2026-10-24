@@ -4,9 +4,10 @@
 
 Ordinary readers accept structurally valid, semantically equivalent
 noncanonical encodings. For the register codec, this includes a longer
-assigned instruction form for the same operation, and TypeMap, MethodMap or
-ConstantMap entries with a different consistently referenced order,
-duplicates or distinct unused entries. These differences do not change
+assigned instruction form for the same operation, and TypeMap, MethodMap,
+FieldMap or ConstantMap entries with a different consistently referenced
+order, duplicates or distinct unused entries. A set `mapMask` bit with a
+zero count is also valid noncanonical framing. These differences do not change
 selected types, values, operations, effects or declaration identities.
 
 Writers emit the canonical instruction form and map order specified below.
@@ -72,11 +73,16 @@ no narrower or wider assigned index form; an out-of-range reference or
 inventory is invalid, not a canonicality difference. Code offsets, byte
 lengths and instruction ordinals remain independent `u32` domains.
 
-TypeMap, MethodMap and ConstantMap entries are fixed-width records. Canonical
-writers order entries by first logical use, reuse identical tokens/values
-and omit unused entries. Ordinary readers accept consistently reordered
-maps, duplicate entries and distinct valid unused entries; a selected lookup
-need not scan the complete maps. HomeMap entries are distinct storage
+TypeMap, MethodMap, FieldMap and ConstantMap entries are fixed-width records.
+The stream prefix uses `mapMask` bits 0..4 for Home/Type/Method/Field/
+Constant maps; only present maps serialize their count words. The exact
+prefix is `17 + 4*popcount(mapMask)` bytes. Canonical writers clear the bit
+and omit count/payload for every empty map. Ordinary readers accept a
+set empty-present map as valid noncanonical framing. Writers order
+TypeMap/MethodMap/FieldMap/ConstantMap entries by first logical use, reuse
+identical tokens/values and omit unused entries. Ordinary readers accept
+consistently reordered maps, duplicate entries and distinct valid unused
+entries; a selected lookup need not scan the complete maps. HomeMap entries are distinct storage
 identities and are not deduplicated. HomeMap order is not canonicalized by
 this schema; a transformation that changes it remaps every Home reference
 and preserves each storage identity/state. A whole-Body audit does not claim
@@ -95,22 +101,33 @@ semantic obligations do not change with the chosen form.
 
 ## 4. Body dependency maps and TypeSpecRef values
 
-Each Body has an upfront TypeMap and MethodMap. Entries are fixed four-byte
-tokens, not instruction-width references. TypeMap entries resolve complete
-types in the Body's selected module context; MethodMap entries resolve a
-MethodDef or the exact imported expectation. Body-local indexes are fixed
-zero-based `u16` values, not artifact row numbers or variable-width fields.
-Required HomeMap, BlockEntryState, descriptor and operation types must be
-present and agree exactly under the selected formation rules.
+Each Body has upfront TypeMap, MethodMap and FieldMap tables. Entries are
+fixed four-byte tokens, not instruction-width references. TypeMap entries
+resolve complete types in the Body's selected module context; MethodMap
+entries resolve a MethodDef or exact imported expectation. FieldMap entries
+select a FieldDef DefId, FieldDef Import or global FieldPath token. Body-local
+indexes are fixed zero-based `u16` values, not artifact row numbers or
+variable-width fields. Required HomeMap, BlockEntryState, descriptor and
+operation types must be present and agree exactly under selected formation
+rules.
 
 Canonical writers order TypeMap entries by first logical use in HomeMap,
-BlockEntryState records, instructions and their referenced typed records.
-A pseudo token's base TypeMap dependency precedes the pseudo entry; ties
-preserve first-use order. MethodMap and ConstantMap entries follow first
-logical use from instructions and referenced records. Writers reuse one
-entry for the same resolved complete type, exact method token or exact
-typed constant; unused entries are omitted. Different Import tokens remain
-distinct when their expected contracts differ.
+BlockEntryState records and instructions; a TypeOf instruction visits its
+complete subject. Carrier 2's required zero `typeMapIndex` is unused and is
+neither a TypeMap use nor a remapping reference. A pseudo token's base
+TypeMap dependency precedes the pseudo entry; ties preserve first-use order.
+MethodMap, FieldMap and ConstantMap entries follow first logical use from
+instructions and referenced records. FieldPath rows are shared by identical
+complete root TypeSpecRefs and ordered FieldDef/Import identities, while
+distinct Import expectations remain distinct. Canonical FieldPath rows follow
+first use from the ordered Module/MethodDef/Body/Block/instruction/FieldMap
+traversal. Unused map entries and unreferenced FieldPath rows are omitted by
+canonical writers.
+A canonical writer uses a direct FieldDef/Import token for an eligible
+one-field path whose exact root is its non-generic declaring type; all
+constructed, qualified, formal or multi-step paths use a FieldPath token.
+An equivalent one-step FieldPath row may be accepted ordinarily but is
+noncanonical when the direct form is valid.
 
 Canonical token spelling follows the assigned identity forms: use `0xF2`
 for an assigned well-known type, `0xF3` for an eligible built-in family over
@@ -172,7 +189,15 @@ affected Block code offset/length, record offset, instruction ordinal and
 containing-row offset. Changing a Body map order remaps every affected
 zero-based reference in its actual context. Changing a token requires
 resolving and rebuilding the token and its row/Import context; byte
-substitution is not a valid remap. Optional SourceMap step-role slots are
+substitution is not a valid remap. For stream Bodies, map changes rebuild
+`mapMask`, conditional count words, all present map payloads, and the
+`17 + 4*popcount(mapMask)` prefix extent. FieldMap remapping distinguishes
+FieldDef DefIds, FieldDef Imports and FieldPath tokens; referenced FieldPath
+rows remap their complete root TypeSpecRef and ordered FieldDef/Import steps.
+`DE` kinds 1/2/5 remap through TypeMap, while kinds 3/4 remap through
+FieldMap. Rewrites preserve TypeIdentity carrier/edge identity evidence,
+comparison results and guarded refinements; carrier-2 zero fields are never
+remapped as TypeMap[0]. Optional SourceMap step-role slots are
 preserved only when the rewritten instruction has the same meaning and
 semantic step; otherwise the section is regenerated or dropped under the producer's
 [transformation obligations](reader-trust.md#5-transformations-verification-reuse-and-audit-claims).
@@ -189,10 +214,10 @@ or incomplete/exhausted work declines the requested claim; a trust decision
 does not supply missing canonicality evidence.
 
 The rules define `encoding-canonicality/1` under the exact
-`trrm/1-draft-register-il-1` schema and out-of-band governing-chapter agreement.
-They change ordinary admission policy, not byte layouts, allocation,
-feature identity or executable membership. Numerical structural/semantic
-resource minima remain unassigned under the separate
+`trrm/1-draft-layout-queries-1` schema and out-of-band governing-chapter
+agreement. They define canonical writers and scoped audits for the selected
+masked Body prefix, FieldMap and FieldPath alongside the existing forms.
+Numerical structural/semantic resource minima remain unassigned under the separate
 [resource-accounting contract](resource-accounting.md).
 
 The [Module manifest](semantic-manifests.md#3-rows-ranges-and-ordinary-encodings)

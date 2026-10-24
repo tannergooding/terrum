@@ -24,6 +24,15 @@ owns that profile's fixups, write/execute separation, instruction-cache
 publication, stack/unwind records and registration lifetime. Private backend
 objects and current worker support do not define those requirements.
 
+An open-generic TypeOf/comparison path requires the selected execution model
+to provide exact complete type-identity evidence for its substitutions,
+including checked captured-type evidence where used. Closed specializations
+may resolve identity statically. If the selected model cannot supply exact
+evidence, reject the affected use before execution; do not compare formal
+declaration IDs, infer identity from layout, or fall back to reflection.
+This requirement selects no dictionary ABI, helper signature or public
+runtime type object.
+
 ## Replacement and code lifetime
 
 Retained code, helpers, unwind data, roots and cleanup providers remain valid

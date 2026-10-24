@@ -4,14 +4,17 @@ These cases apply [semantic manifests](../representation/semantic-manifests.md),
 [requirements and admission](../representation/requirements-and-admission.md),
 the [registry](../representation/registry.md) and
 [metadata framing](../il-metadata.md#header-and-directory).
-The current schema is `trrm/1-draft-register-il-1`, format `(1, 0)`.
+The current schema is `trrm/1-draft-layout-queries-1`, format `(1, 0)`.
 
 [Fixed vectors](il-semantic-manifest-vectors.json) contain actual complete
 current-schema bytes. Edition `1` with no extra Feature is interpreted under the accepted TRRM 1.0
 baseline, subject to all other declared requirements and contracts. Empty
 Feature ranges do not establish implementation support or create a reduced GA
 floor. A known-shape Feature row can be inspected but its unregistered
-required identity does not establish a support claim.
+required identity does not establish a support claim. Feature 13
+`LayoutQueries` is registered at revision 1 without unconditional Feature
+prerequisites; its dependent target, generic-identity, witness, constant and
+runtime requirements remain conditional on retained content.
 
 The additional prerequisite, support and compatibility catalogs are explicit
 schematic supplied facts. They test closure and mapping behavior without
@@ -41,7 +44,6 @@ or verifier organization.
 | SMNF-14 | Two Modules share one immutable Feature list | Recover requirements independently; sharing does not merge Module contexts |
 | SMNF-15 | Explicit list is reordered or repeats identical pairs | Ordinary meaning is unchanged; canonical list audit rejects order/duplicates |
 | SMNF-16 | One Module explicitly requires two revisions of the same Feature | Producer violates the nonconflicting-closure rule; do not take a maximum or invent an alternate branch |
-
 ## 2. Complete requirements and support
 
 | Case | Situation | Required result |
@@ -60,6 +62,11 @@ or verifier organization.
 | SMNF-28 | Optional section/name is offered instead of a registered requirement | It cannot activate the capability or supply a missing required definition |
 | SMNF-29 | A producer emits unknown Module flags or target/runtime values | Producer violates the schema; verification rejects before affected use and no hidden manifest selector is assigned |
 | SMNF-30 | Feature row is not referenced by any Module | Producer violates the ownership rule; verification detects the orphaned required metadata before support is claimed |
+| SMNF-48 | Retained `DE`, TypeIdentity flow, FieldMap/FieldPath or FieldDef binding is used without Feature 13 | Reject affected use; numeric assignment or schema recognition does not establish capability support |
+| SMNF-49 | A Body uses the common `mapMask` framing but has no retained query/path feature use | The map prefix alone does not require Feature 13 |
+| SMNF-50 | FieldDef Import/Export declarations are retained under the registered binding contract, even without a surviving query | Require Feature 13 for the declaration-binding capability |
+| SMNF-51 | A closed TypeIdentity comparison is fully eliminated and no candidate capability survives in retained closure | Feature 13 is not required solely for the removed operation; preserve any remaining identity-binding/refinement obligations |
+| SMNF-52 | Only ordinary fixed-count constants or live witnessed Count calls remain | Do not require Feature 13 for those constants/calls alone |
 
 ## 3. Re-encoding and retained contexts
 
@@ -71,7 +78,7 @@ or verifier organization.
 | SMNF-34 | A genuinely unretained Module/list is trimmed | Retain surviving Module obligations; remove only its discharged rows/requirements |
 | SMNF-35 | A rewriter relabels an edition or chooses the greatest Feature revision | This changes the manifest; it is not the original required interpretation |
 | SMNF-36 | Provider is selected through ModuleRef or a packed direct edge | Provider keeps its own manifest; the consumer's edition is not substituted |
-| SMNF-37 | Current draft adopts these rows while retaining `(1, 0)` | Explicit draft schema changes to `trrm/1-draft-register-il-1`; no new header/schema-ID or preview compatibility requirement |
+| SMNF-37 | Current draft adopts these rows while retaining `(1, 0)` | Explicit draft schema changes to `trrm/1-draft-layout-queries-1`; no new header/schema-ID or preview compatibility requirement |
 | SMNF-38 | A provisional feature number, witness/member name or assigned opcode is presented as a complete capability | No support claim; exact registration, prerequisite closure and every required codec must be present |
 | SMNF-39 | Infer every actual requirement from arbitrary source, values, ownership or private bodies | Document-only: complete publication and source-obligation inference need independent evidence |
 | SMNF-40 | Prove arbitrary binding, effects, unsafe/body facts or native execution from a support decision | Document-only: support does not establish those independent contracts |

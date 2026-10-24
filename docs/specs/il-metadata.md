@@ -15,9 +15,10 @@ operand shapes and admission status; the tables here project that registry.
 The [requirement and admission contract](representation/requirements-and-admission.md)
 owns artifact-schema versus Module-semantic scope and complete retained
 requirements. The [Module manifest](representation/semantic-manifests.md)
-supplies the physical edition/Feature protocol. The registry assigns Feature
-IDs 9-12 at revision 1; their complete registrations and prerequisite closure
-remain subject to this integration.
+supplies the physical edition/Feature protocol. Feature IDs 9-12 remain
+assigned at revision 1 with incomplete registrations; Feature 13
+`LayoutQueries` is registered at revision 1, without implying implementation
+support or closing its conditional target/generic/witness/constant gates.
 The [binding and replacement contract](representation/binding-and-replacement.md)
 owns selected-definition resolution and checked directional satisfaction of
 complete retained expectations; it does not enable missing physical features.
@@ -125,7 +126,7 @@ The [Module semantic manifest](representation/semantic-manifests.md) separately
 encodes exact governing editions and required Feature revisions; it registers no
 compatibility mapping or richer capability. Source revisions and target ABI/profile
 requirements remain independent of the format pair.
-The current registry edition is `trrm/1-draft-register-il-1`. It selects one
+The current registry edition is `trrm/1-draft-layout-queries-1`. It selects one
 allocation catalog, not an alternate floating/generic decoder. Draft agreement
 also covers the governing semantic catalog and chapters; a registry digest is not
 a complete semantic-schema identity.
@@ -302,7 +303,8 @@ qualifier combinations reject. `0xF2` and `0xF3` resolve to the same complete
 type identities as their equivalent TypeSpec forms.
 
 Use `TypeSpecRef` in every field whose schema denotes a complete type,
-including nested TypeSpec values. `TypeSpec.form 0x05`'s `genericTypeSpec`
+including nested TypeSpec values and `FieldPath.rootTypeSpecRef`.
+`TypeSpec.form 0x05`'s `genericTypeSpec`
 remains a row reference to the nominal generic definition; constant formal
 arguments remain ConstantSource references. Other table rows, DefIds, ranges,
 MethodDef/Import identities and TypeArg owners do not become TypeSpecRefs.
@@ -335,6 +337,41 @@ eight-bit family/modifier fields; `0xF2` uses an eight-bit well-known code in
 the low payload byte, with the upper 16 bits zero. `0xF3` uses the TypeSpecRef
 payload described above. `0xF4..0xFE` are unassigned, and `0xFF` remains
 reserved for a future required indirection.
+
+The Body-local FieldMap uses a separate four-byte token union:
+
+```text
+FieldMapToken:u32 =
+    DefId(kind=0x14, row)
+  | ImportToken(kind=0x1C, row)          // expected definition is FieldDef
+  | FieldPathToken(kind=0x1D, row)        // section 0x004B
+```
+
+Rows are one-based `1..0xFF_FFFF` in the selected FieldDef, Import or
+FieldPath table. `0x14` is a FieldDef DefId definition-kind, not a global
+token kind. FieldPath token kind `0x1D` is distinct from metadata section
+kind `0x001D` Export and is valid only in FieldMap. The direct
+FieldDef/Import forms are the compact one-field path only when their exact
+root is the declaring non-generic nominal type; constructed, qualified,
+generic or nested paths use a FieldPath row.
+No compressed inline multi-step token or dedicated FieldRef table is assigned;
+the direct one-field form and shared FieldPath table are the compact encodings
+for this schema. Cross-module field binding uses the existing generic Import
+row with its FieldDef target contract; a field-specific lookup/reference table
+would require a separately reviewed schema amendment.
+
+The global FieldPath steps and `TargetLayoutDependencyField` rows use the
+four-byte `FieldReference` subset of this union:
+
+```text
+FieldReference:u32 =
+    DefId(kind=0x14, row)
+  | ImportToken(kind=0x1C, row)          // expected definition is FieldDef
+```
+
+Its one-based row is bounded by the selected FieldDef or Import table.
+FieldReference excludes the FieldPath-token branch; nested Path signatures
+are already flat ordered step lists.
 
 For a `0xF2` well-known type token, codes `0x00..0x19` use the same
 identities and assignments as the atomic built-in code table below. The
@@ -483,11 +520,14 @@ bytes remain valid after semantic changes.
 | `0x0047` | LogicalViewPathEntry | One ordered logical path selector |
 | `0x0048` | TargetProfile | Exact registered target/layout/ABI identity |
 | `0x0049` | TargetValueBinding | Completed target-dependent frozen result |
+| `0x004A` | TargetLayoutDependencyField | One FieldDef/Import reference in an owned offset-path range |
+| `0x004B` | FieldPath (variable) | One complete root type and ordered hierarchy of FieldDef/Import references |
 | `0x7F00` | SourceMap | Optional nonsemantic body-to-source mapping |
 
 Section kind `0x0012` remains unassigned; the earlier `TypeArg` child-table
 candidate is retired. Native boundary kinds `0x0021..0x0024` are assigned by
 this schema. Features 9-12 remain assigned with registration pending;
+Feature 13 is registered for its listed query/identity/path/binding scope;
 assignment alone does not authorize independent use.
 
 `Module` is always present with at least one row; ordinary one-project output
@@ -496,7 +536,7 @@ physical data without conflating their nominal identities or export keys.
 Other known tables are absent when empty, not encoded as empty directory
 entries. The current governing edition is `1`; native Features 1-7 are
 registered at revision 1, while Features 9-12 remain assigned with
-registration pending. A Module with no additional registered feature uses
+registration pending and Feature 13 is registered at revision 1. A Module with no additional registered feature uses
 `(0, 0)`, but the empty range does not claim that its producer or consumer
 implements every accepted TRRM 1.0 contract. The
 [manifest protocol](representation/semantic-manifests.md) defines exact
@@ -715,6 +755,8 @@ zero-copy ownership, GC rooting and direct aliasing are not implied.
 | ConstantExecutionArgument | `u8 kind, u8 flags=0, u16 reserved=0, u32 sourceRef` |
 | ConstantExecutionDependency | `u8 kind, u8 flags=0, u16 reserved=0, u32 targetRef` |
 | TargetLayoutDependency | `u8 queryKind, u8 flags=0, u16 reserved=0, u32 subjectTypeSpec, u32 selectedTargetProfileRef, u32 fieldFirst, u32 fieldCount` |
+| TargetLayoutDependencyField | `u32 fieldReference` (`DefId(kind=0x14,row)` or `ImportToken(kind=0x1C,row)` expecting FieldDef) |
+| FieldPath (variable) | `u32 rootTypeSpecRef, u32 fieldCount, fieldCount ordered u32 FieldReferences` |
 | LogicalInputView | `u8 backingKind, u8 flags=0, u16 reserved=0, u32 backingRef, u32 referentTypeSpec, u32 pathFirst, u32 pathCount` |
 | LogicalViewPathEntry | `u8 selectorKind, u8 flags=0, u16 reserved=0, u32 selectorRef, u64 indexOrRangeStart, u64 rangeCount` |
 | TargetProfile | `u32 profileId, u32 ruleRevision` |
@@ -727,6 +769,32 @@ definition reference. `GenericParam.defaultArgumentRef` is a TypeSpecRef for a
 type formal and a ConstantSource reference for a constant formal.
 `Constraint.payload` is a TypeSpecRef only for variants whose payload is a
 complete type; other variants retain their kind-specific reference.
+
+Each `FieldPath` variable row is a complete structural path signature. Its
+`rootTypeSpecRef` is a required complete TypeSpecRef, `fieldCount` is
+nonzero, and the row extent is exactly `8 + 4*fieldCount` bytes. The ordered
+FieldReferences are FieldDef DefIds (`0x14`) or Imports (`0x1C`) whose
+expected definition is a FieldDef; FieldPath rows cannot recursively contain
+FieldPath tokens. A row has no Module cursor, like TypeSpec, so each
+FieldReference and Import must resolve in every using Module context.
+Imported expectations remain distinct even if they bind to the same provider
+field. FieldPath rows may be shared only when their complete root and ordered
+field identities/contracts agree. FieldMap's `0x1D` FieldPath token names
+the one-based row; it is not a FieldReference accepted in `0x004A`.
+
+`TargetLayoutDependency` (`0x0045`) retains its 20-byte row and query kinds
+`1=SizeOf`, `2=AlignOf`, `3=OffsetOfTypePath`, `4=OffsetOfPlace`.
+`subjectTypeSpec` is a complete TypeSpecRef and
+`selectedTargetProfileRef` is a concrete nonzero TargetProfile row.
+Size/alignment rows require `(fieldFirst,fieldCount)=(0,0)`. Offset rows
+require a nonempty ordered range in `TargetLayoutDependencyField` (`0x004A`);
+each range is one-based, checked within that table, exclusively owned by
+that observation, and not shared. A `0x004A` row is one FieldReference:
+FieldDef DefId kind `0x14` or Import token kind `0x1C` whose expected
+definition is FieldDef. Expand FieldPath tokens to these ordered references
+when retaining an observation; do not store Body-map or FieldPath-table
+indexes in `0x004A`. The existing owning request/value relationship supplies
+the Module context for imported references.
 
 Fixed row strides and fields for assigned tables are owned by the
 [machine-readable registry](representation/trrm-1.registry.json) and
@@ -798,10 +866,25 @@ The remaining fixed-row columns have these `(1, 0)` valid-artifact rules:
 | MethodSig | `resultTypeSpec` is required (the built-in `void` TypeSpec denotes the zero-data unit result); `receiverTypeSpec?` is zero when absent. Param and generic ranges follow the ownership rules above; ordinary unit parameters remain logical parameters. |
 | Param | `ownerMethodSig` and `typeSpec` are required. `mode` and `flags` use their assigned registries below, and `reserved=0`; ordinal is zero-based within the owning range. |
 | GenericParam, Constraint | `ownerDefId` names a TypeDef or MethodDef and `ownerGenericParam` names a formal, respectively. Names are nonempty and ordinals are zero-based within the owning range. `formalKind` is `1=type` or `2=constant`; type formals carry valid nonzero ownership/nullability domains and zero `constantTypeSpec`, while constant formals carry zero domain tags, a nonzero value-domain TypeSpec and no type constraints. `defaultArgumentRef=0` means no default; otherwise it targets a TypeSpec for a type formal or a ConstantSource for a constant formal. `Constraint.flags=0`; kinds `1=interface instance`, `2=intrinsic property` and `3=associated relation` select a nonzero kind-specific payload. |
-| Import | `moduleRef` names a ModuleRef owned by the expected definition's module; `exportKey` is nonempty and `expectedLocalDefId` names that module's TypeDef, MethodDef or PropertyDef with no locally authored implementation. Resolve that selected producer/key against the complete expected contract before execution. |
-| Export | `localDefId` names this module's public TypeDef, MethodDef or PropertyDef, not an imported expectation; `exportKey` is nonempty and unique within this module's producer identity. An exported member's owner TypeDef is public. |
+| Import | `moduleRef` names a ModuleRef owned by the expected definition's module; `exportKey` is nonempty and `expectedLocalDefId` names that module's TypeDef, MethodDef, PropertyDef or FieldDef with no locally authored implementation. A FieldDef expectation is a stub in its expected owner's checked contiguous field range; bind its owner and field to the exact selected provider declarations before use. |
+| Export | `localDefId` names this module's public TypeDef, MethodDef, PropertyDef or FieldDef, not an imported expectation; `exportKey` is nonempty and unique within this module's producer identity. An exported member's owner TypeDef is public. |
 | PropertyDef | `ownerTypeDef`, `name`, `typeSpec` and `getterMethodDef` are required; only visibility bits are assigned. The getter and result must match as specified above. |
 | SourceFile | `path` is required nonempty decoded text; `digestBlob?=0` until a digest algorithm is assigned. The Module partition owns the row; paths convey no filesystem authority. |
+
+FieldDef Import/Export is metadata declaration binding, not native data
+binding. The expected FieldDef stub belongs to the consumer Module and its
+expected owner TypeDef; its owner binds independently through the selected
+ModuleRef/provider. The selected nonempty export key must resolve to one
+public local provider FieldDef with a public owner, and the expected owner
+must bind to that exact provider owner. Compare the complete field type,
+static/mutable role and access, applied owner substitutions, and every
+retained complete Layout/TargetProfile membership and ordered
+LayoutField correspondence. A FieldDef Import or FieldPath token grants no
+field access, storage, initialization, address formation or marshalling.
+`NativeImport`/`NativeExport` remain their separate static native-binding
+contracts; matching library symbols or names do not satisfy metadata imports.
+The complete satisfaction and replacement obligations are defined in
+[binding and replacement](representation/binding-and-replacement.md).
 
 `Module.identity` and `ModuleRef.producerIdentity` are required references
 to nonempty, well-formed String text without embedded zero scalars, not
@@ -1272,7 +1355,7 @@ the relevant row references; row indexes are artifact-wide:
 | MethodSig 1 | `resultTypeSpec=1, receiverTypeSpec=0, paramFirst=0, paramCount=0, genericFirst=0, genericCount=0` |
 | MethodDef 1 | `ownerTypeDef=0, name=1, signature=1, flags=2` (public), `contractFirst=0, contractCount=0, bodyRow=1` |
 | Export 1 | `localDefId=0x1600_0001, exportKey=1` |
-| Body 1 | Instruction-stream kind `01`, codec `01`; `homeCount=0`, `typeMapCount=1`, `methodMapCount=0`, `constantMapCount=1`, `blockCount=1`, `recordCount=1`, `codeByteLength=2` |
+| Body 1 | Instruction-stream kind `01`, codec `01`, `mapMask=0x12`; present counts `typeMapCount=1`, `constantMapCount=1`, `blockCount=1`, `recordCount=1`, `codeByteLength=2` |
 
 For example, the TypeSpec table with its single `int32` row is exactly
 `00 00 00 00 03 00 00 00 01 00 08`: two four-byte offsets followed by the
@@ -1282,7 +1365,7 @@ contracts. The producer remains responsible for body-level correctness;
 consumers safely decode the Body and may rely on its published semantics
 without re-proof. A deeper semantic audit remains optional.
 
-The Body row is 75 bytes: its 33-byte prefix is followed by TypeMap token
+The Body row is 67 bytes: its 25-byte prefix is followed by TypeMap token
 `0x11000001` (TypeSpec row 1), ConstantMap entry
 `(TypeSpecRef(1), ConstantSource(1))`,
 one 12-byte Block entry `(codeOffset=0, codeLength=2,
@@ -1330,17 +1413,29 @@ contains the register instruction stream and its explicit
 `instructionEncoding:u8`. No decoder infers a form from row length or
 payload bytes.
 
-For kind `01`, the 33-byte prefix is, in order:
-`u8 implementationKind=01, u8 instructionEncoding=01, u8 flags=0,
-u16 reserved=0, u32 homeCount, u32 typeMapCount, u32 methodMapCount,
-u32 constantMapCount, u32 blockCount, u32 recordCount,
-u32 codeByteLength`. The row then contains the eight-byte HomeMap entries,
-four-byte TypeMap tokens, four-byte MethodMap tokens, eight-byte ConstantMap
-references, `blockCount` fixed 12-byte Block entries, the record-offset
-index and typed-record data, and exactly `codeByteLength` instruction
-bytes. There is no padding or unclaimed trailing data.
+For kind `01`, byte 2 is a `mapMask:u8`: bits 0..4 indicate HomeMap, TypeMap,
+MethodMap, FieldMap and ConstantMap, respectively; bits 5..7 are zero.
+The initial bytes are `u8 implementationKind=01, u8 instructionEncoding=01,
+u8 mapMask, u16 reserved=0`.
+Serialize the `u32` counts only for maps whose bits are set, in that order,
+between the initial five bytes and the three mandatory `u32` counts
+`blockCount`, `recordCount` and `codeByteLength`. With
+`K=popcount(mapMask)`, the prefix is exactly `17 + 4*K` bytes, 17..37.
+An absent map has no count or payload. A set bit with a zero count is valid
+noncanonical input; canonical writers clear bits for empty maps.
 
-Home, TypeMap, MethodMap, ConstantMap, Block and typed-record indexes are
+The row then contains the present maps in Home/Type/Method/Field/Constant
+order, omitting absent maps: eight-byte HomeMap entries, four-byte TypeMap
+tokens, four-byte MethodMap tokens, four-byte FieldMap tokens and eight-byte
+ConstantMap references. Next are `blockCount` fixed 12-byte Block entries,
+the record-offset index and typed-record data, and exactly
+`codeByteLength` instruction bytes. There is no padding or unclaimed trailing
+data. For effective map counts `H,T,M,F,C`, mandatory counts `B,R`,
+record-data extent `D` and code extent `L`, the exact Body extent is
+`17 + 4*K + 8*H + 4*T + 4*M + 4*F + 8*C + 12*B + 4*(R+1) + D + L`,
+using checked arithmetic.
+
+Home, TypeMap, MethodMap, FieldMap, ConstantMap, Block and typed-record indexes are
 zero-based `u16` values; `0xFFFF` is valid. Their `u32` counts are at most
 65,536, with at least one block and one record. TypeMap entries use the
 Body-specific type-token grammar: TypeSpec row kind `11`, TypeDef row kind
@@ -1359,11 +1454,13 @@ are disjoint and ordered, and together they cover the complete code byte
 array. Every block ends with exactly one terminal instruction; adjacency
 does not imply fallthrough. `entryStateRecord` selects a typed
 `BlockEntryState`, which publishes the available general-register inputs.
-Each row distinguishes an ordinary value from an internal place handle and,
-for place handles, records the access class and referent type. Dynamic backing,
-loan and provenance facts remain mandatory verifier state across incoming
-edges. Register, home, block and record identities remain Body-local, not
-metadata `DefId`s.
+Each row distinguishes an ordinary value, an internal place handle or an
+internal TypeIdentity. A TypeIdentity row uses `carrierKind=2`,
+`typeMapIndex=0` and `accessKind=0`; the type field is unused and does not
+refer to TypeMap[0]. Place handles retain their access class and referent
+type. Dynamic backing, loan, identity evidence and provenance facts remain
+mandatory verifier state across incoming edges. Register, home, block and
+record identities remain Body-local, not metadata `DefId`s.
 
 `recordOffsets` is `u32[recordCount+1]`, relative to record data. It starts
 at zero, strictly increases, and ends at the exact record-data extent. Each

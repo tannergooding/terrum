@@ -16,9 +16,11 @@ rejection before affected use. A semantically false but structurally
 consumable producer assertion violates producer obligations, but does not
 require consumer re-proof or rejection.
 Unsupported or incompatible input does not establish a support/compatibility
-claim. The current schema is `trrm/1-draft-register-il-1`; the
+claim. The current schema is `trrm/1-draft-layout-queries-1`; the
 [manifest companion](il-semantic-manifests.md) supplies actual edition/Feature
-bytes. No extra capability IDs are registered.
+bytes. Feature 13 `LayoutQueries` is registered at revision 1; it does not
+replace the independent target, generic-identity, witness or constant
+prerequisites of retained operations.
 
 ## 1. Exact identity and ownership
 

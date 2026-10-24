@@ -6,6 +6,11 @@ support or a completed target-layout/metadata implementation. Each fixture
 supplies its stated complete type facts, target profile and fixed-layout or
 coupling obligations. Target-specific numerical fixtures do not define
 universal ABI tables.
+Physical semantic-IL coverage is tracked separately by
+[registry conformance](il-registry.md), including `DE`/TypeIdentity,
+FieldMap/FieldPath, Feature 13 and the selected target-layout dependency
+schema. Source query acceptance does not imply that these physical layers or
+compiler implementations are present.
 
 ## Identity, shape and authority
 
@@ -30,6 +35,7 @@ universal ABI tables.
 | QREG-17 | A same-named ordinary helper competes with a query form | Parse and bind the query by its grammar-owned form; do not rebind it to the helper |
 | QREG-18 | A same-named method or field is offered instead of the Count property | Do not treat it as the live Count witness |
 | QREG-19 | `typeof(Place)` names a value whose static type is `G<_>` | Report the existential view type; do not read the value or recover its hidden argument/witness |
+| QREG-20 | `typeof(T) is typeof(int32)` is evaluated in an admitted generic context | Compare complete identities and preserve only the exact successful type-test refinement; this is not reflection or a general type-object API |
 
 ## Complete subjects and runtime evidence
 
@@ -147,3 +153,4 @@ universal ABI tables.
 | QRET-18 | IsConstEval is true under the resolved mode contract | IsPureEval is also true; layout queries do not change mode |
 | QRET-19 | A runtime object-size, policy-state or arbitrary capability-query API is requested | Outside this bounded catalog until its own exact contract is selected |
 | QRET-20 | A valid layout number is persisted without an admitted physical query/dependency representation | Logical approval does not grant physical interoperability |
+| QRET-21 | Source query semantics are implemented but Feature 13, the selected `DE`/FieldPath schema or a required identity/layout dependency is unsupported | Do not claim source-free execution support; preserve the accepted source contract and reject unsupported artifact use before execution |

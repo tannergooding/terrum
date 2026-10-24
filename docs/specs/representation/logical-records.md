@@ -252,10 +252,13 @@ and nested substitution, associated constants, positive and closed-negative
 property branches including saved-Boolean propagation, qualified-self
 projection, and per-value `Task<_>` evidence. Implementations may diagnose
 excessive complexity beyond that floor; no portable numeric charge units or
-fixed resource budget is selected. Branch operands, proof references, form
-IDs and typed-reference encodings remain open. Sections `0x0025..0x0049`,
-`Contract` clauses `0x000A..0x000B`, Feature IDs 9-12 and DefId kind `0x21`
-are assigned by the registry, but incomplete registrations remain
+fixed resource budget is selected. The `DE` TypeOf/C2 E/U flow supports exact
+TypeIdentity comparison and the existing successful-edge refinement; generic
+branch proof/witness/recovery codecs, captured evidence acquisition, other
+branch operands, proof references, form IDs and typed-reference encodings
+remain open. Sections `0x0025..0x004B`, `Contract` clauses
+`0x000A..0x000B`, Feature IDs 9-13 and DefId kind `0x21` are assigned by the
+registry; Feature 13 is registered, while incomplete registrations remain
 unsupported. Generic candidate Features 6-8 and all `GenericCall`
 opcode/display assignments remain outside this allocation. A `GenericCall`
 requirement call retains a typed reference to the exact open formal
@@ -1259,16 +1262,40 @@ Physical generic/value/validity records remain separately gated. This logical
 approval cannot reinterpret optional Attr data or an unassigned slot as
 mandatory constant-generic semantics.
 
-## Registered query contracts: encoding pending
+## Registered query contracts and representation
 
 The [registered-query contract](../language/registered-queries.md) selects
 `typeof`, `sizeof`, `alignof`, `offsetof` and `countof`, without assigning a
-query opcode, TypeSpec/value form, query table, feature bit, Count witness
-codec or layout-dependency record. The first four are dedicated source
-queries; `countof(Place)` binds a nominal synchronous Pure Count
-witness with a readable instance `Count : nint` property getter from the shared
-Core `ICountable` requirement. Same-shaped properties from unrelated interfaces,
-same-named methods and optional attributes do not supply these facts.
+query opcode or source API. The physical query assignment is the `DE`
+family in the [instruction set](../il-instruction-set.md#assigned-long-families)
+and the machine registry. Kinds 1/2/5 use complete TypeMap subjects; kinds
+3/4 use FieldMap tokens. The Body-local FieldMap selects a direct one-field
+FieldDef/Import token or a FieldPath token into global section `0x004B`.
+FieldPath rows carry a complete root TypeSpecRef and ordered FieldDef/Import
+steps. Direct field tokens are valid only for an exact unconstructed
+non-generic declaring owner; complete constructed, qualified, generic or
+nested paths use FieldPath. No generic `LayoutQuery` Body record is assigned.
+
+`typeof` materializes internal TypeIdentity only when a runtime comparison
+needs a value. Its exact comparison reuses binary `C2` controls `00..02`
+and short `40`: identical complete identities produce E=`2`, distinct
+identities produce U=`8`; boolean equality/inequality remain ordinary
+bool. `BlockEntryState` carrier 2 carries a TypeIdentity with unused
+`typeMapIndex=0` and `accessKind=0`. It is not a public type, reflection
+object, TypeMap code or serialized constant. Metadata-only type recipes bind
+their complete type without executing TypeOf. Open generic uses require exact
+identity/substitution evidence from the selected execution model; unsupported
+uses reject rather than use a formal ID, layout equality or reflection
+fallback.
+
+The first four are dedicated source queries; `countof(Place)` binds a nominal
+synchronous Pure Count witness with a readable instance `Count : nint`
+property getter from the shared Core `ICountable` requirement. Same-shaped
+properties from unrelated interfaces, same-named methods and optional
+attributes do not supply these facts. Type and known-shape `countof` lower to
+ordinary exact typed `nint` constants; live Place Count uses the selected
+getter through ordinary call machinery. There is no universal Count/Length
+opcode or `length` alias.
 
 Retain the exact operation, complete normalized type or bound Place/field
 path, selected target ABI/width, result domain, Blittable/unsafe authority,
@@ -1277,7 +1304,11 @@ shared `ICountable.Count` requirement, property/getter and typed implementing
 witness identity for live Place observations; fixed type/known-shape counts do
 not dispatch it. A retained layout observation records its value
 and fixed-versus-rebuild/rebind/invalidation basis; the scalar result codec
-does not freeze its queried subject. If a required structured constant embeds
+does not freeze its queried subject. `TargetLayoutDependency` (`0x0045`)
+keeps its 20-byte row and four kinds; size/alignment use empty field ranges,
+while offset paths own ordered `TargetLayoutDependencyField` (`0x004A`)
+rows containing FieldDef/Import references. Each observation exclusively
+owns its range. If a required structured constant embeds
 a target-dependent query, retain its recursive typed value and field
 identities; target materialization uses validated `Layout` records, with
 explicit fixups only for genuine address relocations. JIT/AOT resolves only
@@ -1302,9 +1333,13 @@ coupled observations without regeneration/rebinding/invalidation, nor violate
 published fixed observations. Queries do not invent field access,
 object-payload reflection or arbitrary value codecs.
 
-Physical query/layout/dependency records remain separately gated. Optional
-Attr data, a held slot or name-based call cannot silently carry these required
-semantics. Logical selection alone makes no physical interoperability claim.
+Feature 13 `LayoutQueries` registers the complete query/identity/path and
+FieldDef binding capability. Common map-mask framing alone does not require
+it. A required Feature number does not supply exact open generic identity
+evidence, Count witnesses, dynamic target models, frozen-value codecs or
+layout coupling; those retain their separate gates. Optional Attr data, a
+held slot or name-based call cannot silently carry required semantics.
+Logical selection alone makes no physical interoperability claim.
 
 ## Published predicates and evaluation forms
 
@@ -1351,11 +1386,11 @@ unpublished-artifact compatibility promise.
 | Namespace | Assignment |
 |---|---|
 | Required sections | `0x0025=InterfaceDef`, `0x0026=InterfaceBase`, `0x0027=AssociatedTypeDef`, `0x0028=InterfaceWitness`, `0x0029=WitnessMember`, `0x002A=WitnessAssociatedType`, `0x002B=BuilderRegistration`, `0x002C=TextTarget`, `0x002D=TextContentShape`, `0x002E=TextCaptureShape`, `0x002F=TextFragmentShape`, `0x0030=ConstantSource`, `0x0031=InterfaceConstDef`, `0x0032=AssociatedConstDef`, `0x0033=WitnessAssociatedConst`, `0x0034=UnionCaseDef`, `0x0035=UnionCaseField`, `0x0036=AssociatedRelation` |
-| Required sections | `0x0037..0x0049`, in order: `PredicateGraph`, `PredicateReadFootprint`, `PredicateReadRoot`, `PredicateReadDependency`, `PredicateNode`, `PredicateNodeOperand`, `PredicateChildEdge`, `PredicateCapture`, `FrozenValueNode`, `FrozenValueChild`, `ImmutableData`, `ConstantExecution`, `ConstantExecutionArgument`, `ConstantExecutionDependency`, `TargetLayoutDependency`, `LogicalInputView`, `LogicalViewPathEntry`, `TargetProfile`, `TargetValueBinding` |
+| Required sections | `0x0037..0x0049`, in order: `PredicateGraph`, `PredicateReadFootprint`, `PredicateReadRoot`, `PredicateReadDependency`, `PredicateNode`, `PredicateNodeOperand`, `PredicateChildEdge`, `PredicateCapture`, `FrozenValueNode`, `FrozenValueChild`, `ImmutableData`, `ConstantExecution`, `ConstantExecutionArgument`, `ConstantExecutionDependency`, `TargetLayoutDependency`, `LogicalInputView`, `LogicalViewPathEntry`, `TargetProfile`, `TargetValueBinding`; then `0x004A=TargetLayoutDependencyField`, `0x004B=FieldPath` |
 | `Contract` clauses | `0x000A=EvaluationForm`; `0x000B=PredicateGraph` |
 | `DefId` kind | `0x0021=UnionCaseDef` |
-| Feature revision 1 | `9=NominalUnionMetadata`, `10=PublishedPredicates`, `11=TypedFrozenValues`, `12=ConstantExecution`; IDs 1-8 remain separate Native/Generic candidates, not assignments made by this batch |
-| Feature prerequisites | Feature 11 requires 9; 10 requires 11; 12 requires 10 and 11. Generic `ConstantSource` tags 2 and 3 additionally require Feature 12. The complete registrations remain gates even though their numeric identities are assigned. |
+| Feature revision 1 | `9=NominalUnionMetadata`, `10=PublishedPredicates`, `11=TypedFrozenValues`, `12=ConstantExecution`, `13=LayoutQueries`; IDs 1-8 remain separate Native/Generic candidates, not assignments made by this batch |
+| Feature prerequisites | Feature 11 requires 9; 10 requires 11; 12 requires 10 and 11; 13 has no unconditional Feature prerequisite. Generic `ConstantSource` tags 2 and 3 additionally require Feature 12. The complete registrations remain gates even though their numeric identities are assigned. |
 | Target profile | `profileId=1`, revision `1` is `windows-x64-native/1`; `portable-semantic` remains a broad `targetRequirement`, not a concrete layout/ABI profile. |
 
 The [semantic operation display and layer map](../il-instruction-set.md#operation-identity-encoding-and-presentation)
@@ -1645,9 +1680,13 @@ The approved direction keeps four typed record families distinct:
   u32 selectedTargetProfileRef, u32 fieldFirst, u32 fieldCount`. Query tags
   are `1=SizeOf`, `2=AlignOf`, `3=OffsetOfTypePath`, and
   `4=OffsetOfPlace`. The row retains the complete normalized subject type,
-  exact TargetProfile and an ordered FieldDef path only for offset queries;
-  SizeOf/AlignOf have an empty path. It stores no computed result, byte
-  offset or duplicated Layout rows. Each query occurrence owns its range.
+  exact TargetProfile and an ordered field path only for offset queries;
+  SizeOf/AlignOf have an empty path. Offset ranges index section `0x004A`,
+  `TargetLayoutDependencyField`, whose fixed four-byte rows are FieldDef
+  DefIds (`0x14`) or FieldDef Imports (`0x1C`). Each occurrence exclusively
+  owns its nonempty ordered range. Expand FieldMap/FieldPath paths to these
+  global references; do not persist Body-map or FieldPath-row indexes here.
+  It stores no computed result, byte offset or duplicated Layout rows.
 * `TargetProfile` at section `0x0048` is the 8-byte identity row
   `u32 profileId, u32 ruleRevision`. The assigned pair `(1, 1)` identifies
   the exact `windows-x64-native/1` layout, value-representation and applicable

@@ -1,6 +1,6 @@
 {
-  "schema": "trrm/1-draft-register-il-1",
-  "scope": "Fixed register-codec instruction, typed-record, SourceMap and complete-artifact vectors; not arbitrary Body truth, compiler support, native execution or complete exception-region conformance.",
+  "schema": "trrm/1-draft-layout-queries-1",
+  "scope": "Fixed register-codec instruction, masked Body-prefix, FieldMap/FieldPath, TypeIdentity carrier, typed-record, SourceMap and complete-artifact vectors; not arbitrary Body truth, compiler support, native execution or complete exception-region conformance.",
   "instructions": [
     {
       "name": "load-argument-pair-0-1",
@@ -184,6 +184,107 @@
           "R2"
         ]
       }
+    },
+    {
+      "name": "size-of-typemap-0",
+      "hex": "DE 10 00 00",
+      "expected": {
+        "queryKind": 1,
+        "operation": "SizeOf",
+        "destination": "R0",
+        "operandMap": "TypeMap",
+        "operandIndex": 0,
+        "resultType": "nint"
+      }
+    },
+    {
+      "name": "align-of-typemap-0",
+      "hex": "DE 21 00 00",
+      "expected": {
+        "queryKind": 2,
+        "operation": "AlignOf",
+        "destination": "R1",
+        "operandMap": "TypeMap",
+        "operandIndex": 0,
+        "resultType": "nint"
+      }
+    },
+    {
+      "name": "offset-of-type-fieldpath-row-1",
+      "hex": "DE 32 01 00",
+      "expected": {
+        "queryKind": 3,
+        "operation": "OffsetOfTypePath",
+        "destination": "R2",
+        "operandMap": "FieldMap",
+        "operandIndex": 1,
+        "resultType": "nint",
+        "meaning": "cumulative-inline-offset"
+      }
+    },
+    {
+      "name": "offset-of-place-fieldpath-row-1",
+      "hex": "DE 43 01 00",
+      "expected": {
+        "queryKind": 4,
+        "operation": "OffsetOfPlace",
+        "destination": "R3",
+        "operandMap": "FieldMap",
+        "operandIndex": 1,
+        "resultType": "nint",
+        "meaning": "terminal-immediate-containing-type-offset"
+      }
+    },
+    {
+      "name": "typeof-to-internal-type-identity",
+      "hex": "DE 50 00 00",
+      "expected": {
+        "queryKind": 5,
+        "operation": "TypeOf",
+        "destination": "R0",
+        "operandMap": "TypeMap",
+        "operandIndex": 0,
+        "result": "internal-TypeIdentity"
+      }
+    },
+    {
+      "name": "discard-size-result",
+      "hex": "DE 1F 00 00",
+      "expected": {
+        "queryKind": 1,
+        "destination": "R15-discard",
+        "operandMap": "TypeMap",
+        "authorizationAndDependenciesRetained": true
+      }
+    },
+    {
+      "name": "discard-type-identity-result",
+      "hex": "DE 5F 00 00",
+      "expected": {
+        "queryKind": 5,
+        "destination": "R15-discard",
+        "operandMap": "TypeMap",
+        "identityAdmissionRetained": true
+      }
+    },
+    {
+      "name": "size-of-typemap-endpoint",
+      "hex": "DE 10 FF FF",
+      "context": "TypeMap count is 65,536 and entry 65,535 is a valid complete type",
+      "expected": {
+        "operandIndex": 65535,
+        "resultType": "nint"
+      }
+    },
+    {
+      "name": "offset-of-fieldmap-endpoint",
+      "hex": "DE 32 FF FF",
+      "context": "FieldMap count is 65,536 and entry 65,535 is a valid FieldPath token",
+      "expected": {
+        "operandIndex": 65535,
+        "operandMap": "FieldMap",
+        "resultType": "nint"
+      }
     }
   ],
   "record_vectors": [
@@ -261,6 +362,19 @@
         "carrierKind": "PlaceHandle",
         "typeMapIndex": 0,
         "accessKind": "Write"
+      }
+    },
+    {
+      "id": "block-entry-type-identity-r0",
+      "kind": "BlockEntryState",
+      "hex": "01 00 00 00 01 00 00 00 00 02 00 00 00",
+      "context": "TypeIdentity evidence is supplied by a live predecessor; the zero type/access fields are unused",
+      "expected": {
+        "register": "R0",
+        "carrierKind": "TypeIdentity",
+        "typeMapIndex": 0,
+        "typeMapIndexIsReference": false,
+        "accessKind": 0
       }
     }
   ],
@@ -654,6 +768,89 @@
       }
     }
   ],
+  "body_prefix_masks": {
+    "rule": "17 + 4*popcount(mapMask)",
+    "count_order": ["HomeMap","TypeMap","MethodMap","FieldMap","ConstantMap"],
+    "empty_present": "ordinary-valid-canonical-writer-omits",
+    "empty_present_hex": "01 01 1F 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00",
+    "cases": [
+      {"mapMask":"00","popcount":0,"prefixBytes":17,"prefixHex":"01 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"01","popcount":1,"prefixBytes":21,"prefixHex":"01 01 01 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"02","popcount":1,"prefixBytes":21,"prefixHex":"01 01 02 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"03","popcount":2,"prefixBytes":25,"prefixHex":"01 01 03 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"04","popcount":1,"prefixBytes":21,"prefixHex":"01 01 04 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"05","popcount":2,"prefixBytes":25,"prefixHex":"01 01 05 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"06","popcount":2,"prefixBytes":25,"prefixHex":"01 01 06 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"07","popcount":3,"prefixBytes":29,"prefixHex":"01 01 07 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"08","popcount":1,"prefixBytes":21,"prefixHex":"01 01 08 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"09","popcount":2,"prefixBytes":25,"prefixHex":"01 01 09 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"0A","popcount":2,"prefixBytes":25,"prefixHex":"01 01 0A 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"0B","popcount":3,"prefixBytes":29,"prefixHex":"01 01 0B 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"0C","popcount":2,"prefixBytes":25,"prefixHex":"01 01 0C 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"0D","popcount":3,"prefixBytes":29,"prefixHex":"01 01 0D 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"0E","popcount":3,"prefixBytes":29,"prefixHex":"01 01 0E 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"0F","popcount":4,"prefixBytes":33,"prefixHex":"01 01 0F 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"10","popcount":1,"prefixBytes":21,"prefixHex":"01 01 10 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"11","popcount":2,"prefixBytes":25,"prefixHex":"01 01 11 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"12","popcount":2,"prefixBytes":25,"prefixHex":"01 01 12 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"13","popcount":3,"prefixBytes":29,"prefixHex":"01 01 13 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"14","popcount":2,"prefixBytes":25,"prefixHex":"01 01 14 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"15","popcount":3,"prefixBytes":29,"prefixHex":"01 01 15 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"16","popcount":3,"prefixBytes":29,"prefixHex":"01 01 16 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"17","popcount":4,"prefixBytes":33,"prefixHex":"01 01 17 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"18","popcount":2,"prefixBytes":25,"prefixHex":"01 01 18 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"19","popcount":3,"prefixBytes":29,"prefixHex":"01 01 19 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"1A","popcount":3,"prefixBytes":29,"prefixHex":"01 01 1A 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"1B","popcount":4,"prefixBytes":33,"prefixHex":"01 01 1B 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"1C","popcount":3,"prefixBytes":29,"prefixHex":"01 01 1C 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"1D","popcount":4,"prefixBytes":33,"prefixHex":"01 01 1D 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"1E","popcount":4,"prefixBytes":33,"prefixHex":"01 01 1E 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"},
+      {"mapMask":"1F","popcount":5,"prefixBytes":37,"prefixHex":"01 01 1F 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00"}
+    ]
+  },
+  "layout_path_vectors": {
+    "field_map_tokens": [
+      {"name":"direct-fielddef","hex":"07 00 00 14","expected":"DefId FieldDef row 7"},
+      {"name":"field-import","hex":"05 00 00 1C","expected":"Import row 5 expecting FieldDef"},
+      {"name":"field-path-row","hex":"01 00 00 1D","expected":"FieldPath section 004B row 1"}
+    ],
+    "field_path_row": {
+      "sectionKind":"004B",
+      "row":1,
+      "hex":"2A 00 00 00 02 00 00 00 07 00 00 14 09 00 00 14",
+      "context":"TypeSpec row 42 is complete Outer; FieldDefs 7 and 9 are Outer.inner and Inner.tail",
+      "expected":{
+        "rootTypeSpecRef":42,
+        "fieldCount":2,
+        "fields":["FieldDef row 7","FieldDef row 9"],
+        "rowBytes":16
+      }
+    },
+    "imported_field_path_row": {
+      "sectionKind":"004B",
+      "row":2,
+      "hex":"2A 00 00 00 01 00 00 00 05 00 00 1C",
+      "expected":{
+        "rootTypeSpecRef":42,
+        "fieldCount":1,
+        "fieldReference":"Import row 5, expected definition is FieldDef",
+        "rowBytes":12
+      }
+    },
+    "target_layout_dependency_field_rows":["07 00 00 14","09 00 00 14"],
+    "offset_meaning":{
+      "typePath":"cumulative root-to-terminal offset",
+      "place":"terminal offset in immediate containing type"
+    }
+  },
+  "type_identity_comparisons": [
+    {"name":"identical-identities","hex":"C2 00 F2 10","context":"R0 and R1 carry the same complete identity","expected":"uint8 E=2"},
+    {"name":"distinct-identities","hex":"C2 00 F2 10","context":"R0 and R1 carry distinct complete identities","expected":"uint8 U=8"},
+    {"name":"in-place-identity-relation","hex":"40 10","context":"R0/R1 carry TypeIdentity; compare reads both old bindings","expected":"replace R0 with uint8 E=2 or U=8"},
+    {"name":"identity-equality","hex":"C2 01 F3 10","context":"R0 and R1 carry TypeIdentity","expected":"bool true exactly for E"},
+    {"name":"identity-inequality","hex":"C2 02 F4 10","context":"R0 and R1 carry TypeIdentity","expected":"bool true exactly for U"},
+    {"name":"ordinary-ne-branches-on-distinct","hex":"E5 D2 01 00","context":"R2 contains uint8 E or U and the existing ne predicate D is selected","expected":"branch on U only for distinct identities"}
+  ],
   "source_map_sections": [
     {
       "name": "whole-instruction-source-span",
@@ -698,7 +895,7 @@
   "artifacts": [
     {
       "id": "Sum-register-checked-add",
-      "hex": "54 52 52 4D 01 00 00 00 20 00 00 00 07 00 00 00 92 01 00 00 20 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 90 00 00 00 30 00 00 00 02 00 00 00 02 00 00 00 C0 00 00 00 28 00 00 00 11 00 00 00 01 00 00 00 E8 00 00 00 0B 00 00 00 16 00 00 00 01 00 00 00 F3 00 00 00 1C 00 00 00 17 00 00 00 01 00 00 00 0F 01 00 00 18 00 00 00 18 00 00 00 02 00 00 00 27 01 00 00 20 00 00 00 20 00 00 00 01 00 00 00 47 01 00 00 4B 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 14 00 00 00 1C 00 00 00 00 0F 00 00 52 65 67 69 73 74 72 79 46 69 78 74 75 72 65 00 00 03 00 00 53 75 6D 00 00 00 00 00 03 00 00 00 01 00 08 00 00 00 00 02 00 00 00 01 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 43 00 00 00 01 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 06 00 00 00 00 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 08 00 00 00 01 00 00 00 00 00 00 00 04 C0 01 F0 10 00",
+      "hex": "54 52 52 4D 01 00 00 00 20 00 00 00 07 00 00 00 82 01 00 00 20 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 90 00 00 00 30 00 00 00 02 00 00 00 02 00 00 00 C0 00 00 00 28 00 00 00 11 00 00 00 01 00 00 00 E8 00 00 00 0B 00 00 00 16 00 00 00 01 00 00 00 F3 00 00 00 1C 00 00 00 17 00 00 00 01 00 00 00 0F 01 00 00 18 00 00 00 18 00 00 00 02 00 00 00 27 01 00 00 20 00 00 00 20 00 00 00 01 00 00 00 47 01 00 00 3B 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 14 00 00 00 1C 00 00 00 00 0F 00 00 52 65 67 69 73 74 72 79 46 69 78 74 75 72 65 00 00 03 00 00 53 75 6D 00 00 00 00 00 03 00 00 00 01 00 08 00 00 00 00 02 00 00 00 01 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 02 00 00 00 00 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 00 00 00 00 01 00 00 00 01 00 00 00 01 00 00 00 00 00 00 00 00 00 00 00 33 00 00 00 01 01 00 00 00 01 00 00 00 01 00 00 00 06 00 00 00 00 00 00 00 06 00 00 00 00 00 00 00 00 00 00 00 08 00 00 00 01 00 00 00 00 00 00 00 04 C0 01 F0 10 00",
       "expected": {
         "name": "Sum",
         "parameters": [
@@ -714,7 +911,11 @@
         ],
         "return": "R0",
         "bodyImplementationKind": 1,
-        "instructionEncoding": 1
+        "instructionEncoding": 1,
+        "mapMask": 0,
+        "streamPrefixBytes": 17,
+        "bodyRowBytes": 51,
+        "artifactBytes": 386
       }
     }
   ],
@@ -792,6 +993,54 @@
       "hex": "01 00 00 00",
       "context": "Body.TypeMap",
       "phase": "operand"
+    },
+    {
+      "id": "query-r14-destination",
+      "kind": "instruction",
+      "hex": "DE 1E 00 00",
+      "phase": "operand"
+    },
+    {
+      "id": "query-unassigned-kind-zero",
+      "kind": "instruction",
+      "hex": "DE 00 00 00",
+      "phase": "shape"
+    },
+    {
+      "id": "query-unassigned-kind-six",
+      "kind": "instruction",
+      "hex": "DE 60 00 00",
+      "phase": "shape"
+    },
+    {
+      "id": "body-map-mask-reserved-bit",
+      "kind": "body-prefix",
+      "hex": "01 01 20 00 00 01 00 00 00 01 00 00 00 01 00 00 00",
+      "phase": "framing"
+    },
+    {
+      "id": "type-identity-entry-nonzero-unused-type-field",
+      "kind": "record",
+      "hex": "01 00 00 00 01 00 00 00 00 02 01 00 00",
+      "phase": "operand"
+    },
+    {
+      "id": "fieldmap-zero-fieldpath-row-token",
+      "kind": "body-map-token",
+      "hex": "00 00 00 1D",
+      "phase": "reference"
+    },
+    {
+      "id": "fieldpath-zero-step-count",
+      "kind": "FieldPath-row",
+      "hex": "2A 00 00 00 00 00 00 00",
+      "phase": "framing"
+    },
+    {
+      "id": "fieldpath-nested-path-token",
+      "kind": "FieldPath-row",
+      "hex": "2A 00 00 00 01 00 00 00 01 00 00 1D",
+      "phase": "reference"
     },
     {
       "id": "prefix-is-not-an-instruction",

@@ -256,7 +256,7 @@ Before independent use, the consumer needs complete physical records for
 every retained source declaration/value/operation and local failure feature.
 This profile fixes native machine-call structures only. It allocates no
 Feature/target ID, Attr, TypeSpec extension, exception-body region, packet
-codec or callback metadata in `trrm/1-draft-register-il-1`.
+codec or callback metadata in `trrm/1-draft-layout-queries-1`.
 Out-of-band governing rule agreement does not repair missing physical records.
 Private serializers remain private.
 

@@ -70,6 +70,9 @@ prerequisite has already been met.
    portable proof/evaluation floor. Complete their physical effect/program/
    value records and independent-consumer support before claiming general
    execution; additional domains and beyond-floor rules remain separate work.
+   Preserve the assigned TypeIdentity `DE`/comparison flow through generic
+   proof and constant folding, and implement Count shape constants versus
+   live witnessed calls without a universal Count opcode.
 4. **Resources/graphs.** Implement the accepted distinction between stable,
    shared normal backing and explicit GC-backed class/box/root forms, including
    exact-place roots, stable reborrows, backing-specific Cleanup and the
@@ -85,12 +88,19 @@ prerequisite has already been met.
    and native ABI integration for the accepted public Windows x64 Blittable
    contracts. Natural Sequential and bounded Transparent source support
    already exist; Packing/Alignment controls, Union and broader ABI cases
-   remain implementation work. The
+   remain implementation work. The newly assigned `DE` size/alignment/offset
+   operations, FieldMap/FieldPath encoding, FieldDef declaration binding and
+   retained `TargetLayoutDependencyField` ranges require producer/reader/
+   rewriter work plus exact selected-target evidence; assignment does not
+   establish dynamic-layout or private-layout replacement support. The
    [CG-005 gate](implementation/conformance-gaps.md#cg-005) tracks that work.
 6. **General separate compilation — binding contracts.** Implement the
    selected source call/inference algorithm, witness/default resolution and
    qualified interface forms; complete their physical identity, dispatch and
-   replacement records. Adapter, family and additional declaration/lookup
+   replacement records. Include exact FieldDef Import/Export owner,
+   substitution, field-type and layout-membership checks for FieldPath use;
+   retain TypeIdentity's exact generic evidence obligations without a
+   reflection or dictionary ABI shortcut. Adapter, family and additional declaration/lookup
    choices remain pending rather than adopting convenient host behavior. The staged,
    Windows x64 FFI direction crosses this area and runtime safety: raw
    caller-unsafe imports, general stable storage/pointers, explicit native
@@ -207,12 +217,15 @@ approve other proposals.
 TRRM is a compact binary representation of the language and ecosystem: an
 input for metadata binding, reflection, tooling, linking and AOT/JIT code
 generation without source recompilation. It is not merely private-IR
-serialization or a verifier certificate. The approved source grammar and
-current `(1, 0)` metadata and register instruction designs specify target
-contracts, not a complete executable profile, current compiler support or a
-released schema. Migrate private SSA/value-ID Body paths to
-`instructionEncoding=01`, compact implementation kinds, fixed `u16`
-Body-local indexes and recipe-aware SourceMap locations. Complete the
+serialization or a verifier certificate. The approved source grammar and the exact development schema
+`trrm/1-draft-layout-queries-1` for `(1, 0)` metadata and register
+instructions specify target contracts, not a complete executable profile,
+current compiler support or a released schema. This schema includes the
+five-map `mapMask` prefix, `DE` TypeOf/layout queries, TypeIdentity carrier
+and comparison admission, FieldMap/FieldPath and target-layout field ranges.
+Migrate private SSA/value-ID Body paths to `instructionEncoding=01`, compact
+implementation kinds, fixed `u16` Body-local indexes and recipe-aware
+SourceMap locations. Complete the
 producer/reader/rewriter, structural safe-consumption and feature-admission
 rules under [CG-001](implementation/conformance-gaps.md#cg-001); higher
 structured physical profiles and numerical portable representation-reader

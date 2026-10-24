@@ -2,7 +2,7 @@
 
 These cases apply [encoding canonicality](../representation/encoding-canonicality.md),
 [consumer verification](../representation/reader-trust.md), [Body encoding](../il-instruction-set.md)
-and exact schema `trrm/1-draft-register-il-1`. Ordinary acceptance, writer
+and exact schema `trrm/1-draft-layout-queries-1`. Ordinary acceptance, writer
 conformance and an explicit canonicality audit are separate claims. The
 fixtures establish only the stated byte/metadata facts, not arbitrary Body
 truth, compiler support or native behavior.
@@ -29,10 +29,10 @@ inherit the range's length as a semantic default.
 
 | Case | Input or observation | Required outcome |
 |---|---|---|
-| ICB-01 | Body implementation kind is `01` and codec selector is `01` | Read the exact 33-byte prefix, fixed maps, fixed Block table, record index/data and exact code extent |
+| ICB-01 | Body implementation kind is `01` and codec selector is `01` | Read the exact `17 + 4*popcount(mapMask)` prefix, present maps, fixed Block table, record index/data and exact code extent |
 | ICB-02 | Implementation kind is `02..05` | Decode only its exact field/forwarder descriptor and validate target kind, signature and contract; do not infer a stream |
 | ICB-03 | A reserved flag, nonzero reserved field, unknown implementation kind or unknown codec selector appears | Reject before affected use |
-| ICB-04 | HomeMap, TypeMap, MethodMap, ConstantMap, Block or record index is `0xFFFF` with count 65,536 | Accept as the final valid zero-based index |
+| ICB-04 | HomeMap, TypeMap, MethodMap, FieldMap, ConstantMap, Block or record index is `0xFFFF` with count 65,536 | Accept as the final valid zero-based index |
 | ICB-05 | Any indexed inventory has 65,537 entries or an index is outside its count | Reject; no implicit wider local-index encoding exists |
 | ICB-06 | `blockCount` is zero, or `recordCount` is zero | Reject; a stream has at least one Block and each Block needs a BlockEntryState record |
 | ICB-07 | A Block has an empty/overlapping range, a gap in code coverage, or lacks exactly one terminal instruction | Reject |
@@ -40,11 +40,18 @@ inherit the range's length as a semantic default.
 | ICB-09 | `recordOffsets` is truncated, nonmonotonic, out of range, or does not end at the exact record-data extent | Reject |
 | ICB-10 | A record has unknown kind, nonzero flags/reserved fields, malformed list count or trailing payload bytes | Reject before affected use |
 | ICB-11 | A record index or list count is zero or `0xFFFF` | Interpret using its explicit field rule; zero is not absence unless the field says so, and `0xFFFF` is not a sentinel |
-| ICB-12 | Reordered/duplicate/unused TypeMap, MethodMap or ConstantMap entries preserve every resolved reference | Ordinary reading accepts; a complete canonicality audit may reject noncanonical order, duplicates or unused entries |
+| ICB-12 | Reordered/duplicate/unused TypeMap, MethodMap, FieldMap or ConstantMap entries preserve every resolved reference | Ordinary reading accepts; a complete canonicality audit may reject noncanonical order, duplicates or unused entries |
 | ICB-13 | Two HomeMap rows have equal types/flags, or a rewriter merges their indexes | Equal row fields remain distinct homes; remap only when the complete storage identity/state contract is preserved |
+| ICB-14 | A stream Body uses an empty-present map | Ordinary reading accepts; canonical writers omit its count/payload and an explicit prefix audit rejects the bit |
+| ICB-15 | FieldPath row repeats an identical complete root/ordered-step signature | A canonical metadata writer interns it; ordinary duplicate rows remain valid when references preserve their meanings and Import expectations |
+| ICB-16 | A TypeIdentity `BlockEntryState` has nonzero unused type/access fields | Reject; the zero fields are reserved and are not remapped as TypeMap[0] |
+| ICB-17 | A one-field path has an exact non-generic declaring root | Canonical FieldMap uses the direct FieldDef/Import token; an equivalent one-step FieldPath row may be accepted ordinarily but is noncanonical |
+| ICB-18 | A constructed, qualified, formal or nested root is encoded as a FieldPath | Preserve the complete root TypeSpecRef and ordered FieldDef/Import identities; do not compress a multi-step path into an unassigned inline token |
 
-The stream prefix counts HomeMap, TypeMap, MethodMap, ConstantMap, Block and
-record inventories with `u32`; their zero-based local references are `u16`.
+The stream prefix uses bits 0..4 of `mapMask` for HomeMap, TypeMap,
+MethodMap, FieldMap and ConstantMap, with one `u32` count per set bit.
+Block/record/code counts remain mandatory `u32` values; zero-based local map
+references are `u16`.
 Global row tokens, code offsets/lengths and instruction ordinals retain
 independent widths.
 

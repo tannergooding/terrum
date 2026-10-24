@@ -69,8 +69,13 @@ unsupported references before affected use.
 | Field or form | Schema-owned target |
 |---|---|
 | `MethodDef.signature`, `bodyRow`, `ownerTypeDef` | MethodSig, Body and TypeDef respectively |
+| `Import.expectedLocalDefId` | TypeDef, FieldDef, MethodDef or PropertyDef; FieldDef expectations are checked stubs in their expected owner's range |
+| `Export.localDefId` | Public local TypeDef, FieldDef, MethodDef or PropertyDef; FieldDef owner must also be public |
 | TypeSpec nominal/import/formal operands | TypeDef, Import and GenericParam respectively |
 | Body TypeMap word | Body-specific token kind; TypeSpec rows use kind `11`, not TypeSpecRef row form `00` |
+| Body FieldMap word | FieldDef DefId `0x14`, FieldDef Import `0x1C`, or FieldPath row token `0x1D`; the token kind fixes its table and expected target |
+| FieldPath row | Section `0x004B`; `rootTypeSpecRef` is a complete TypeSpecRef and each ordered step is a FieldDef DefId or FieldDef Import |
+| `TargetLayoutDependency.fieldFirst/fieldCount` | Exclusive ordered range in `TargetLayoutDependencyField` section `0x004A`, not a Body FieldMap or FieldPath row |
 | `fieldDefRow`, Body MethodMap entry | FieldDef; MethodMap resolves an exact MethodDef or Import token, with no direct-row escape |
 | Effects/OutputState `ownerRow` | MethodDef, selected by clause kind |
 | Cleanup `ownerRow`, `cleanupMethodDef` | TypeDef and MethodDef respectively |
@@ -88,6 +93,22 @@ change a reference's namespace. A meaning-preserving rewriter maps decoded
 reference fields according to their schema-owned table and context, not by
 substituting matching octets.
 
+For stream Bodies, consumers derive the prefix size only from the selected
+schema's `mapMask`: `17 + 4*popcount(mapMask)`. They check reserved bits,
+count words for set bits, map payload extents and the fixed payload order
+before affected use. A plausible body length, Feature 13 or byte-2 value
+does not select a schema or supply omitted count fields. FieldMap references
+validate their exact token kind/row; a FieldPath row validates its variable
+extent, nonzero field count, complete root type and each ordered
+FieldDef/Import reference. Consumers need not semantically re-prove the
+producer's field accessibility or published layout facts.
+`BlockEntryState.carrierKind=2` requires its unused `typeMapIndex` and
+`accessKind` fields to be zero, and support must admit TypeIdentity's
+restricted producer, alias, merge, comparison and conditional-selection
+flow before use. Exact open-generic identity evidence is required where the
+selected execution model needs it; the entry row alone cannot manufacture
+that evidence or prove a source refinement.
+
 ## 5. Transformations, verification reuse and audit claims
 
 A rewriter safely decodes its selected input before affected use and is
@@ -98,6 +119,16 @@ producer obligations. Cached structural/admission checks may be reused only
 for an unchanged artifact under the same exact schema, binding, target and
 rule context. Removing code does not itself discharge remaining type,
 layout, constant, witness, cleanup or load dependencies.
+
+Rewriting a stream Body reconstructs its maps and query operations, remaps
+FieldMap tokens and any referenced FieldPath row's root/ordered steps, and
+rebuilds the `mapMask`, conditional count words, payload extents, instruction
+indexes and containing section extents. A closed TypeIdentity fold may
+replace the comparison with ordinary bool/uint8 constants or control flow
+only while preserving exact identity-binding, substitution and refinement
+obligations. Discarding debug data, deleting a FieldPath row or replacing an
+Import with a direct FieldDef reference cannot silently drop a surviving
+layout, binding or provider obligation.
 
 Any claimed deeper semantic audit is optional and limited to the bytes,
 schema, context, rules, targets and bindings actually examined. This

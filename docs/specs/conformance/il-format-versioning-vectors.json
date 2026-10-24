@@ -1,5 +1,5 @@
 {
-  "schema": "trrm/1-draft-register-il-1",
+  "schema": "trrm/1-draft-layout-queries-1",
   "format_pair": [1, 0],
   "rule": "trrm-format-versioning/1",
   "scope": "Fixed current bytes and supplied-fact version selection; no released schema or extra draft decoder is assigned. Module bytes use the separately defined semantic manifest.",

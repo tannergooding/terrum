@@ -3,7 +3,7 @@
 These cases apply [format versioning](../representation/format-versioning.md),
 [metadata framing](../il-metadata.md#header-and-directory) and
 [requirements and admission](../representation/requirements-and-admission.md).
-The current draft is `trrm/1-draft-register-il-1`, format `(1, 0)`.
+The current draft is `trrm/1-draft-layout-queries-1`, format `(1, 0)`.
 
 [Fixed vectors](il-format-versioning-vectors.json) include a complete current
 artifact containing one empty Module and its identity String. Draft identities

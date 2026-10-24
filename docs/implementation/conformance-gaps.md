@@ -83,7 +83,7 @@ separate reduced scalar execution floor. The draft registry still lacks
 required capability implementation and complete runtime/target carriers, so
 schema assignment does not establish executable support for every approved
 contract. Consumers require exact agreement on
-`trrm/1-draft-register-il-1`; equal format bytes do not select an
+`trrm/1-draft-layout-queries-1`; equal format bytes do not select an
 alternate schema.
 
 **Current/evidence:** `TrRmBodyExampleTests.ReadExample` explicitly embeds
@@ -97,12 +97,15 @@ current-registry decoding.
 
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,
-the 33-byte stream prefix, `instructionEncoding=01`, fixed TypeMap/MethodMap/
-ConstantMap entries, the fixed Block table, typed-record offsets/data and
-one-/two-/four-byte instruction partitions. Body-local indexes are zero-based
-`u16` with `u32` counts through 65,536; global tokens remain fixed-width.
-Preserve exact TypeSpec/Import/MethodDef identity, F0/F1/F2/F3 TypeMap tokens,
-the TypeSpecRef row/F2/F3 union in every complete type-valued field, and the
+the `17 + 4*popcount(mapMask)` prefix and five optional maps,
+`instructionEncoding=01`, the fixed Block table, typed-record offsets/data
+and one-/two-/four-byte instruction partitions. Body-local indexes are
+zero-based `u16` with `u32` counts through 65,536; global tokens remain
+fixed-width. Implement `DE` kinds 1..5; FieldMap tokens; global FieldPath
+section `004B`; target-layout field references in `004A`; TypeIdentity
+carrier/comparison/conditional flow; and Feature 13 admission. Preserve exact
+TypeSpec/Import/MethodDef identity, F0/F1/F2/F3 TypeMap tokens, the
+TypeSpecRef row/F2/F3 union in every complete type-valued field, and the
 source operation/type, effect, failure and ownership contracts.
 
 Independently decode the revised vectors; exercise every tiny tuple, short
@@ -111,8 +114,10 @@ and long control domain, register-role/reserved-field rejection, `0xFFFF`/
 compact descriptors, pseudo-type cycles/modifiers, place-handle BlockEntryState
 carrier/access rows and their verified edge flow, RequirementFailure Boolean/
 uint8-mask condition selectors and constructor bindings, terminal
-DoesNotReturn CallSites, unsupported capabilities, same-version incompatible
-drafts and packed/import contexts. Check scoped
+DoesNotReturn CallSites, all map masks/empty-present framing, every `DE`
+control/map selector, TypeIdentity evidence/joins/escapes, FieldPath table
+rows, FieldDef Import/Export binding, unsupported capabilities, same-version
+incompatible drafts and packed/import contexts. Check scoped
 selective access separately from whole-artifact audits. Rebuild decoded
 operations, maps, records, references, code offsets and SourceMap data rather
 than byte-substituting old fixtures. The earlier SSA/value-ID Body draft is
@@ -292,6 +297,12 @@ transitive commitments, forged layout facts, storage cycles, unsupported
 targets, invalid attribute arguments and incompatible replacement. Preserve
 nominal identity, field access/mutation, caller-unsafety and stronger physical
 facts through replacement.
+Implement and qualify the accepted `DE` SizeOf/AlignOf/OffsetOf path for
+selected targets, including direct non-generic fields, generic/nested
+FieldPath rows, cumulative versus terminal offsets, retained `0045`/`004A`
+dependencies, FieldDef Import/Export layout membership and fixed/coupled
+replacement. This codec assignment does not provide a dynamic layout model
+or close the underlying target/layout implementation gate.
 Select the actual supported language version and diagnostic behavior rather
 than inferring support from attribute parsing.
 
@@ -335,6 +346,10 @@ constraint-only overloads are pairwise disjoint, generic bodies across their
 full declared domains, and compile-time property branches with true-edge
 proofs and complements only for closed exhaustive domains. JIT/AOT may resolve
 such branches during closed-instance specialization, not as runtime reflection.
+Feature 13 now assigns the internal TypeIdentity carrier and exact E/U
+comparison flow, but open generic TypeOf still needs exact execution-model
+identity evidence; the entry carrier or formal declaration ID cannot supply
+it, and no reflection/dictionary ABI is selected.
 Use the approved 32-byte `GenericParam` shape for formal kind, type-only
 ownership/nullability domains and typed defaults; use the approved 12-byte
 `Constraint` shape with closed kinds `1=interface instance`,
@@ -402,6 +417,8 @@ reference codecs, authority checks, typed remapping, remaining required DefId
 kinds, the existential runtime carrier and complete generic Feature
 registration remain gates. Feature IDs `9..12` are assigned to the
 proof/value/execution capabilities, but their registrations are incomplete;
+Feature 13 now registers the TypeIdentity and layout-query representation,
+but exact open-generic identity evidence remains an implementation dependency;
 generic candidate Feature IDs `6..8` remain unassigned. Assigned rows do not
 establish independent exchange support.
 
@@ -438,6 +455,10 @@ allocation and generated-producer support remain gates. Source-free execution
 needs CG-002/003/006/010 and the approved separate
 evaluation-form, PredicateGraph, per-observation footprint,
 per-request `ConstantExecution`, and typed frozen-value record families.
+`countof(Type)`/known-shape Count produces ordinary typed `nint` constants;
+live Place Count remains a witnessed `ICountable.Count` call. Reached layout
+queries retain one `TargetLayoutDependency` and ordered `004A` field range
+per observation; TypeOf retains identity evidence without a layout row.
 The `PredicateGraph` references one separate actual-footprint record with flat
 typed ranges for the complete actual read-root set and direct call/witness
 dependencies; 8-byte tagged candidate schemas now define both root entries
@@ -585,11 +606,11 @@ govern semantics and reproducible accounting. The
 selects typed evaluation-form clauses, predicate graphs plus separate
 read-footprint dependencies, constant-execution records and typed frozen values;
 remaining predicate/resource fields and typed-reference encodings remain open.
-Sections `0x0037..0x0049`, `Contract` clauses `0x000A..0x000B`, Feature IDs
-`9..12` at revision 1, DefId kind `0x21`, and TargetProfile `(1,1)` are
+Sections `0x0037..0x004B`, `Contract` clauses `0x000A..0x000B`, Feature IDs
+`9..13` at revision 1, DefId kind `0x21`, and TargetProfile `(1,1)` are
 assigned; their complete registrations and independent exchange support are
 not complete. Feature prerequisites are `11 -> 9`, `10 -> 11`, and
-`12 -> 10,11`.
+`12 -> 10,11`; Feature 13 has no unconditional Feature prerequisite.
 The approved direction additionally gives each predicate one typed node row
 per evaluated expression occurrence with explicit ordered child-edge rows and
 one separate actual read-footprint record referenced by its graph, whose
@@ -637,9 +658,11 @@ declaration reference selected by kind and an optional complete owner
 TypeSpec reference; semantic identity uses kind, declaration identity and
 owner substitution rather than row numbers. Closed kind tags are
 `1=ResolvedConstant` and `2=PublishedImmutableRegion`; sections
-`0x0037..0x0049`, Contract clauses `0x000A..0x000B` and Features `9..12`
-are assigned, but complete registration and typed-reference mappings remain
-open. The family references existing value and static-initialization records rather than copying
+`0x0037..0x004B`, Contract clauses `0x000A..0x000B` and Features `9..13`
+are assigned. Features 9..12 retain incomplete registration/support gates;
+Feature 13 is registered for layout queries and TypeIdentity, but still
+depends on exact identity, target, value and witness support where used.
+Typed-reference mappings remain open. The family references existing value and static-initialization records rather than copying
 snapshots;
 one-clause-per-graph ownership, structural-kind versus selected-identity
 separation, and the coarse value/subject, access/projection,
@@ -992,19 +1015,21 @@ successful supervisor response.
 <a id="cg-024"></a>
 ## CG-024: Representation extensions and resource accounting
 
-**Metadata/type-reference and register instruction-schema decisions
-integrated; producer/consumer implementation and qualification remain blocked
-on CG-001. Numerical portable resource minima and exception-region physical
-carriers remain unassigned.**
+**Metadata/type-reference, masked Body-map and register query-schema
+decisions integrated; producer/consumer implementation and qualification
+remain blocked on CG-001. Numerical portable resource minima and
+exception-region physical carriers remain unassigned.**
 [Canonicality](../specs/representation/encoding-canonicality.md),
 [reader trust](../specs/representation/reader-trust.md) and
 [resource accounting](../specs/representation/resource-accounting.md),
 [Body metadata](../specs/il-metadata.md) and the
 [instruction contract](../specs/il-instruction-set.md) define the accepted
-schema. It assigns the 33-byte register-stream prefix, fixed maps and Block
-table, zero-based `u16` local indexes with `u32` counts, instruction/record
-layouts, F0/F1/F2/F3 TypeMap tokens and TypeSpecRef fields, plus the accepted
-integer, binary-floating and decimal type matrices.
+schema. It assigns the `17 + 4*popcount(mapMask)` register-stream prefix,
+five optional Body maps including four-byte FieldMap tokens, global FieldPath
+and target-layout field-reference sections, zero-based `u16` local indexes
+with `u32` counts, `DE` query/TypeIdentity controls, BlockEntryState carrier
+2, instruction/record layouts, F0/F1/F2/F3 TypeMap tokens and TypeSpecRef
+fields, plus the accepted integer, binary-floating and decimal type matrices.
 
 **Current/evidence:** development fixture/reader behavior is not independent
 proof of the selected schema. The revised vectors are specification evidence,
@@ -1018,7 +1043,10 @@ checked preflight, structural versus semantic work, depth, payload/state
 lifetime and explicit exhaustion. Calibrate rather than guess minima. Migrate
 every producer/consumer to rebuild maps, records, code offsets, indexes and
 SourceMap step roles; validate token nesting/modifiers and exact type/value
-identity. Exercise `0xFFFF` and 65,536/65,537 boundaries, noncanonical maps,
+identity. Rebuild masks/counts for every stream Body; traverse FieldPath rows
+under artifact/root resource budgets and preserve ordered `004A` ranges.
+Exercise `0xFFFF` and 65,536/65,537 boundaries, all map masks,
+empty-present maps, FieldPath rows, noncanonical maps,
 malformed controls/records and operation/type combinations with independent
 vectors. No decoder alias or new pre-release format pair is automatic.
 
@@ -1066,6 +1094,12 @@ type/alias normalization; finite call inference, source-order named argument
 staging, defaults and params; selected pattern/refinement forms; and unit versus
 explicit non-unit result discard. Compose the relevant CG-002/006/007/010/013/021
 gates rather than adding a second semantic rule set.
+
+For registered queries, connect the accepted query productions to their
+public binder/compiler entry points and the assigned representation cases.
+Preserve the distinctions between source query acceptance, TypeIdentity
+evidence, target-layout support and Count witness availability; a parser or
+display path alone does not establish `DE` emission or runtime support.
 
 Exercise hosted and Terrum-authored routes only for their declared scope,
 with explicit unsupported diagnostics outside it. Parser acceptance is not

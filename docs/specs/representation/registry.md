@@ -24,7 +24,7 @@ schema assignments and exact out-of-band draft agreement.
 The [semantic-manifest chapter](semantic-manifests.md) owns Module editions,
 exact coherent capability requirements, complete closure and physical ranges.
 
-`trrm/1-draft-register-il-1` identifies this registry edition for the development
+`trrm/1-draft-layout-queries-1` identifies this registry edition for the development
 format pair `(1, 0)`. It is not an on-wire Feature ID or profile selector.
 Independently exchanged drafts require exact agreement on this registry,
 its semantic catalog **and** governing chapters. Matching `(1, 0)`, an edition
@@ -67,6 +67,7 @@ are:
 | `B6` | Recognized RegionExit shape; no usable `exitKind` or region index domain |
 | `C0..CC` | Scalar/bit/comparison/selection/ternary/recipe families |
 | `D0..DD` | Conversion, constants, Home and typed place/store/reference operations |
+| `DE` | TypeOf/TypeIdentity and SizeOf/AlignOf/OffsetOf query family |
 | `E0..E8`, `EB` | Calls, branches, switch, requirement, throw and Home return |
 | `EA` | Recognized RegionExit shape; no usable `exitKind` or region index domain |
 
@@ -95,8 +96,14 @@ register-family payload nibbles are least-significant first:
 result0/result1/source0/source1.
 
 The stream codec selector is a separate `u8`, fixed to `01` for this
-encoding. The Body stream prefix is 33 bytes and its map/count/index rules
-are specified in [IL metadata](../il-metadata.md#body-table-and-coded-instruction-boundary)
+encoding. Its `mapMask`-selected prefix is `17 + 4*popcount(mapMask)` bytes
+(17..37), with optional Home/Type/Method/Field/Constant map counts in bit
+order and mandatory Block/record/code counts. FieldMap has four-byte
+FieldDef/Import/FieldPath tokens; global FieldPath rows are in section
+`0x004B`, and offset-observation field ranges use `0x004A`. The five-byte
+BlockEntryState row adds carrier 2=TypeIdentity with unused `typeMapIndex=0`
+and `accessKind=0`. Exact framing and index rules are specified in
+[IL metadata](../il-metadata.md#body-table-and-coded-instruction-boundary)
 and the machine registry. Body-local map, Home, Block and record indexes are
 zero-based `u16`; all 65,536 values are available and corresponding counts
 are `u32`. Global table tokens and code byte offsets/lengths/instruction
@@ -142,6 +149,10 @@ support for every type or declaration. In particular:
   two-word manifest codec. Feature IDs 9-12 are assigned at revision 1, but a
   number does not complete its registration or prerequisite closure;
   incomplete required capabilities cannot be admitted or silently omitted.
+  Feature 13 `LayoutQueries` is registered at revision 1 for retained `DE`
+  queries, TypeIdentity flow/comparison, FieldMap/FieldPath, FieldDef
+  Import/Export binding and target-layout field-path dependencies. Common
+  map-mask framing alone does not require Feature 13.
 - Effects has assigned MethodDef applicability, and OutputState/Dependency
   have approved shared row contracts in the
   [clause chapter](contract-clauses.md). OutputState's predicate target still
@@ -171,11 +182,13 @@ separately scoped claims.
 ## 5. Re-encoding and conformance
 
 Canonical writers use the assigned tiny, short or long form; there are no
-variable instruction-width classes. TypeMap, MethodMap and ConstantMap
-entries follow deterministic first logical use, reuse identical entries and
-omit unused entries. Typed records follow first logical use and omit unused
+variable instruction-width classes. TypeMap, MethodMap, FieldMap and
+ConstantMap entries follow deterministic first logical use, reuse identical
+entries and omit unused entries. FieldPath rows are structurally interned
+without conflating distinct Import expectations. The map mask omits the count
+and payload of each empty map. Typed records follow first logical use and omit unused
 records. HomeMap entries remain distinct storage identities. Ordinary readers
-accept structurally valid reordered or duplicate TypeMap/MethodMap/
+accept structurally valid reordered or duplicate TypeMap/MethodMap/FieldMap/
 ConstantMap/typed-record entries where every reference preserves its meaning;
 HomeMap ordering is not canonicalized, and audits do not claim a unique
 HomeMap order. Canonicality is an explicitly scoped audit.

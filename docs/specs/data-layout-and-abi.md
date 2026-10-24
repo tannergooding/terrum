@@ -371,9 +371,13 @@ extent is valid. `alignof` also returns nonnegative `nint`, with
 a positive alignment. Results exceeding `nint.MaxValue`, malformed layouts
 and absent target rules are unsupported, not wrapped values or host-derived
 sentinels.
-The semantic display uses the same query names; it does not prescribe a wire
-opcode or target helper. JIT/AOT selects folding or lowering only after the
-target representation and its dependencies are known.
+The semantic display uses the same query names. In semantic IL, `DE` kinds
+1..4 encode these layout observations; offset operands resolve through
+FieldMap/FieldPath, and retained target-dependent observations use
+`TargetLayoutDependency` plus its ordered field-reference range. This does
+not introduce a public target helper or change source authority. JIT/AOT
+selects folding or lowering only after the target representation and its
+dependencies are known.
 
 `Blittable` commits layout facts per target and permits safe layout
 observation. Non-Blittable layout observations require unsafe authorization

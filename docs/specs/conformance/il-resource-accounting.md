@@ -2,7 +2,7 @@
 
 These cases apply [resource accounting](../representation/resource-accounting.md),
 [consumer verification](../representation/reader-trust.md), [canonicality](../representation/encoding-canonicality.md)
-and the exact `trrm/1-draft-register-il-1` schema. Numerical limits in fixtures
+and the exact `trrm/1-draft-layout-queries-1` schema. Numerical limits in fixtures
 are selected test envelopes, not portable minima. Finite action/graph models
 do not certify an arbitrary verifier, resource codec or production consumer.
 Cases involving malformed metadata state producer violations and require
@@ -41,11 +41,13 @@ Optional audits account only for work they actually perform.
 | IRBO-09 | Producer emits an empty String/semantic row without required framing | Verification rejects before affected use |
 | IRBO-10 | Producer emits a variable-size element count without enough containing bytes | Producer violates the selected schema; no speculative-allocation check is mandated |
 | IRBO-11 | Flattened receiver/formal inventory or a HomeMap reaches/exceeds the `u16` index domain | Permit at most 65,536 local/formal slots; reject overflow rather than widening or wrapping |
-| IRBO-12 | Body maps, fixed Block entries, record offsets/data or code bytes approach the row extent | Account the exact 33-byte stream prefix, fixed map/Block sizes, `(recordCount+1)*4` offsets, record extent and `codeByteLength` without wrapped products |
+| IRBO-12 | Body maps, fixed Block entries, record offsets/data or code bytes approach the row extent | Account the `17 + 4*popcount(mapMask)` stream prefix, present map payloads (including four-byte FieldMap tokens), fixed Block sizes, `(recordCount+1)*4` offsets, record extent and `codeByteLength` without wrapped products |
 | IRBO-13 | A Body-local index equals `0xFFFF` | Treat it as an ordinary usable index when its inventory count is 65,536; it is not an absence or offset sentinel |
 | IRBO-14 | A valid selected reference is used under an envelope | It has the schema-assigned namespace, nullability and reserved-field meaning |
 | IRBO-15 | Nested row or Body would reset root work | Same root ledger; only per-object capacity is local |
 | IRBO-16 | A complete traversal exceeds its remaining capacity/work | Explicitly decline; no skipped-element completion claim |
+| IRBO-17 | FieldPath row or `TargetLayoutDependencyField` range is traversed | Charge row bytes and ordered FieldReference steps to the owning artifact/root budget; use checked 24-bit row bounds and `u32` extents |
+| IRBO-18 | Repeated Bodies reuse an identical global FieldPath row | Reuse encoded row storage where allowed, but do not merge query occurrences or their exclusively owned `004A` observation ranges |
 
 ## 3. Strings and expansion
 

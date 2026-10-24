@@ -5,6 +5,9 @@ source binding, and the selected constructor contracts. They are specification
 obligations, not executed compiler tests. Assume otherwise eligible payloads,
 valid registrations, constraints, and target support. `C` is a compatible
 ordinary managed class, `S` an inline Copy payload, and `D` another class.
+Source type-identity/refinement behavior remains the language contract;
+register-level TypeIdentity evidence and its `DE`/comparison encoding are
+covered separately by [IL registry conformance](il-registry.md).
 
 ## Identity, qualification, and finite substitution
 
