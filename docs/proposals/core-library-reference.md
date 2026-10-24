@@ -18,6 +18,12 @@ exact selected roles, incomplete families and unselected candidates; the
 [design scenarios](../specs/libraries/design-scenarios.md) exercise their
 actual contracts. Selection of a protocol does not adopt each candidate
 provider or member in this proposal.
+The accepted [initialization-reference form](../specs/language/references.md#initialization-references)
+and [common exception contract](../specs/language/local-failures.md#1-the-common-exception-contract)
+are reflected where this inventory shows affected signatures or failure
+semantics. These cross-cutting consequences do not approve the remaining
+Core API inventory, Result representation or exception-specific extension
+APIs.
 The design-only [`library/*.api.terrum`](../../library/) sketches are inventory
 inputs, not reference assemblies.
 
@@ -109,27 +115,46 @@ or per-API contract metadata. Here, a concrete-member `;` remains
 reference-signature notation, not an implementation or an additional source
 form; each inventory retains its own unresolved dependencies and decisions.
 
-## Selected Core value-layout queries
+Read these inventories through the shared
+[copy, alias, reference and lifetime definitions](../specs/language.md#definitions-and-notation).
+Copying an eligible handle or view copies that value and aliases its referent;
+it does not deep-copy the data or acquire its owner, and does not universally
+extend its backing lifetime. Borrow/loan names a non-owning access relationship; an exclusive
+guard or storage-and-release lease has additional, separately stated duties.
+Managed rooting can keep an object reachable without preserving a disposed
+native resource or a released guard. These explanations do not settle any
+candidate signature, view representation, retention schema or release API.
 
-**SELECTED CORE CONTRACT:** the
-[registered-query chapter](../specs/language/registered-queries.md) adopts
-these ordinary members on Core's `Terrum.RuntimeHelpers` identity.
-This does not approve the rest of this proposal or select a wire intrinsic ID:
+## Registered type and layout queries
 
-| Member | Declared subject and result |
-|---|---|
-| `SizeOf<T>() -> nuint` | `where T : [Sized]`; complete normalized value/handle byte extent |
-| `AlignmentOf<T>() -> nuint` | The same constraint; value representation's alignment in bytes |
+**SELECTED LANGUAGE CONTRACT:** the
+[registered-query chapter](../specs/language/registered-queries.md) owns
+`typeof`, `sizeof`, `alignof`, `offsetof` and `countof` as dedicated query
+forms. They are not `RuntimeHelpers` members, generic Core APIs or general
+reflection, and no Core query declarations belong in this inventory. A
+same-named user method remains an ordinary call.
 
-The exact intrinsic contracts are pure and required-constant-eligible,
-without constructing T, allocating a reflection object or initializing
-mutable static state. They are not object-payload queries.
-Runtime layout evidence does not imply a definition-time number; retained
-observations require published fixed target promises or explicit complete
-layout-coupling/invalidation records. The result's scalar codec does not
-freeze its queried type. Existing IsPureEval/IsConstEval properties keep their
-[evaluation-mode contracts](../specs/language/published-predicates-and-effects.md#evaluation-modes).
-Neither `sizeof`/`alignof` syntax nor general source query registration is added.
+`sizeof` and `alignof` inspect complete normalized value/handle
+representations under the selected target and return nonnegative `nint`;
+`alignof(void) == 0` means no placement requirement. `offsetof` observes only
+the admitted inline field path. `countof(Place)` uses the shared nominal Core
+`ICountable.Count : nint` property witness, whose getter is synchronous, `Pure`
+and `NoThrow`. Same-shaped properties from unrelated interfaces do not satisfy
+the requirement. Type and known-shape forms do not invoke live value
+operations.
+Safe layout observation requires the target's `Blittable` commitment;
+non-Blittable observations require unsafe authorization and are
+version-sensitive. Fixed target layouts may fold in the selected compilation or closed-instance
+JIT/AOT phase; execution-dependent layouts cannot satisfy required-constant
+contexts. Retained observations require fixed commitments or explicit
+complete layout-coupling/invalidation records. The result's scalar codec does
+not freeze its queried type. The physical query representation is assigned in
+`trrm/1-draft-layout-queries-1`: `DE` kinds 1..5, FieldMap/FieldPath and the
+retained `TargetLayoutDependencyField` range under Feature 13. This does not
+claim compiler support, select a runtime type object/helper, or add Core query
+declarations. Type/known-shape `countof` lowers to ordinary constants and
+live Place Count remains a bound call; the shared `ICountable.Count` witness
+codec and its implementation support remain separate work.
 
 ## Type and protocol reference index
 
@@ -143,7 +168,8 @@ its namespace, family registration, ABI or implementation.
 Generative width families, scalable SIMD, nominal sums such as `Result<T,E>`
 and matrix-only service candidates remain in their respective inventories;
 they are not complete declarations merely because their names appear in a
-table. The proposed `Option<T>` alias is separately described in
+table. The accepted `option<T>` constructor and the absence of an exported
+`Option<T>` alias are described in
 [fundamental values](#1-fundamental-values-presence-and-outcomes).
 
 | Signature group | Concrete types/protocols | Reference |
@@ -159,7 +185,8 @@ table. The proposed `Option<T>` alias is separately described in
 | Native double-ended storage | `Deque`, `DequeSegments`, `DequeWriteAccess` | [Deque signatures](#proposed-owned-double-ended-storage) |
 | Borrowed arena and rentals | `ByteArena`, `MemoryPool`, `MemoryOwner` | [Arena/pool](#proposed-borrowed-arena-and-typed-rental-storage) |
 | Memory operations | `MemoryOrder`, `CompareExchangeObservation`, `MemoryPrimitives` | [Memory primitives](#memoryprimitives) |
-| Selected value-layout queries | `RuntimeHelpers` | [Core value-layout queries](#selected-core-value-layout-queries) |
+| Registered source queries | `typeof`, `sizeof`, `alignof`, `offsetof`, `countof` | [Registered type and layout queries](#registered-type-and-layout-queries) |
+| Live Count witness | `ICountable` | [Registered type and layout queries](#registered-type-and-layout-queries) |
 | Managed lists | `List`, `ListCursor`, `ListBuilder`, `ListWriteAccess`, `LinkedListNode`, `LinkedList`, `LinkedListBuilder`, `LinkedListCursor` | [Collections](#5-collections-iteration-and-eager-algorithms) |
 | Eager callbacks and algorithms | `IMapper`, `IPredicate`, `IZipper`, `IVisitor`, `SpanAlgorithms` | [Eager signatures](#5-collections-iteration-and-eager-algorithms) |
 | Selected synchronous/async value iteration and proposed producer examples | `ICursor`, `ISequence<T, TCursor>`, `Int32RangeCursor`, `Int32RangeSequence`, `IAsyncCursor`, `IAsyncSequence`, `Int32AsyncCursor`, `Int32AsyncSequence` | [Sequence/cursor contracts](#sequence-and-cursor-protocol-contracts) |
@@ -172,7 +199,7 @@ table. The proposed `Option<T>` alias is separately described in
 | Selected conversion pairs | `ICheckedConversion`, `ISaturatingConversion`, `ITruncatingConversion` | [Conversion witnesses](#existing-sampled-declarations) |
 | Sampled primitives | `int32`, `float32`, `decimal32`; `uint32`, `int8` | [Initial samples](#existing-sampled-declarations), [width-family samples](#candidate-primitive-member-families) |
 | Scalar services | `BitOperations` | [Scalar services](#numeric-conversion-and-scalar-operation-signatures) |
-| Built-in numeric operations | Per-type selection members and generic-interface access | [Numeric operation signatures](#numeric-conversion-and-scalar-operation-signatures), [combined numeric-selection proposal](numeric-selection-members.md) |
+| Built-in numeric operations | Per-type selection members and generic-interface access | [Numeric operation signatures](#numeric-conversion-and-scalar-operation-signatures), [accepted numeric selection](../specs/language/numeric-selection.md), [implementation gap](../implementation/conformance-gaps.md#cg-011) |
 | Fixed SIMD | `simd128`, `simd128mask`, `Simd128Conversions`, `Simd128Reductions` | [Fixed SIMD](#fixed-width-simd) |
 | Tensor metadata and views | `TensorShape`, `TensorSpan`, `TensorViews` | [Tensor views](#tensor-shapes-and-views) |
 | Tensor kernels | `TensorPrimitives` | [Tensor operations](#tensor-operations) |
@@ -196,18 +223,13 @@ table. The proposed `Option<T>` alias is separately described in
 ## 1. Fundamental values, presence and outcomes
 
 The canonical [language contract](../specs/language.md#primitives-strict-arithmetic-and-text)
-defines `void`, optional normalization, and the absence of a universal root;
-[alias rules](../specs/type-families.md#nominal-witnesses-and-associated-relationships)
-define the transparent alias form. Exporting `Option<T>` remains a library
-decision. The proposed `Lookup<T>` uses an optional payload to distinguish
-missing from present-null; its type shape remains unapproved. The union and
-case syntax is an [approved target form](../specs/grammar-spec.md#31-source-file-structure-and-declarations),
+defines `void`, `option<T>`/`T?` optional normalization, and the absence of a
+universal root. `option<T>` is a language type constructor, not a Core export;
+an `Option<T>` library alias is not selected. The proposed `Lookup<T>` uses an
+optional payload to distinguish missing from present-null; its type shape
+remains unapproved. The union and case syntax is an
+[approved target form](../specs/grammar-spec.md#31-source-file-structure-and-declarations),
 not evidence of current compiler support.
-
-```terrum
-// Approved alias declaration form; this particular exported alias is PROPOSED.
-public alias Option<T> = T?;
-```
 
 | Proposed nominal sum | Case inventory | Distinction |
 |---|---|---|
@@ -215,9 +237,17 @@ public alias Option<T> = T?;
 
 Presence, vacancy, initialization, and checked failure are separate under
 [language contracts](../specs/language-contracts.md#2-outcome-initialization-and-nullability-are-separate);
-no niche encoding follows from the candidate shapes. `Result<T,E>` and its
-error payload remain proposed in §11, without selecting a library-wide
-exception hierarchy or object ABI.
+The accepted null niche for optional managed class handles, checked references
+and raw pointers does not determine the layout of the proposed `Lookup<T>` or
+`Result<T,E>` sums. Their case, payload, ownership and failure layouts remain
+open, without selecting a library-wide exception hierarchy or object ABI.
+
+For ordinary present/absent API results, `option<T>` is the value-return
+direction. Preserve Boolean Try-style or Status-plus-`ref<init T>` forms when
+they express caller-provided storage, richer status, ABI efficiency or a
+found-with-optional-payload result. A compiler may lower `option<T>` to an
+output/status form only as an implementation detail that preserves ownership,
+cleanup and publication. The exact Core API inventory remains open.
 
 ### Primitive and presence inventory
 
@@ -236,7 +266,7 @@ No listed family implies a mixed-width expression or implicit conversion.
 | binary `float16`, `bfloat16`, `float32/64/128` | `Zero`, classification, `FusedMultiplyAdd`, parse/format and matching-width bit services | Identities/ordinary operations selected; additional APIs pending; numeric comparison is not key equivalence |
 | decimal `decimal32/64/128` | `Zero`, classification, parse/format and numeric-key helpers | Identities, ordinary format/rounding/cohort rules selected; additional functions require separate contracts |
 | `char8`, `char16`, `char32`, `rune` | scalar validity, ordinal comparison, formatter where selected | Code units are not automatically complete Unicode scalars |
-| `void`, `T?`, candidate `Option<T>` alias | `()`; presence test and checked payload access for option | No universal `default(T)`; optional normalization is not nested two-state wrappers |
+| `void`, `option<T>`/`T?` | `()`; presence test and checked payload access for option | No universal `default(T)`; optional normalization is not nested two-state wrappers |
 | proposed `Lookup<T>`, `Result<T,E>` | case test and checked payload access | Concrete cases, ownership/representation and registration are OPEN; see §11 for result |
 
 Current compiler support is narrower than that accepted catalog; it does not
@@ -270,7 +300,7 @@ public interface IKeyComparer<T> : IEqualityComparer<T>
 public interface IParsable<TSelf>
     where TSelf : IParsable<TSelf>
 {
-    static bool TryParse(TextSpan text, init ref<TSelf> value);
+    static bool TryParse(TextSpan text, ref<init TSelf> value);
 }
 ```
 
@@ -362,13 +392,13 @@ public struct rune : IFormattable
     public nuint Utf8CodeUnitCount { get; }
     public nuint Utf16CodeUnitCount { get; }
     public static bool IsValid(uint32 value);
-    public static bool TryCreate(uint32 value, init ref<rune> result);
-    public static bool TryDecodeSingleUtf8(Span<char8> source, init ref<rune> result);
-    public static bool TryDecodeSingleUtf16(Span<char16> source, init ref<rune> result);
-    public static bool TryDecodeSingleUtf32(Span<char32> source, init ref<rune> result);
-    public bool TryEncodeUtf8(write Span<char8> destination, init ref<nuint> written);
-    public bool TryEncodeUtf16(write Span<char16> destination, init ref<nuint> written);
-    public bool TryEncodeUtf32(write Span<char32> destination, init ref<nuint> written);
+    public static bool TryCreate(uint32 value, ref<init rune> result);
+    public static bool TryDecodeSingleUtf8(Span<char8> source, ref<init rune> result);
+    public static bool TryDecodeSingleUtf16(Span<char16> source, ref<init rune> result);
+    public static bool TryDecodeSingleUtf32(Span<char32> source, ref<init rune> result);
+    public bool TryEncodeUtf8(write Span<char8> destination, ref<init nuint> written);
+    public bool TryEncodeUtf16(write Span<char16> destination, ref<init nuint> written);
+    public bool TryEncodeUtf32(write Span<char32> destination, ref<init nuint> written);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
@@ -411,7 +441,7 @@ execution, ITextContent protocol or construction-evaluation policy is added.
 | **OPEN** conditional family contract | Proposed member/relationship |
 |---|---|
 | `TextSpan<char8/char16/char32>` | `Length: nuint`; `AsSpan() -> Span<TCodeUnit>`; `AsTextSpan() -> TextSpan<void>`; implements `IContiguousSequence<TCodeUnit>` |
-| `TextSpan<void>` | `TryProject<TRequested>(init ref<TextSpan<TRequested>> result) -> bool`, with `TRequested : [TextCodeUnit]`; false leaves output vacant |
+| `TextSpan<void>` | `TryProject<TRequested>(ref<init TextSpan<TRequested>> result) -> bool`, with `TRequested : [TextCodeUnit]`; false leaves output vacant |
 | all `TextSpan` members | `IsEmpty`, scalar-ordinal comparisons and `TryFormat`; none promises writable text storage |
 
 Conditional family membership/conformance remains **OPEN**; ordinary
@@ -451,17 +481,17 @@ remain open.
 
 | Type / proposed layer | Additional signature inventory | Source/ownership boundary |
 |---|---|---|
-| `Span<T>` / Core | `Length`; `Slice(start, length) -> Span<T>`; matched-access borrowed index; `IContiguousSequence<T>.AsSpan()` | Candidate indexer form; access/backing follow [view contracts](../specs/libraries.md#views-shapes-and-tensor-primitives) |
+| `Span<T>` / Core | `Length`; `Slice(start, length) -> Span<T>`; matched-access element reference; `IContiguousSequence<T>.AsSpan()` | Candidate indexer form; access/backing follow [view contracts](../specs/libraries.md#views-shapes-and-tensor-primitives) |
 | `InlineArray<T,N>` / Core | `Length: nuint` (constant `N`); matched-access index; `AsSpan() -> Span<T>` | Candidate fixed inline shape; enclosing lifetime follows [lifetimes](../specs/lifetimes.md#three-independent-dependencies) |
 | `TextSpan<TCodeUnit>` / Core | `IsEmpty`; `EqualsOrdinal(TextSpan/rune)`; `CompareOrdinal(TextSpan)`; `TryFormat(writer, format)` | Candidate family members; accepted erasure/projection rules are in [libraries](../specs/libraries.md#views-shapes-and-tensor-primitives) |
 | `rune` / Core | `Value`, `IsAscii`, UTF code-unit counts, `IsValid`, `TryCreate`, exact `TryDecodeSingleUtf8/16/32`, `TryEncodeUtf8/16/32`, `TryFormat` | Proposed service signatures; scalar and literal rules are in [conversions](../specs/conversions.md#character-intent) |
 | `Text` / Foundation or Application | `AsSpan() -> TextSpan`; `TryFormat(writer, format)`; `Create<TContent>(content) -> own<val<Text>>` | Copy/transfer/lease and native layout remain open |
 | `TextBuilder<TCodeUnit>` / Foundation, **OPEN** registration | Constructors, `Length`, `Capacity`, `Reserve`, `Append`, `AppendScalar`, `TryAppend`, `TryAppendScalar`, `TryBuild`, `Clear` | Explicit code-unit capacity, whole-fragment allocation refusal; registration, backing and failure cleanup need checked contracts |
-| `TextSearch` / Core | `ScalarCount`, `TryGetScalar`, `TrySliceScalars`, `StartsWithOrdinal`, `EndsWithOrdinal`, `TryIndexOfOrdinal`, `TryLastIndexOfOrdinal` | Scalar positions; borrowed slices retain encoding/backing; no culture, normalization or sentinel |
+| `TextSearch` / Core | `ScalarCount`, `TryGetScalar`, `TrySliceScalars`, `StartsWithOrdinal`, `EndsWithOrdinal`, `TryIndexOfOrdinal`, `TryLastIndexOfOrdinal` | Scalar positions; non-owning slice views retain encoding/backing; no culture, normalization or sentinel |
 | `TextFormatting` / Core | `TryWrite<TWriter,TContent>(write ref<TWriter>, TContent) -> bool` | Follows the accepted [typed-writer contract](../specs/libraries.md#scalar-mathematics-keys-and-conversion) |
 | `ITextWriter`, `SpanTextWriter<TCodeUnit>` / Core | Selected writer's `TryWrite`, `TryWriteScalar`, `TryWriteFormatted`; candidate bounded provider adds `Written` | Exact interface in [standard text operations](../specs/language/construction-handlers.md#standard-text-operations); concrete provider remains proposed |
 | `ITextDecoder<TCodeUnit>`, `ITextEncoder<TCodeUnit>` / Foundation | `Convert`, `Finish`, `Reset` with `TextConversionProgress`; concrete UTF-8 witnesses below | Proposed incremental codec protocol; explicit EOF and progress decisions remain as specified below |
-| `Utf8TextReader<TStream>` / Application, **OPEN** | `ReadScalar(init ref<rune>) -> Result<bool,Error>`; `ReadLine(init ref<own<val<Text>>>) -> Result<bool,Error>` | Borrows an explicit byte stream; EOF differs from empty line |
+| `Utf8TextReader<TStream>` / Application, **OPEN** | `ReadScalar(ref<init rune>) -> Result<bool,Error>`; `ReadLine(ref<init own<val<Text>>>) -> Result<bool,Error>` | Borrows an explicit byte stream; EOF differs from empty line |
 
 The proposed explicit encoding protocols below retain incremental state and
 select malformed-input policy on decoder construction. No encoding is
@@ -493,7 +523,7 @@ public mut unique class TextBuilder<TCodeUnit>
     public mut void AppendScalar(rune value);
     public mut bool TryAppend(TextSpan source);
     public mut bool TryAppendScalar(rune value);
-    public mut bool TryBuild(init ref<own<val<Text>>> result);
+    public mut bool TryBuild(ref<init own<val<Text>>> result);
     public mut void Clear();
 }
 
@@ -501,15 +531,15 @@ public static class TextSearch
 {
     public static nuint ScalarCount(TextSpan source);
     public static bool TryGetScalar(TextSpan source, nuint scalarIndex,
-        init ref<rune> value);
+        ref<init rune> value);
     public static bool TrySliceScalars(TextSpan source, nuint scalarStart,
-        nuint scalarLength, init ref<TextSpan> result);
+        nuint scalarLength, ref<init TextSpan> result);
     public static bool StartsWithOrdinal(TextSpan source, TextSpan prefix);
     public static bool EndsWithOrdinal(TextSpan source, TextSpan suffix);
     public static bool TryIndexOfOrdinal(TextSpan source, TextSpan needle,
-        init ref<nuint> scalarIndex);
+        ref<init nuint> scalarIndex);
     public static bool TryLastIndexOfOrdinal(TextSpan source, TextSpan needle,
-        init ref<nuint> scalarIndex);
+        ref<init nuint> scalarIndex);
 }
 
 public enum MalformedTextPolicy : int32
@@ -634,7 +664,7 @@ the **proposed library contracts**, not new compiler support or an exact
 search/probe algorithm, complexity bound or hidden scalar-index cache.
 
 `ScalarCount`, `TryGetScalar` and `TrySliceScalars` are **PROPOSED** additions
-for inspecting and borrowing validated text by Unicode scalar position.
+for inspecting validated text and forming views by Unicode scalar position.
 `ScalarCount` counts the entire view's scalars; empty text returns zero.
 It does not count UTF code units, bytes, grapheme clusters or display columns.
 The count fits `nuint` because each scalar occupies at least one code unit
@@ -647,7 +677,7 @@ sentinel. Access does not normalize, fold, replace or copy the text's backing.
 
 `TrySliceScalars` checks that the complete requested scalar range lies within
 the source and that both encoded endpoints are scalar boundaries. True
-publishes a borrowed validated `TextSpan` in the source's actual encoding,
+publishes a non-owning validated `TextSpan` in the source's actual encoding,
 retaining its access, backing/root/lease and lifetime; no allocation,
 transcoding, mutation or owner transfer occurs. An empty slice at any valid
 boundary, including the end, succeeds and retains those dependencies.
@@ -761,12 +791,11 @@ The accepted `Span<T>` family, qualifier behavior, opaque backing dependencies,
 and explicit interface projection are specified in
 [library views](../specs/libraries.md#views-shapes-and-tensor-primitives)
 and [lifetimes](../specs/lifetimes.md#three-independent-dependencies).
-The candidate borrowed indexer and stored-view anchor/ABI remain open; a
-by-value accessor for unconstrained unique `T` is not proposed.
+The candidate reference-returning indexer and stored-view anchor/ABI remain
+open; a by-value accessor for unconstrained unique `T` is not proposed.
 
 ```terrum
 public struct InlineArray<T, const uint64 N>
-    where T : [Sized]
 {
     public nuint Length { get; }
     [MatchedAccess] public ref<T> this[nuint index] { get; }
@@ -779,8 +808,10 @@ The proposed length formal uses the approved `uint64` constant-generic form
 exact target layout limits and zero-length storage remain open. `Length`
 reports `N` in the target indexing domain, and
 instantiations must reject unrepresentable length/storage products rather
-than truncate them. Borrowing retains enclosing-owner lifetime and access
-under [lifetimes](../specs/lifetimes.md).
+than truncate them. References/views into inline elements remain bounded by
+the containing owner's storage lifetime and access under
+[lifetimes](../specs/lifetimes.md); forming or copying them does not acquire
+the owner or prolong its cleanup scope.
 
 ### Explicit native storage (representative Foundation inventory)
 
@@ -795,36 +826,34 @@ public mut unique struct AllocatorContext
 {
     public mut AllocationLease Allocate(nuint byteLength, nuint alignment);
     public mut bool TryAllocate(nuint byteLength, nuint alignment,
-        init ref<AllocationLease> storage);
+        ref<init AllocationLease> storage);
     public mut void Dispose();
 }
 public mut unique struct Buffer<T>
-    where T : [Sized]
 {
     public nuint Capacity { get; }
     public nuint Count { get; }
     public static Buffer<T> Adopt(nuint capacity, AllocationLease storage);
     public mut void Initialize(nuint index, T value);
-    public mut bool TryTakeLast(init ref<T> value);
+    public mut bool TryTakeLast(ref<init T> value);
     public Span<T> AsSpan();
     [ViewOf(Access.Write)] public mut write Span<T> GetWriteAccess();
     public mut void Clear();
     public mut void Dispose();
 }
 public mut unique struct Vector<T>
-    where T : [Sized], [Copy]
 {
     public nuint Count { get; }
     public nuint Capacity { get; }
     public static Vector<T> Create(AllocatorContext allocator);
     public T this[nuint index] { get; mut set; }
-    public bool TryGet(nuint index, init ref<T> value);
+    public bool TryGet(nuint index, ref<init T> value);
     public mut void Add(T value);
     public mut bool TryAdd(T value);
     public mut void Insert(nuint index, T value);
     public mut bool TryInsert(nuint index, T value);
     public mut void RemoveAt(nuint index);
-    public mut bool TryTakeLast(init ref<T> value);
+    public mut bool TryTakeLast(ref<init T> value);
     public mut void Reserve(nuint capacity);
     public mut bool TryReserve(nuint capacity);
     public Span<T> AsSpan();
@@ -834,14 +863,18 @@ public mut unique struct Vector<T>
 }
 ```
 
-The accepted lease/provider distinction, `Buffer<T>.Adopt` validation and
-initial `Vector<T>` growth profile are specified in the [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries).
+The accepted storage-and-release lease/provider distinction, `Buffer<T>.Adopt`
+validation and initial `Vector<T>` growth profile are specified in the
+[library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries).
 The signatures below add proposed members and profiles; broader element and
 allocator policies, view/guard metadata and failure transport remain open.
 `Dispose` here names explicit release on a particular owned lease/provider;
 it neither imports .NET `IDisposable` nor implies a universal object finalizer.
 Provider cleanup must not invalidate allocations whose release responsibility
 was transferred elsewhere.
+`AllocationLease` carries that per-allocation release responsibility; it is not
+an ordinary non-owning view or a universal type for every backing-validity
+lease.
 
 These are **PROPOSED** complete member sets for the sampled native owners,
 not cleanup registrations or implemented generic exports. `TryAllocate`
@@ -854,8 +887,9 @@ validation rather than masquerading as resource exhaustion.
 `Count < Capacity`; it does not expose holes or overwrite a live owner without
 its replacement contract. Both span accessors expose only initialized
 elements. `GetWriteAccess` lends those existing elements exclusively and does
-not grant construction authority over unused capacity. `Clear` cleans the
-initialized prefix while retaining storage capacity. Explicit disposal ends
+not grant construction authority over unused capacity. This is the accessor's
+proposed protocol, not an automatic property of `write Span<T>`. `Clear` cleans
+the initialized prefix while retaining storage capacity. Explicit disposal ends
 the owned storage's lifetime and must not proceed while any conflicting view
 remains live. Subsequent storage access cannot silently produce an empty
 span. Exact disposed-state diagnostics, release-failure reporting and
@@ -867,7 +901,8 @@ dependency for future growth rather than consulting an ambient provider.
 extraction members. They transfer the last initialized element into a vacant
 output rather than copy an element and then destroy its original. The buffer
 form therefore does not add a `[Copy]` requirement; the vector retains its
-existing `[Sized], [Copy]` profile for its other operations.
+default Copy-capable element-formal domain for its
+other operations.
 
 An empty live owner returns false, leaves the output vacant and preserves
 contents, count and capacity. True publishes the complete moved value,
@@ -880,8 +915,8 @@ copy of an affine owner or readable stale tail is manufactured.
 
 The output must satisfy ordinary vacant-destination, move, capture/rooting
 and lifetime checks. Dependencies carried by `T` are retained by the moved
-result; extraction neither extends a borrowed lifetime nor rebases an
-interior reference. Conflicting backing loans must have ended before
+result; extraction neither removes a supporting lifetime bound nor rebases
+an interior reference. Conflicting backing loans must have ended before
 structural mutation, including when no allocation or relocation occurs.
 Disposed access, loan conflicts and other checked failures are not empty
 results. Conditional publication, transferred cleanup/root responsibility
@@ -889,15 +924,15 @@ and source/output dependency metadata remain **OPEN**; the member spelling
 alone supplies no executable move or NoThrow guarantee.
 
 The vector's indexed access, insertion/removal and allocation-refusal
-overloads are **PROPOSED** additions for its existing `[Sized], [Copy]`
-profile. `TryGet` checks the initialized prefix: false leaves the output
+overloads are **PROPOSED** additions for its default
+Copy-capable element-formal domain. `TryGet` checks the initialized prefix: false leaves the output
 vacant, and true publishes a copied element. The indexer and `RemoveAt`
 require `index < Count`; `Insert` and `TryInsert` accept `index <= Count`.
 Insertion preserves prefix order, and removal shifts later elements toward
 the removed position before retiring the former final slot. These operations
 must obey typed initialization, rooting/barrier and replacement/cleanup
-contracts; `[Copy]` does not authorize untyped byte moves or exposing the
-now-vacant tail as a readable element.
+contracts; Copy-capable formal domains do not authorize untyped byte moves or
+exposing the now-vacant tail as a readable element.
 
 `TryAdd`, `TryInsert` and `TryReserve` report expected allocation refusal as
 false with prior contents, count and capacity preserved. Invalid indexes,
@@ -907,13 +942,16 @@ without allocation; reservation never reduces capacity or changes count.
 Successful growth preserves existing element order and publishes replacement
 storage only after all required initialization succeeds. Non-`Try` operations
 surface allocation failure through the provider's declared checked-failure
-contract, not a silent no-op. Neither overload family adds implicit rollback
-of provider side effects or retries the provider after refusal.
+contract, not a silent no-op. The default Copy-capable domain does not
+authorize untyped byte moves or exposing the now-vacant tail as a readable
+element. Neither overload family adds implicit rollback of provider side
+effects or retries the provider after refusal.
 
 All structural operations require their conflicting backing loans to have
 ended, even if spare capacity means no relocation is needed. The indexer
-copies its result rather than returning a slot loan; writable span access
-still requires the explicit exclusive accessor. Ordinary readonly span access
+copies its result rather than returning a reference to the element slot;
+writable span access still requires the explicit exclusive accessor.
+Ordinary readonly span access
 does not authorize replacement through an alias. Disposed-state and provider
 lifetime checks remain those of the owner above; these conveniences neither
 reacquire a disposed allocation nor select a global allocator.
@@ -921,28 +959,27 @@ reacquire a disposed allocation nor select a global allocator.
 ### Proposed owned double-ended storage
 
 These **PROPOSED** `Terrum.Collections` declarations complete the existing
-owned-deque inventory for the same `[Sized], [Copy]` element profile as
-`Vector<T>`. They describe a logical sequence with front/back access, not a
+owned-deque inventory for the same default Copy-capable
+element-formal domain as `Vector<T>`. They describe a logical sequence with front/back access, not a
 promise of one contiguous span or a selected physical ring-buffer layout.
 The allocator is explicitly supplied and retained for future growth.
 
 ```terrum
 public mut unique struct Deque<T>
-    where T : [Sized], [Copy]
 {
     public static Deque<T> Create(AllocatorContext allocator);
     public nuint Count { get; }
     public nuint Capacity { get; }
     public T this[nuint index] { get; mut set; }
-    public bool TryGet(nuint index, init ref<T> value);
-    public bool TryPeekFront(init ref<T> value);
-    public bool TryPeekBack(init ref<T> value);
+    public bool TryGet(nuint index, ref<init T> value);
+    public bool TryPeekFront(ref<init T> value);
+    public bool TryPeekBack(ref<init T> value);
     public mut void PushFront(T value);
     public mut void PushBack(T value);
     public mut bool TryPushFront(T value);
     public mut bool TryPushBack(T value);
-    public mut bool TryPopFront(init ref<T> value);
-    public mut bool TryPopBack(init ref<T> value);
+    public mut bool TryPopFront(ref<init T> value);
+    public mut bool TryPopBack(ref<init T> value);
     public mut void Reserve(nuint capacity);
     public mut bool TryReserve(nuint capacity);
     public DequeSegments<T> GetSegments();
@@ -951,13 +988,11 @@ public mut unique struct Deque<T>
     public mut void Dispose();
 }
 public struct DequeSegments<T>
-    where T : [Sized], [Copy]
 {
     public Span<T> First { get; }
     public Span<T> Second { get; }
 }
 public mut unique struct DequeWriteAccess<T>
-    where T : [Sized], [Copy]
 {
     [ViewOf(Access.Write)] public write Span<T> First { get; }
     [ViewOf(Access.Write)] public write Span<T> Second { get; }
@@ -1012,8 +1047,8 @@ concurrency protocol, stable element addresses or generic cursor selection.
 These **PROPOSED** `Terrum.Collections` declarations expand the storage
 inventory without introducing a global allocator. `ByteArena` is a
 fixed-capacity borrowed byte arena, not the owned/growable arena family.
-The initial pool element profile is `[Sized], [Copy]`; the rental itself
-remains a unique release owner.
+The initial pool element profile is the default Copy-capable
+formal domain; the rental itself remains a unique release owner.
 
 ```terrum
 public mut unique struct ByteArena
@@ -1024,20 +1059,18 @@ public mut unique struct ByteArena
     public nuint Used { get; }
     public mut write Span<uint8> Allocate(nuint byteLength, nuint alignment);
     public mut bool TryAllocate(nuint byteLength, nuint alignment,
-        init ref<write Span<uint8>> storage);
+        ref<init write Span<uint8>> storage);
     public mut void Reset();
     public mut void Dispose();
 }
 public mut unique struct MemoryPool<T>
-    where T : [Sized], [Copy]
 {
     public static MemoryPool<T> Create(AllocatorContext allocator);
     public mut MemoryOwner<T> Rent(nuint minimumCapacity);
-    public mut bool TryRent(nuint minimumCapacity, init ref<MemoryOwner<T>> owner);
+    public mut bool TryRent(nuint minimumCapacity, ref<init MemoryOwner<T>> owner);
     public mut void Dispose();
 }
 public mut unique struct MemoryOwner<T>
-    where T : [Sized], [Copy]
 {
     public nuint Capacity { get; }
     public nuint Count { get; }
@@ -1109,7 +1142,6 @@ public enum MemoryOrder : int32
 
 // Proposed richer result alongside the success-only CAS form.
 public struct CompareExchangeObservation<T>
-    where T : [Copy], [Sized]
 {
     public bool Exchanged { get; }
     public T Previous { get; }
@@ -1120,10 +1152,8 @@ public static class MemoryPrimitives
     public static T AtomicRead<T>(ref<T> location, MemoryOrder order = MemoryOrder.Acquire);
     public static void AtomicWrite<T>(write ref<T> location, T value,
         MemoryOrder order = MemoryOrder.Release);
-    public static T UnalignedRead<T>(Span<uint8> source, nuint byteOffset)
-        where T : [Copy], [Sized];
-    public static void UnalignedWrite<T>(write Span<uint8> destination, nuint byteOffset, T value)
-        where T : [Copy], [Sized];
+    public static T UnalignedRead<T>(Span<uint8> source, nuint byteOffset);
+    public static void UnalignedWrite<T>(write Span<uint8> destination, nuint byteOffset, T value);
 
     public static void AtomicAdd<T>(write ref<T> location, T amount, MemoryOrder order = MemoryOrder.Sequential);
     public static T AtomicAddGetPrevious<T>(write ref<T> location, T amount, MemoryOrder order = MemoryOrder.Sequential);
@@ -1161,8 +1191,7 @@ public static class MemoryPrimitives
         MemoryOrder successOrder = MemoryOrder.Sequential, MemoryOrder failureOrder = MemoryOrder.Sequential);
     public static CompareExchangeObservation<T> AtomicCompareExchangeObserve<T>(write ref<T> location,
         T expected, T replacement, MemoryOrder successOrder = MemoryOrder.Sequential,
-        MemoryOrder failureOrder = MemoryOrder.Sequential)
-        where T : [Copy], [Sized];
+        MemoryOrder failureOrder = MemoryOrder.Sequential);
     public static void Fence(MemoryOrder order = MemoryOrder.Sequential);
     public static void CompilerFence(/* exact scope/mask open */);
     public static T NonTemporalRead<T>(ref<T> location);
@@ -1180,8 +1209,8 @@ families in the [memory-model library surface](../specs/memory-model.md#library-
 That contract also specifies defaults, order validity, bitwise CAS semantics,
 progress, and target-dependent non-temporal/cache obligations; the accepted
 [CAS order-pair table](../specs/memory-model.md#explicit-order-semantics)
-gives the nine valid pairs; the [CAS follow-up](atomic-cas-order-pairs.md)
-tracks remaining API/physical integration.
+gives the nine valid pairs; [CG-020](../implementation/conformance-gaps.md#cg-020)
+tracks target/runtime implementation and qualification.
 Still open here are exact source/overload forms, eligible representation and
 range profiles, richer CAS declaration, and target support. The named
 `CompareExchangeObservation<T>` remains a candidate alternative to the
@@ -1189,8 +1218,10 @@ success-only result, not an approved API.
 
 Previous/updated-value semantics are defined by the
 [memory-model result forms](../specs/memory-model.md#access-and-atomic-operation-families).
-`[Copy]` and `[Sized]` alone do not establish byte-representation
-eligibility; the proposed unaligned byte-span overload excludes
+Copy-capable type formals do not establish byte-representation eligibility.
+Every type has a target size, while `Blittable` evidence permits safe layout
+observation; the exact representation and validity requirements for the
+proposed unaligned byte-span overload remain open. It excludes
 managed-reference-containing types. Collector-aware typed-memory operations
 need a separate explicit contract.
 
@@ -1199,9 +1230,9 @@ need a separate explicit contract.
 | Family / namespace | Proposed signatures or members | Required authority |
 |---|---|---|
 | `AllocationLease` / `Terrum.Collections` | `ByteLength`, `Alignment`, `Dispose()`; optional checked `SliceBytes(offset, length) -> Span<uint8>` | Accepted lease/provider distinction: [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries); byte slicing remains a candidate |
-| `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., init ref<AllocationLease>) -> bool` | Accepted retained-provider role: [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries); exact lifetime/release transfer remains open |
+| `AllocatorContext` / `Terrum.Collections` | `Allocate(bytes, alignment) -> AllocationLease`, `Dispose()`; `TryAllocate(..., ref<init AllocationLease>) -> bool` | Accepted retained-provider role: [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries); exact lifetime/release transfer remains open |
 | `Buffer<T>` / `Terrum.Collections` | `Capacity`, `Count`, `Adopt`, `Initialize`, moving `TryTakeLast`, `AsSpan`, `GetWriteAccess`, `Clear`, `Dispose` | Accepted initialized-prefix/adoption profile: [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries); tail extraction remains a candidate |
-| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, copied index/`TryGet`, `Add`/`TryAdd`, `Insert`/`TryInsert`, `RemoveAt`, moving `TryTakeLast`, `Reserve`/`TryReserve`, span access, `Clear`, `Dispose` | Accepted initial Copy-profile growth: [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries); added members remain proposals |
+| `Vector<T>` / `Terrum.Collections` | `Create`, `Count`, `Capacity`, copied index/`TryGet`, `Add`/`TryAdd`, `Insert`/`TryInsert`, `RemoveAt`, moving `TryTakeLast`, `Reserve`/`TryReserve`, span access, `Clear`, `Dispose` | Accepted initial growth over the default Copy-capable element-formal domain: [library inventory](../specs/libraries.md#dependency-layers-and-package-boundaries); added members remain proposals |
 | `Deque<T>` / `Terrum.Collections` | Explicit-provider `Create`, count/capacity/index/peek, front/back push/pop, reservation, readonly segment pair and exclusive writable guard, `Clear`, `Dispose` | Logical front-to-back initialized sequence; disjoint two-span coverage and retained backing; no fabricated contiguous span |
 | `ByteArena` / `Terrum.Collections` | Borrowed-backing constructor, `Capacity`, `Used`, `Allocate`, `TryAllocate`, `Reset`, `Dispose` | Fixed initialized byte backing; disjoint-slice, alignment and reset/disposal loan checks; owned/growable arena remains OPEN |
 | `MemoryPool<T>`, `MemoryOwner<T>` / `Terrum.Collections` | Explicit-provider `Create`, `Rent`/`TryRent`; rental `Capacity`, `Count`, `Initialize`, span access, `Clear`, `Dispose` | Unique rental/return responsibility; initialized prefix versus pooled capacity; pool disposal requires all rentals returned |
@@ -1238,13 +1269,13 @@ checked result/cleanup relation, directly or through an explicit adapter.
 ```terrum
 [CollectionBuilder(typeof(ListBuilder<T>))]
 public mut class List<T> : ISequence<T, ListCursor<T>>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public List();
     public List(nuint capacity);
     public nuint Count { get; }
     public nuint Capacity { get; }
-    public bool TryGet(nuint index, init ref<T> value);
+    public bool TryGet(nuint index, ref<init T> value);
     public mut void Add(T value);
     public mut void Insert(nuint index, T value);
     public mut void Reserve(nuint capacity);
@@ -1253,30 +1284,30 @@ public mut class List<T> : ISequence<T, ListCursor<T>>
     public mut void RemoveAt(nuint index);
     [ViewOf(Access.Write)] public mut ListWriteAccess<T> GetWriteAccess();
     [ViewOf(Access.Write, "access")]
-    public mut bool TryGetWriteAccess(init ref<ListWriteAccess<T>> access);
+    public mut bool TryGetWriteAccess(ref<init ListWriteAccess<T>> access);
     public ListCursor<T> GetEnumerator();
 }
 public mut unique struct ListCursor<T> : ICursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 public mut unique struct ListBuilder<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public ListBuilder(nuint capacityHint);
     public mut bool TryAdd(T value);
-    public mut bool TryBuild(init ref<write List<T>> value);
+    public mut bool TryBuild(ref<init write List<T>> value);
 }
 public mut unique struct ListWriteAccess<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     [ViewOf(Access.Write)] public write Span<T> Span { get; }
     public mut void Close();
 }
 public mut class LinkedListNode<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public LinkedListNode(T value);
     public T Value { get; mut set; }
@@ -1285,7 +1316,7 @@ public mut class LinkedListNode<T>
 }
 [CollectionBuilder(typeof(LinkedListBuilder<T>))]
 public mut class LinkedList<T> : ISequence<T, LinkedListCursor<T>>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public LinkedList();
     public nuint Count { get; }
@@ -1304,16 +1335,16 @@ public mut class LinkedList<T> : ISequence<T, LinkedListCursor<T>>
     public LinkedListCursor<T> GetEnumerator();
 }
 public mut unique struct LinkedListBuilder<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public LinkedListBuilder(nuint capacityHint);
     public mut bool TryAdd(T value);
-    public mut bool TryBuild(init ref<write LinkedList<T>> value);
+    public mut bool TryBuild(ref<init write LinkedList<T>> value);
 }
 public mut unique struct LinkedListCursor<T> : ICursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 ```
@@ -1322,7 +1353,8 @@ The accepted managed collection, guard, builder, node-identity and cursor
 contracts are specified in
 [libraries](../specs/libraries.md#collections-algorithms-and-application-services).
 These candidate signatures retain the initial
-`[ManagedStorable], [Copy], [Sized]` profile; it is not a permanent ban on
+`[ManagedStorable]` profile over the default Copy-capable formal
+domain; it is not a permanent ban on
 reference/affine values. Private buffer/access fields and public ABI/layout
 remain unspecified.
 
@@ -1388,10 +1420,10 @@ public static class SpanAlgorithms
         write ref<TComparer> comparer)
         where TComparer : IEqualityComparer<T>;
     public static bool TryIndexOf<T, TComparer>(Span<T> source, ref<T> value,
-        write ref<TComparer> comparer, init ref<nuint> index)
+        write ref<TComparer> comparer, ref<init nuint> index)
         where TComparer : IEqualityComparer<T>;
     public static bool TryLastIndexOf<T, TComparer>(Span<T> source, ref<T> value,
-        write ref<TComparer> comparer, init ref<nuint> index)
+        write ref<TComparer> comparer, ref<init nuint> index)
         where TComparer : IEqualityComparer<T>;
     public static bool SequenceEqual<T, TComparer>(Span<T> left, Span<T> right,
         write ref<TComparer> comparer)
@@ -1403,18 +1435,18 @@ public static class SpanAlgorithms
         write ref<TComparer> comparer)
         where TComparer : IEqualityComparer<T>;
     public static bool TryFind<T, TPredicate>(Span<T> source,
-        write ref<TPredicate> predicate, init ref<T> value)
-        where T : [Copy]
+        write ref<TPredicate> predicate, ref<init T> value)
+
         where TPredicate : IPredicate<T>;
     public static bool TryFindLast<T, TPredicate>(Span<T> source,
-        write ref<TPredicate> predicate, init ref<T> value)
-        where T : [Copy]
+        write ref<TPredicate> predicate, ref<init T> value)
+
         where TPredicate : IPredicate<T>;
     public static bool TryFindIndex<T, TPredicate>(Span<T> source,
-        write ref<TPredicate> predicate, init ref<nuint> index)
+        write ref<TPredicate> predicate, ref<init nuint> index)
         where TPredicate : IPredicate<T>;
     public static bool TryFindLastIndex<T, TPredicate>(Span<T> source,
-        write ref<TPredicate> predicate, init ref<nuint> index)
+        write ref<TPredicate> predicate, ref<init nuint> index)
         where TPredicate : IPredicate<T>;
     public static bool Any<T, TPredicate>(Span<T> source,
         write ref<TPredicate> predicate)
@@ -1430,7 +1462,6 @@ public static class SpanAlgorithms
         where TMapper : IMapper<TSource, TResult>;
     public static nuint Where<T, TPredicate>(Span<T> source,
         write Span<T> destination, write ref<TPredicate> predicate)
-        where T : [Copy]
         where TPredicate : IPredicate<T>;
     public static void Zip<TLeft, TRight, TResult, TZipper>(Span<TLeft> left,
         Span<TRight> right, write Span<TResult> destination,
@@ -1439,15 +1470,11 @@ public static class SpanAlgorithms
     public static void ForEach<T, TVisitor>(Span<T> source,
         write ref<TVisitor> visitor)
         where TVisitor : IVisitor<T>;
-    public static void Fill<T>(write Span<T> destination, T value)
-        where T : [Copy];
-    public static void Reverse<T>(write Span<T> values)
-        where T : [Copy];
-    public static void CopyTo<T>(Span<T> source, write Span<T> destination)
-        where T : [Copy];
+    public static void Fill<T>(write Span<T> destination, T value);
+    public static void Reverse<T>(write Span<T> values);
+    public static void CopyTo<T>(Span<T> source, write Span<T> destination);
     public static void MoveWithin<T>(write Span<T> values, nuint sourceStart,
-        nuint destinationStart, nuint length)
-        where T : [Copy];
+        nuint destinationStart, nuint length);
 }
 ```
 
@@ -1475,7 +1502,7 @@ grant writable element access merely because its own state is mutable.
 | `StartsWith`, `EndsWith` | A longer prefix/suffix returns false without witness calls. Compare the matching source range against the supplied prefix/suffix in increasing index order, stopping at the first unequal pair; an empty prefix/suffix matches any source. |
 | `TryFind` | Visit from the beginning and copy the first matching element into the vacant output; no match leaves it vacant. An optional/null element can be a successful result. |
 | `TryFindLast` | Visit from the end and copy the first matching element in that direction; no match leaves the output vacant. No forward scan or predicate replay is implied. |
-| `TryFindIndex`, `TryFindLastIndex` | Search in increasing/decreasing source-index order, respectively, stopping at the first true predicate in that direction. Success publishes the original source index; no match leaves it vacant. No `[Copy]` element capability is required. |
+| `TryFindIndex`, `TryFindLastIndex` | Search in increasing/decreasing source-index order, respectively, stopping at the first true predicate in that direction. Success publishes the original source index; no match leaves it vacant. No additional Copy evidence is required beyond the default formal domain. |
 | `Any` | Stop at the first true predicate; empty input returns false without invoking it. |
 | `All` | Stop at the first false predicate; empty input returns true without invoking it. |
 | `CountWhere` | Visit every element once in increasing source-index order and count true results. Empty input returns zero. The result is at most the span length and fits `nuint` without widening or wrapping. |
@@ -1491,17 +1518,18 @@ grant writable element access merely because its own state is mutable.
 suffix remains unchanged. All span destinations refer to existing initialized slots;
 replacement must obey the element's cleanup, rooting and write-barrier
 requirements. None of these operations treats arbitrary bytes as valid
-`T` or substitutes raw memory copying for checked typed access. `[Copy]`
-is required wherever one existing element is duplicated; mapper/zipper
+`T` or substitutes raw memory copying for checked typed access. The default
+Copy-capable element domain applies wherever one existing element is
+duplicated; mapper/zipper
 results instead transfer each separately produced result into its destination.
 Output publication/effect metadata and callback-loan enforcement remain
 **OPEN**. No callback is replayed after failure, and these signatures do not
 promise rollback, NoThrow or a hidden allocation-free callback.
 
 The predicate-only searches, quantifiers and count operation borrow elements
-without copying or retaining them. Copied-value searches add `[Copy]` because
-they publish an existing element, not because predicate execution itself
-requires it. A stateful predicate can distinguish forward and reverse visits;
+without copying or retaining them. Copied-value searches use the default
+Copy-capable formal domain because they publish an existing element, not
+because predicate execution itself requires it. A stateful predicate can distinguish forward and reverse visits;
 implementations must preserve the stated direction, invoke it at most once
 per visited element and stop immediately on the specified result or failure.
 They cannot replace a reverse search with a forward scan that remembers the
@@ -1517,7 +1545,8 @@ and the prefix/suffix element is the right operand. Readonly input ranges may
 overlap, including identical ranges, but identical backing does not permit
 skipping witness calls: a selected floating equality may reject a NaN compared
 with itself, and callbacks retain their declared effects. These operations
-need neither `[Copy]` nor hidden materialization; they cannot retain the
+do not copy elements or require additional Copy evidence beyond the default
+formal domain; they cannot retain the
 element loans or reinterpret padding as part of equality.
 
 ### Sequence and eager-operation inventory
@@ -1534,18 +1563,18 @@ an operation says otherwise.
 | Protocol / type | Proposed members and shape | Outcome / ownership |
 |---|---|---|
 | `ISequence<T, TCursor>` | Selected readonly `GetEnumerator() -> TCursor`; exact ICursor<T> relationship | Factory source; no implicit source consumption or universal re-enumeration |
-| `ICursor<T>` | Selected `TryMoveNext(init ref<T> item) -> bool` and mandatory `Close()` | True/live, false/vacant; direct sources preserve ordinary copy/transfer/backing, without a universal Copy bound or Current |
-| `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | Selected synchronous `GetAsyncEnumerator() -> TCursor`; `TryMoveNextAsync(init ref<T>) -> Task<bool>`; required `CloseAsync() -> Task<void>` | Completion/output reservation and saved Boolean relationship; no universal Copy bound or Current; lending remains separate |
-| `ILendingSequence<T, TCursor>` / `ILendingCursor<T>` and writable counterparts | Selected `GetEnumerator() -> TCursor`, readonly/mut respectively; `TryMoveNext(init ref<ref<T>>)` or `init ref<write ref<T>>`; mandatory Close | Distinct reference-output roles; element-place aliases, cursor-bound loans and checked published backing refinements |
+| `ICursor<T>` | Selected `TryMoveNext(ref<init T> item) -> bool` and mandatory `Close()` | True/live, false/vacant; direct sources preserve ordinary copy/transfer/backing, without a universal Copy bound or Current |
+| `IAsyncSequence<T, TCursor>` / `IAsyncCursor<T>` | Selected synchronous `GetAsyncEnumerator() -> TCursor`; `TryMoveNextAsync(ref<init T>) -> Task<bool>`; required `CloseAsync() -> Task<void>` | Completion/output reservation and saved Boolean relationship; no universal Copy bound or Current; lending remains separate |
+| `ILendingSequence<T, TCursor>` / `ILendingCursor<T>` and writable counterparts | Selected `GetEnumerator() -> TCursor`, readonly/mut respectively; `TryMoveNext(ref<init ref<T>>)` or `ref<init write ref<T>>`; mandatory Close | Distinct reference-output roles; element-place aliases, cursor-bound loans and checked published backing refinements |
 | `IAsyncLendingSequence<T, TCursor>` / `IAsyncLendingCursor<T>` and writable counterparts | Selected synchronous readonly/mut GetAsyncEnumerator; reference-output TryMoveNextAsync and awaited CloseAsync | Same element dependencies plus explicit descriptor reservation and completion publication; no implicit Task<TCursor> factory |
 | `SpanAlgorithms` search and predicates | `Contains`, `TryIndexOf`, `TryLastIndexOf`, `TryFind`, `TryFindLast`, `TryFindIndex`, `TryFindLastIndex`, `All`, `CountWhere`, `Any` | Explicit equality witness or predicate; directional visits and vacant no-match outputs, no unknown-index sentinel |
 | `SpanAlgorithms` sequence comparison | `SequenceEqual`, `StartsWith`, `EndsWith` | Explicit element-equality witness; readonly overlap allowed, no identical-backing shortcut that skips effects or NaN comparisons |
 | `SpanAlgorithms` transform | `Select`, `Where`, `Zip`, `ForEach`, `Fill`, `Reverse`, `CopyTo`, `MoveWithin` | Mutable callbacks take `write ref<TCallback>`; destination/overlap contracts differ by operation |
 | `OrderedSpanAlgorithms` aggregate | `Fold`, `TryMin`, `TryMax`; prospective `Sum` | Explicit seed or ordering witness; empty extrema leave output vacant, equal extrema choose the first source element |
 | `OrderedSpanAlgorithms` order | `LowerBound`, `UpperBound`, `TryBinarySearch`, `Sort` | Explicit total-order witness; logarithmic sorted bounds, first-equal search and possibly partial permutation on sort failure |
-| `List<T>` / managed | Constructors, `Count`, `Capacity`, index, `TryGet`, `Add`, `Insert`, `Reserve`, `RemoveAt`, `Clear`, write guard and concrete cursor | Initial `[ManagedStorable],[Copy],[Sized]` profile; accepted storage/guard rules: [libraries](../specs/libraries.md#collections-algorithms-and-application-services) |
+| `List<T>` / managed | Constructors, `Count`, `Capacity`, index, `TryGet`, `Add`, `Insert`, `Reserve`, `RemoveAt`, `Clear`, write guard and concrete cursor | Initial `[ManagedStorable]` profile over the default Copy-capable formal domain; accepted storage/guard rules: [libraries](../specs/libraries.md#collections-algorithms-and-application-services) |
 | `LinkedList<T>` / managed | `First`, `Last`, `AddFirst/Last`, `AddBefore/After`, `Remove`, `Clear`, cursor | Accepted node identity/ownership rules: [libraries](../specs/libraries.md#collections-algorithms-and-application-services) |
-| `Queue<T>`, `Stack<T>` / managed, **new** | Empty/capacity constructors, `Count`, `Capacity`, `Reserve`, `Enqueue/Push`, `TryDequeue/TryPop(init ref<T>)`, `TryPeek(init ref<T>)`, `Clear`, copied-value cursor and `Close` | Initial same managed Copy bounds; false output vacant; no `default(T)` |
+| `Queue<T>`, `Stack<T>` / managed, **new** | Empty/capacity constructors, `Count`, `Capacity`, `Reserve`, `Enqueue/Push`, `TryDequeue/TryPop(ref<init T>)`, `TryPeek(ref<init T>)`, `Clear`, copied-value cursor and `Close` | Initial same managed profile over the default Copy-capable domain; false output vacant; no `default(T)` |
 | `SortedSet<T,TOrder>` / managed, **new** | Explicit-order constructors, `Count`, `Capacity`, `Order`, `Reserve`, `Contains`, `TryAdd`, `Remove`, `Clear`, ascending cursor and `Close` | Explicit total-order witness; comparison-zero means duplicate |
 | `Deque<T>` / owned, **new** | Explicit-provider construction, count/capacity/index/peek, front/back push/pop, reservation, `GetSegments`, exclusive write guard, clear/disposal | Concrete Copy-profile declarations in §4; segment loans forbid structural mutation and never fabricate a contiguous span |
 | `Dictionary<TKey,TValue,TComparer>`, `HashSet<T,TComparer>` | Explicit-comparer constructors, `Count`, `Capacity`, comparer, `Reserve`, `TryGet`/`ContainsKey`/`Contains`, `TryAdd`, `Remove`, `Clear`, guarded cursor | Explicit key comparer; complete sample and failure contracts in §11 |
@@ -1715,7 +1744,8 @@ boundary in its
 
 ### Proposed ordered and sequential collection declarations
 
-These signatures expand the matrix for one managed `[Copy]` storage profile.
+These signatures expand the matrix for one managed storage profile over the
+default Copy-capable element domain.
 They do not choose a generic associated-cursor contract or a universal
 sequence witness. A concrete cursor returns copied values; its loan on the
 collection and traversal invalidation are part of the proposed contract.
@@ -1741,26 +1771,26 @@ public static class OrderedSpanAlgorithms
         ref<TOrder> order)
         where TOrder : IOrderComparer<T>;
     public static bool TryBinarySearch<T, TOrder>(Span<T> source, ref<T> value,
-        ref<TOrder> order, init ref<nuint> index)
+        ref<TOrder> order, ref<init nuint> index)
         where TOrder : IOrderComparer<T>;
     public static void Sort<T, TOrder>(write Span<T> values, ref<TOrder> order)
-        where T : [Copy]
+
         where TOrder : IOrderComparer<T>;
     public static bool TryMin<T, TOrder>(Span<T> source, ref<TOrder> order,
-        init ref<T> value)
-        where T : [Copy]
+        ref<init T> value)
+
         where TOrder : IOrderComparer<T>;
     public static bool TryMax<T, TOrder>(Span<T> source, ref<TOrder> order,
-        init ref<T> value)
-        where T : [Copy]
+        ref<init T> value)
+
         where TOrder : IOrderComparer<T>;
     public static TState Fold<T, TState, TFolder>(Span<T> source,
         TState seed, write ref<TFolder> folder)
         where TFolder : IFolder<T, TState>;
 }
 public mut class SortedSet<T, TOrder> : ISequence<T, SortedSetCursor<T, TOrder>>
-    where T : [ManagedStorable], [Copy], [Sized]
-    where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
+    where TOrder: IOrderComparer<T>, [ManagedStorable]
 {
     public SortedSet(TOrder order);
     public SortedSet(TOrder order, nuint capacity);
@@ -1775,14 +1805,14 @@ public mut class SortedSet<T, TOrder> : ISequence<T, SortedSetCursor<T, TOrder>>
     public SortedSetCursor<T, TOrder> GetEnumerator();
 }
 public mut unique struct SortedSetCursor<T, TOrder> : ICursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
-    where TOrder : IOrderComparer<T>, [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
+    where TOrder: IOrderComparer<T>, [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 public mut class Queue<T> : ISequence<T, QueueCursor<T>>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public Queue();
     public Queue(nuint capacity);
@@ -1790,19 +1820,19 @@ public mut class Queue<T> : ISequence<T, QueueCursor<T>>
     public nuint Capacity { get; }
     public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<void, Error> Enqueue(T value);
-    public mut bool TryDequeue(init ref<T> value);
-    public bool TryPeek(init ref<T> value);
+    public mut bool TryDequeue(ref<init T> value);
+    public bool TryPeek(ref<init T> value);
     public mut void Clear();
     public QueueCursor<T> GetEnumerator();
 }
 public mut unique struct QueueCursor<T> : ICursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 public mut class Stack<T> : ISequence<T, StackCursor<T>>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
     public Stack();
     public Stack(nuint capacity);
@@ -1810,15 +1840,15 @@ public mut class Stack<T> : ISequence<T, StackCursor<T>>
     public nuint Capacity { get; }
     public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<void, Error> Push(T value);
-    public mut bool TryPop(init ref<T> value);
-    public bool TryPeek(init ref<T> value);
+    public mut bool TryPop(ref<init T> value);
+    public bool TryPeek(ref<init T> value);
     public mut void Clear();
     public StackCursor<T> GetEnumerator();
 }
 public mut unique struct StackCursor<T> : ICursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 ```
@@ -1880,8 +1910,9 @@ no retry, rollback or fabricated boundary is implied.
 
 Extrema need no sorted input. Their witness call compares the visited element
 on the left with the retained candidate on the right; a singleton publishes
-its sole copied element without comparison. `[Copy]` is required for that
-publication, not for binary search or insertion bounds. An optional/null
+its sole copied element without comparison. The default Copy-capable element
+domain is required for that publication, not for binary search or insertion
+bounds. An optional/null
 element can be a successful result; absence of an
 extremum means an empty input, not a default or sentinel `T`. Failed comparison
 leaves the output vacant without undoing earlier witness effects.
@@ -2123,12 +2154,12 @@ public struct int32 : IParsable<int32>, IFormattable, IScalarNumber<int32>
     public static int32 One { get; }
     public static int32 MinValue { get; }
     public static int32 MaxValue { get; }
-    public static bool TryParse(TextSpan text, init ref<int32> value);
+    public static bool TryParse(TextSpan text, ref<init int32> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
-    public static bool TryAdd(int32 left, int32 right, init ref<int32> result);
-    public static bool TrySubtract(int32 left, int32 right, init ref<int32> result);
-    public static bool TryMultiply(int32 left, int32 right, init ref<int32> result);
+    public static bool TryAdd(int32 left, int32 right, ref<init int32> result);
+    public static bool TrySubtract(int32 left, int32 right, ref<init int32> result);
+    public static bool TryMultiply(int32 left, int32 right, ref<init int32> result);
     public static int32 AddWrapping(int32 left, int32 right);
     public static int32 FromBits(uint32 bits);
     public static uint32 ToBits(int32 value);
@@ -2154,7 +2185,7 @@ public struct float32 : IParsable<float32>, IFormattable, IScalarIeee754<float32
     public static uint32 ToBits(float32 value);
     public bool KeyEquals(float32 other);
     public int32 GetKeyHashCode();
-    public static bool TryParse(TextSpan text, init ref<float32> value);
+    public static bool TryParse(TextSpan text, ref<init float32> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
@@ -2173,7 +2204,7 @@ public struct decimal32 : IParsable<decimal32>, IFormattable, IScalarIeee754<dec
     public static decimal32 FusedMultiplyAdd(decimal32 left, decimal32 right, decimal32 addend);
     public bool KeyEquals(decimal32 other);
     public int32 GetKeyHashCode();
-    public static bool TryParse(TextSpan text, init ref<decimal32> value);
+    public static bool TryParse(TextSpan text, ref<init decimal32> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
 }
@@ -2232,12 +2263,12 @@ public struct uint32
     public static uint32 MinValue { get; }
     public static uint32 MaxValue { get; }
     [Literal(LiteralKind.Integer)] [ConstEval]
-    public static bool TryParse(TextSpan text, init ref<uint32> value);
+    public static bool TryParse(TextSpan text, ref<init uint32> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
-    public static bool TryAdd(uint32 left, uint32 right, init ref<uint32> result);
-    public static bool TrySubtract(uint32 left, uint32 right, init ref<uint32> result);
-    public static bool TryMultiply(uint32 left, uint32 right, init ref<uint32> result);
+    public static bool TryAdd(uint32 left, uint32 right, ref<init uint32> result);
+    public static bool TrySubtract(uint32 left, uint32 right, ref<init uint32> result);
+    public static bool TryMultiply(uint32 left, uint32 right, ref<init uint32> result);
     public static uint32 AddWrapping(uint32 left, uint32 right);
     public static uint32 FromBits(uint32 bits);
     public static uint32 ToBits(uint32 value);
@@ -2249,10 +2280,10 @@ public struct int8 : IParsable<int8>, IFormattable
     public static int8 MinValue { get; }
     public static int8 MaxValue { get; }
     [Literal(LiteralKind.Integer)] [ConstEval]
-    public static bool TryParse(TextSpan text, init ref<int8> value);
+    public static bool TryParse(TextSpan text, ref<init int8> value);
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
         where TWriter : ITextWriter;
-    public static bool TryAdd(int8 left, int8 right, init ref<int8> result);
+    public static bool TryAdd(int8 left, int8 right, ref<init int8> result);
     public static int8 AddWrapping(int8 left, int8 right);
     public static int8 FromBits(uint8 bits);
     public static uint8 ToBits(int8 value);
@@ -2324,7 +2355,7 @@ public struct BitOperations
     public static uint32 ReverseBits(uint32 value);
     public static uint32 ReverseEndianness(uint32 value);
     public static bool IsPow2(uint32 value);
-    public static bool TryRoundUpToPowerOfTwo(uint32 value, init ref<uint32> result);
+    public static bool TryRoundUpToPowerOfTwo(uint32 value, ref<init uint32> result);
     public static int32 LeadingZeroCount(uint64 value);
     public static int32 TrailingZeroCount(uint64 value);
     public static int32 PopCount(uint64 value);
@@ -2333,7 +2364,7 @@ public struct BitOperations
     public static uint64 ReverseBits(uint64 value);
     public static uint64 ReverseEndianness(uint64 value);
     public static bool IsPow2(uint64 value);
-    public static bool TryRoundUpToPowerOfTwo(uint64 value, init ref<uint64> result);
+    public static bool TryRoundUpToPowerOfTwo(uint64 value, ref<init uint64> result);
 }
 ```
 
@@ -2347,7 +2378,7 @@ selection-member follow-up:
 
 | Candidate owning scalar | Proposed public static signature |
 |---|---|
-| `int32`, `int64` (substitute that exact type for `T`) | `TryAbs(T value, init ref<T> result) -> bool` |
+| `int32`, `int64` (substitute that exact type for `T`) | `TryAbs(T value, ref<init T> result) -> bool` |
 | `int32`, `int64` | `Sign(T value) -> int32` |
 | `int32`, `int64` | `DivRem(T dividend, T divisor) -> (T Quotient, T Remainder)` |
 | `int32` | `BigMultiply(int32 left, int32 right) -> int64` |
@@ -2423,7 +2454,7 @@ NoThrow declaration.
 Exact accepted numeric-member placement, Core groups, signatures and
 primitive membership are in
 [numeric capabilities](../specs/language/numeric-capabilities.md).
-The [selection follow-up](numeric-selection-members.md) tracks their physical
+[CG-011](../implementation/conformance-gaps.md#cg-011) tracks their physical
 integration and distinguishes it from extra APIs here. Public witness/member
 transport and implementation remain incomplete; the older heterogeneous and
 three-member composite declarations above are not a second accepted grouping.
@@ -2462,7 +2493,7 @@ operation.
 
 ```terrum
 public struct simd128<T> : IAdditionOperators<simd128<T>, simd128<T>, simd128<T>>
-    where T : [SimdElement], [Copy], [Sized]
+    where T: [SimdElement]
 {
     public static nuint LaneCount { get; }
 
@@ -2470,7 +2501,7 @@ public struct simd128<T> : IAdditionOperators<simd128<T>, simd128<T>, simd128<T>
     public simd128<T> WithLane(nuint lane, T value);
 
     public static simd128<T> Splat(T value);
-    public static bool TryCreate(Span<T> lanes, init ref<simd128<T>> result);
+    public static bool TryCreate(Span<T> lanes, ref<init simd128<T>> result);
     public static simd128<T> Load(Span<T> source);
     public static simd128<T> LoadMasked(Span<T> source, simd128mask<T> active,
         T inactive);
@@ -2492,7 +2523,7 @@ public struct simd128<T> : IAdditionOperators<simd128<T>, simd128<T>, simd128<T>
 }
 
 public struct simd128mask<T>
-    where T : [SimdElement], [Copy], [Sized]
+    where T: [SimdElement]
 {
     public static nuint LaneCount { get; }
 
@@ -2549,7 +2580,7 @@ public static class Simd128Conversions
     public static simd128<uint32> WidenLowerToUInt32(simd128<uint16> value);
     public static simd128<uint32> WidenUpperToUInt32(simd128<uint16> value);
     public static bool TryNarrowCheckedToUInt16(simd128<uint32> lower,
-        simd128<uint32> upper, init ref<simd128<uint16>> result);
+        simd128<uint32> upper, ref<init simd128<uint16>> result);
     public static simd128<uint16> NarrowSaturatingToUInt16(simd128<uint32> lower,
         simd128<uint32> upper);
     public static simd128<uint16> NarrowTruncatingToUInt16(simd128<uint32> lower,
@@ -2593,8 +2624,9 @@ element combination, nor that every operation is supplied by every pair.
 
 ### Scalable SIMD
 
-The candidate `simd<T>` is genuinely hardware-scalable and initially
-sizeless, not a fixed-width alias or scalar-callback vectorization promise;
+The candidate `simd<T>` is genuinely hardware-scalable with a
+target/runtime-defined extent, not a fixed-width alias or scalar-callback
+vectorization promise;
 see the [canonical SIMD direction](../specs/libraries.md#simd-as-a-family-of-shapes).
 The complete callable declaration and target profile remain **BLOCKED/OPEN**:
 lane/mask ABI, storage, call/return, suspension and spill rules cannot be
@@ -2618,7 +2650,7 @@ public struct TensorShape
     public Span<nint> Strides { get; }
 
     public static bool TryCreate(Span<nuint> lengths, Span<nint> strides,
-        init ref<TensorShape> result);
+        ref<init TensorShape> result);
 }
 
 public struct TensorSpan<T>
@@ -2646,10 +2678,10 @@ public static class TensorViews
     public static TensorSpan<T> BroadcastTo<T>(TensorSpan<T> source,
         Span<nuint> lengths);
     public static bool TryAsDenseSpan<T>(TensorSpan<T> source,
-        init ref<Span<T>> result);
+        ref<init Span<T>> result);
     public static void CopyTo<T>(TensorSpan<T> source,
         write TensorSpan<T> destination)
-        where T : [Copy];
+        ;
 }
 ```
 
@@ -2664,8 +2696,8 @@ and stored-view anchor/ABI, not the existence of multi-source authoring syntax.
 ### Tensor operations
 
 The signatures below are candidate names and shapes with explicit sources
-and writable destinations. Accepted `[Copy]`, shape/alias, empty-reduction,
-and strict row-major rules are in
+and writable destinations. The default Copy-capable formal domain, shape/
+alias, empty-reduction and strict row-major rules are in
 [library tensor views](../specs/libraries.md#views-shapes-and-tensor-primitives).
 Exact reduction names, cross-width reproducibility and separately selected
 relaxed policies remain **OPEN**.
@@ -2674,38 +2706,38 @@ relaxed policies remain **OPEN**.
 public static class TensorPrimitives
 {
     public static void Add<T>(Span<T> left, Span<T> right, write Span<T> destination)
-        where T : IAdditionOperators<T, T, T>, [Copy];
+        where T: IAdditionOperators<T, T, T>;
     public static T Sum<T>(Span<T> source)
-        where T : IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+        where T: IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>;
     public static T Dot<T>(Span<T> left, Span<T> right)
         where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
-                 IAdditiveIdentity<T, T>, [Copy];
+                 IAdditiveIdentity<T, T>;
 
     public static void Add<T>(TensorSpan<T> left, TensorSpan<T> right,
         write TensorSpan<T> destination)
-        where T : IAdditionOperators<T, T, T>, [Copy];
+        where T: IAdditionOperators<T, T, T>;
     public static void Subtract<T>(TensorSpan<T> left, TensorSpan<T> right,
         write TensorSpan<T> destination)
-        where T : ISubtractionOperators<T, T, T>, [Copy];
+        where T: ISubtractionOperators<T, T, T>;
     public static void Multiply<T>(TensorSpan<T> left, TensorSpan<T> right,
         write TensorSpan<T> destination)
-        where T : IMultiplyOperators<T, T, T>, [Copy];
+        where T: IMultiplyOperators<T, T, T>;
     public static void Scale<T>(TensorSpan<T> source, T scalar,
         write TensorSpan<T> destination)
-        where T : IMultiplyOperators<T, T, T>, [Copy];
+        where T: IMultiplyOperators<T, T, T>;
 
     public static T SumStrictCandidate<T>(TensorSpan<T> source)
-        where T : IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+        where T: IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>;
     public static T DotStrictCandidate<T>(TensorSpan<T> left, TensorSpan<T> right)
         where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
-                 IAdditiveIdentity<T, T>, [Copy];
+                 IAdditiveIdentity<T, T>;
     public static void ReduceRowsStrictCandidate<T>(TensorSpan<T> source,
         write TensorSpan<T> destination)
-        where T : IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>, [Copy];
+        where T: IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>;
     public static void MatMulStrictCandidate<T>(TensorSpan<T> left,
         TensorSpan<T> right, write TensorSpan<T> destination)
         where T : IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
-                 IAdditiveIdentity<T, T>, [Copy];
+                 IAdditiveIdentity<T, T>;
 
     public static float32 SumRelaxedCandidate(TensorSpan<float32> source);
     public static float32 DotRelaxedCandidate(TensorSpan<float32> left,
@@ -2753,7 +2785,7 @@ The exact Task identity, affine responsibility, IsCompleted and consuming
 await are selected by [task responsibility](../specs/language/task-responsibility.md).
 Extra task, executor and public awaiter APIs remain candidates.
 
-`IRandom` is referenced as a nominal protocol for mutable generic use through `write ref<TRandom>`, without defensive copies/boxing; storing concrete `TRandom` additionally requires `[Sized]`. The design sample defines `mut uint32 NextUInt32()` and `ISeedableRandom.Reseed(uint32 seed)` only; no RNG quality, entropy or cryptographic guarantee is specified.
+`IRandom` is referenced as a nominal protocol for mutable generic use through `write ref<TRandom>`, without defensive copies/boxing; storing concrete `TRandom` additionally requires its ordinary representation, initialization, ownership and lifetime obligations. The design sample defines `mut uint32 NextUInt32()` and `ISeedableRandom.Reseed(uint32 seed)` only; no RNG quality, entropy or cryptographic guarantee is specified.
 
 ```terrum
 public interface IRandom
@@ -2770,7 +2802,7 @@ public static uint32 Draw<TRandom>(write ref<TRandom> random)
 
 `CounterRandom(uint32 seed)` and
 `DifferentRandom<TRandom>(TRandom inner, uint32 mask)` with
-`TRandom : IRandom, [Sized]` are sample implementations, not mandatory
+`TRandom : IRandom` are sample implementations, not mandatory
 algorithms. Entropy, seed material, statistical quality and cryptographic
 security require separate capability contracts; `NextUInt32` alone promises
 none. See the complete primitive/protocol inventory in §§1 and 6.
@@ -2833,6 +2865,7 @@ because a provider or serialized codec is missing.
 | Parsing/formatting and construction: [standard operations and handlers](../specs/language/construction-handlers.md), [literal parsers](../specs/language/literal-construction.md) | Concrete parser/writer/builder providers, exact target registrations, result representation and costs. Each init output needs its actual checked outcome relation; Try spelling is not a contract. Reuse selected eager capture, refusal, exact completion and cleanup rather than a parallel handler language or source-reading JIT literal route. |
 | Views, families and nominal projection: [type families](../specs/type-families.md), [interface witnesses](../specs/language/interface-witnesses.md), [dependencies](../specs/language/dependencies-and-views.md) | Candidate indexers, MatchedAccess/ViewOf markers, conditional members and concrete provider witnesses. Preserve approved self/access projections and complete inherited requirements; new adapters still need explicit intent, validity, access, ownership, backing and cost. Equal layout or a same-spelled method is not a witness; writable storage remains invariant. |
 | Storage/collections: [selected storage and guards](../specs/libraries.md#collections-algorithms-and-application-services) | Allocator/provider retention, release/failure transport, concrete guard names, grow/abandon contracts and non-Copy/borrowed element profiles. Accepted value/async/lending roles and dependency refinements do not automatically register Span/List, associated ISequence<T> or a new producer frame. |
+| Static initialization: [source contract](../specs/grammar-spec.md#static-initialization-and-load-scoped-storage), [logical metadata](../specs/representation/logical-records.md#static-initialization-and-load-scope-encoding-pending), [implementation gates](../implementation/conformance-gaps.md#cg-008) | The accepted registration model uses exact Core definition identities for `StaticInitializer`, its closed trigger enum/cases and `LazyInitialization`; spelling or underlying enum values alone do not grant semantics. Failed-unit recovery uses a registered runtime-owned unsafe call, not a dedicated Body operation. Its exact callable identity/signature, target carrier, catalog/metadata IDs and runtime lifecycle ABI remain physical integration gates. |
 | Memory primitives: [memory model](../specs/memory-model.md) | Exact source overloads/order spelling, comparison-eligible representations, richer CAS observation and target width/alignment/progress. Compiler-fence scope, range contracts, cache/non-temporal capabilities and GC-aware typed operations need explicit admission; accepted defaults and the nine CAS pairs are not open. |
 | Numerics: [scalar catalog/operators](../specs/overview/conformance.md#mandatory-scalar-catalog), [capability groups](../specs/language/numeric-capabilities.md), [conversions](../specs/conversions.md) | Additional primitive members, integer associated relations, heterogeneous/classification/conversion interfaces, mathematical function contracts and physical witnesses. Do not restate selected identities, grouped signatures or floating rules as pending APIs. |
 | SIMD/tensors: [view/shape and strict-operation contracts](../specs/libraries.md#views-shapes-and-tensor-primitives) | Fixed family/mask registration/ABI and scalable restrictions; independently live immutable shape metadata, exact TensorShape span qualification, stored anchors and View's actual storage/shape dependency set. Reproducible/relaxed reduction APIs need explicit contracts; multi-source dependency authoring itself is accepted. |
@@ -2851,11 +2884,17 @@ nesting; passing a collection does not silently enumerate it.
 
 Recommend adopting bounded concrete API families with their ordinary
 members, exact nominal witnesses and shared output/failure/ownership
-contracts. The [generic/construction metadata proposal](generic-nominal-construction-metadata.md)
-owns candidate transport, not additional source authority. Complete member
-effects, target representation, [constant programs](static-proof-and-constant-evaluation.md),
-[manifests](../specs/representation/semantic-manifests.md) and independent
-binding/verification must be integrated together.
+contracts. Generic and construction transports are owned by
+[logical records](../specs/representation/logical-records.md) and the
+[assigned registry](../specs/representation/trrm-1.registry.json), with
+remaining independent-exchange gates in
+[CG-006](../implementation/conformance-gaps.md#cg-006) and
+[CG-007](../implementation/conformance-gaps.md#cg-007). The accepted
+[proof/evaluation contracts](../specs/language/proof-and-constant-evaluation.md)
+do not select each candidate API below; physical proof/value integration is
+tracked in [CG-010](../implementation/conformance-gaps.md#cg-010). Complete
+member effects, target representation, [manifests](../specs/representation/semantic-manifests.md)
+and independent binding/verification must be integrated together.
 
 Broader number roots, automatic erasure/marshalling, a new Task observation
 model, generic property carriers or shared callable codecs are substantive
@@ -2910,8 +2949,23 @@ public state, not frozen private layout or wire ABI.
 ### Expected failures and error values
 
 Use a proposed nominal `Result<T,E>` for expected domain alternatives and
-retain ordinary failure for exceptional language/runtime outcomes. Do not
-make every domain error an exception object or invent a universal root.
+retain ordinary failure for exceptional language/runtime outcomes. Terrum's
+accepted local exception contract is the self-typed
+`IException<this TException>` interface implemented by class-only managed
+exception objects, with the common existential view `IException<_>`. It is
+not a universal class base, implicit inheritance or a mandate that domain
+`Error` values become exceptions. Do not make every domain error an exception
+object or infer additional Core API from that contract.
+The accepted common contract includes readonly non-null `Text Message`,
+static `Text DefaultMessage`, default/nullable-`Text`/typed eager
+`[TextTarget]` creation paths, readonly nullable existential views for
+authored `InnerException` and runtime-attached `ParentException`, and the
+`IFormattable` witness whose default forwards to `Message.TryFormat`. The
+runtime attaches `ParentException`; factories do not accept it. The authored
+cause and propagation parent remain distinct, and no stack-trace member is
+required. Exact source-visible cause/parent member spellings and physical
+parent storage remain integration work, not additional decisions in this
+Core API review.
 The [grammar](../specs/grammar-spec.md#31-source-file-structure-and-declarations)
 already admits struct/class unions and cases. This particular sum's
 declaration, representation, case API and conditional copy/ownership remain
@@ -2951,9 +3005,9 @@ an escaping failure event. Keep `T?`/Option for absence, not error status.
 ```terrum
 public mut class Dictionary<TKey, TValue, TComparer>
     : ISequence<DictionaryEntry<TKey, TValue>, DictionaryCursor<TKey, TValue, TComparer>>
-    where TKey : [ManagedStorable], [Copy], [Sized]
-    where TValue : [ManagedStorable], [Copy], [Sized]
-    where TComparer : IKeyComparer<TKey>, [ManagedStorable], [Copy], [Sized]
+    where TKey: [ManagedStorable]
+    where TValue: [ManagedStorable]
+    where TComparer: IKeyComparer<TKey>, [ManagedStorable]
 {
     public nuint Count { get; }
     public nuint Capacity { get; }
@@ -2961,7 +3015,7 @@ public mut class Dictionary<TKey, TValue, TComparer>
     public Dictionary(TComparer comparer);
     public Dictionary(TComparer comparer, nuint capacity);
     public bool ContainsKey(TKey key);
-    public bool TryGet(TKey key, init ref<TValue> value);
+    public bool TryGet(TKey key, ref<init TValue> value);
     public mut Result<void, Error> Reserve(nuint capacity);
     public mut Result<bool, Error> TryAdd(TKey key, TValue value);
     public mut Result<void, Error> Set(TKey key, TValue value);
@@ -2971,8 +3025,8 @@ public mut class Dictionary<TKey, TValue, TComparer>
 }
 
 public mut class HashSet<T, TComparer> : ISequence<T, HashSetCursor<T, TComparer>>
-    where T : [ManagedStorable], [Copy], [Sized]
-    where TComparer : IKeyComparer<T>, [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
+    where TComparer: IKeyComparer<T>, [ManagedStorable]
 {
     public nuint Count { get; }
     public nuint Capacity { get; }
@@ -2988,8 +3042,8 @@ public mut class HashSet<T, TComparer> : ISequence<T, HashSetCursor<T, TComparer
 }
 
 public struct DictionaryEntry<TKey, TValue>
-    where TKey : [ManagedStorable], [Copy], [Sized]
-    where TValue : [ManagedStorable], [Copy], [Sized]
+    where TKey: [ManagedStorable]
+    where TValue: [ManagedStorable]
 {
     public DictionaryEntry(TKey key, TValue value);
     public TKey Key { get; }
@@ -2997,18 +3051,18 @@ public struct DictionaryEntry<TKey, TValue>
 }
 public mut unique struct DictionaryCursor<TKey, TValue, TComparer>
     : ICursor<DictionaryEntry<TKey, TValue>>
-    where TKey : [ManagedStorable], [Copy], [Sized]
-    where TValue : [ManagedStorable], [Copy], [Sized]
-    where TComparer : IKeyComparer<TKey>, [ManagedStorable], [Copy], [Sized]
+    where TKey: [ManagedStorable]
+    where TValue: [ManagedStorable]
+    where TComparer: IKeyComparer<TKey>, [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<DictionaryEntry<TKey, TValue>> item);
+    public mut bool TryMoveNext(ref<init DictionaryEntry<TKey, TValue>> item);
     public mut void Close();
 }
 public mut unique struct HashSetCursor<T, TComparer> : ICursor<T>
-    where T : [ManagedStorable], [Copy], [Sized]
-    where TComparer : IKeyComparer<T>, [ManagedStorable], [Copy], [Sized]
+    where T: [ManagedStorable]
+    where TComparer: IKeyComparer<T>, [ManagedStorable]
 {
-    public mut bool TryMoveNext(init ref<T> item);
+    public mut bool TryMoveNext(ref<init T> item);
     public mut void Close();
 }
 ```
@@ -3016,7 +3070,7 @@ public mut unique struct HashSetCursor<T, TComparer> : ICursor<T>
 These proposed constructors always require a comparer; the comparer-only
 overload constructs an empty collection without an element-capacity request.
 No `DefaultComparer` or hidden comparer lookup is provided, and missing values
-are never synthesized with `default(TValue)`. `TryGet` returns false for a missing key and leaves its output vacant; true publishes a copied value. `TryAdd` returns `Success(false)` for a duplicate without changing collection contents or count, `Success(true)` only after insertion, and `Failure(Error)` on allocation failure with no partial publication. `Set` inserts or updates and leaves the prior mapping unchanged if insertion allocation fails. `Remove` returns false when absent; `Clear` empties the collection. Construction validates capacity and is all-or-nothing; capacity/allocation failure must be a checked failure before an instance is published. The concrete library failure selection and physical constructor/result transport remain open; ordinary constructor initialization/unwind is already a language contract, not blocked on a universal exception hierarchy. Keys must retain equality/hash stability while stored; comparer behavior must also remain stable, and comparer equality must imply identical hashes. These collections add no automatic concurrent safety; callers need an explicit external synchronization contract. Initial key, value, element and stored-comparer constraints intentionally retain `[ManagedStorable]`, `[Copy]`, and `[Sized]`; broader affine/non-Copy storage is out of scope.
+are never synthesized with `default(TValue)`. `TryGet` returns false for a missing key and leaves its output vacant; true publishes a copied value. `TryAdd` returns `Success(false)` for a duplicate without changing collection contents or count, `Success(true)` only after insertion, and `Failure(Error)` on allocation failure with no partial publication. `Set` inserts or updates and leaves the prior mapping unchanged if insertion allocation fails. `Remove` returns false when absent; `Clear` empties the collection. Construction validates capacity and is all-or-nothing; capacity/allocation failure must be a checked failure before an instance is published. The concrete library failure selection and physical constructor/result transport remain open; ordinary constructor initialization/unwind is already a language contract, not blocked on a universal exception hierarchy. Keys must retain equality/hash stability while stored; comparer behavior must also remain stable, and comparer equality must imply identical hashes. These collections add no automatic concurrent safety; callers need an explicit external synchronization contract. Initial key, value, element and stored-comparer constraints intentionally retain `[ManagedStorable]` over the default Copy-capable formal domain; broader affine/non-Copy storage is out of scope.
 
 The comparer-only constructors, capacity/reservation members and dictionary
 `ContainsKey` are **PROPOSED** additions. `ContainsKey` tests presence without
@@ -3072,6 +3126,20 @@ compiler-owned; it does not use the candidate public GetAwaiter pattern below.
 The remaining methods, public task/awaiter nominal shapes, TaskStatus/
 TaskOutcome, scope, cancellation and executor APIs are proposals, not physical
 layouts or prerequisites inferred from that logical approval.
+The accepted existential `Task<_>` view exposes the common `IsCompleted`
+observation and permits a contractually defined completion-only consuming
+operation when the payload type is hidden; that operation settles and cleans
+up the payload without returning it. Its exact Core member name and signature
+remain open, and this candidate inventory does not choose them. This is the
+Task-specific operation set under the general nominal-generic `G<_>` view
+described by [complete types](../specs/language/types-and-normalization.md#complete-type-terms),
+not a Task-only existential mechanism. Each `Task<_>` value retains its own
+hidden payload `TypeSpec` and checked evidence under the per-value rule in
+[logical records](../specs/representation/logical-records.md#existential-generic-views);
+parameter/result/storage owner metadata defines the required evidence shape,
+while each runtime Task value supplies its own concrete payload type and
+witness references. This does not prescribe boxing, a task-specific dictionary
+or a storage ABI.
 
 ```terrum
 namespace Terrum.Threading.Tasks;
@@ -3090,7 +3158,7 @@ public mut unique class Task<T = void>
     public TaskStatus Status { get; }
     public bool IsCompleted { get; }
     public bool HasOutcome { get; }
-    public mut bool TryTakeOutcome(init ref<TaskOutcome<T>> outcome);
+    public mut bool TryTakeOutcome(ref<init TaskOutcome<T>> outcome);
     public mut TaskAwaiter<T> GetAwaiter();
 }
 public struct TaskAwaiter<T>
@@ -3219,11 +3287,11 @@ public struct Duration
     public static Duration Zero { get; }
     public static Duration FromNanoseconds(int64 nanoseconds);
     public static int32 Compare(Duration left, Duration right);
-    public static bool TryAdd(Duration left, Duration right, init ref<Duration> result);
-    public static bool TrySubtract(Duration left, Duration right, init ref<Duration> result);
-    public static bool TryMultiply(Duration value, int64 factor, init ref<Duration> result);
+    public static bool TryAdd(Duration left, Duration right, ref<init Duration> result);
+    public static bool TrySubtract(Duration left, Duration right, ref<init Duration> result);
+    public static bool TryMultiply(Duration value, int64 factor, ref<init Duration> result);
     public static bool TryDivideTruncating(Duration value, int64 divisor,
-        init ref<Duration> result);
+        ref<init Duration> result);
 }
 
 public struct Instant
@@ -3231,8 +3299,8 @@ public struct Instant
     public int64 UnixNanoseconds { get; }
     public static Instant FromUnixNanoseconds(int64 nanoseconds);
     public static int32 Compare(Instant left, Instant right);
-    public static bool TryAdd(Instant instant, Duration delta, init ref<Instant> result);
-    public static bool TrySubtract(Instant later, Instant earlier, init ref<Duration> result);
+    public static bool TryAdd(Instant instant, Duration delta, ref<init Instant> result);
+    public static bool TrySubtract(Instant later, Instant earlier, ref<init Duration> result);
 }
 
 public struct MonotonicTimestamp;
@@ -3245,7 +3313,7 @@ public interface IMonotonicClock
 {
     MonotonicTimestamp GetTimestamp();
     bool TryGetElapsed(MonotonicTimestamp earlier, MonotonicTimestamp later,
-        init ref<Duration> elapsed);
+        ref<init Duration> elapsed);
 }
 public struct SystemClock : IUtcClock, IMonotonicClock
 {
@@ -3253,7 +3321,7 @@ public struct SystemClock : IUtcClock, IMonotonicClock
     public Instant GetUtcNow();
     public MonotonicTimestamp GetTimestamp();
     public bool TryGetElapsed(MonotonicTimestamp earlier, MonotonicTimestamp later,
-        init ref<Duration> elapsed);
+        ref<init Duration> elapsed);
 }
 ```
 
@@ -3448,8 +3516,8 @@ overlap and cleanup metadata remain explicit contracts before adoption.
 neither unique ownership nor authority to close an independently aliased
 stream. A future `BufferedByteStream<TStream>` must specify which concrete
 owner/loan it receives and how that responsibility survives flush/close
-failure; a `[Sized]` constraint or erased interface spelling does not establish
-it. Likewise, `Result<nuint, Error>` reports successful progress but does not
+failure; a generic type constraint or erased interface spelling does not
+establish it. Likewise, `Result<nuint, Error>` reports successful progress but does not
 by itself report how much a failing read/write consumed or exposed. Exact-read,
 write-all and copy helpers cannot promise rollback or exact failed-call
 progress until the base stream contract or a richer progress result supplies
@@ -3627,7 +3695,7 @@ public struct IpAddress : IFormattable
 {
     public bool IsIPv4 { get; }
     public bool IsIPv6 { get; }
-    public static bool TryParse(TextSpan text, init ref<IpAddress> value);
+    public static bool TryParse(TextSpan text, ref<init IpAddress> value);
     public bool Equals(IpAddress other);
     public uint64 GetKeyHashCode();
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
@@ -3708,8 +3776,8 @@ public mut unique struct Utf8TextReader<TStream>
     [Captures("source")]
     public Utf8TextReader(write ref<TStream> source,
         MalformedTextPolicy policy, nuint bufferCapacity);
-    public mut Result<bool, Error> ReadScalar(init ref<rune> value);
-    public mut Result<bool, Error> ReadLine(init ref<own<val<Text>>> value);
+    public mut Result<bool, Error> ReadScalar(ref<init rune> value);
+    public mut Result<bool, Error> ReadLine(ref<init own<val<Text>>> value);
     public mut Result<void, Error> Close();
 }
 public mut unique struct Utf8TextWriter<TStream>
@@ -3757,18 +3825,18 @@ approved by this reference.
 ```terrum
 public struct BinaryPrimitives
 {
-    public static bool TryReadInt16LittleEndian(Span<uint8> source, init ref<int16> value);
-    public static bool TryReadInt16BigEndian(Span<uint8> source, init ref<int16> value);
-    public static bool TryReadUInt16LittleEndian(Span<uint8> source, init ref<uint16> value);
-    public static bool TryReadUInt16BigEndian(Span<uint8> source, init ref<uint16> value);
-    public static bool TryReadInt32LittleEndian(Span<uint8> source, init ref<int32> value);
-    public static bool TryReadInt32BigEndian(Span<uint8> source, init ref<int32> value);
-    public static bool TryReadUInt32LittleEndian(Span<uint8> source, init ref<uint32> value);
-    public static bool TryReadUInt32BigEndian(Span<uint8> source, init ref<uint32> value);
-    public static bool TryReadInt64LittleEndian(Span<uint8> source, init ref<int64> value);
-    public static bool TryReadInt64BigEndian(Span<uint8> source, init ref<int64> value);
-    public static bool TryReadUInt64LittleEndian(Span<uint8> source, init ref<uint64> value);
-    public static bool TryReadUInt64BigEndian(Span<uint8> source, init ref<uint64> value);
+    public static bool TryReadInt16LittleEndian(Span<uint8> source, ref<init int16> value);
+    public static bool TryReadInt16BigEndian(Span<uint8> source, ref<init int16> value);
+    public static bool TryReadUInt16LittleEndian(Span<uint8> source, ref<init uint16> value);
+    public static bool TryReadUInt16BigEndian(Span<uint8> source, ref<init uint16> value);
+    public static bool TryReadInt32LittleEndian(Span<uint8> source, ref<init int32> value);
+    public static bool TryReadInt32BigEndian(Span<uint8> source, ref<init int32> value);
+    public static bool TryReadUInt32LittleEndian(Span<uint8> source, ref<init uint32> value);
+    public static bool TryReadUInt32BigEndian(Span<uint8> source, ref<init uint32> value);
+    public static bool TryReadInt64LittleEndian(Span<uint8> source, ref<init int64> value);
+    public static bool TryReadInt64BigEndian(Span<uint8> source, ref<init int64> value);
+    public static bool TryReadUInt64LittleEndian(Span<uint8> source, ref<init uint64> value);
+    public static bool TryReadUInt64BigEndian(Span<uint8> source, ref<init uint64> value);
     public static bool TryWriteInt16LittleEndian(write Span<uint8> destination, int16 value);
     public static bool TryWriteInt16BigEndian(write Span<uint8> destination, int16 value);
     public static bool TryWriteUInt16LittleEndian(write Span<uint8> destination, uint16 value);
@@ -3795,25 +3863,24 @@ public enum BinaryCodecStatus : int32
     InvalidData
 }
 public interface IFixedBinaryCodec<T>
-    where T : [Copy], [Sized]
 {
     nuint EncodedLength { get; }
     BinaryCodecStatus Encode(ref<T> value, write Span<uint8> destination);
-    BinaryCodecStatus Decode(Span<uint8> source, init ref<T> value);
+    BinaryCodecStatus Decode(Span<uint8> source, ref<init T> value);
 }
 public struct UInt32BinaryCodec : IFixedBinaryCodec<uint32>
 {
     public UInt32BinaryCodec(ByteOrder order);
     public nuint EncodedLength { get; }
     public BinaryCodecStatus Encode(ref<uint32> value, write Span<uint8> destination);
-    public BinaryCodecStatus Decode(Span<uint8> source, init ref<uint32> value);
+    public BinaryCodecStatus Decode(Span<uint8> source, ref<init uint32> value);
 }
 public struct Int64BinaryCodec : IFixedBinaryCodec<int64>
 {
     public Int64BinaryCodec(ByteOrder order);
     public nuint EncodedLength { get; }
     public BinaryCodecStatus Encode(ref<int64> value, write Span<uint8> destination);
-    public BinaryCodecStatus Decode(Span<uint8> source, init ref<int64> value);
+    public BinaryCodecStatus Decode(Span<uint8> source, ref<init int64> value);
 }
 ```
 
@@ -3861,7 +3928,7 @@ selected by their names.
 public struct Locale : IFormattable
 {
     public Text Id { get; }
-    public static bool TryParse(TextSpan text, init ref<Locale> value);
+    public static bool TryParse(TextSpan text, ref<init Locale> value);
     public bool Equals(Locale other);
     public uint64 GetKeyHashCode();
     public bool TryFormat<TWriter>(write ref<TWriter> writer, TextSpan format)
@@ -3889,13 +3956,13 @@ public struct NumberFormatter
     public static bool TryFormat<TWriter>(decimal64 value, write ref<TWriter> writer,
         TextSpan format, ref<CultureData> culture) where TWriter : ITextWriter;
     public static bool TryParse(TextSpan text, TextSpan format,
-        ref<CultureData> culture, init ref<int32> value);
+        ref<CultureData> culture, ref<init int32> value);
     public static bool TryParse(TextSpan text, TextSpan format,
-        ref<CultureData> culture, init ref<uint64> value);
+        ref<CultureData> culture, ref<init uint64> value);
     public static bool TryParse(TextSpan text, TextSpan format,
-        ref<CultureData> culture, init ref<float64> value);
+        ref<CultureData> culture, ref<init float64> value);
     public static bool TryParse(TextSpan text, TextSpan format,
-        ref<CultureData> culture, init ref<decimal64> value);
+        ref<CultureData> culture, ref<init decimal64> value);
 }
 public struct LocalDateTime
 {
@@ -3908,7 +3975,7 @@ public struct LocalDateTime
     public uint32 Nanosecond { get; }
     public static bool TryCreate(int32 year, uint8 month, uint8 day,
         uint8 hour, uint8 minute, uint8 second, uint32 nanosecond,
-        init ref<LocalDateTime> value);
+        ref<init LocalDateTime> value);
 }
 public struct DateTimeFormatter
 {
@@ -3916,7 +3983,7 @@ public struct DateTimeFormatter
         write ref<TWriter> writer, TextSpan format, ref<CultureData> culture)
         where TWriter : ITextWriter;
     public static bool TryParse(TextSpan text, TextSpan format,
-        ref<CultureData> culture, init ref<LocalDateTime> value);
+        ref<CultureData> culture, ref<init LocalDateTime> value);
 }
 public interface ITimeZoneDataProvider
 {
@@ -4022,8 +4089,8 @@ singleton, a default encoding, or authority to escape its supplied capability.
 | `NumberFormatter`, `DateTimeFormatter` | Typed `TryFormat<TWriter>(value,writer,format,culture)` and `TryParse(text,format,culture,init value)` | Locale-sensitive APIs explicitly separate from ordinal/invariant primitive formatting; no scalar promotion or implicit zone/calendar |
 | `LocalDateTime`, `TimeZoneDatabase`, `TimeZone`, `LocalTimeMapping`, `ITimeZoneDataProvider` | Validated civil `TryCreate`; provider `Load`, zone `Find`/`Convert`/`Map`; mapping `Count`, copied index and explicit `Resolve` | Immutable rule versions, no UTC/civil conflation; gaps/overlaps and instant-domain failure remain explicit |
 | `BinaryPrimitives`, `IFixedBinaryCodec<T>`, `UInt32BinaryCodec`, `Int64BinaryCodec` | Closed signed/unsigned 16/32/64-bit byte-order reads/writes; fixed `EncodedLength`, `Encode`, `Decode` | Explicit wire bytes, no native-layout inference; checked vacancy/publication and no retained buffers |
-| `IByteEncoder<T>`, `IByteDecoder<T>` | `Encode(ref<T>,write Span<uint8>,init ref<nuint> written) -> Result<bool,Error>`; `Decode(Span<uint8>,init ref<T>,init ref<nuint> consumed) -> Result<bool,Error>` | Explicit schema/version, incremental state, output-publication rules |
-| `BinarySerializer<T>`, `TextSerializer<T>` | `Write(ref<T>,write ref<IByteStream>) -> Result<void,Error>`; `Read(write ref<IByteStream>,init ref<T>) -> Result<bool,Error>` | Checked registration/schema/encoding; no reflection on arbitrary objects or hidden allocation |
+| `IByteEncoder<T>`, `IByteDecoder<T>` | `Encode(ref<T>,write Span<uint8>,ref<init nuint> written) -> Result<bool,Error>`; `Decode(Span<uint8>,ref<init T>,ref<init nuint> consumed) -> Result<bool,Error>` | Explicit schema/version, incremental state, output-publication rules |
+| `BinarySerializer<T>`, `TextSerializer<T>` | `Write(ref<T>,write ref<IByteStream>) -> Result<void,Error>`; `Read(write ref<IByteStream>,ref<init T>) -> Result<bool,Error>` | Checked registration/schema/encoding; no reflection on arbitrary objects or hidden allocation |
 
 These rows are signature families, not a generic capability-object base
 class. `IByteStream` is a behavioral witness; an erased owned stream requires
