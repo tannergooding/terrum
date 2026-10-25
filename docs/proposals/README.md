@@ -34,6 +34,12 @@ numbers do not save bytes.
 |---|---|
 | [Semantic IL and metadata extensions](il-extensions.md) | Remaining Body/runtime carriers, exception regions, roots/effects, sharing and inlining questions; TypeSpecRef and the register instruction/Body schema are integrated. |
 
+## Metadata reference forms
+
+| Proposal | Review boundary |
+|---|---|
+| [TextFragmentShape reference forms](text-fragment-reference-forms.md) | Unapproved namespaces and conditional references for captured values, formatter evidence and writer requirements; preserves the assigned 40-byte row and literal/formatted tags. |
+
 ## Review and implementation handoff
 
 Review shared state and representation before dependent native, witness,
