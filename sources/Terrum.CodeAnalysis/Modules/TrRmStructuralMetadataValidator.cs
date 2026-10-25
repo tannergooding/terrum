@@ -657,6 +657,16 @@ public static class TrRmStructuralMetadataValidator
             constantSources = new TrRmConstantSourceTableReader(constantSourceBytes,
                 constantSourceCount, frozenValueNodeCount, constantExecutionCount,
                 targetValueBindingCount);
+            for (var row = 1; row <= interfaceConstDefs.Count; row++)
+            {
+                var ownerInterface = interfaceConstDefs.GetOwnerInterfaceDef(row);
+                var ownerTypeDef = interfaces.GetOwnerTypeDef(ownerInterface);
+                TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+                    interfaceConstDefs.GetConstantSourceRow(row),
+                    interfaceConstDefs.GetConstantTypeSpecRef(row),
+                    types.GetOwnerModule(ownerTypeDef), constantSources,
+                    frozenValueNodes, blobs, typeSpecs, features, modules);
+            }
             associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
                 associatedTypeBytes, associatedTypeCount, strings, typeSpecs, interfaces);
             interfaceWitnesses = new TrRmInterfaceWitnessTableReader(

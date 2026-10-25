@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
@@ -76,6 +77,21 @@ public sealed class TrRmInterfaceConstantTableTests
             fixture.InterfaceConstDefs, fixture.AssociatedConstDefs);
     }
 
+    [Test]
+    public void InitializedInterfaceConstantRequiresTypedFrozenValuesFeature()
+    {
+        var fixture = CreateFixture();
+        var moduleBytes = (byte[])fixture.Modules.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(24), 0);
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(28), 0);
+        var noFeatureFixture = fixture with { Modules = moduleBytes };
+
+        Assert.Throws<NotSupportedException>(() => TrRmStructuralMetadataValidator.Validate(
+            CreateArtifact(noFeatureFixture, fixture.InterfaceDefs,
+                fixture.InterfaceConstDefs, fixture.AssociatedConstDefs,
+                includeFeature11: false)));
+    }
+
     private static Fixture CreateFixture()
     {
         var stringBytes = TrRmStringTableWriter.EncodeNames([
@@ -83,10 +99,10 @@ public sealed class TrRmInterfaceConstantTableTests
         ]);
         var strings = new TrRmStringTableReader(stringBytes, 4);
         var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1, 1, 1),
         ], strings, 0, 1, 0, 0);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, 1, 0, 0);
+            0, 1, 0, 0, 1);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             new byte[] { 1, 0, 8 },
         ], 0, 0, 0, 0);
@@ -135,7 +151,7 @@ public sealed class TrRmInterfaceConstantTableTests
     {
         var strings = new TrRmStringTableReader(fixture.Strings, 4);
         var modules = new TrRmModuleTableReader(fixture.Modules, 1, strings,
-            0, 1, 0, 0);
+            0, 1, 0, 0, 1);
         var typeSpecs = new TrRmTypeSpecTableReader(fixture.TypeSpecs, 1, 0, 0, 0, 0);
         var types = new TrRmTypeDefTableReader(fixture.TypeDefs, 1,
             strings, modules, 0, 0, 1, 0);
@@ -172,7 +188,8 @@ public sealed class TrRmInterfaceConstantTableTests
                 associatedConstDefBytes)));
 
     private static byte[] CreateArtifact(Fixture fixture, byte[] interfaceDefBytes,
-        byte[] interfaceConstDefBytes, byte[] associatedConstDefBytes)
+        byte[] interfaceConstDefBytes, byte[] associatedConstDefBytes,
+        bool includeFeature11 = true)
     {
         var blobBytes = TrRmVariableTableWriter.EncodeBlobs(
             [new byte[] { 0, 0, 0, 0 }]);
@@ -181,10 +198,17 @@ public sealed class TrRmInterfaceConstantTableTests
         frozenValueBytes[4] = 1;
         BinaryPrimitives.WriteUInt32LittleEndian(
             frozenValueBytes.AsSpan(8), 1);
-        return TrRmArtifactWriter.Encode([
+        var sections = new List<TrRmSection> {
             new TrRmSection(0x0001, 0, 1, fixture.Modules),
             new TrRmSection(0x0002, 0, 4, fixture.Strings),
             new TrRmSection(0x0003, 0, 1, blobBytes),
+        };
+        if (includeFeature11)
+        {
+            sections.Add(new TrRmSection(0x0004, 0, 1,
+                new byte[] { 11, 0, 0, 0, 1, 0, 0, 0 }));
+        }
+        sections.AddRange([
             new TrRmSection(0x0011, 0, 1, fixture.TypeSpecs),
             new TrRmSection(0x0013, 0, 1, fixture.TypeDefs),
             new TrRmSection(0x0015, 0, 1, fixture.Layouts),
@@ -194,6 +218,7 @@ public sealed class TrRmInterfaceConstantTableTests
             new TrRmSection(0x0032, 0, 1, associatedConstDefBytes),
             new TrRmSection(0x003F, 0, 1, frozenValueBytes),
         ]);
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private sealed record Fixture(
