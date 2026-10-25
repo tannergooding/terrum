@@ -161,7 +161,10 @@ are checked where assigned. `E8`/`EA` remain unsupported and rejected.
 Register/type/effect semantics, other record-to-instruction links, and
 unsupported `B4`/`B6` forms remain outside this slice. F0/F1 rejection is
 provisional under the unapproved pseudo-retirement proposal; normative
-assignments remain unchanged.
+assignments remain unchanged. The reader also rejects R14 in explicit
+destination roles, requires place handles/call windows to use general
+registers, and bounds paired-formal windows to R0..R13. Per-operation source
+roles and R15 discard eligibility remain in instruction verification.
 Artifact framing now selects standard TRRM or the internal development
 executable schema before indexing and writing. The standard index follows the
 registry's assigned section kinds/strides, including `NativeImport`/

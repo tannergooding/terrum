@@ -146,8 +146,11 @@ index. Tiny/short Home, Type, Constant and Method map indexes and the
 and expected record kind. Long `D0..DE`/`E0..E7`/`EB` forms also validate
 their assigned map, Block and record references, selected record kinds,
 reserved controls and query-kind routing; `E8`/`EA` remain rejected.
-Register/type/effect semantics and remaining instruction-record
-relationships are not established.
+The reader also rejects R14 in explicit destination roles, restricts
+place/window registers to R0..R13, and bounds paired-formal windows; per-
+operation source roles and R15 discard eligibility remain unverified.
+Register/type/effect semantics and remaining instruction-record relationships
+are not established.
 
 Artifact framing now takes an explicit standard or internal development
 schema before table indexing and writing. Standard `TrRmArtifactIndex` uses

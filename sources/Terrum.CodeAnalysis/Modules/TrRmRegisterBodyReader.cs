@@ -308,6 +308,8 @@ internal readonly ref struct TrRmRegisterBodyReader
                 }
                 break;
         }
+
+        ValidateShortRegisterRoles(opcode, x, y);
     }
 
     private void ValidateLongInstructionReferences(byte opcode,
@@ -423,6 +425,107 @@ internal readonly ref struct TrRmRegisterBodyReader
                 }
                 ValidateMapIndex(reference, HomeCount);
                 break;
+        }
+
+        ValidateLongRegisterRoles(opcode, instruction);
+    }
+
+    private static void ValidateShortRegisterRoles(byte opcode, int x, int y)
+    {
+        switch (opcode)
+        {
+            case 0x10:
+            case 0x11:
+            case 0x13:
+            case 0x15:
+            case 0x16:
+            case 0x19:
+            case >= 0x20 and <= 0x2B:
+            case >= 0x30 and <= 0x36:
+            case 0x40:
+            case 0x41:
+            case >= 0x50 and <= 0x52:
+            case >= 0x70 and <= 0x7F:
+                ValidateWritableRegister(x);
+                break;
+            case 0x12:
+                if (x > 12 || y > 14)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0x60:
+            case 0x61:
+            case 0x62:
+            case 0x64:
+            case 0x66:
+            case 0x91:
+                ValidateGeneralRegister(x);
+                break;
+            case 0x63:
+            case 0x65:
+            case 0x67:
+                ValidateWritableRegister(x);
+                ValidateGeneralRegister(y);
+                break;
+            case 0x80:
+            case 0x82:
+                ValidateGeneralRegister(x);
+                break;
+            case 0x81:
+            case 0x83:
+                ValidateGeneralRegister(x);
+                ValidateGeneralRegister(y);
+                break;
+        }
+    }
+
+    private static void ValidateLongRegisterRoles(byte opcode,
+        ReadOnlySpan<byte> instruction)
+    {
+        var control = instruction[1];
+        var lowRegister = control & 0x0F;
+        var highRegister = control >> 4;
+        switch (opcode)
+        {
+            case >= 0xD0 and <= 0xD5:
+            case 0xD7:
+                ValidateWritableRegister(lowRegister);
+                break;
+            case 0xD8:
+                ValidateGeneralRegister(lowRegister);
+                break;
+            case 0xDA:
+            case 0xDB:
+            case 0xDD:
+            case 0xDE:
+                ValidateWritableRegister(lowRegister);
+                break;
+            case 0xE1:
+                ValidateGeneralRegister(lowRegister);
+                ValidateWritableRegister(highRegister);
+                break;
+            case 0xE2:
+                ValidateGeneralRegister(lowRegister);
+                ValidateGeneralRegister(highRegister);
+                ValidateWritableRegister(ReadUInt16(instruction, 2) & 0x0F);
+                break;
+        }
+    }
+
+    private static void ValidateWritableRegister(int register)
+    {
+        if (register == 14)
+        {
+            throw InvalidBody();
+        }
+    }
+
+    private static void ValidateGeneralRegister(int register)
+    {
+        if (register > 13)
+        {
+            throw InvalidBody();
         }
     }
 

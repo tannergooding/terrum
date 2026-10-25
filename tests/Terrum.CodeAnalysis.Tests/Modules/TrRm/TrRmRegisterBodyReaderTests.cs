@@ -164,9 +164,15 @@ public sealed class TrRmRegisterBodyReaderTests
         _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
             [blockState, placeSelection], 0x03, placeCounts,
             [0x61, 0x10, 0x18, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(
+            [blockState, placeSelection], 0x03, placeCounts,
+            [0x61, 0x1E, 0x18, 0x00]));
         _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
             [blockState, placeSelection], 0x03, placeCounts,
             [0x91, 0x10, 0x18, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(
+            [blockState, placeSelection], 0x03, placeCounts,
+            [0x91, 0x1E, 0x18, 0x00]));
 
         var callSite = new byte[] {
             2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -254,6 +260,9 @@ public sealed class TrRmRegisterBodyReaderTests
         _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
             [blockState, placeSelection], 0x03, placeCounts,
             [0xD8, 0, 1, 0, 0x18, 0]));
+        AssertInvalid(CreateBodyWithRecords(
+            [blockState, placeSelection], 0x03, placeCounts,
+            [0xD8, 0x0E, 1, 0, 0x18, 0]));
         _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
             [blockState, placeSelection], 0x03, placeCounts,
             [0xDA, 0, 1, 0, 0x18, 0]));
@@ -316,6 +325,37 @@ public sealed class TrRmRegisterBodyReaderTests
             [blockState, edge], code: [0xD9, 0, 1, 0, 0x18, 0]));
         AssertInvalid(CreateBodyWithRecords(
             [blockState, edge], code: [0xE0, 0, 1, 0, 0x18, 0]));
+    }
+
+    [Test]
+    public void ValidatesSpecialRegisterRoleBounds()
+    {
+        _ = new TrRmRegisterBodyReader(CreateBody(0, code: [0x12, 0xEC, 0]));
+        AssertInvalid(CreateBody(0, code: [0x10, 0x0E, 0]));
+        AssertInvalid(CreateBody(0, code: [0x21, 0x0E, 0]));
+        AssertInvalid(CreateBody(0, code: [0x12, 0x0D, 0]));
+        AssertInvalid(CreateBody(0, code: [0x12, 0xFC, 0]));
+
+        var homeCounts = new uint[5];
+        homeCounts[0] = 1;
+        AssertInvalid(CreateBody(0x01, homeCounts, [0x60, 0x0E, 0]));
+        AssertInvalid(CreateBody(0, code: [0x64, 0x0E, 0]));
+        AssertInvalid(CreateBody(0, code: [0x63, 0x0E, 0]));
+        AssertInvalid(CreateBody(0, code: [0x65, 0xE0, 0]));
+        AssertInvalid(CreateBody(0, code: [0x67, 0xE0, 0]));
+
+        var typeCounts = new uint[5];
+        typeCounts[1] = 1;
+        AssertInvalid(CreateBody(0x02, typeCounts, [0xD0, 0x0E, 0, 0, 0x18, 0]));
+        var methodCounts = new uint[5];
+        methodCounts[2] = 1;
+        AssertInvalid(CreateBody(0x04, methodCounts, [0x80, 0x0E, 0x18, 0]));
+        AssertInvalid(CreateBody(0x04, methodCounts, [0x81, 0x0E, 0x18, 0]));
+        AssertInvalid(CreateBody(0x04, methodCounts, [0x81, 0xE0, 0x18, 0]));
+        AssertInvalid(CreateBody(0x04, methodCounts, [0xE1, 0xE0, 0, 0, 0x18, 0]));
+        AssertInvalid(CreateBody(0x04, methodCounts, [0xE1, 0x0E, 0, 0, 0x18, 0]));
+        AssertInvalid(CreateBody(0, code: [0xE2, 0x0E, 0, 0, 0x18, 0]));
+        AssertInvalid(CreateBody(0, code: [0xE2, 0, 0x0E, 0, 0x18, 0]));
     }
 
     [Test]
