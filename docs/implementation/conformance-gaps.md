@@ -140,6 +140,10 @@ root/subject TypeSpecRefs, direct FieldDef or expected-FieldDef Import
 references, exact TargetProfile row bounds, and exclusive offset-field ranges.
 They do not bind path steps through owner substitutions or compute/compare
 target layouts.
+Standard UnionCaseDef/UnionCaseField rows now validate their TypeDef and case
+owners, exclusive payload-field ranges, ordered payload ordinals and complete
+UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so these
+structural checks do not establish nominal-union source or runtime support.
 
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,

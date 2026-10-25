@@ -21,6 +21,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
             TrRmAssociatedConstDefTableReader associatedConstDefs,
             TrRmAssociatedRelationTableReader associatedRelations,
+            TrRmUnionCaseDefTableReader unionCaseDefs,
+            TrRmUnionCaseFieldTableReader unionCaseFields,
             TrRmConstantSourceTableReader constantSources,
             TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
             TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
@@ -47,6 +49,8 @@ public static class TrRmStructuralMetadataValidator
             InterfaceConstDefs = interfaceConstDefs;
             AssociatedConstDefs = associatedConstDefs;
             AssociatedRelations = associatedRelations;
+            UnionCaseDefs = unionCaseDefs;
+            UnionCaseFields = unionCaseFields;
             ConstantSources = constantSources;
             TargetLayoutDependencies = targetLayoutDependencies;
             TargetLayoutDependencyFields = targetLayoutDependencyFields;
@@ -79,6 +83,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
         internal TrRmAssociatedConstDefTableReader AssociatedConstDefs { get; }
         internal TrRmAssociatedRelationTableReader AssociatedRelations { get; }
+        internal TrRmUnionCaseDefTableReader UnionCaseDefs { get; }
+        internal TrRmUnionCaseFieldTableReader UnionCaseFields { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
         internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
         internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
@@ -171,6 +177,8 @@ public static class TrRmStructuralMetadataValidator
             out var interfaceConstCount);
         _ = index.TryGetSection(0x0032, out var associatedConstBytes,
             out var associatedConstCount);
+        _ = index.TryGetSection(0x0034, out var unionCaseDefBytes, out var unionCaseDefCount);
+        _ = index.TryGetSection(0x0035, out var unionCaseFieldBytes, out var unionCaseFieldCount);
         _ = index.TryGetSection(0x0036, out var associatedRelationBytes,
             out var associatedRelationCount);
         _ = index.TryGetSection(0x003F, out _, out var frozenValueNodeCount);
@@ -268,12 +276,20 @@ public static class TrRmStructuralMetadataValidator
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
         var associatedConstDefs = default(TrRmAssociatedConstDefTableReader);
         var associatedRelations = default(TrRmAssociatedRelationTableReader);
+        var unionCaseDefs = default(TrRmUnionCaseDefTableReader);
+        var unionCaseFields = default(TrRmUnionCaseFieldTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
         var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
         var fieldPaths = default(TrRmFieldPathTableReader);
         if (!developmentProfile)
         {
+            unionCaseDefs = new TrRmUnionCaseDefTableReader(
+                unionCaseDefBytes, unionCaseDefCount, strings, types,
+                unionCaseFieldCount);
+            unionCaseFields = new TrRmUnionCaseFieldTableReader(
+                unionCaseFieldBytes, unionCaseFieldCount, strings, typeSpecs,
+                unionCaseDefs);
             interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes,
                 interfaceDefCount, types, generics, interfaceBaseCount,
                 interfaceMethodCount, associatedTypeCount, associatedConstCount,
@@ -449,7 +465,8 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
-            interfaceConstDefs, associatedConstDefs, associatedRelations, constantSources,
+            interfaceConstDefs, associatedConstDefs, associatedRelations,
+            unionCaseDefs, unionCaseFields, constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,

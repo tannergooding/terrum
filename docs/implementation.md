@@ -169,9 +169,12 @@ F2/F3 forms; exact instance binding and the Constraint kind-3 row link remain
 incomplete. InterfaceConstDef and AssociatedConstDef rows validate their
 InterfaceDef ranges, owners, names and complete type references; initialized
 interface constants also require a bounded ConstantSource row reference. The
-associated-type identity and
-relation-payload proposals remain unapproved; their implementation directions
-are provisional only.
+standard UnionCaseDef/UnionCaseField readers validate TypeDef/UnionCaseDef
+owners, exclusive payload ranges, ordered payload ordinals and complete
+UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so this
+row validation does not admit nominal-union source or runtime support. The
+associated-type identity and relation-payload proposals remain unapproved;
+their implementation directions are provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
