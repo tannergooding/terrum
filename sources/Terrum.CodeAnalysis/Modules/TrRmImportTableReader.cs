@@ -15,7 +15,9 @@ internal readonly record struct TrRmImportBinding(string ProducerIdentity, strin
 public readonly ref struct TrRmImportTableReader
 {
     private const int RowSize = 12;
+    private readonly ReadOnlySpan<byte> _rows;
     private readonly Dictionary<uint, TrRmImportBinding> _expected;
+    private readonly int _recordCount;
 
     internal int Count => _expected is null ? 0 : _expected.Count;
 
@@ -42,6 +44,8 @@ public readonly ref struct TrRmImportTableReader
             throw InvalidImport();
         }
 
+        _rows = section;
+        _recordCount = recordCount;
         _expected = new Dictionary<uint, TrRmImportBinding>(recordCount);
         var lastModuleRefRow = 0;
         var lastRequirements = default((int OwnerModule,
@@ -136,6 +140,16 @@ public readonly ref struct TrRmImportTableReader
 
         binding = default;
         return false;
+    }
+
+    internal uint GetExpectedDefinitionForImportRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidImport();
+        }
+
+        return Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

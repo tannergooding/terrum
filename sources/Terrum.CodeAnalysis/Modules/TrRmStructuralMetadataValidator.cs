@@ -231,8 +231,10 @@ public static class TrRmStructuralMetadataValidator
         var properties = propertyCount == 0 ? default
             : new TrRmPropertyDefTableReader(propertyBytes, propertyCount,
                 strings, types, typeSpecs, methods, signatures);
+        var selectedConstantSourceCount = developmentProfile ? 0 : constantSourceCount;
         var generics = new TrRmGenericParamTableReader(genericParamBytes, genericParamCount,
-            strings, types, methods, signatures, typeSpecs, constraintCount);
+            strings, types, methods, signatures, typeSpecs, constraintCount,
+            selectedConstantSourceCount);
         var interfaces = default(TrRmInterfaceDefTableReader);
         var associatedTypeDefs = default(TrRmAssociatedTypeDefTableReader);
         var interfaceBases = default(TrRmInterfaceBaseTableReader);
@@ -265,6 +267,8 @@ public static class TrRmStructuralMetadataValidator
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties,
             interfaces, associatedTypeDefs);
+        TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
+            generics, imports, selectedConstantSourceCount);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports,
             interfaces, associatedTypeDefs);

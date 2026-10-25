@@ -31,12 +31,15 @@ public static class TrRmGenericParamTableWriter
     /// <param name="types">The validated TypeDef table.</param>
     /// <param name="methods">The validated MethodDef table.</param>
     /// <param name="signatures">The validated MethodSig table.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
     /// <param name="constraintCount">The number of Constraint rows.</param>
+    /// <param name="constantSourceCount">The number of ConstantSource rows.</param>
     /// <returns>The encoded GenericParam section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmGenericParamRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
-        TrRmTypeSpecTableReader typeSpecs, int constraintCount)
+        TrRmTypeSpecTableReader typeSpecs, int constraintCount,
+        int constantSourceCount = 0)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -62,7 +65,8 @@ public static class TrRmGenericParamTableWriter
         }
 
         _ = new TrRmGenericParamTableReader(result, rows.Count,
-            strings, types, methods, signatures, typeSpecs, constraintCount);
+            strings, types, methods, signatures, typeSpecs, constraintCount,
+            constantSourceCount);
         return result;
     }
 
