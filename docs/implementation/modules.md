@@ -43,9 +43,11 @@ through `0x004B`, including standard SourceMap Body slots; semantic table
 binding and standard execution remain incomplete. The structural validator
 currently reads standard `InterfaceDef` and `AssociatedTypeDef` rows and
 checks their owner, self-formal, range, name and complete default-type shape.
-It does not yet validate InterfaceBase/InterfaceMethod or constant row
-payloads, bind associated declarations across Import/Export, or execute
-associated relations and witnesses.
+InterfaceBase and InterfaceMethod rows validate their range ownership,
+ordinals, complete base TypeSpecRefs and directly declared instance MethodDef
+owners. Base-instance interface binding, constant row payloads, associated
+Import/Export binding, and associated-relation/witness execution remain
+incomplete.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute

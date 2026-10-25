@@ -36,12 +36,28 @@ public readonly ref struct TrRmInterfaceDefTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int[] _associatedTypeOwners;
     private readonly int _recordCount;
+    private readonly int _baseCount;
+    private readonly int _methodCount;
+    private readonly int _associatedConstCount;
+    private readonly int _interfaceConstCount;
 
     /// <summary>Gets the number of validated InterfaceDef rows.</summary>
     public int Count => _recordCount;
 
     /// <summary>Gets the number of AssociatedTypeDef rows in the owning ranges.</summary>
     public int AssociatedTypeCount => _associatedTypeOwners.Length - 1;
+
+    /// <summary>Gets the number of InterfaceBase rows.</summary>
+    public int InterfaceBaseCount => _baseCount;
+
+    /// <summary>Gets the number of InterfaceMethod rows.</summary>
+    public int InterfaceMethodCount => _methodCount;
+
+    /// <summary>Gets the number of AssociatedConstDef rows.</summary>
+    public int AssociatedConstCount => _associatedConstCount;
+
+    /// <summary>Gets the number of InterfaceConstDef rows.</summary>
+    public int InterfaceConstCount => _interfaceConstCount;
 
     /// <summary>Validates InterfaceDef rows and their associated-type ranges.</summary>
     /// <param name="section">The borrowed 48-byte InterfaceDef rows.</param>
@@ -68,6 +84,10 @@ public readonly ref struct TrRmInterfaceDefTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _baseCount = interfaceBaseCount;
+        _methodCount = interfaceMethodCount;
+        _associatedConstCount = associatedConstCount;
+        _interfaceConstCount = interfaceConstCount;
         _associatedTypeOwners = new int[associatedTypeCount + 1];
         var interfaceOwners = new int[types.Count + 1];
 
@@ -162,6 +182,22 @@ public readonly ref struct TrRmInterfaceDefTableReader
     /// <summary>Gets the directly-declared AssociatedTypeDef range.</summary>
     public (int First, int Count) GetAssociatedTypeRange(int row)
         => (checked((int)ReadRow(row, 24)), checked((int)ReadRow(row, 28)));
+
+    /// <summary>Gets the directly-declared InterfaceBase range.</summary>
+    public (int First, int Count) GetBaseRange(int row)
+        => (checked((int)ReadRow(row, 8)), checked((int)ReadRow(row, 12)));
+
+    /// <summary>Gets the directly-declared InterfaceMethod range.</summary>
+    public (int First, int Count) GetMethodRange(int row)
+        => (checked((int)ReadRow(row, 16)), checked((int)ReadRow(row, 20)));
+
+    /// <summary>Gets the directly-declared AssociatedConstDef range.</summary>
+    public (int First, int Count) GetAssociatedConstRange(int row)
+        => (checked((int)ReadRow(row, 32)), checked((int)ReadRow(row, 36)));
+
+    /// <summary>Gets the directly-declared InterfaceConstDef range.</summary>
+    public (int First, int Count) GetInterfaceConstRange(int row)
+        => (checked((int)ReadRow(row, 40)), checked((int)ReadRow(row, 44)));
 
     /// <summary>Gets the InterfaceDef row that owns an AssociatedTypeDef row.</summary>
     public int GetAssociatedTypeOwner(int row)

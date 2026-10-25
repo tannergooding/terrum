@@ -381,9 +381,11 @@ generic substitution, proof, witness and execution semantics; row framing
 alone does not execute a generic contract. The standard structural validator
 also checks InterfaceDef/AssociatedTypeDef ownership, self-formal identity,
 range extents, associated-row partitioning, names and optional default
-TypeSpecRefs. InterfaceBase/InterfaceMethod and constant payload checks,
-associated-type Import/Export identity, provider/default binding, relations,
-witnesses and execution remain incomplete. The focused
+TypeSpecRefs. InterfaceBase/InterfaceMethod ownership, ordinals, complete
+base TypeSpecRefs and direct instance MethodDef ownership are now checked;
+base-instance binding, constant payloads, associated-type Import/Export
+identity, provider/default binding, relations, witnesses and execution remain
+incomplete. The focused
 [associated-relation payload proposal](../proposals/constraint-associated-relation-payload.md)
 is unapproved, provisionally guides implementation only under explicit user
 authorization, and does not resolve the separate AssociatedTypeDef identity

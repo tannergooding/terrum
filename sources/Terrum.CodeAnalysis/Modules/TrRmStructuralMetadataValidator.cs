@@ -16,6 +16,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs, TrRmInterfaceDefTableReader interfaces,
             TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+            TrRmInterfaceBaseTableReader interfaceBases,
+            TrRmInterfaceMethodTableReader interfaceMethods,
             TrRmFieldDefTableReader fields,
             TrRmLayoutTableReader layouts, TrRmLayoutFieldTableReader layoutFields,
             TrRmTargetProfileTableReader targetProfiles,
@@ -33,6 +35,8 @@ public static class TrRmStructuralMetadataValidator
             TypeSpecs = typeSpecs;
             Interfaces = interfaces;
             AssociatedTypeDefs = associatedTypeDefs;
+            InterfaceBases = interfaceBases;
+            InterfaceMethods = interfaceMethods;
             Fields = fields;
             Layouts = layouts;
             LayoutFields = layoutFields;
@@ -56,6 +60,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmInterfaceDefTableReader Interfaces { get; }
         internal TrRmAssociatedTypeDefTableReader AssociatedTypeDefs { get; }
+        internal TrRmInterfaceBaseTableReader InterfaceBases { get; }
+        internal TrRmInterfaceMethodTableReader InterfaceMethods { get; }
         internal TrRmFieldDefTableReader Fields { get; }
         internal TrRmLayoutTableReader Layouts { get; }
         internal TrRmLayoutFieldTableReader LayoutFields { get; }
@@ -131,9 +137,11 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0011, out var typeSpecBytes, out var typeSpecCount);
         _ = index.TryGetSection(0x0013, out var typeDefBytes, out var typeDefCount);
         _ = index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
-        _ = index.TryGetSection(0x0024, out _, out var interfaceMethodCount);
+        _ = index.TryGetSection(0x0024, out var interfaceMethodBytes,
+            out var interfaceMethodCount);
         _ = index.TryGetSection(0x0025, out var interfaceDefBytes, out var interfaceDefCount);
-        _ = index.TryGetSection(0x0026, out _, out var interfaceBaseCount);
+        _ = index.TryGetSection(0x0026, out var interfaceBaseBytes,
+            out var interfaceBaseCount);
         _ = index.TryGetSection(0x0027, out var associatedTypeBytes,
             out var associatedTypeCount);
         _ = index.TryGetSection(0x0031, out _, out var interfaceConstCount);
@@ -218,12 +226,18 @@ public static class TrRmStructuralMetadataValidator
             strings, types, methods, signatures, typeSpecs, constraintCount);
         var interfaces = default(TrRmInterfaceDefTableReader);
         var associatedTypeDefs = default(TrRmAssociatedTypeDefTableReader);
+        var interfaceBases = default(TrRmInterfaceBaseTableReader);
+        var interfaceMethods = default(TrRmInterfaceMethodTableReader);
         if (!developmentProfile)
         {
             interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes,
                 interfaceDefCount, types, generics, interfaceBaseCount,
                 interfaceMethodCount, associatedTypeCount, associatedConstCount,
                 interfaceConstCount);
+            interfaceBases = new TrRmInterfaceBaseTableReader(interfaceBaseBytes,
+                interfaceBaseCount, typeSpecs, interfaces);
+            interfaceMethods = new TrRmInterfaceMethodTableReader(interfaceMethodBytes,
+                interfaceMethodCount, interfaces, methods, signatures);
             associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
                 associatedTypeBytes, associatedTypeCount, strings, typeSpecs, interfaces);
         }
@@ -361,7 +375,8 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
-            interfaces, associatedTypeDefs, fields, layouts, layoutFields,
+            interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
+            fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,
             nativeCallables, nativeFunctionPointerSignatures, nativeVTables, imports,
             index.Schema);
