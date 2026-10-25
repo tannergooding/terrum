@@ -23,7 +23,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmModuleRefTableReader moduleRefs)
     {
         var visitedTypeSpecRows = new HashSet<int>();
-        ValidateHomeMap(body, methodDefRow, methods, signatures, parameters, typeSpecs);
+        ValidateHomeMap(body, methodDefRow, types, methods, signatures, parameters,
+            typeSpecs, genericParams, imports);
         ValidateTypeMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, visitedTypeSpecRows);
         ValidateMethodMap(body, ownerModule, methods, signatures, parameters,
@@ -37,8 +38,10 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,
-        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
-        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs)
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports)
     {
         var signature = methods.GetSignature(methodDefRow);
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
@@ -63,7 +66,8 @@ internal static class TrRmRegisterBodyMapValidator
             {
                 case 1:
                     if (flags != 0 || formalOrdinal != 0 || !hasReceiver || hasReceiverHome
-                        || !MatchesTypeMapEntry(body, typeMapIndex, receiverType, typeSpecs))
+                        || !MatchesTypeMapEntry(body, typeMapIndex, receiverType,
+                            types, typeSpecs, genericParams, imports))
                     {
                         throw InvalidMap();
                     }
@@ -73,7 +77,8 @@ internal static class TrRmRegisterBodyMapValidator
                     if (flags != 0 || formalOrdinal >= parameterCount
                         || !formalOrdinals.Add(formalOrdinal)
                         || !MatchesTypeMapEntry(body, typeMapIndex,
-                            parameters.GetTypeSpec(firstParameter + formalOrdinal), typeSpecs))
+                            parameters.GetTypeSpec(firstParameter + formalOrdinal),
+                            types, typeSpecs, genericParams, imports))
                     {
                         throw InvalidMap();
                     }
@@ -89,7 +94,9 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static bool MatchesTypeMapEntry(TrRmRegisterBodyReader body,
-        int typeMapIndex, uint expectedType, TrRmTypeSpecTableReader typeSpecs)
+        int typeMapIndex, uint expectedType, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports)
     {
         var token = ReadUInt32(body.TypeMap, typeMapIndex * sizeof(uint));
         var kind = (byte)(token >> 24);
@@ -107,7 +114,8 @@ internal static class TrRmRegisterBodyMapValidator
                 return MatchesInlineFamilyTypeSpec(typeSpecRef, expectedType, typeSpecs);
             }
 
-            return typeSpecs.AreEquivalentTypeSpecRefs(typeSpecRef, expectedType);
+            return AreEquivalentSelectedTypeSpecRefs(typeSpecRef, expectedType,
+                types, typeSpecs, genericParams, imports);
         }
 
         if (kind is not (0x13 or 0x1C))
@@ -130,6 +138,150 @@ internal static class TrRmRegisterBodyMapValidator
                 && ReadUInt32(expectedRow, 2) == (token & 0x00FF_FFFF),
             _ => false,
         };
+    }
+
+    private static bool AreEquivalentSelectedTypeSpecRefs(uint left, uint right,
+        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports)
+    {
+        var pending = new Stack<(uint Left, uint Right)>();
+        var visited = new HashSet<(uint Left, uint Right)>();
+        pending.Push((left, right));
+        while (pending.TryPop(out var pair))
+        {
+            if (pair.Left == pair.Right || !visited.Add(pair))
+            {
+                continue;
+            }
+
+            var leftReference = typeSpecs.GetTypeSpecRef(pair.Left);
+            var rightReference = typeSpecs.GetTypeSpecRef(pair.Right);
+            if (leftReference.Qualifiers != rightReference.Qualifiers)
+            {
+                return false;
+            }
+            if (leftReference.Form != rightReference.Form)
+            {
+                if (leftReference.Form == 0x0C && rightReference.Form == 0x01
+                    && rightReference.TypeCode >= 0x80)
+                {
+                    if (!MatchesInlineFamilyTypeSpec(pair.Right, pair.Left, typeSpecs))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+                if (leftReference.Form == 0x01 && leftReference.TypeCode >= 0x80
+                    && rightReference.Form == 0x0C)
+                {
+                    if (!MatchesInlineFamilyTypeSpec(pair.Left, pair.Right, typeSpecs))
+                    {
+                        return false;
+                    }
+                    continue;
+                }
+                return false;
+            }
+
+            var leftRow = leftReference.IsRow
+                ? typeSpecs.GetRow(leftReference.Row) : default;
+            var rightRow = rightReference.IsRow
+                ? typeSpecs.GetRow(rightReference.Row) : default;
+            switch (leftReference.Form)
+            {
+                case 0x01:
+                    if (leftReference.TypeCode != rightReference.TypeCode
+                        || leftReference.ArgumentCode != rightReference.ArgumentCode)
+                    {
+                        return false;
+                    }
+                    break;
+
+                case 0x02:
+                case 0x03:
+                case 0x04:
+                    if (!leftReference.IsRow || !rightReference.IsRow
+                        || ReadUInt32(leftRow, 2) != ReadUInt32(rightRow, 2))
+                    {
+                        return false;
+                    }
+                    break;
+
+                case 0x05:
+                    if (!leftReference.IsRow || !rightReference.IsRow)
+                    {
+                        return false;
+                    }
+                    var leftDefinitionRef = ReadUInt32(leftRow, 2);
+                    var rightDefinitionRef = ReadUInt32(rightRow, 2);
+                    if (!typeSpecs.AreEquivalentTypeSpecRefs(
+                        leftDefinitionRef, rightDefinitionRef))
+                    {
+                        return false;
+                    }
+
+                    var leftDefinition = typeSpecs.GetNominalTypeDefRow(
+                        leftDefinitionRef, types, imports);
+                    var rightDefinition = typeSpecs.GetNominalTypeDefRow(
+                        rightDefinitionRef, types, imports);
+                    if (leftDefinition != rightDefinition)
+                    {
+                        return false;
+                    }
+
+                    var (firstFormal, formalCount) = types.GetGenericRange(leftDefinition);
+                    var leftArgumentCount = typeSpecs.GetConstructedArgumentCount(leftReference.Row);
+                    var rightArgumentCount = typeSpecs.GetConstructedArgumentCount(rightReference.Row);
+                    if (leftArgumentCount != formalCount || rightArgumentCount != formalCount)
+                    {
+                        return false;
+                    }
+                    for (var ordinal = 0; ordinal < formalCount; ordinal++)
+                    {
+                        var formalKind = genericParams.GetFormalKind(firstFormal + ordinal);
+                        var leftArgument = typeSpecs.GetConstructedArgument(
+                            leftReference.Row, ordinal);
+                        var rightArgument = typeSpecs.GetConstructedArgument(
+                            rightReference.Row, ordinal);
+                        if (formalKind == 1)
+                        {
+                            pending.Push((leftArgument, rightArgument));
+                        }
+                        else if (formalKind != 2 || leftArgument != rightArgument)
+                        {
+                            return false;
+                        }
+                    }
+                    break;
+
+                case >= 0x06 and <= 0x0B:
+                case 0x0E:
+                    if (!leftReference.IsRow || !rightReference.IsRow)
+                    {
+                        return false;
+                    }
+                    pending.Push((ReadUInt32(leftRow, 2), ReadUInt32(rightRow, 2)));
+                    break;
+
+                case 0x0C:
+                    if (!leftReference.IsRow || !rightReference.IsRow
+                        || leftRow[2] != rightRow[2])
+                    {
+                        return false;
+                    }
+                    pending.Push((ReadUInt32(leftRow, 3), ReadUInt32(rightRow, 3)));
+                    break;
+
+                default:
+                    if (!typeSpecs.AreEquivalentTypeSpecRefs(pair.Left, pair.Right))
+                    {
+                        return false;
+                    }
+                    break;
+            }
+        }
+
+        return true;
     }
 
     private static bool MatchesInlineFamilyTypeSpec(uint inlineTypeSpecRef,
