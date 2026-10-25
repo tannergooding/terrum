@@ -15,7 +15,9 @@ public static class TrRmStructuralMetadataValidator
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
             TrRmModuleTableReader modules, TrRmModuleRefTableReader moduleRefs,
             TrRmTypeDefTableReader typeDefs,
-            TrRmTypeSpecTableReader typeSpecs, TrRmInterfaceDefTableReader interfaces,
+            TrRmTypeSpecTableReader typeSpecs,
+            TrRmGenericParamTableReader genericParams,
+            TrRmInterfaceDefTableReader interfaces,
             TrRmAssociatedTypeDefTableReader associatedTypeDefs,
             TrRmInterfaceWitnessTableReader interfaceWitnesses,
             TrRmWitnessMemberTableReader witnessMembers,
@@ -54,6 +56,7 @@ public static class TrRmStructuralMetadataValidator
             ModuleRefs = moduleRefs;
             TypeDefs = typeDefs;
             TypeSpecs = typeSpecs;
+            GenericParams = genericParams;
             Interfaces = interfaces;
             AssociatedTypeDefs = associatedTypeDefs;
             InterfaceWitnesses = interfaceWitnesses;
@@ -99,6 +102,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmModuleRefTableReader ModuleRefs { get; }
         internal TrRmTypeDefTableReader TypeDefs { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
+        internal TrRmGenericParamTableReader GenericParams { get; }
         internal TrRmInterfaceDefTableReader Interfaces { get; }
         internal TrRmAssociatedTypeDefTableReader AssociatedTypeDefs { get; }
         internal TrRmInterfaceWitnessTableReader InterfaceWitnesses { get; }
@@ -155,8 +159,8 @@ public static class TrRmStructuralMetadataValidator
             var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
             TrRmRegisterBodyMapValidator.Validate(body,
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), TypeDefs, TypeSpecs,
-                Methods, Signatures, Fields, FieldPaths, ConstantSources,
-                Imports, ModuleRefs);
+                GenericParams, Methods, Signatures, Parameters, Fields,
+                FieldPaths, ConstantSources, Imports, ModuleRefs);
         }
     }
 
@@ -580,6 +584,7 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, moduleRefs, types, typeSpecs,
+            generics,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
             witnessAssociatedTypes,
             interfaceBases, interfaceMethods,

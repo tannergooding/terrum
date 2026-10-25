@@ -125,11 +125,13 @@ method-aware selected-Body map validator now checks HomeMap structure and
 signature ordinal bounds, TypeMap token forms and pseudo-base acyclicity,
 MethodMap/FieldMap row kinds and bounds, top-level direct/Import module
 ownership, selected FieldPath step ownership, and ConstantMap TypeSpecRef/
-ConstantSource row bounds. It does not yet bind nested TypeSpec or FieldPath
-roots in each using-module context, compare HomeMap types to substituted
-signature types, or prove ConstantMap source/value type equality. Full record
-and instruction semantics, descriptor eligibility, canonical writing,
-remapping, re-emission and execution remain unfinished.
+ConstantSource row bounds. Map-reachable TypeSpec references are traversed
+under the selected Module, including constructed type arguments, MethodSig
+result/receiver/parameter types, FieldDef types and FieldPath roots/steps.
+Exact HomeMap type substitution, callee/provider contract equality and
+ConstantMap source/value type equality remain incomplete. Full record and
+instruction semantics, descriptor eligibility, canonical writing, remapping,
+re-emission and execution remain unfinished.
 
 Artifact framing now takes an explicit standard or internal development
 schema before table indexing and writing. Standard `TrRmArtifactIndex` uses
@@ -1171,12 +1173,12 @@ fields, plus the accepted integer, binary-floating and decimal type matrices.
 
 **Current/evidence:** development fixture/reader behavior is not independent
 proof of the selected schema. The standard selected-Body validator checks
-top-level map token kinds, row bounds and direct/Import ownership, plus
-pseudo-base cycles and constant-source row bounds; it does not establish
-map-to-signature type equality, nested TypeSpec/FieldPath context, canonical
-writing or runtime execution. Numerical portable resource minima remain
-unassigned, not invented defaults. A lower fixed-width ID is not smaller on
-disk.
+map token kinds, row bounds, direct/Import ownership and pseudo-base cycles,
+and traverses map-reachable TypeSpec references under the using Module. It
+does not establish exact substitution, HomeMap-to-signature equivalence,
+ConstantSource value-type equality, canonical writing or runtime execution.
+Numerical portable resource minima remain unassigned, not invented defaults.
+A lower fixed-width ID is not smaller on disk.
 
 **Routes/gate:** CG-001 must preserve ordinary equivalent noncanonical
 admission versus strict writers/scoped audits, retained root budgets,
