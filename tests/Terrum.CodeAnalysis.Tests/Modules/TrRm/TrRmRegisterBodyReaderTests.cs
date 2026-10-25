@@ -232,6 +232,19 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesFixedShortInstructionOperands()
+    {
+        AssertBody([0x17, 0x00]);
+        AssertInvalid(CreateBody(0, code: [0x17, 0x10]));
+
+        AssertBody([0x18, 0x00]);
+        AssertInvalid(CreateBody(0, code: [0x18, 0x01]));
+
+        AssertBody([0x66, 0x00, 0x18, 0x00]);
+        AssertInvalid(CreateBody(0, code: [0x66, 0x10, 0x18, 0x00]));
+    }
+
+    [Test]
     public void ValidatesLongInstructionMapAndRecordReferences()
     {
         var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
@@ -359,6 +372,16 @@ public sealed class TrRmRegisterBodyReaderTests
         AssertInvalid(CreateBody(0, code: [0x21, 0x0E, 0]));
         AssertInvalid(CreateBody(0, code: [0x12, 0x0D, 0]));
         AssertInvalid(CreateBody(0, code: [0x12, 0xFC, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0x19, 0x10, 0x18, 0]));
+        AssertInvalid(CreateBody(0, code: [0x19, 0xE0, 0x18, 0]));
+        AssertInvalid(CreateBody(0, code: [0x19, 0xF0, 0x18, 0]));
+        AssertInvalid(CreateBody(0, code: [0x1A, 0x0E, 0x18, 0]));
+        AssertInvalid(CreateBody(0, code: [0x1A, 0x0F, 0x18, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0x1A, 0xE0, 0x18, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0x1A, 0xF0, 0x18, 0]));
 
         var homeCounts = new uint[5];
         homeCounts[0] = 1;
@@ -370,7 +393,6 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var typeCounts = new uint[5];
         typeCounts[1] = 1;
-        AssertInvalid(CreateBody(0x02, typeCounts, [0xD0, 0x0E, 0, 0, 0x18, 0]));
         var methodCounts = new uint[5];
         methodCounts[2] = 1;
         AssertInvalid(CreateBody(0x04, methodCounts, [0x80, 0x0E, 0x18, 0]));
@@ -380,6 +402,22 @@ public sealed class TrRmRegisterBodyReaderTests
         AssertInvalid(CreateBody(0x04, methodCounts, [0xE1, 0x0E, 0, 0, 0x18, 0]));
         AssertInvalid(CreateBody(0, code: [0xE2, 0x0E, 0, 0, 0x18, 0]));
         AssertInvalid(CreateBody(0, code: [0xE2, 0, 0x0E, 0, 0x18, 0]));
+    }
+
+    [Test]
+    public void ValidatesLongConversionSourceAndDestinationRegisterRoles()
+    {
+        var typeCounts = new uint[5];
+        typeCounts[1] = 1;
+        foreach (var opcode in new byte[] { 0xD0, 0xD1, 0xD2, 0xD3 })
+        {
+            _ = new TrRmRegisterBodyReader(CreateBody(0x02, typeCounts,
+                [opcode, 0x0E, 0, 0, 0x18, 0]));
+            _ = new TrRmRegisterBodyReader(CreateBody(0x02, typeCounts,
+                [opcode, 0x0F, 0, 0, 0x18, 0]));
+            AssertInvalid(CreateBody(0x02, typeCounts,
+                [opcode, 0xE0, 0, 0, 0x18, 0]));
+        }
     }
 
     [Test]
@@ -398,7 +436,7 @@ public sealed class TrRmRegisterBodyReaderTests
                     : 0x21F0;
             _ = new TrRmRegisterBodyReader(
                 CreateBody(0, code: [
-                    0xC0, control, (byte)payload, (byte)(payload >> 8), 0,
+                    0xC0, control, (byte)(payload & 0xFF), (byte)(payload >> 8), 0,
                 ]));
         }
 
@@ -407,7 +445,7 @@ public sealed class TrRmRegisterBodyReaderTests
             var payload = control == 4 ? 0xF0F0 : 0x21F0;
             _ = new TrRmRegisterBodyReader(
                 CreateBody(0, code: [
-                    0xC1, control, (byte)payload, (byte)(payload >> 8), 0,
+                    0xC1, control, (byte)(payload & 0xFF), (byte)(payload >> 8), 0,
                 ]));
         }
 
@@ -484,7 +522,7 @@ public sealed class TrRmRegisterBodyReaderTests
                     && (!outerNegate
                         || ((control & 0x80) != 0 && (control & 0x10) == 0));
                 var code = new byte[] {
-                    opcode, (byte)control, (byte)payload, (byte)(payload >> 8), 0,
+                    opcode, (byte)control, (byte)(payload & 0xFF), (byte)(payload >> 8), 0,
                 };
                 var accepted = true;
                 try
@@ -515,12 +553,12 @@ public sealed class TrRmRegisterBodyReaderTests
 
     private static void AssertValidRecipeControl(byte opcode, byte control, ushort payload)
         => _ = new TrRmRegisterBodyReader(CreateBody(0, code: [
-            opcode, control, (byte)payload, (byte)(payload >> 8), 0,
+            opcode, control, (byte)(payload & 0xFF), (byte)(payload >> 8), 0,
         ]));
 
     private static void AssertInvalidRecipeControl(byte opcode, byte control, ushort payload)
         => AssertInvalid(CreateBody(0, code: [
-            opcode, control, (byte)payload, (byte)(payload >> 8), 0,
+            opcode, control, (byte)(payload & 0xFF), (byte)(payload >> 8), 0,
         ]));
 
     [Test]

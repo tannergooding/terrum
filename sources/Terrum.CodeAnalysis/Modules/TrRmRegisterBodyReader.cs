@@ -268,6 +268,24 @@ internal readonly ref struct TrRmRegisterBodyReader
             case 0x61:
                 ValidateRecordReference(y, 0x04);
                 break;
+            case 0x17:
+                if (y != 0)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0x18:
+                if (instruction[1] != 0)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0x66:
+                if (y != 0)
+                {
+                    throw InvalidBody();
+                }
+                break;
             case 0x80:
             case 0x82:
                 ValidateMapIndex(y, MethodCount);
@@ -566,7 +584,15 @@ internal readonly ref struct TrRmRegisterBodyReader
             case 0x13:
             case 0x15:
             case 0x16:
+                ValidateWritableRegister(x);
+                break;
             case 0x19:
+                ValidateWritableRegister(x);
+                ValidateGeneralRegister(y);
+                break;
+            case 0x1A:
+                ValidateGeneralRegister(x);
+                break;
             case >= 0x20 and <= 0x2B:
             case >= 0x30 and <= 0x36:
             case 0x40:
@@ -615,7 +641,11 @@ internal readonly ref struct TrRmRegisterBodyReader
         var highRegister = control >> 4;
         switch (opcode)
         {
-            case >= 0xD0 and <= 0xD5:
+            case >= 0xD0 and <= 0xD3:
+                ValidateWritableRegister(highRegister);
+                break;
+            case 0xD4:
+            case 0xD5:
             case 0xD7:
                 ValidateWritableRegister(lowRegister);
                 break;
