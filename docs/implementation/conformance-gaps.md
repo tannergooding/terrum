@@ -949,14 +949,26 @@ active regressions. The Release fast build and focused no-return/effect/
 control-flow/frontend selection passed 131 tests with zero skipped; this is
 not current-schema TRRM CallSite evidence.
 
-**Routes/gate:** implement the accepted register CallSite rule through decode,
-canonical writing, map/record validation, dependency binding/remapping and
-JIT/AOT execution: a verified no-return target uses result selector `None`
-and terminates its Block without publishing a normal result or successor;
-the complete target signature remains in metadata. A normal non-unit call
-retains its typed result selector, and compact call windows remain
-normal-returning forms. The development indexed Body currently round-trips
-non-unit no-return declaration/body facts, not terminal non-unit callsites.
+The selected standard-body method validator now resolves direct/import
+MethodMap targets for general CallSites and compact bound calls. It enforces
+the unit/non-unit result-selector shape, requires a `DoesNotReturn` CallSite
+to use `None` and end its Block, and rejects compact bound calls to those
+targets. Short `0x90` is admitted as a potential terminator. Release fast
+build passed; the focused register Body reader selection passed 57 tests and
+the combined TRRM/metadata/CLI/no-return selection passed 1,763 tests with
+zero skipped. This is selected-validation evidence, not current-schema
+execution evidence.
+
+**Routes/gate:** complete the accepted register CallSite rule through
+indirect Register/Home targets, compact callable-value windows, full argument
+mode/type/ownership checks, result-home type/vacancy and discard
+responsibility, canonical writing, dependency binding/remapping and JIT/AOT
+execution. A verified no-return target must use result selector `None` and
+terminate its Block without publishing a normal result or successor; the
+complete target signature remains in metadata. A normal non-unit call retains
+its typed result selector, and compact calls remain normal-returning forms.
+The development indexed Body currently round-trips non-unit no-return
+declaration/body facts, not terminal non-unit callsites.
 The source/private/native/frontend slice now preserves evaluation order and
 no-normal state across supported expression-bearing statements, including
 assignments, coalescing, native buffers and later arguments. The remaining

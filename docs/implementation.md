@@ -177,6 +177,13 @@ normative assignments remain unchanged. The reader also rejects R14 in explicit
 destination roles, requires place handles/call windows to use general
 registers, and bounds paired-formal windows to R0..R13. Per-operation source
 roles and R15 discard eligibility remain in instruction verification.
+The selected method-aware validator resolves direct/import MethodMap targets
+for general CallSites and compact bound calls. It enforces the unit/non-unit
+result-selector shape, requires a `DoesNotReturn` CallSite to use `None` and
+end its Block, and rejects compact bound calls to such targets. Short `0x90`
+is admitted as a potential terminator. Register/Home indirect callable targets,
+argument modes, result-home types/vacancy, R15 retirement, canonical writing,
+dependency remapping and execution remain incomplete.
 Artifact framing now selects standard TRRM or the internal development
 executable schema before indexing and writing. The standard index follows the
 registry's assigned section kinds/strides, including `NativeImport`/

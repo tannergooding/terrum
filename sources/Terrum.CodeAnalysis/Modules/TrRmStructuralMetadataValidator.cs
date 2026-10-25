@@ -164,7 +164,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmRegisterBodyMapValidator.Validate(body,
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), TypeDefs, TypeSpecs,
                 GenericParams, Methods, Signatures, Parameters, Fields,
-                FieldPaths, ConstantSources, Imports, ModuleRefs);
+                FieldPaths, ConstantSources, Contracts, Imports, ModuleRefs);
         }
     }
 

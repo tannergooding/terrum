@@ -9,6 +9,8 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal static class TrRmRegisterBodyMapValidator
 {
+    private const uint UnitTypeSpecRef = 0xF200_0000;
+
     internal static void Validate(TrRmRegisterBodyReader body, int methodDefRow,
         int ownerModule,
         TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
@@ -16,7 +18,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
-        TrRmConstantSourceTableReader constantSources, TrRmImportTableReader imports,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmContractTableReader contracts, TrRmImportTableReader imports,
         TrRmModuleRefTableReader moduleRefs)
     {
         var visitedTypeSpecRows = new HashSet<int>();
@@ -29,6 +32,8 @@ internal static class TrRmRegisterBodyMapValidator
             methods, fields, fieldPaths, imports, moduleRefs, visitedTypeSpecRows);
         ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantSources, visitedTypeSpecRows);
+        ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
+            contracts, imports);
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,
@@ -428,6 +433,119 @@ internal static class TrRmRegisterBodyMapValidator
                     throw InvalidMap();
             }
         }
+    }
+
+    private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
+        TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmContractTableReader contracts,
+        TrRmImportTableReader imports)
+    {
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            var position = 0;
+            while (position < code.Length)
+            {
+                var opcode = code[position];
+                var instructionLength = TrRmRegisterBodyReader.InstructionLength(opcode);
+                var instruction = code.Slice(position, instructionLength);
+                switch (opcode)
+                {
+                    case 0x80:
+                    case 0x82:
+                        RejectNonReturningMethodMapTarget(
+                            body, instruction[1] >> 4, methods, contracts, imports);
+                        break;
+                    case 0x90:
+                        ValidateCallSiteEffects(body, instruction[1], blockIndex,
+                            typeSpecs, methods, signatures, contracts, imports);
+                        break;
+                    case 0xE0:
+                        ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
+                            blockIndex, typeSpecs, methods, signatures,
+                            contracts, imports);
+                        break;
+                    case 0xE1:
+                        RejectNonReturningMethodMapTarget(
+                            body, ReadUInt16(instruction, 2), methods, contracts, imports);
+                        break;
+                }
+
+                position += instructionLength;
+            }
+        }
+    }
+
+    private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
+        int recordIndex, int blockIndex, TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmContractTableReader contracts, TrRmImportTableReader imports)
+    {
+        var payload = body.GetRecord(recordIndex)[4..];
+        if (payload[0] != 1)
+        {
+            return;
+        }
+
+        var targetMethod = GetMethodMapTarget(
+            body, ReadUInt16(payload, 4), methods, imports);
+        var signature = methods.GetSignature(targetMethod);
+        var resultType = signatures.GetResultTypeSpec(signature);
+        var unitResult = typeSpecs.AreEquivalentTypeSpecRefs(
+            resultType, UnitTypeSpecRef);
+        var doesNotReturn = (contracts.GetEffectsMask(targetMethod) & 2) != 0;
+        if (doesNotReturn
+            ? payload[1] != 0 || !body.IsCallSiteAtBlockEnd(blockIndex, recordIndex)
+            : unitResult ? payload[1] != 0 : payload[1] == 0)
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static void RejectNonReturningMethodMapTarget(
+        TrRmRegisterBodyReader body, int methodMapIndex,
+        TrRmMethodDefTableReader methods, TrRmContractTableReader contracts,
+        TrRmImportTableReader imports)
+    {
+        var targetMethod = GetMethodMapTarget(
+            body, methodMapIndex, methods, imports);
+        if ((contracts.GetEffectsMask(targetMethod) & 2) != 0)
+        {
+            throw InvalidMap();
+        }
+    }
+
+    private static int GetMethodMapTarget(TrRmRegisterBodyReader body,
+        int methodMapIndex, TrRmMethodDefTableReader methods,
+        TrRmImportTableReader imports)
+    {
+        if ((uint)methodMapIndex >= (uint)body.MethodCount)
+        {
+            throw InvalidMap();
+        }
+
+        var token = ReadUInt32(body.MethodMap, methodMapIndex * sizeof(uint));
+        var row = checked((int)(token & 0x00FF_FFFF));
+        return (byte)(token >> 24) switch
+        {
+            0x16 when row > 0 && row <= methods.Count => row,
+            0x1C => GetImportedMethodTarget(row, methods, imports),
+            _ => throw InvalidMap(),
+        };
+    }
+
+    private static int GetImportedMethodTarget(int importRow,
+        TrRmMethodDefTableReader methods, TrRmImportTableReader imports)
+    {
+        var expected = imports.GetExpectedDefinitionForImportRow(importRow);
+        var targetMethod = checked((int)(expected & 0x00FF_FFFF));
+        if ((expected >> 24) != 0x16
+            || targetMethod <= 0 || targetMethod > methods.Count)
+        {
+            throw InvalidMap();
+        }
+
+        return targetMethod;
     }
 
     private static void AddConstructedTypeReferences(int row,

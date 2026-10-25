@@ -672,7 +672,31 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private static int InstructionLength(byte opcode)
+    internal bool IsCallSiteAtBlockEnd(int blockIndex, int recordIndex)
+    {
+        var block = GetBlockCode(blockIndex);
+        var position = 0;
+        while (position < block.Length)
+        {
+            var opcode = block[position];
+            var length = InstructionLength(opcode);
+            if (position + length == block.Length)
+            {
+                return opcode switch
+                {
+                    0x90 => block[position + 1] == recordIndex,
+                    0xE0 => ReadUInt16(block, position + 2) == recordIndex,
+                    _ => false,
+                };
+            }
+
+            position += length;
+        }
+
+        return false;
+    }
+
+    internal static int InstructionLength(byte opcode)
     {
         if (opcode <= 0x0F)
         {
@@ -710,7 +734,7 @@ internal readonly ref struct TrRmRegisterBodyReader
             || opcode is 0x17 or 0x18
                 or >= 0xA0 and <= 0xAF
                 or 0xB0 or 0xB1 or 0xB2 or 0xB4 or 0xB5 or 0xB6 or 0xB7 or 0xB8
-                or 0xE0
+                or 0x90 or 0xE0
                 or >= 0xE3 and <= 0xE6
                 or 0xE8 or 0xEA or 0xEB;
 
