@@ -129,8 +129,9 @@ public sealed class NestedValueTests
         Assert.That(compilation.Program, Is.Null);
     }
 
-    [Test]
-    public void RightHandSideCannotVacateTheContainingValue()
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public void RightHandSideCannotVacateTheContainingValue(BoundRuntimePolicy runtimePolicy)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             struct Inner { public mut bool Flag; public int32 Other;
@@ -142,10 +143,33 @@ public sealed class NestedValueTests
                 value.Value.Flag = Clear(out value);
                 return 0;
             }
-            """));
+            """), runtimePolicy);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
+
+    [Test]
+    public async Task NestedWriteCanFollowAnUnconditionalValueOutputAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Values + """
+            int32 Replace(out Pair value) {
+                value = new Pair(10, 32);
+                return 19;
+            }
+            int32 Main() {
+                mut Pair value = new Pair(1, 2);
+                value.First.Value = Replace(out value);
+                return value.First.Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteBothAsync(((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual0 = compilation.Program;
+            Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual0!;
+        }))(), 19).ConfigureAwait(true);
+    }
+
     [TestCase("Value = 1; return 0;")]
     [TestCase("return Value;")]
     public void StaticMembersCannotUseAnImplicitInstanceField(string body)

@@ -2566,6 +2566,9 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                // A nested value place remains usable only while its live owner remains complete.
+                var preserveValueOwner = initialized[fieldAssignment.Variable]
+                    && !ManagedClassTypes.IsClass(ownerType);
                 var fieldValueCouldComplete = CanCompleteNormally(fieldAssignment.Value,
                     initialized, program, ref remaining, depth + 1);
                 if (fieldValueCouldComplete)
@@ -2576,6 +2579,11 @@ public static partial class SemanticVerifier
                     function, program, ref remaining, depth + 1, failures))
                 {
                     return true;
+                }
+                if (preserveValueOwner && (!initialized[fieldAssignment.Variable]
+                    || fieldMasks[fieldAssignment.Variable] != FullMask(program, ownerType)))
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 if (targetField.Type == PrimitiveType.TokenSpan)
                 {
@@ -5434,6 +5442,11 @@ public static partial class SemanticVerifier
                         else
                         {
                             initialized[output] = true;
+                            var outputType = function.Variables[output].Type;
+                            if (HasFields(program, outputType))
+                            {
+                                fieldMasks[output] = FullMask(program, outputType);
+                            }
                         }
                     }
                 }
