@@ -36,6 +36,8 @@ numbers do not save bytes.
 |---|---|
 | [Constructor no-return applicability](constructor-no-return-applicability.md) | Unapproved, explicitly provisional direction admitting instance and authored static constructors; preserves initialization/cleanup contracts and separate constructor/static representation gates. |
 | [NoThrow retirement and proof boundaries](no-throw-retirement-and-proof-boundaries.md) | Unapproved, provisionally actionable retirement of the general source/export promise; preserves scoped internal no-failure proofs and separate cleanup/native obligations without restoring the retired Effects bit or adding a carrier. |
+| [Result-correlated aggregate native outputs](aggregate-native-outputs.md) | Unapproved, provisional vacant-only `Blittable Copy` outputs preserving NoThrow retirement; recommends shared OutputState/Dependency extensions, bounded result-selector Feature 10, new Feature 8 beside the native family, and DF/record-0C call reservations as prerequisites for the standard native path. |
+| [Aggregate native-output private persistence](aggregate-native-output-private-persistence.md) | Unapproved candidate private revision 90, declaration-owned normalized output contracts and reservation expression tag 41; preserves exact inner-schema admission, dependency/replacement/remapping obligations and version-2 native containers without reinterpreting legacy output tuples. |
 | [Static-initializer trigger identities](static-initializer-trigger-identities.md) | Unapproved Core schema/enum/case registration and exact trigger normalization; preserves both accepted choices and separate static metadata/runtime gates. |
 
 ## Batch 4: Encoding and operation representation
