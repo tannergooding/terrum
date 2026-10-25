@@ -837,6 +837,23 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void RestrictsBoundMethodCallDiscardToUnitResults()
+    {
+        ValidateSelectedImportedMethodBodyMaps(
+            CreateBoundMethodCallBody([0xE1, 0xF0, 0, 0, 0x18, 0],
+                0x1C00_0001),
+            targetReturnsUnit: true);
+        ValidateSelectedImportedMethodBodyMaps(
+            CreateBoundMethodCallBody([0xE1, 0, 0, 0, 0x18, 0],
+                0x1C00_0001));
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedImportedMethodBodyMaps(
+                CreateBoundMethodCallBody([0xE1, 0xF0, 0, 0, 0x18, 0],
+                    0x1C00_0001)));
+    }
+
+    [Test]
     public void BindsTypeFieldPathAndConstantMapVariants()
     {
         var counts = new uint[5];

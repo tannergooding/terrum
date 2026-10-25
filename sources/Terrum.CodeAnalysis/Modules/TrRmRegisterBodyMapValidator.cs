@@ -466,8 +466,19 @@ internal static class TrRmRegisterBodyMapValidator
                             contracts, imports);
                         break;
                     case 0xE1:
+                        var methodMapIndex = ReadUInt16(instruction, 2);
+                        var targetMethod = GetMethodMapTarget(
+                            body, methodMapIndex, methods, imports);
+                        var signature = methods.GetSignature(targetMethod);
+                        var resultType = signatures.GetResultTypeSpec(signature);
+                        if ((instruction[1] >> 4) == 15
+                            && !typeSpecs.AreEquivalentTypeSpecRefs(
+                                resultType, UnitTypeSpecRef))
+                        {
+                            throw InvalidMap();
+                        }
                         RejectNonReturningMethodMapTarget(
-                            body, ReadUInt16(instruction, 2), methods, contracts, imports);
+                            body, methodMapIndex, methods, contracts, imports);
                         break;
                 }
 
