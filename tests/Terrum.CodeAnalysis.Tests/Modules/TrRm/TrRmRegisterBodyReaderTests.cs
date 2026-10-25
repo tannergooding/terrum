@@ -121,6 +121,89 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesShortInstructionMapAndRecordIndexes()
+    {
+        var homeCounts = new uint[5];
+        homeCounts[0] = 1;
+        _ = new TrRmRegisterBodyReader(CreateBody(0x01, homeCounts, [0x05, 0x00]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x01, homeCounts, [0x13, 0x00, 0x18, 0x00]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x01, homeCounts, [0x14, 0x00, 0x18, 0x00]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x01, homeCounts, [0x15, 0x00, 0x18, 0x00]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x01, homeCounts, [0x60, 0x00, 0x18, 0x00]));
+
+        var typeCounts = new uint[5];
+        typeCounts[1] = 1;
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x02, typeCounts, [0x50, 0x00, 0x18, 0x00]));
+
+        var constantCounts = new uint[5];
+        constantCounts[4] = 1;
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x10, constantCounts, [0x09, 0x00]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x10, constantCounts, [0x16, 0x00, 0x18, 0x00]));
+
+        var methodCounts = new uint[5];
+        methodCounts[2] = 1;
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x04, methodCounts, [0x80, 0x00, 0x18, 0x00]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0x04, methodCounts, [0x82, 0x00, 0x18, 0x00]));
+
+        var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        var placeSelection = new byte[] {
+            4, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        };
+        var placeCounts = new uint[5];
+        placeCounts[0] = 1;
+        placeCounts[1] = 1;
+        _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
+            [blockState, placeSelection], 0x03, placeCounts,
+            [0x61, 0x10, 0x18, 0x00]));
+        _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
+            [blockState, placeSelection], 0x03, placeCounts,
+            [0x91, 0x10, 0x18, 0x00]));
+
+        var callSite = new byte[] {
+            2, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        };
+        var callSiteCounts = new uint[5];
+        callSiteCounts[2] = 1;
+        _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
+            [blockState, callSite], 0x04, callSiteCounts,
+            [0x90, 1, 0x18, 0x00]));
+
+        var semanticStore = new byte[] {
+            5, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        };
+        _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
+            [blockState, semanticStore], code: [0x92, 1, 0x18, 0x00]));
+
+        AssertInvalid(CreateBody(0, code: [0x05, 0x00]));
+        AssertInvalid(CreateBody(0, code: [0x09, 0x00]));
+        AssertInvalid(CreateBody(0, code: [0x13, 0x00, 0x18, 0x00]));
+        AssertInvalid(CreateBody(0, code: [0x14, 0x00, 0x18, 0x00]));
+        AssertInvalid(CreateBody(0, code: [0x16, 0x00, 0x18, 0x00]));
+        AssertInvalid(CreateBody(0, code: [0x50, 0x00, 0x18, 0x00]));
+        AssertInvalid(CreateBody(0, code: [0x80, 0x00, 0x18, 0x00]));
+
+        var edge = new byte[] { 6, 0, 0, 0, 0, 0, 0, 0 };
+        var wrongRecord = new[] { blockState, edge };
+        AssertInvalid(CreateBodyWithRecords(
+            wrongRecord, 0x03, placeCounts, [0x61, 0x10, 0x18, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(
+            wrongRecord, 0x03, placeCounts, [0x91, 0x10, 0x18, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(
+            wrongRecord, 0x04, callSiteCounts, [0x90, 1, 0x18, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(
+            wrongRecord, code: [0x92, 1, 0x18, 0x00]));
+    }
+
+    [Test]
     public void RejectsInvalidPrefixCountsAndInstructionExtents()
     {
         AssertInvalid(Mutate(CreateBody(), 0, 0x02));

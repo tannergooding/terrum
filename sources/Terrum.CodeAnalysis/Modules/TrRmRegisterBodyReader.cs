@@ -204,7 +204,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                 throw InvalidBody();
             }
 
-            ValidateControlReferences(opcode, block.Slice(position, instructionLength));
+            ValidateInstructionReferences(opcode, block.Slice(position, instructionLength));
             position += instructionLength;
             if (IsDefiniteTerminator(opcode) && position != block.Length)
             {
@@ -220,7 +220,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private void ValidateControlReferences(byte opcode, ReadOnlySpan<byte> instruction)
+    private void ValidateInstructionReferences(byte opcode, ReadOnlySpan<byte> instruction)
     {
         if (opcode is >= 0xA0 and <= 0xAF)
         {
@@ -228,8 +228,51 @@ internal readonly ref struct TrRmRegisterBodyReader
             return;
         }
 
+        var x = instruction.Length > 1 ? instruction[1] & 0x0F : 0;
+        var y = instruction.Length > 1 ? instruction[1] >> 4 : 0;
         switch (opcode)
         {
+            case 0x05:
+            case 0x07:
+                ValidateMapIndex(0, HomeCount);
+                break;
+            case 0x06:
+            case 0x08:
+                ValidateMapIndex(1, HomeCount);
+                break;
+            case 0x09:
+                ValidateMapIndex(0, ConstantCount);
+                break;
+            case 0x13:
+            case 0x15:
+            case 0x60:
+                ValidateMapIndex(y, HomeCount);
+                break;
+            case 0x14:
+                ValidateMapIndex(x, HomeCount);
+                break;
+            case 0x16:
+                ValidateMapIndex(y, ConstantCount);
+                break;
+            case >= 0x50 and <= 0x52:
+                ValidateMapIndex(y, TypeCount);
+                break;
+            case 0x61:
+                ValidateRecordReference(y, 0x04);
+                break;
+            case 0x80:
+            case 0x82:
+                ValidateMapIndex(y, MethodCount);
+                break;
+            case 0x90:
+                ValidateRecordReference(instruction[1], 0x02);
+                break;
+            case 0x91:
+                ValidateRecordReference(y, 0x04);
+                break;
+            case 0x92:
+                ValidateRecordReference(instruction[1], 0x05);
+                break;
             case 0xB0:
                 if (instruction[1] >= BlockCount)
                 {
@@ -258,6 +301,14 @@ internal readonly ref struct TrRmRegisterBodyReader
                     throw InvalidBody();
                 }
                 break;
+        }
+    }
+
+    private static void ValidateMapIndex(int index, int count)
+    {
+        if (index >= count)
+        {
+            throw InvalidBody();
         }
     }
 
