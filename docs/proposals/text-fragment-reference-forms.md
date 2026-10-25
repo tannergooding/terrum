@@ -301,14 +301,37 @@ stringification, allocation/staging ABI or native text layout is supplied.
 Reference/pointer/unique captures retain their real safety, loan, backing,
 retention and async-completion obligations; this metadata grants none.
 
-The [current inventory](../implementation.md#persistent-and-self-hosted-components)
-and [construction gate](../implementation/conformance-gaps.md#cg-007)
-do not establish generated text-graph reconstruction or runtime support.
-Implementation work, if separately authorized, must carry these typed
-references through producers/readers, shared bound traversal/rewriting,
-verification, dependency binding and lowering. A structural slice may
-explicitly report unsupported dependencies without enabling execution.
-This proposal neither edits that inventory nor declares a milestone complete.
+### Current implementation and status
+
+The standard C# `TrRmTextFragmentShapeTableReader` and
+`TrRmTextFragmentShapeTableWriter` are committed, together with the standard
+structural-validator integration that invokes the reader. This is a
+user-authorized provisional implementation of this **unapproved candidate**.
+Its structural checks cover:
+
+* Kind `0` literal versus kind `1` formatted field presence.
+* Distinct, same-shape TextCaptureShape row references and their bounds.
+* MethodDef row bounds and locality to the generated TypeDef's Module.
+* Direct InterfaceWitness row bounds.
+* Kind-1 Constraint evidence owned by a type formal of the generated TypeDef.
+
+The raw MethodDef rows may name imported expected stubs, whose Import
+structures are separately validated.
+
+Focused Release tests passed **4/4**; the combined active TRRM/metadata/CLI
+tests passed **1,729/1,729**. The normal analyzer build still reports
+**758 repository-wide diagnostics**, with none in the new TextFragmentShape files.
+These results do not establish a clean repository-wide analyzer checkpoint.
+
+Exact formatter/witness/interface compatibility, semantic import/replacement
+binding, remapping/packing, producer equivalence, runtime/source construction
+and complete capability closure remain incomplete. General generic evidence
+and WitnessProjection remain separately gated. The structural implementation does not
+establish generated text-graph reconstruction, source-free execution or
+runtime support. The [current inventory](../implementation.md#persistent-and-self-hosted-components)
+and [construction gate](../implementation/conformance-gaps.md#cg-007) retain
+their separate roles. This proposal remains unapproved; normative owners
+are unchanged, and no milestone completion is claimed.
 
 ## Remapping and packing
 

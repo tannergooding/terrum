@@ -28,6 +28,12 @@ numbers do not save bytes.
 |---|---|
 | [Core-library reference](core-library-reference.md) | Broad candidate APIs and dependency layers; accepted members/protocols link to the adopted inventory rather than being redefined. |
 
+## Callable contracts
+
+| Proposal | Review boundary |
+|---|---|
+| [Constructor no-return applicability](constructor-no-return-applicability.md) | Unapproved, explicitly provisional direction admitting instance and authored static constructors; preserves initialization/cleanup contracts and separate constructor/static representation gates. |
+
 ## Batch 4: Encoding and operation representation
 
 | Proposal | Review boundary |
@@ -39,6 +45,9 @@ numbers do not save bytes.
 | Proposal | Review boundary |
 |---|---|
 | [TextFragmentShape reference forms](text-fragment-reference-forms.md) | Unapproved namespaces and conditional references for captured values, formatter evidence and writer requirements; preserves the assigned 40-byte row and literal/formatted tags. |
+| [Witness associated-type binding origin](witness-associated-type-binding-origin.md) | Unapproved closed `bindingOrigin` enum and materialized inherited selections for the assigned WitnessAssociatedType row; does not allocate associated-declaration identities or witness runtime carriers. |
+| [ImmutableData declaration references](immutable-data-declaration-reference.md) | Unapproved direct-DefId target sets and owner substitution for constants and immutable regions; numeric identities, richer feature closure and publication/runtime carriers remain separate gates. |
+| [ImmutableData definition-kind assignments](immutable-data-definition-kinds.md) | Unapproved `0x22/0x23/0x24` DefId candidates for fixed constants, selected associated-constant bindings and static fields; preserves the separate `0x20` associated-type candidate and publication/value/runtime gates. |
 
 ## Review and implementation handoff
 
