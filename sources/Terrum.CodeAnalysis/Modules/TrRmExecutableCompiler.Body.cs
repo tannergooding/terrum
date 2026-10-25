@@ -11,6 +11,19 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private static (int Opcode, int Kind) IntegerArithmeticEncoding(TokenKind operation,
+        BoundIntegerOverflowBehavior overflowBehavior)
+        => (operation, overflowBehavior) switch
+        {
+            (TokenKind.Plus, BoundIntegerOverflowBehavior.Checked) => (0x15, 1),
+            (TokenKind.Minus, BoundIntegerOverflowBehavior.Checked) => (0x15, 2),
+            (TokenKind.Star, BoundIntegerOverflowBehavior.Checked) => (0x15, 3),
+            (TokenKind.Plus, BoundIntegerOverflowBehavior.Wrapping) => (5, 10),
+            (TokenKind.Minus, BoundIntegerOverflowBehavior.Wrapping) => (5, 11),
+            (TokenKind.Star, BoundIntegerOverflowBehavior.Wrapping) => (5, 12),
+            _ => throw Unsupported("Integer arithmetic operation has no executable TRRM encoding."),
+        };
+
     private static byte[] EncodeBody(BoundFunction function, bool hasFloatingTypes,
         int nativeRawPointerTypeRow,
         Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
@@ -57,15 +70,33 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundUnary unary:
                     left = EmitExpression(unary.Operand);
-                    (opcode, kind) = unary.Operator switch
+                    if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type))
                     {
-                        TokenKind.Bang => (4, 1),
-                        TokenKind.Tilde => (4, 2),
-                        TokenKind.Plus => (4, 3),
-                        TokenKind.Minus when unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64 => (0x1C, 0),
-                        TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64 => (0x17, 0),
-                        _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
-                    };
+                        if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked
+                            && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64)
+                        {
+                            opcode = 0x17;
+                        }
+                        else
+                        {
+                            right = left;
+                            left = EmitExpression(new BoundConstant(0, unary.Type, unary.Span));
+                            (opcode, kind) = IntegerArithmeticEncoding(TokenKind.Minus,
+                                unary.OverflowBehavior);
+                        }
+                    }
+                    else
+                    {
+                        (opcode, kind) = unary.Operator switch
+                        {
+                            TokenKind.Bang => (4, 1),
+                            TokenKind.Tilde => (4, 2),
+                            TokenKind.Plus => (4, 3),
+                            TokenKind.Minus when unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64
+                                => (0x1C, 0),
+                            _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
+                        };
+                    }
                     break;
                 case BoundBinary binary:
                     if (IsFloat(binary.Left.Type))
@@ -103,24 +134,33 @@ public static partial class TrRmExecutableCompiler
                     }
                     left = EmitExpression(binary.Left);
                     right = EmitExpression(binary.Right);
-                    (opcode, kind) = binary.Operator switch
+                    if (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star)
                     {
-                        TokenKind.Ampersand => (5, 1),
-                        TokenKind.Pipe => (5, 2),
-                        TokenKind.Caret => (5, 3),
-                        TokenKind.EqualsEquals => (5, 4),
-                        TokenKind.BangEquals => (5, 5),
-                        TokenKind.Less => (5, 6),
-                        TokenKind.LessEquals => (5, 7),
-                        TokenKind.Greater => (5, 8),
-                        TokenKind.GreaterEquals => (5, 9),
-                        TokenKind.Plus => (0x15, 1),
-                        TokenKind.Minus => (0x15, 2),
-                        TokenKind.Star => (0x15, 3),
-                        TokenKind.Slash => (0x15, 4),
-                        TokenKind.Percent => (0x15, 5),
-                        _ => throw Unsupported($"Binary operator {binary.Operator} has no executable TRRM encoding."),
-                    };
+                        if (!IsInteger(binary.Left.Type))
+                        {
+                            throw Unsupported("Integer arithmetic requires an admitted integer type.");
+                        }
+                        (opcode, kind) = IntegerArithmeticEncoding(binary.Operator,
+                            binary.OverflowBehavior);
+                    }
+                    else
+                    {
+                        (opcode, kind) = binary.Operator switch
+                        {
+                            TokenKind.Ampersand => (5, 1),
+                            TokenKind.Pipe => (5, 2),
+                            TokenKind.Caret => (5, 3),
+                            TokenKind.EqualsEquals => (5, 4),
+                            TokenKind.BangEquals => (5, 5),
+                            TokenKind.Less => (5, 6),
+                            TokenKind.LessEquals => (5, 7),
+                            TokenKind.Greater => (5, 8),
+                            TokenKind.GreaterEquals => (5, 9),
+                            TokenKind.Slash => (0x15, 4),
+                            TokenKind.Percent => (0x15, 5),
+                            _ => throw Unsupported($"Binary operator {binary.Operator} has no executable TRRM encoding."),
+                        };
+                    }
                     break;
                 case BoundCast cast:
                     left = EmitExpression(cast.Operand);
@@ -704,7 +744,9 @@ public static partial class TrRmExecutableCompiler
                     12 => TokenKind.Star,
                     _ => throw Invalid("Unsupported wrapping Binary kind."),
                 };
-                expression = new TrRmScalarWrappingBinary(token, first, second, first.Type);
+                expression = new BoundBinary(token, first, second, first.Type, default) {
+                    OverflowBehavior = BoundIntegerOverflowBehavior.Wrapping,
+                };
             }
             else if (opcode == 5 && (kind is 4 or 5)
                 && left > 0 && left <= variables.Count

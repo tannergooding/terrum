@@ -29,7 +29,11 @@ table; forward and recursive calls do not require source or name rebinding. Audi
 policy-3 integer reinterpretations preserve the source shift contract without
 changing checked numeric conversions. Loaded scalar graphs, including linear
 Bodies that need these representation operations or calls, are not serializable as
-development structured IR. Its Module section now emits and reads the assigned
+development structured IR. The source arithmetic selector is not persisted;
+the development writer and reader preserve resolved checked/wrapping integer
+add, subtract, multiply and negation through their existing controls, including
+ScalarInitOutput Bodies. This remains development-profile behavior, not
+standard register-Body support. Its Module section now emits and reads the assigned
 48-byte row, including governing edition 1. The standard Feature-table reader
 and writer model exact assigned pairs, ordinary unordered per-Module lists
 with identical-duplicate tolerance, canonical sorted/deduplicated output, and

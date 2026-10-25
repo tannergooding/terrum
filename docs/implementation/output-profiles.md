@@ -172,7 +172,7 @@ current-schema profile.
 | Output calls | Module-local initialization outputs; Boolean results conditionally publish, non-Boolean/void results require normal-return initialization |
 | General Bodies | One straight-line block or one direct Boolean-call split with two terminal arms; independently audited place state |
 | Places | Output formals then local places, exact types, vacant activation and initialization; entry/inherited state counts as use ordinal zero |
-| Operations | Existing admitted scalar values, comparisons, checked arithmetic/conversions, loads, initialization and local calls; no general place escape |
+| Operations | Existing admitted scalar values, comparisons, checked/wrapping integer add/subtract/multiply/negate, checked divide/remainder/shifts/conversions, loads, initialization and local calls; no general place escape |
 | Failure | Existing Fail reason 1; no checked handling, ownership cleanup, exceptional output publication or general output forwarding |
 | Native scalar addresses | Revision 7 readonly `NoEscape` inputs; revision 8 writable result-correlated outputs and the bounded three-block unsafe scope |
 | Unsafe scope | Experimental opcode `0x2E` marks the one-block suffix or conditional entry and its terminal successors; not the accepted indexed region `0x06` |

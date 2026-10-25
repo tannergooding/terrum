@@ -1355,7 +1355,7 @@ public static partial class TrRmExecutableCompiler
                     structureTypeByTypeDef: structureTypeByTypeDef);
                 if (statements.Any(static statement => statement is BoundLocal
                     { Initializer: TrRmScalarReinterpret or TrRmScalarConvert
-                        or TrRmScalarWrappingBinary or TrRmScalarOptionalNone
+                        or TrRmScalarOptionalNone
                         or TrRmScalarOptionalLift or TrRmScalarOptionalPresence
                         or TrRmScalarOptionalEquality or BoundBinary
                         { Operator: TokenKind.ShiftLeft or TokenKind.ShiftRight } }

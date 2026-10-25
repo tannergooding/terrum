@@ -803,14 +803,26 @@ public static partial class TrRmExecutableCompiler
                     break;
                 case BoundUnary unary:
                     left = ReadOperand(unary.Operand);
-                    (opcode, kind) = unary.Operator switch {
-                        TokenKind.Bang => (4, 1),
-                        TokenKind.Tilde => (4, 2),
-                        TokenKind.Plus => (4, 3),
-                        TokenKind.Minus when unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64 => (0x1C, 0),
-                        TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64 => (0x17, 0),
-                        _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
-                    };
+                    if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type))
+                    {
+                        if (unary.OverflowBehavior != BoundIntegerOverflowBehavior.Checked
+                            || unary.Type is not (PrimitiveType.Int32 or PrimitiveType.Int64))
+                        {
+                            throw Unsupported("Indexed integer negation must be lowered to an arithmetic operation.");
+                        }
+                        opcode = 0x17;
+                    }
+                    else
+                    {
+                        (opcode, kind) = unary.Operator switch {
+                            TokenKind.Bang => (4, 1),
+                            TokenKind.Tilde => (4, 2),
+                            TokenKind.Plus => (4, 3),
+                            TokenKind.Minus when unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64
+                                => (0x1C, 0),
+                            _ => throw Unsupported($"Unary operator {unary.Operator} has no executable TRRM encoding."),
+                        };
+                    }
                     break;
                 case BoundCast cast:
                     left = ReadOperand(cast.Operand);
@@ -885,26 +897,34 @@ public static partial class TrRmExecutableCompiler
                     }
                     left = ReadOperand(binary.Left);
                     right = ReadOperand(binary.Right);
-                    (opcode, kind) = binary.Operator switch {
-                        TokenKind.Ampersand => (5, 1),
-                        TokenKind.Pipe => (5, 2),
-                        TokenKind.Caret => (5, 3),
-                        TokenKind.EqualsEquals => (5, 4),
-                        TokenKind.BangEquals => (5, 5),
-                        TokenKind.Less => (5, 6),
-                        TokenKind.LessEquals => (5, 7),
-                        TokenKind.Greater => (5, 8),
-                        TokenKind.GreaterEquals => (5, 9),
-                        TokenKind.Plus => (0x15, 1),
-                        TokenKind.Minus => (0x15, 2),
-                        TokenKind.Star => (0x15, 3),
-                        TokenKind.Slash => (0x15, 4),
-                        TokenKind.Percent => (0x15, 5),
-                        TokenKind.ShiftLeft => (0x15, 6),
-                        TokenKind.ShiftRight => (0x15, 7),
-                        TokenKind.ShiftRightUnsigned => (0x15, 7),
-                        _ => throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding."),
-                    };
+                    if (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star)
+                    {
+                        if (!IsInteger(binary.Left.Type))
+                        {
+                            throw Unsupported("Integer arithmetic requires an admitted integer type.");
+                        }
+                        (opcode, kind) = IntegerArithmeticEncoding(binary.Operator,
+                            binary.OverflowBehavior);
+                    }
+                    else
+                    {
+                        (opcode, kind) = binary.Operator switch {
+                            TokenKind.Ampersand => (5, 1),
+                            TokenKind.Pipe => (5, 2),
+                            TokenKind.Caret => (5, 3),
+                            TokenKind.EqualsEquals => (5, 4),
+                            TokenKind.BangEquals => (5, 5),
+                            TokenKind.Less => (5, 6),
+                            TokenKind.LessEquals => (5, 7),
+                            TokenKind.Greater => (5, 8),
+                            TokenKind.GreaterEquals => (5, 9),
+                            TokenKind.Slash => (0x15, 4),
+                            TokenKind.Percent => (0x15, 5),
+                            TokenKind.ShiftLeft => (0x15, 6),
+                            TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned => (0x15, 7),
+                            _ => throw Unsupported($"Binary operator {binary.Operator} has no executable scalar encoding."),
+                        };
+                    }
                     break;
                 case BoundCall call:
                     opcode = 0x12;
@@ -1626,8 +1646,22 @@ public static partial class TrRmExecutableCompiler
                 case BoundConstant constant:
                     return Add(constant);
                 case BoundUnary unary:
-                    return Add(new BoundUnary(unary.Operator, Read(Expression(unary.Operand)),
-                        unary.Type, default));
+                {
+                    var unaryOperand = Read(Expression(unary.Operand));
+                    if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type)
+                        && (unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                            || unary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping))
+                    {
+                        var zero = Add(new BoundConstant(0, unary.Type, default));
+                        return Add(new BoundBinary(TokenKind.Minus, Read(zero), unaryOperand,
+                            unary.Type, default) {
+                            OverflowBehavior = unary.OverflowBehavior,
+                        });
+                    }
+                    return Add(new BoundUnary(unary.Operator, unaryOperand, unary.Type, default) {
+                        OverflowBehavior = unary.OverflowBehavior,
+                    });
+                }
                 case BoundCast cast:
                     return Add(new BoundCast(Read(Expression(cast.Operand)), cast.Type, default));
                 case BoundUpdate { Place: BoundRead place } update
@@ -1641,7 +1675,9 @@ public static partial class TrRmExecutableCompiler
                     var one = Add(new BoundConstant(1, update.Type, default));
                     var replacement = Add(new BoundBinary(update.Operator == TokenKind.PlusPlus
                         ? TokenKind.Plus : TokenKind.Minus, Read(previous), Read(one),
-                        update.Type, default));
+                        update.Type, default) {
+                        OverflowBehavior = update.OverflowBehavior,
+                    });
                     _slots[place.Variable] = replacement;
                     return update.IsPrefix ? replacement : previous;
                 case BoundCompoundAssignment { Place: BoundRead place } compound
@@ -1657,7 +1693,9 @@ public static partial class TrRmExecutableCompiler
                     var next = CompoundOperators.IsShift(compound.Operator)
                         ? Shift(operation, old, operand, compound.Type)
                         : Add(new BoundBinary(operation, Read(old), Read(operand),
-                            compound.Type, default));
+                            compound.Type, default) {
+                            OverflowBehavior = compound.OverflowBehavior,
+                        });
                     _slots[place.Variable] = next;
                     return next;
                 case BoundBinary binary when binary.Operator is TokenKind.AmpersandAmpersand
@@ -1674,7 +1712,9 @@ public static partial class TrRmExecutableCompiler
                     {
                         return Shift(binary.Operator, lhs, rhs, binary.Type);
                     }
-                    return Add(new BoundBinary(binary.Operator, Read(lhs), Read(rhs), binary.Type, default));
+                    return Add(new BoundBinary(binary.Operator, Read(lhs), Read(rhs), binary.Type, default) {
+                        OverflowBehavior = binary.OverflowBehavior,
+                    });
                 case BoundConditional conditional:
                     var condition = Expression(conditional.Condition);
                     return Merge(condition, () => Expression(conditional.WhenTrue),

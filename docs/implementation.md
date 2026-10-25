@@ -40,8 +40,10 @@ subject binding; compiler/scanner component compilation remains Development.
 The
 [unapproved private-persistence proposal](proposals/source-arithmetic-private-persistence.md) is
 provisionally implemented for structured semantic modules and their native
-package, set, and graph embeddings. Development executable persistence and
-standard register-Body persistence remain unfinished. Hosted calls also
+package, set, and graph embeddings. The selected fail-fast development
+executable profile also preserves resolved arithmetic through its existing
+linear, indexed and ScalarInitOutput controls; standard register-Body
+persistence remains unfinished. Hosted calls also
 support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 `void` functions across semantic modules, native libraries and native graphs;
 compilation-local `[Copy]` templates support the bounded generic `out T` and

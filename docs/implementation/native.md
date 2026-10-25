@@ -854,11 +854,12 @@ a later cancellation cannot erase an earlier checked failure. Calls and storage
 reads stay opaque, including a call multiplied by zero. Folding does not provide
 missing literal context, change operator binding, or infer a callee's effect
 contract. The source profile is compile-time-only; direct AOT/JIT lowering and
-revision-89 private semantic bodies use the resolved operation facts. The
-provisional selector now reaches eligible CLI source compilation and scalar
-frontend subject binding; component compilation remains Development.
-Development executable persistence and standard register-Body persistence
-remain unfinished under their respective provisional or accepted contracts.
+revision-89 private semantic bodies and the fail-fast development executable
+profile use the resolved operation facts. The CLI selector reaches eligible
+source compilation and scalar frontend subject binding; component compilation
+remains Development. The development executable uses its existing linear,
+indexed and ScalarInitOutput controls; standard register-Body persistence
+remains unfinished under its accepted contract.
 
 Matching constant integer/code-unit comparisons and boolean equality also
 fold into boolean constants, as do built-in boolean `!`, `&&`, `||`, `&`, `|`

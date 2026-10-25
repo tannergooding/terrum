@@ -19,9 +19,6 @@ internal sealed record TrRmScalarReinterpret(BoundExpression Operand, PrimitiveT
 internal sealed record TrRmScalarConvert(BoundExpression Operand, PrimitiveType Type, byte Policy)
     : BoundExpression(Type, default);
 
-internal sealed record TrRmScalarWrappingBinary(TokenKind Operator, BoundRead Left,
-    BoundRead Right, PrimitiveType Type) : BoundExpression(Type, default);
-
 internal sealed record TrRmScalarOptionalNone(PrimitiveType Type) : BoundExpression(Type, default);
 
 internal sealed record TrRmScalarOptionalLift(BoundExpression Value, PrimitiveType Type)
@@ -157,17 +154,17 @@ internal sealed class TrRmScalarGraph
                     _ => null,
                 };
                 if (operation is BoundLocal
-                    { Initializer: TrRmScalarWrappingBinary wrapping } local
-                    && (!IsInteger(wrapping.Type)
-                        || wrapping.Operator is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Star)
-                        || local.Variable < ParameterCount || local.Variable >= Types.Length
-                        || Types[local.Variable] != wrapping.Type
-                        || (uint)wrapping.Left.Variable >= (uint)Types.Length
-                        || (uint)wrapping.Right.Variable >= (uint)Types.Length
-                        || Types[wrapping.Left.Variable] != wrapping.Type
-                        || Types[wrapping.Right.Variable] != wrapping.Type))
+                    { Initializer: BoundBinary { OverflowBehavior: BoundIntegerOverflowBehavior.Wrapping } wrapping }
+                    local
+                    && !WrappingBinaryMatches(wrapping, local.Variable, Types))
                 {
                     throw new ArgumentException("Indexed wrapping Binary result or operand contract does not match.");
+                }
+                if (operation is BoundExpressionStatement
+                    { Expression: BoundBinary { OverflowBehavior: BoundIntegerOverflowBehavior.Wrapping } wrappingExpression }
+                    && !WrappingBinaryMatches(wrappingExpression, null, Types))
+                {
+                    throw new ArgumentException("Indexed wrapping Binary operand contract does not match.");
                 }
                 if (operation is BoundLocal { Initializer: var initializer } optionalLocal
                     && (initializer is TrRmScalarOptionalNone or TrRmScalarOptionalLift
@@ -493,6 +490,16 @@ internal sealed class TrRmScalarGraph
             && (uint)read.Variable < (uint)types.Length
             && read.Type == type
             && types[read.Variable] == type;
+
+    private static bool WrappingBinaryMatches(BoundBinary binary, int? resultVariable,
+        ImmutableArray<PrimitiveType> types)
+        => IsInteger(binary.Type)
+            && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+            && binary.Left.Type == binary.Type && binary.Right.Type == binary.Type
+            && GraphReadMatches(binary.Left, binary.Type, types)
+            && GraphReadMatches(binary.Right, binary.Type, types)
+            && (resultVariable is not int variable
+                || ((uint)variable < (uint)types.Length && types[variable] == binary.Type));
 
     private static bool HasTerminalDoesNotReturnCall(TrRmScalarBlock block, BoundProgram program)
     {

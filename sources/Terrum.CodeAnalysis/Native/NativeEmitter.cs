@@ -1720,9 +1720,6 @@ internal sealed partial class PeCompiler
                     ExpressionSpills(cast.Operand, ref maximumArguments));
             case TrRmScalarConvert conversion:
                 return ExpressionSpills(conversion.Operand, ref maximumArguments);
-            case TrRmScalarWrappingBinary wrapping:
-                return Math.Max(ExpressionSpills(wrapping.Left, ref maximumArguments),
-                    1 + ExpressionSpills(wrapping.Right, ref maximumArguments));
             case TrRmScalarOptionalLift lift:
                 return 1 + ExpressionSpills(lift.Value, ref maximumArguments);
             case TrRmScalarOptionalNone none when IsIndirect(none.Type):
@@ -1951,10 +1948,6 @@ internal sealed partial class PeCompiler
                     break;
                 case TrRmScalarConvert conversion:
                     VisitExpression(conversion.Operand);
-                    break;
-                case TrRmScalarWrappingBinary wrapping:
-                    VisitExpression(wrapping.Left);
-                    VisitExpression(wrapping.Right);
                     break;
                 case BoundOptionalLift lift:
                     VisitExpression(lift.Value);
@@ -4154,21 +4147,6 @@ internal sealed partial class PeCompiler
             case TrRmScalarReinterpret reinterpret:
                 Expression(reinterpret.Operand, spill);
                 break;
-            case TrRmScalarWrappingBinary wrapping:
-                Expression(wrapping.Left, spill);
-                StoreValue(Spill(spill), wrapping.Type);
-                Expression(wrapping.Right, spill + 1);
-                if (IsWide(wrapping.Type))
-                {
-                    _code.Bytes(0x48, 0x89, 0xC1);
-                }
-                else
-                {
-                    _code.Bytes(0x89, 0xC1);
-                }
-                LoadValue(Spill(spill), wrapping.Type);
-                WrappingBinary(wrapping.Operator, wrapping.Type);
-                break;
             case TrRmScalarOptionalNone none:
                 if (IsIndirect(none.Type))
                 {
@@ -5027,28 +5005,6 @@ internal sealed partial class PeCompiler
             return;
         }
         throw new InvalidOperationException("TRRM integer conversion types were not verified.");
-    }
-
-    private void WrappingBinary(TokenKind op, PrimitiveType type)
-    {
-        if (IsWide(type))
-        {
-            _code.Byte(0x48);
-        }
-        switch (op)
-        {
-            case TokenKind.Plus:
-                _code.Bytes(0x01, 0xC8);
-                break;
-            case TokenKind.Minus:
-                _code.Bytes(0x29, 0xC8);
-                break;
-            case TokenKind.Star:
-                _code.Bytes(0x0F, 0xAF, 0xC1);
-                break;
-            default:
-                throw new InvalidOperationException("TRRM wrapping Binary operator was not verified.");
-        }
     }
 
     private bool TryEmitUnsignedPowerOfTwoBinary(BoundBinary binary)

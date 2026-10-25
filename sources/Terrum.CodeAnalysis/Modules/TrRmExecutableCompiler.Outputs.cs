@@ -579,6 +579,26 @@ public static partial class TrRmExecutableCompiler
                     var left = ReadValue(operation.Operands[0]);
                     var right = ReadValue(operation.Operands[1]);
                     var isFloat = operation.Opcode == 0x19;
+                    if (!isFloat && operation.Kind is >= 10 and <= 12)
+                    {
+                        if (!IsInteger(left.Type) || left.Type != right.Type)
+                        {
+                            throw Invalid("Wrapping Binary requires equal integer operands.");
+                        }
+
+                        var wrappingToken = operation.Kind switch
+                        {
+                            10 => TokenKind.Plus,
+                            11 => TokenKind.Minus,
+                            12 => TokenKind.Star,
+                            _ => throw Invalid("Unsupported wrapping Binary kind."),
+                        };
+                        DefineValue(operation.Result,
+                            new BoundBinary(wrappingToken, left, right, left.Type, default) {
+                                OverflowBehavior = BoundIntegerOverflowBehavior.Wrapping,
+                            });
+                        break;
+                    }
                     var valid = left.Type == right.Type && (operation.Kind switch
                     {
                         1 or 2 when isFloat => IsFloat(left.Type),
@@ -1363,12 +1383,19 @@ public static partial class TrRmExecutableCompiler
                     {
                         TokenKind.Bang => unary.Type == PrimitiveType.Bool,
                         TokenKind.Tilde or TokenKind.Plus => IsInteger(unary.Type),
-                        TokenKind.Minus => IsFloat(unary.Type)
-                            || unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64,
+                        TokenKind.Minus => IsFloat(unary.Type) || IsInteger(unary.Type),
                         _ => false,
                     }):
                 {
                     var unaryOperand = EmitValue(unary.Operand);
+                    if (unary.Operator == TokenKind.Minus && IsInteger(unary.Type)
+                        && (unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                            || unary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping))
+                    {
+                        var zero = EmitValue(new BoundConstant(0, unary.Type, default));
+                        return EmitIntegerArithmetic(TokenKind.Minus, unary.OverflowBehavior,
+                            zero, unaryOperand, unary.Type);
+                    }
                     var unaryResult = _valueTypes.Count + 1;
                     var unaryOpcode = unary.Operator == TokenKind.Minus
                         ? IsFloat(unary.Type) ? (byte)0x1C : (byte)0x17
@@ -1484,10 +1511,16 @@ public static partial class TrRmExecutableCompiler
                         TokenKind.ShiftLeft => 6,
                         _ => 7,
                     };
+                    var integerOpcode = 0x15;
+                    if (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star)
+                    {
+                        (integerOpcode, integerKind) = IntegerArithmeticEncoding(
+                            binary.Operator, binary.OverflowBehavior);
+                    }
                     var binaryWidth = Width((ulong)Math.Max(integerResult,
                         Math.Max(integerLeft, integerRight)));
                     var binaryOffset = _operations.Count;
-                    WriteInstruction(_operations, 0x15, binaryWidth, 0);
+                    WriteInstruction(_operations, integerOpcode, binaryWidth, 0);
                     Write(_operations, (ulong)integerResult, binaryWidth);
                     _operations.Add((byte)integerKind);
                     Write(_operations, (ulong)integerLeft, binaryWidth);
@@ -1503,6 +1536,30 @@ public static partial class TrRmExecutableCompiler
                 default:
                     throw Unsupported($"Expression {expression.GetType().Name} is outside the output Body profile.");
             }
+        }
+
+        private int EmitIntegerArithmetic(TokenKind operation,
+            BoundIntegerOverflowBehavior overflowBehavior, int left, int right, PrimitiveType type)
+        {
+            if (!IsInteger(type))
+            {
+                throw Unsupported("Integer arithmetic requires an admitted integer type.");
+            }
+
+            var (opcode, kind) = IntegerArithmeticEncoding(operation, overflowBehavior);
+            var result = _valueTypes.Count + 1;
+            var width = Width((ulong)Math.Max(result, Math.Max(left, right)));
+            var offset = _operations.Count;
+            WriteInstruction(_operations, opcode, width, 0);
+            Write(_operations, (ulong)result, width);
+            _operations.Add((byte)kind);
+            Write(_operations, (ulong)left, width);
+            Write(_operations, (ulong)right, width);
+            _ = AddValue(type, 0, (uint)offset);
+            UseValue(left, _operationCount);
+            UseValue(right, _operationCount);
+            _operationCount++;
+            return result;
         }
 
         private int EmitCall(BoundCall call)

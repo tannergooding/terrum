@@ -81,6 +81,24 @@ public sealed class TrRmExecutionAuditTests
         Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(artifact),
             NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
+    [TestCase((byte)0)]
+    [TestCase((byte)13)]
+    public void IndependentWrappingBinaryRejectsUnassignedKinds(byte kind)
+    {
+        var artifact = Artifact(WrappingBinaryBody(PrimitiveType.Int32, kind, 1, 1, 2));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact));
+    }
+    [Test]
+    public void IndependentCheckedArithmeticRejectsWrappingKinds()
+    {
+        var body = WrappingBinaryBody(PrimitiveType.Int32, 10, 1, 1, 2);
+        var operation = Array.IndexOf(body, (byte)5);
+        Assert.That(operation, Is.GreaterThanOrEqualTo(0));
+        body[operation] = 0x15;
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.ValidateCompactLinear(Artifact(body)));
+    }
     [TestCase(PrimitiveType.Int32,PrimitiveType.UInt64,(byte)(1),0xFFFF_FFFFUL,0xFFFF_FFFF_FFFF_FFFFUL)]
     [TestCase(PrimitiveType.Int64,PrimitiveType.Int32,(byte)(1),0xFFFF_FFFF_7FFF_FFFFUL,0x7FFF_FFFFUL)]
     [TestCase(PrimitiveType.UInt64,PrimitiveType.UInt32,(byte)(1),0x1_0000_0001UL,1UL)]
