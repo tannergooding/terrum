@@ -34,6 +34,7 @@ numbers do not save bytes.
 | Proposal | Review boundary |
 |---|---|
 | [Constructor no-return applicability](constructor-no-return-applicability.md) | Unapproved, explicitly provisional direction admitting instance and authored static constructors; preserves initialization/cleanup contracts and separate constructor/static representation gates. |
+| [NoThrow retirement and proof boundaries](no-throw-retirement-and-proof-boundaries.md) | Unapproved, provisionally actionable retirement of the general source/export promise; preserves scoped internal no-failure proofs and separate cleanup/native obligations without restoring the retired Effects bit or adding a carrier. |
 | [Static-initializer trigger identities](static-initializer-trigger-identities.md) | Unapproved Core schema/enum/case registration and exact trigger normalization; preserves both accepted choices and separate static metadata/runtime gates. |
 
 ## Batch 4: Encoding and operation representation
