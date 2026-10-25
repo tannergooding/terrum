@@ -25,6 +25,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmUnionCaseFieldTableReader unionCaseFields,
             TrRmBuilderRegistrationTableReader builderRegistrations,
             TrRmTextTargetTableReader textTargets,
+            TrRmTextContentShapeTableReader textContentShapes,
+            TrRmTextCaptureShapeTableReader textCaptureShapes,
             TrRmConstantSourceTableReader constantSources,
             TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
             TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
@@ -55,6 +57,8 @@ public static class TrRmStructuralMetadataValidator
             UnionCaseFields = unionCaseFields;
             BuilderRegistrations = builderRegistrations;
             TextTargets = textTargets;
+            TextContentShapes = textContentShapes;
+            TextCaptureShapes = textCaptureShapes;
             ConstantSources = constantSources;
             TargetLayoutDependencies = targetLayoutDependencies;
             TargetLayoutDependencyFields = targetLayoutDependencyFields;
@@ -91,6 +95,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmUnionCaseFieldTableReader UnionCaseFields { get; }
         internal TrRmBuilderRegistrationTableReader BuilderRegistrations { get; }
         internal TrRmTextTargetTableReader TextTargets { get; }
+        internal TrRmTextContentShapeTableReader TextContentShapes { get; }
+        internal TrRmTextCaptureShapeTableReader TextCaptureShapes { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
         internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
         internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
@@ -180,6 +186,11 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x002B, out var builderRegistrationBytes,
             out var builderRegistrationCount);
         _ = index.TryGetSection(0x002C, out var textTargetBytes, out var textTargetCount);
+        _ = index.TryGetSection(0x002D, out var textContentShapeBytes,
+            out var textContentShapeCount);
+        _ = index.TryGetSection(0x002E, out var textCaptureShapeBytes,
+            out var textCaptureShapeCount);
+        _ = index.TryGetSection(0x002F, out _, out var textFragmentShapeCount);
         _ = index.TryGetSection(0x0030, out var constantSourceBytes,
             out var constantSourceCount);
         _ = index.TryGetSection(0x0031, out var interfaceConstBytes,
@@ -289,6 +300,8 @@ public static class TrRmStructuralMetadataValidator
         var unionCaseFields = default(TrRmUnionCaseFieldTableReader);
         var builderRegistrations = default(TrRmBuilderRegistrationTableReader);
         var textTargets = default(TrRmTextTargetTableReader);
+        var textContentShapes = default(TrRmTextContentShapeTableReader);
+        var textCaptureShapes = default(TrRmTextCaptureShapeTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
         var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
@@ -299,6 +312,12 @@ public static class TrRmStructuralMetadataValidator
                 builderRegistrationBytes, builderRegistrationCount, types, typeSpecs);
             textTargets = new TrRmTextTargetTableReader(textTargetBytes,
                 textTargetCount, methods, signatures, typeSpecs);
+            textContentShapes = new TrRmTextContentShapeTableReader(
+                textContentShapeBytes, textContentShapeCount, types,
+                textCaptureShapeCount, textFragmentShapeCount);
+            textCaptureShapes = new TrRmTextCaptureShapeTableReader(
+                textCaptureShapeBytes, textCaptureShapeCount, typeSpecs,
+                textContentShapes);
             unionCaseDefs = new TrRmUnionCaseDefTableReader(
                 unionCaseDefBytes, unionCaseDefCount, strings, types,
                 unionCaseFieldCount);
@@ -482,7 +501,7 @@ public static class TrRmStructuralMetadataValidator
             interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
-            constantSources,
+            textContentShapes, textCaptureShapes, constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,

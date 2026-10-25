@@ -530,10 +530,13 @@ spread syntax and private generic specializations from executable registered
 builders/protocols. Standard structural BuilderRegistration and TextTarget
 readers/writers now validate target TypeDef/MethodDef rows, complete
 schema/recipe TypeSpecRefs, parameter ordinal bounds and duplicate targets.
-This does not check source recipe meaning, TextContentShape graphs, builder
-protocol conformance, runtime construction or retained constant programs. A
-self-hosted method or candidate API sketch supplies no registered identity,
-retained constant program or frozen value codec.
+TextContentShape/TextCaptureShape readers now validate generated TypeDef
+ownership, exclusive capture/fragment ranges, capture order/modes and complete
+capture TypeSpecRefs. These checks do not decode TextFragmentShape references,
+prove source recipe meaning, establish builder protocol conformance, implement
+runtime construction or provide retained constant programs. A self-hosted
+method or candidate API sketch supplies no registered identity, retained
+constant program or frozen value codec.
 
 **Routes/gate:** retain exact role/member/witness identities and contextual
 result, once-only source-ordered captures, after-capture acquisition, ordered

@@ -175,10 +175,13 @@ UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so this
 row validation does not admit nominal-union source or runtime support.
 BuilderRegistration and TextTarget rows now validate TypeDef/MethodDef
 references, complete schema/recipe TypeSpecRefs, parameter ordinal bounds and
-duplicate targets. They do not implement source recipe checking, generated
-text-shape reconstruction or runtime construction. The associated-type
-identity and relation-payload proposals remain unapproved; their
-implementation directions are provisional only.
+duplicate targets. TextContentShape/TextCaptureShape rows validate generated
+TypeDef ownership, exclusive capture/fragment ranges, capture order/modes and
+complete capture TypeSpecRefs. These structural readers do not resolve
+TextFragmentShape's typed formatter/writer references, implement source recipe
+checking, reconstruct generated text operations or provide runtime
+construction. The associated-type identity and relation-payload proposals
+remain unapproved; their implementation directions are provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
