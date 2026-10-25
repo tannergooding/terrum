@@ -883,7 +883,7 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new(0x48, 0, (uint)targetProfiles.Count, targetProfileBytes));
         }
-        var artifact = TrRmArtifactWriter.Encode(sections);
+        var artifact = TrRmArtifactWriter.EncodeDevelopment(sections);
         _ = Load(artifact);
         return artifact;
     }
@@ -900,7 +900,7 @@ public static partial class TrRmExecutableCompiler
 
     public static BoundProgram Load(ReadOnlySpan<byte> artifact)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = new TrRmArtifactIndex(artifact, TrRmArtifactSchema.Development);
         var validatedTables = TrRmStructuralMetadataValidator
             .ValidateDevelopmentAndGetExecutionTables(index);
         var modules = validatedTables.Modules;
@@ -1449,7 +1449,7 @@ public static partial class TrRmExecutableCompiler
         ArgumentNullException.ThrowIfNull(providerArtifact);
         var program = Load(providerArtifact);
         var validatedTables = TrRmStructuralMetadataValidator.ValidateDevelopmentAndGetExecutionTables(
-            new TrRmArtifactIndex(providerArtifact));
+            new TrRmArtifactIndex(providerArtifact, TrRmArtifactSchema.Development));
         var providerIdentity = validatedTables.Modules.GetIdentity(1);
         var (targetRequirement, runtimePolicy) = validatedTables.Modules.GetRequirements(1);
         if (program.EntryPoint != -1

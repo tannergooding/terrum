@@ -828,7 +828,7 @@ public sealed class TrRmExecutionAuditTests
             Functions = original.Functions.Add(original.Functions[0] with { Name = "Other", IsNoThrow = true }),
         };
         var bytes = TrRmExecutableCompiler.Emit(source, "two-bodies");
-        var index = new TrRmArtifactIndex(bytes);
+        var index = TrRmArtifactIndex.ForDevelopment(bytes);
         Assert.That(index.TryGetSection(0x20, out var bodies, out var bodyCount), Is.True);
         var firstBody = new TrRmBodyTableReader(bodies, bodyCount).GetRow(1).ToArray();
         var sections = new List<TrRmSection>();
@@ -838,7 +838,7 @@ public sealed class TrRmExecutionAuditTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? Rows([firstBody, invalid]) : payload.ToArray()));
         }
-        var tampered = TrRmArtifactWriter.Encode(sections);
+        var tampered = TrRmArtifactWriter.EncodeDevelopment(sections);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(tampered);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(tampered));
     }

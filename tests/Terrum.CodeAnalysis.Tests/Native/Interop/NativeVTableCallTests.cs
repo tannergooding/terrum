@@ -34,7 +34,7 @@ public sealed class NativeVTableCallTests
             string.Join(Environment.NewLine, provider.Diagnostics));
 
         var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "native-vtable");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0032, out _, out var vtableCount), Is.True);
         Assert.That(vtableCount, Is.EqualTo(1));
         AssertNativeVTableFeatures(index);
@@ -54,7 +54,7 @@ public sealed class NativeVTableCallTests
         BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(vtableSectionOffset + 8), 8);
         var offsetLoaded = TrRmExecutableCompiler.Load(artifact);
         var reemitted = TrRmExecutableCompiler.Emit(offsetLoaded, "native-vtable-offset");
-        var reemittedIndex = new TrRmArtifactIndex(reemitted);
+        var reemittedIndex = TrRmArtifactIndex.ForDevelopment(reemitted);
         Assert.That(reemittedIndex.TryGetSection(0x0032, out var reemittedVTables, out _), Is.True);
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(reemittedVTables[8..]), Is.EqualTo(8));
 
@@ -71,7 +71,7 @@ public sealed class NativeVTableCallTests
             string.Join(Environment.NewLine, consumer.Diagnostics));
         var addressConsumerArtifact = TrRmExecutableCompiler.Emit(
             consumer.Program!, "native-vtable-address-consumer");
-        AssertNativeVTableFeatures(new TrRmArtifactIndex(addressConsumerArtifact),
+        AssertNativeVTableFeatures(TrRmArtifactIndex.ForDevelopment(addressConsumerArtifact),
             hasScalarInitOutput: true);
         var addressConsumer = TrRmExecutableCompiler.Load(addressConsumerArtifact);
         var loadedDispatch = addressConsumer.Functions
@@ -100,7 +100,7 @@ public sealed class NativeVTableCallTests
         Assert.That(caller.HasErrors, Is.False,
             string.Join(Environment.NewLine, caller.Diagnostics));
         var callArtifact = TrRmExecutableCompiler.Emit(caller.Program!, "native-vtable-call");
-        var callIndex = new TrRmArtifactIndex(callArtifact);
+        var callIndex = TrRmArtifactIndex.ForDevelopment(callArtifact);
         AssertNativeVTableFeatures(callIndex);
         var callLoaded = TrRmExecutableCompiler.Load(callArtifact);
         Assert.That(callLoaded.EntryPoint, Is.GreaterThanOrEqualTo(0));
@@ -169,7 +169,7 @@ public sealed class NativeVTableCallTests
 
         var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
             "native-vtable-indexed-pointer-arguments");
-        AssertNativeVTableFeatures(new TrRmArtifactIndex(artifact));
+        AssertNativeVTableFeatures(TrRmArtifactIndex.ForDevelopment(artifact));
         var loaded = TrRmExecutableCompiler.Load(artifact);
         var dispatch = loaded.Functions.Single(static function => function.Name == "Dispatch");
         var invoke = loaded.Functions.Single(static function => function.Name == "Invoke");
@@ -179,7 +179,7 @@ public sealed class NativeVTableCallTests
             .PointeeType, Is.EqualTo(PrimitiveType.UInt32));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         var tables = TrRmStructuralMetadataValidator
             .ValidateDevelopmentAndGetExecutionTables(index);
         var invokeRow = 0;
@@ -269,7 +269,7 @@ public sealed class NativeVTableCallTests
             .ModuleImport, Is.EqualTo(new BoundModuleImport("VTableProvider", "Invoke", 1, 0)));
 
         var consumerArtifact = TrRmExecutableCompiler.Emit(consumer.Program!, "vtable-consumer");
-        var consumerIndex = new TrRmArtifactIndex(consumerArtifact);
+        var consumerIndex = TrRmArtifactIndex.ForDevelopment(consumerArtifact);
         Assert.That(consumerIndex.TryGetSection(0x001C, out _, out var importCount), Is.True);
         Assert.That(importCount, Is.EqualTo(1));
         var loaded = TrRmExecutableCompiler.Load(consumerArtifact);
@@ -450,7 +450,7 @@ public sealed class NativeVTableCallTests
         Assert.That(loadedMethod.NativeVTableMethod!.Outputs.Single(),
             Is.EqualTo(new DirectNativeOutput(1, PrimitiveType.UInt32, 3, 1)));
 
-        var contractIndex = new TrRmArtifactIndex(providerArtifact);
+        var contractIndex = TrRmArtifactIndex.ForDevelopment(providerArtifact);
         Assert.That(contractIndex.TryGetSection(0x001B, out _, out var contractCount), Is.True);
         var contractSectionOffset = FindSectionOffset(providerArtifact, 0x001B);
         var contractDataOffset = contractSectionOffset + ((contractCount + 1) * sizeof(uint));
@@ -487,7 +487,8 @@ public sealed class NativeVTableCallTests
             string.Join(Environment.NewLine, consumer.Diagnostics));
 
         var consumerArtifact = TrRmExecutableCompiler.Emit(consumer.Program!, "VTableOutputConsumer");
-        AssertNativeVTableFeatures(new TrRmArtifactIndex(consumerArtifact), hasScalarInitOutput: true);
+        AssertNativeVTableFeatures(TrRmArtifactIndex.ForDevelopment(consumerArtifact),
+            hasScalarInitOutput: true);
         var loadedConsumer = TrRmExecutableCompiler.Load(consumerArtifact);
         var privateReference = ModuleCompiler.CreateReference(semanticProvider);
         var privateConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""

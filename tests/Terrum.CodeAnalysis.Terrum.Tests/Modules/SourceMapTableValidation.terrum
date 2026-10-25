@@ -69,7 +69,7 @@ public static bool TryValidateSourceMapTable(int32 recordCount,
         int32 fileOffset = 4 + (int32(fileSlot) - 1) * 16;
         if (!TryReadSourceMapTableHalfWord(instructionOffset, init var instructionKind)
             || !TryReadSourceMapTableHalfWord(fileOffset, init var fileKind)
-            || instructionKind != 0x0020
+            || instructionKind != 0
             || fileKind != 0x001F
             || !TryReadSourceMapTableWord(instructionOffset + 4, init var bodyRow)
             || !TryReadSourceMapTableWord(fileOffset + 4, init var fileRow))
@@ -145,16 +145,17 @@ bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
             return false;
         }
 
-        if (kind != 0x0020)
+        if (kind != 0)
         {
             continue;
         }
 
         if (selector != 1
             || !TryReadSourceMapTableWord(slotOffset + 4, init var bodyRow)
-            || !TryReadSourceMapTableWord(slotOffset + 8, init var block)
+            || !TryReadSourceMapTableHalfWord(slotOffset + 8, init var block)
+            || !TryReadSourceMapTableHalfWord(slotOffset + 10, init var reserved)
             || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal)
-            || bodyRow == 0 || bodyRow > uint32(bodyCount) || block == 0)
+            || bodyRow == 0 || bodyRow > uint32(bodyCount) || reserved != 0)
         {
             return false;
         }
@@ -167,7 +168,8 @@ bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
 
         int32 blockCount = Host.SourceMapOperationBlockCounts[methodRow];
         int32 firstOperationCount = Host.SourceMapOperationBlockStarts[methodRow];
-        if (blockCount <= 0 || block > uint32(blockCount)
+        int32 blockIndex = int32(block);
+        if (blockCount <= 0 || blockIndex >= blockCount
             || firstOperationCount <= 0 || firstOperationCount >= operationCountLength
             || blockCount > operationCountLength - firstOperationCount)
         {
@@ -175,7 +177,7 @@ bool TryValidateCompactSourceMapLocations(int32 methodDefCount,
         }
 
         int32 operationCount = Host.SourceMapOperationCounts[
-            firstOperationCount + int32(block) - 1];
+            firstOperationCount + blockIndex];
         if (operationCount < 0 || ordinal > uint32(operationCount))
         {
             return false;
@@ -192,15 +194,16 @@ bool TryValidateSourceMapSlot(int32 slot, int32 sourceFileCount,
     if (!TryReadSourceMapTableHalfWord(slotOffset, init var kind)
         || !TryReadSourceMapTableHalfWord(slotOffset + 2, init var selector)
         || !TryReadSourceMapTableWord(slotOffset + 4, init var target)
-        || !TryReadSourceMapTableWord(slotOffset + 8, init var block)
+        || !TryReadSourceMapTableHalfWord(slotOffset + 8, init var block)
+        || !TryReadSourceMapTableHalfWord(slotOffset + 10, init var reserved)
         || !TryReadSourceMapTableWord(slotOffset + 12, init var ordinal))
     {
         return false;
     }
 
-    if (kind == 0x0020 && selector == 1)
+    if (kind == 0 && selector == 1)
     {
-        if (target == 0 || target > uint32(bodyCount) || block == 0)
+        if (target == 0 || target > uint32(bodyCount) || reserved != 0)
         {
             return false;
         }
@@ -210,7 +213,7 @@ bool TryValidateSourceMapSlot(int32 slot, int32 sourceFileCount,
 
     if (kind == 0x001F && selector == 0)
     {
-        if (block != 0 || ordinal != 0 || target == 0
+        if (int32(block) != 0 || reserved != 0 || ordinal != 0 || target == 0
             || target > uint32(sourceFileCount))
         {
             return false;

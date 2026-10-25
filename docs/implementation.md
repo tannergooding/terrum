@@ -138,6 +138,16 @@ table without pre-scanning unrelated Body rows; consumers validate a selected
 Body through `TrRmBodyTableReader`. Map-token binding, full instruction
 operands/control verification, descriptor eligibility, canonical writing,
 re-emission and execution remain incomplete.
+Artifact framing now selects standard TRRM or the internal development
+executable schema before indexing and writing. The standard index follows the
+registry's assigned section kinds/strides, including `NativeImport`/
+`NativeExport` and the standard `0x0030..0x0033` records; the executable
+compiler and compact validators explicitly use the separate development
+profile, with no fallback between them. Standard SourceMap slots use section
+kind zero for Body-instruction targets and zero-based `u16` blocks; the
+development SourceMap layout remains isolated. This routes framing correctly
+but does not establish semantic readers or current-schema execution for every
+registered row.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar

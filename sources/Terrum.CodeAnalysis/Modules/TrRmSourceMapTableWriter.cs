@@ -7,6 +7,13 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>A standard TRRM mapping from one Body operation to a SourceFile span.</summary>
+/// <param name="BodyRow">The one-based Body row.</param>
+/// <param name="Block">The zero-based u16 block index.</param>
+/// <param name="Ordinal">The zero-based operation or terminator ordinal.</param>
+/// <param name="SourceFileRow">The one-based SourceFile row.</param>
+/// <param name="StartUtf16">The UTF-16 start offset.</param>
+/// <param name="LengthUtf16">The UTF-16 span length.</param>
 public readonly record struct TrRmSourceMapEntry(
     int BodyRow, int Block, int Ordinal, int SourceFileRow, uint StartUtf16, uint LengthUtf16);
 
@@ -32,7 +39,7 @@ public static class TrRmSourceMapTableWriter
         var lastBodyOwnerModule = 0;
         foreach (var mapping in mappings)
         {
-            if (mapping.Block <= 0 || mapping.Ordinal < 0
+            if (mapping.Block < 0 || mapping.Block > ushort.MaxValue || mapping.Ordinal < 0
                 || (ulong)mapping.StartUtf16 + mapping.LengthUtf16 > uint.MaxValue)
             {
                 throw new InvalidDataException("Invalid TRRM SourceMap mapping.");
@@ -77,10 +84,10 @@ public static class TrRmSourceMapTableWriter
         {
             var mapping = mappings[index];
             var bodySlot = 4 + index * 16;
-            WriteU16(result, bodySlot, 0x0020);
+            WriteU16(result, bodySlot, 0);
             WriteU16(result, bodySlot + 2, 1);
             Write(result, bodySlot + 4, (uint)mapping.BodyRow);
-            Write(result, bodySlot + 8, (uint)mapping.Block);
+            WriteU16(result, bodySlot + 8, (ushort)mapping.Block);
             Write(result, bodySlot + 12, (uint)mapping.Ordinal);
             var row = rowsStart + index * 16;
             Write(result, row, (uint)index + 1);

@@ -176,11 +176,11 @@ public sealed class CompactBodyOperationIndexComponentTests
         await VerifySourceMapConsumerAsync(ordinal: 2, expectedValid: false, policy,
             indexedBody: true).ConfigureAwait(true);
         await VerifySourceMapConsumerAsync(ordinal: 0, expectedValid: true, policy,
-            indexedBody: true, block: 2).ConfigureAwait(true);
+            indexedBody: true, block: 1).ConfigureAwait(true);
         await VerifySourceMapConsumerAsync(ordinal: 1, expectedValid: false, policy,
-            indexedBody: true, block: 2).ConfigureAwait(true);
+            indexedBody: true, block: 1).ConfigureAwait(true);
         await VerifySourceMapConsumerAsync(ordinal: 0, expectedValid: false, policy,
-            indexedBody: true, block: 3).ConfigureAwait(true);
+            indexedBody: true, block: 2).ConfigureAwait(true);
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -378,7 +378,7 @@ public sealed class CompactBodyOperationIndexComponentTests
 
     private static async Task VerifySourceMapConsumerAsync(
         int ordinal, bool expectedValid, BoundRuntimePolicy policy, bool hasOperation = true,
-        bool indexedBody = false, int block = 1)
+        bool indexedBody = false, int block = 0)
     {
         var root = RepositoryRoot();
         var components = await LoadComponentsAsync(root, includeSourceMapValidation: true)
@@ -415,10 +415,10 @@ public sealed class CompactBodyOperationIndexComponentTests
         WriteWord(sourceFiles, 0, 3);
         var sourceMaps = new byte[52];
         WriteWord(sourceMaps, 0, 2);
-        WriteHalfWord(sourceMaps, 4, 0x0020);
+        WriteHalfWord(sourceMaps, 4, 0);
         WriteHalfWord(sourceMaps, 6, 1);
         WriteWord(sourceMaps, 8, 1);
-        WriteWord(sourceMaps, 12, (uint)block);
+        WriteHalfWord(sourceMaps, 12, checked((ushort)block));
         WriteWord(sourceMaps, 16, (uint)ordinal);
         WriteHalfWord(sourceMaps, 20, 0x001F);
         WriteWord(sourceMaps, 24, 1);

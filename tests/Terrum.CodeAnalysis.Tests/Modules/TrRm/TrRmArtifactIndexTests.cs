@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
@@ -24,6 +25,85 @@ public sealed class TrRmArtifactIndexTests
         Assert.That(index.TryGetSection(0x0010, out var absent, out var absentCount), Is.False);
         Assert.That(absent.IsEmpty, Is.True);
         Assert.That(absentCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void StandardAndDevelopmentProfilesDoNotAliasSectionLayouts()
+    {
+        var sharedSections = new TrRmSection[]
+        {
+            new(0x0001, 0, 1, new byte[48]),
+            new(0x0002, 0, 1, TrRmStringTableWriter.EncodeNames([("A", 0)])),
+        };
+        var standard = TrRmArtifactWriter.Encode([
+            .. sharedSections,
+            new(0x0030, 0, 1, new byte[8]),
+            new(0x0031, 0, 1, new byte[16]),
+            new(0x0032, 0, 1, new byte[12]),
+            new(0x0033, 0, 1, new byte[16]),
+        ]);
+        var standardIndex = new TrRmArtifactIndex(standard);
+        Assert.That(standardIndex.TryGetSection(0x0030, out var constantSources,
+            out var constantSourceCount), Is.True);
+        Assert.That(constantSources.Length, Is.EqualTo(8));
+        Assert.That(constantSourceCount, Is.EqualTo(1));
+        Assert.Throws<InvalidDataException>(() => TrRmArtifactIndex.ForDevelopment(standard));
+
+        var development = TrRmArtifactWriter.EncodeDevelopment([
+            .. sharedSections,
+            new(0x0030, 0, 1, new byte[16]),
+            new(0x0031, 0, 1, new byte[8]),
+            new(0x0032, 0, 1, new byte[16]),
+            new(0x0033, 0, 1, new byte[8]),
+        ]);
+        var developmentIndex = TrRmArtifactIndex.ForDevelopment(development);
+        Assert.That(developmentIndex.TryGetSection(0x0030, out var nativeImports,
+            out var nativeImportCount), Is.True);
+        Assert.That(nativeImports.Length, Is.EqualTo(16));
+        Assert.That(nativeImportCount, Is.EqualTo(1));
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(development));
+    }
+
+    [Test]
+    public void IndexesEveryAssignedStandardFixedRowStride()
+    {
+        (ushort Kind, int Stride)[] assigned =
+        [
+            (0x0010, 12), (0x0013, 44), (0x0014, 16), (0x0015, 28),
+            (0x0016, 28), (0x0017, 24), (0x0018, 16), (0x0019, 32),
+            (0x001A, 12), (0x001C, 12), (0x001D, 8), (0x001E, 20),
+            (0x001F, 8), (0x0021, 16), (0x0022, 16), (0x0023, 12),
+            (0x0024, 12), (0x0025, 48), (0x0026, 12), (0x0027, 12),
+            (0x0028, 32), (0x0029, 20), (0x002A, 20), (0x002B, 12),
+            (0x002C, 12), (0x002D, 20), (0x002E, 16), (0x002F, 40),
+            (0x0030, 8), (0x0031, 16), (0x0032, 12), (0x0033, 16),
+            (0x0034, 20), (0x0035, 16), (0x0036, 12), (0x0037, 8),
+            (0x0038, 16), (0x0039, 8), (0x003A, 8), (0x003B, 16),
+            (0x003C, 8), (0x003D, 12), (0x003E, 16), (0x003F, 24),
+            (0x0040, 12), (0x0041, 12), (0x0042, 80), (0x0043, 8),
+            (0x0044, 8), (0x0045, 20), (0x0046, 20), (0x0047, 24),
+            (0x0048, 8), (0x0049, 16), (0x004A, 4),
+        ];
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, new byte[48]),
+            new(0x0002, 0, 1, TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new(0x0004, 0, 1,
+                TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(1, 1)])),
+        };
+        foreach (var (kind, stride) in assigned)
+        {
+            sections.Add(new TrRmSection(kind, 0, 1, new byte[stride]));
+        }
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
+
+        var index = new TrRmArtifactIndex(TrRmArtifactWriter.Encode(sections));
+        foreach (var (kind, stride) in assigned)
+        {
+            Assert.That(index.TryGetSection(kind, out var section, out var count), Is.True);
+            Assert.That(section.Length, Is.EqualTo(stride), $"section 0x{kind:X4}");
+            Assert.That(count, Is.EqualTo(1), $"section 0x{kind:X4}");
+        }
     }
 
     [Test]
@@ -524,6 +604,34 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void OptionalSlotRewritesRetainTheSelectedDevelopmentSchema()
+    {
+        var development = TrRmArtifactWriter.EncodeDevelopment([
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
+            new TrRmSection(0x0002, 0, 1,
+                TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([new byte[] { 0x04 }])),
+        ]);
+        var slots = new[] { new TrRmReferenceSlot(0x0020, 1, 1, 1, 0) };
+        var extension = TrRmOptionalSectionSlots.Create(0x8000, 1, slots,
+            new byte[] { 0xA5 });
+
+        var inserted = TrRmOptionalSectionSlots.InsertInDevelopmentArtifact(
+            development, extension);
+        var developmentIndex = TrRmArtifactIndex.ForDevelopment(inserted);
+        Assert.That(developmentIndex.TryGetSection(0x8000, out _, out _), Is.True);
+        Assert.Throws<InvalidDataException>(() => new TrRmArtifactIndex(inserted));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmOptionalSectionSlots.InsertInArtifact(development, extension));
+
+        var replaced = TrRmOptionalSectionSlots.ReplaceInDevelopmentArtifact(
+            inserted, 0x8000, slots);
+        Assert.That(TrRmArtifactIndex.ForDevelopment(replaced)
+            .TryGetSection(0x8000, out _, out _), Is.True);
+    }
+
+    [Test]
     public void ArtifactChangesDropDiscardOnRewriteExtensions()
     {
         var original = WithReferenceSlottedExtension();
@@ -809,10 +917,10 @@ public sealed class TrRmArtifactIndexTests
         {
             var map = new byte[52];
             Write(map, 0, 2);
-            WriteU16(map, 4, 0x0020);
+            WriteU16(map, 4, 0);
             WriteU16(map, 6, 1);
             Write(map, 8, 1);
-            Write(map, 12, 1);
+            Write(map, 12, 0);
             WriteU16(map, 20, 0x001F);
             Write(map, 24, 1);
             Write(map, 36, 1);

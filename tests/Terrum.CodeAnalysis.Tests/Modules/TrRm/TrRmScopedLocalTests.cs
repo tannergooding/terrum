@@ -25,7 +25,7 @@ public sealed class TrRmScopedLocalTests
         var original = Compile(source);
         var artifact = TrRmExecutableCompiler.Emit(original, "scoped-locals");
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bytes, out var count), Is.True);
         Assert.That(new TrRmBodyTableReader(bytes, count).GetRow(1)[0] & 0x0C, Is.EqualTo(0x08));
         var loaded = TrRmExecutableCompiler.Load(artifact);

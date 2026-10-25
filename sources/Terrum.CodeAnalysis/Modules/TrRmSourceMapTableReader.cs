@@ -11,9 +11,17 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmSourceMapTableReader
 {
     private readonly ReadOnlySpan<byte> _slots;
+    private readonly TrRmArtifactSchema _schema;
 
     public TrRmSourceMapTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files)
+        : this(section, recordCount, methods, files, TrRmArtifactSchema.Standard)
+    {
+    }
+
+    internal TrRmSourceMapTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmMethodDefTableReader methods, TrRmSourceFileTableReader files,
+        TrRmArtifactSchema schema)
     {
         if (recordCount <= 0 || recordCount > 0xFF_FFFF || section.Length < 4)
         {
@@ -29,15 +37,23 @@ public readonly ref struct TrRmSourceMapTableReader
 
         var slots = section.Slice(4, (int)rowStart - 4);
         _slots = slots;
+        _schema = schema;
         for (var slot = 0; slot < slotCount; slot++)
         {
             var data = slots.Slice((int)slot * 16, 16);
             var kind = ReadU16(data, 0);
             var selector = ReadU16(data, 2);
             var target = Read(data, 4);
-            if (kind == 0x0020 && selector == 1)
+            var block = ReadU16(data, 8);
+            if (ReadU16(data, 10) != 0)
             {
-                if (target == 0 || Read(data, 8) == 0)
+                throw InvalidMap();
+            }
+
+            if (IsBodyInstructionSlot(kind, selector, schema))
+            {
+                if (target == 0
+                    || (schema == TrRmArtifactSchema.Development && block == 0))
                 {
                     throw InvalidMap();
                 }
@@ -80,7 +96,9 @@ public readonly ref struct TrRmSourceMapTableReader
 
             var instruction = slots.Slice(((int)instructionSlot - 1) * 16, 16);
             var file = slots.Slice(((int)fileSlot - 1) * 16, 16);
-            if (ReadU16(instruction, 0) != 0x0020 || ReadU16(file, 0) != 0x001F)
+            if (!IsBodyInstructionSlot(ReadU16(instruction, 0),
+                    ReadU16(instruction, 2), schema)
+                || ReadU16(file, 0) != 0x001F || ReadU16(file, 2) != 0)
             {
                 throw InvalidMap();
             }
@@ -114,6 +132,11 @@ public readonly ref struct TrRmSourceMapTableReader
     internal void ValidateCompactLinearLocations(TrRmMethodDefTableReader methods,
         ReadOnlySpan<int> operationCounts)
     {
+        if (_schema != TrRmArtifactSchema.Development)
+        {
+            throw InvalidMap();
+        }
+
         for (var offset = 0; offset < _slots.Length; offset += 16)
         {
             var slot = _slots.Slice(offset, 16);
@@ -134,18 +157,31 @@ public readonly ref struct TrRmSourceMapTableReader
         for (var offset = 0; offset < _slots.Length; offset += 16)
         {
             var slot = _slots.Slice(offset, 16);
-            if (ReadU16(slot, 0) == 0x0020)
+            var kind = ReadU16(slot, 0);
+            if ((_schema == TrRmArtifactSchema.Standard && kind == 0)
+                || (_schema == TrRmArtifactSchema.Development && kind == 0x0020))
             {
                 var method = methods.GetBodyOwnerMethod((int)Read(slot, 4));
-                var block = Read(slot, 8);
+                var block = ReadU16(slot, 8);
                 var counts = operationCounts[method];
-                if (block == 0 || block >= counts.Length || Read(slot, 12) > (uint)counts[block])
+                var countIndex = _schema == TrRmArtifactSchema.Standard
+                    ? block + 1 : block;
+                if (ReadU16(slot, 2) != 1 || ReadU16(slot, 10) != 0
+                    || (_schema == TrRmArtifactSchema.Development && block == 0)
+                    || countIndex >= counts.Length
+                    || Read(slot, 12) > (uint)counts[countIndex])
                 {
                     throw InvalidMap();
                 }
             }
         }
     }
+
+    private static bool IsBodyInstructionSlot(ushort kind, ushort selector,
+        TrRmArtifactSchema schema)
+        => schema == TrRmArtifactSchema.Standard
+            ? kind == 0 && selector == 1
+            : kind == 0x0020 && selector == 1;
 
     private static ushort ReadU16(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt16LittleEndian(data.Slice(offset, sizeof(ushort)));

@@ -58,7 +58,7 @@ public sealed class TrRmControlFlowTests
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
         Assert.That((byte)(new TrRmBodyTableReader(bodyBytes, count).GetRow(1)[0] & 0x0C), Is.EqualTo((byte)0x08));
     }
@@ -101,7 +101,7 @@ public sealed class TrRmControlFlowTests
 
         source.Append("} return x; }");
         var artifact = TrRmExecutableCompiler.Emit(Compile(source.ToString()), "wide-indexed");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
         var body = new TrRmBodyTableReader(bodyBytes, count).GetRow(1);
         Assert.That(body[0], Is.EqualTo(0x09));

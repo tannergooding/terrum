@@ -48,7 +48,7 @@ public sealed class SourceMapTableValidationComponentTests
             SourceMapOperationBlockCounts = [0, 2],
             SourceMapOperationCounts = [0, 1, 2],
         };
-        var secondBlock = WithWord(twoBlockBody, 12, 2);
+        var secondBlock = WithWord(twoBlockBody, 12, 1);
         var unusedSlots = WithSourceMap(valid, MapWithUnusedSlots());
         var cases = new List<TableCase> {
             valid,
@@ -69,7 +69,7 @@ public sealed class SourceMapTableValidationComponentTests
             unusedSlots,
             Reject(ChangeHalfWord(unusedSlots, 38, 0)),
             Reject(ChangeWord(unusedSlots, 40, 0)),
-            Reject(ChangeWord(unusedSlots, 44, 0)),
+            Reject(ChangeWord(unusedSlots, 44, 0x0001_0000)),
             Reject(ChangeHalfWord(unusedSlots, 54, 1)),
             Reject(ChangeWord(unusedSlots, 60, 1)),
             Reject(valid with { RecordCount = 0 }),
@@ -80,7 +80,7 @@ public sealed class SourceMapTableValidationComponentTests
             Reject(ChangeHalfWord(valid, 4, 0x003F)),
             Reject(ChangeHalfWord(valid, 6, 0)),
             Reject(ChangeWord(valid, 8, 0)),
-            Reject(ChangeWord(valid, 12, 0)),
+            Reject(ChangeHalfWord(valid, 14, 1)),
             Reject(ChangeHalfWord(valid, 22, 1)),
             Reject(ChangeWord(valid, 28, 1)),
             Reject(ChangeWord(valid, 32, 1)),
@@ -384,10 +384,10 @@ public sealed class SourceMapTableValidationComponentTests
     {
         var bytes = new byte[52];
         Write(bytes, 0, 2);
-        WriteHalfWord(bytes, 4, 0x0020);
+        WriteHalfWord(bytes, 4, 0);
         WriteHalfWord(bytes, 6, 1);
         Write(bytes, 8, 1);
-        Write(bytes, 12, 1);
+        Write(bytes, 12, 0);
         WriteHalfWord(bytes, 20, 0x001F);
         Write(bytes, 24, fileRow);
         Write(bytes, 36, 1);
@@ -400,14 +400,14 @@ public sealed class SourceMapTableValidationComponentTests
     {
         var bytes = new byte[84];
         Write(bytes, 0, 3);
-        WriteHalfWord(bytes, 4, 0x0020);
+        WriteHalfWord(bytes, 4, 0);
         WriteHalfWord(bytes, 6, 1);
         Write(bytes, 8, 1);
-        Write(bytes, 12, 1);
-        WriteHalfWord(bytes, 20, 0x0020);
+        Write(bytes, 12, 0);
+        WriteHalfWord(bytes, 20, 0);
         WriteHalfWord(bytes, 22, 1);
         Write(bytes, 24, 2);
-        Write(bytes, 28, 1);
+        Write(bytes, 28, 0);
         WriteHalfWord(bytes, 36, 0x001F);
         Write(bytes, 40, 1);
         Write(bytes, 52, 1);
@@ -425,14 +425,14 @@ public sealed class SourceMapTableValidationComponentTests
     {
         var bytes = new byte[100];
         Write(bytes, 0, 4);
-        WriteHalfWord(bytes, 4, 0x0020);
+        WriteHalfWord(bytes, 4, 0);
         WriteHalfWord(bytes, 6, 1);
         Write(bytes, 8, 2);
-        Write(bytes, 12, 1);
-        WriteHalfWord(bytes, 20, 0x0020);
+        Write(bytes, 12, 0);
+        WriteHalfWord(bytes, 20, 0);
         WriteHalfWord(bytes, 22, 1);
         Write(bytes, 24, 1);
-        Write(bytes, 28, 1);
+        Write(bytes, 28, 0);
         WriteHalfWord(bytes, 36, 0x001F);
         Write(bytes, 40, 1);
         WriteHalfWord(bytes, 52, 0x001F);
@@ -454,10 +454,10 @@ public sealed class SourceMapTableValidationComponentTests
         var bytes = new byte[84];
         Write(bytes, 0, 4);
         original.AsSpan(4, 32).CopyTo(bytes.AsSpan(4));
-        WriteHalfWord(bytes, 36, 0x0020);
+        WriteHalfWord(bytes, 36, 0);
         WriteHalfWord(bytes, 38, 1);
         Write(bytes, 40, 1);
-        Write(bytes, 44, 1);
+        Write(bytes, 44, 0);
         WriteHalfWord(bytes, 52, 0x001F);
         Write(bytes, 56, 1);
         original.AsSpan(36, 16).CopyTo(bytes.AsSpan(68));

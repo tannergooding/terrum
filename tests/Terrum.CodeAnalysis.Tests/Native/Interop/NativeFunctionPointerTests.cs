@@ -679,7 +679,7 @@ public sealed class NativeFunctionPointerTests
 
         var artifact = TrRmExecutableCompiler.Emit(compilation.Program!,
             "native-function-pointer-body");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(
@@ -759,7 +759,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(callbackSignature.ParameterTypes, Is.Empty);
 
         var artifact = TrRmExecutableCompiler.Emit(program, "nested-native-callable");
-        var artifactIndex = new TrRmArtifactIndex(artifact);
+        var artifactIndex = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(artifactIndex.TryGetSection(0x0033, out _, out var signatureCount), Is.True);
         Assert.That(signatureCount, Is.EqualTo(program.NativeFunctionPointerSignatures.Length));
         Assert.That(artifactIndex.TryGetSection(0x0011, out var typeSpecBytes,
@@ -954,7 +954,7 @@ public sealed class NativeFunctionPointerTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
         var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "typed-pointer-only");
-        var artifactIndex = new TrRmArtifactIndex(artifact);
+        var artifactIndex = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(artifactIndex.TryGetSection(0x0004, out var featureBytes,
             out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
@@ -1082,7 +1082,7 @@ public sealed class NativeFunctionPointerTests
 
         var artifact = TrRmExecutableCompiler.Emit(
             consumerCompilation.Program!, "native-callable-consumer");
-        var artifactIndex = new TrRmArtifactIndex(artifact);
+        var artifactIndex = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(artifactIndex.TryGetSection(0x10, out _, out var moduleRefCount), Is.True);
         Assert.That(moduleRefCount, Is.EqualTo(1));
         Assert.That(artifactIndex.TryGetSection(0x1C, out _, out var importCount), Is.True);
@@ -1478,7 +1478,7 @@ public sealed class NativeFunctionPointerTests
 
     private static byte[] MoveNativeFunctionPointerSignatureAnchorFirst(byte[] artifact)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         if (!index.TryGetSection(0x0033, out var signatureBytes, out var signatureCount)
             || signatureCount != 1
             || !index.TryGetSection(0x0016, out var methodBytes, out var methodCount))
@@ -1581,7 +1581,7 @@ public sealed class NativeFunctionPointerTests
             sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
         }
 
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static uint RemapMethodDefinitionId(uint definition, int[] methodRowMap)
@@ -1608,7 +1608,7 @@ public sealed class NativeFunctionPointerTests
 
     private static int FindIndexedOperationTargetOffset(byte[] artifact, byte opcode)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
         {
             throw new InvalidDataException("TRRM fixture is missing its Body section.");
@@ -1645,7 +1645,7 @@ public sealed class NativeFunctionPointerTests
 
     private static void RemoveIndexedUnsafeAuthorization(byte[] artifact)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         if (!index.TryGetSection(0x0020, out var bodyBytes, out var bodyCount))
         {
             throw new InvalidDataException("TRRM fixture is missing its Body section.");
@@ -1704,7 +1704,7 @@ public sealed class NativeFunctionPointerTests
 
     private static byte[] SplitSignatureAnchorModule(byte[] artifact, bool includeRootlessFeature)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         var sections = new List<TrRmSection>(index.SectionCount);
         if (!index.TryGetSection(0x0016, out var methodBytes, out _))
         {
@@ -1742,12 +1742,12 @@ public sealed class NativeFunctionPointerTests
             sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
         }
 
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static byte[] ReverseNativeFunctionPointerSignatureRows(byte[] artifact)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         if (!index.TryGetSection(0x0033, out var signatureBytes, out var signatureCount)
             || signatureCount < 2)
         {
@@ -1796,7 +1796,7 @@ public sealed class NativeFunctionPointerTests
             sections.Add(new TrRmSection(kind, flags, (uint)recordCount, bytes));
         }
 
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static void SkipString(BinaryReader reader)

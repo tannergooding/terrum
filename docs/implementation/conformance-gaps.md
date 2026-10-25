@@ -124,6 +124,18 @@ must use `TrRmBodyTableReader` to validate a selected implementation. Map
 token binding, full record and instruction semantics, descriptor eligibility,
 canonical writing, remapping, re-emission and execution remain unfinished.
 
+Artifact framing now takes an explicit standard or internal development
+schema before table indexing and writing. Standard `TrRmArtifactIndex` uses
+the registry-owned section assignments through `0x004B`; the development
+executable route retains its old `0x0030..0x0033` meanings through explicit
+writer, loader and compact-validation selection. No section-layout fallback
+or byte-based schema detection is used. Standard SourceMap selector-1 slots
+now use target section kind zero and zero-based `u16` Body blocks, with their
+reserved word checked; the Terrum-authored directory and SourceMap validators
+match those rules. Standard interface/constant/witness/native semantic readers,
+all registry field binding, and executable current-schema production remain
+incomplete, so correct framing is not a conformance claim.
+
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,
 the `17 + 4*popcount(mapMask)` prefix and five optional maps,

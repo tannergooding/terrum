@@ -22,7 +22,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmContractTableReader contracts, TrRmNativeImportTableReader nativeImports,
             TrRmNativeCallableTableReader nativeCallables,
             TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
-            TrRmNativeVTableTableReader nativeVTables, TrRmImportTableReader imports)
+            TrRmNativeVTableTableReader nativeVTables, TrRmImportTableReader imports,
+            TrRmArtifactSchema schema)
         {
             Strings = strings;
             Modules = modules;
@@ -42,6 +43,7 @@ public static class TrRmStructuralMetadataValidator
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures;
             NativeVTables = nativeVTables;
             Imports = imports;
+            Schema = schema;
         }
 
         internal TrRmStringTableReader Strings { get; }
@@ -62,6 +64,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmNativeFunctionPointerSignatureTableReader NativeFunctionPointerSignatures { get; }
         internal TrRmNativeVTableTableReader NativeVTables { get; }
         internal TrRmImportTableReader Imports { get; }
+        internal TrRmArtifactSchema Schema { get; }
     }
 
     private enum BodyInspection
@@ -88,20 +91,29 @@ public static class TrRmStructuralMetadataValidator
         => ValidateCore(index, BodyInspection.None, developmentProfile: true);
 
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.CompactLinear,
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema.Development), BodyInspection.CompactLinear,
             developmentProfile: true);
 
     public static void ValidateCompactIndexed(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.CompactIndexed,
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema.Development), BodyInspection.CompactIndexed,
             developmentProfile: true);
 
     public static void ValidateCompact(ReadOnlySpan<byte> artifact)
-        => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.CompactMixed,
+        => _ = ValidateCore(new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema.Development), BodyInspection.CompactMixed,
             developmentProfile: true);
 
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
         BodyInspection inspection, bool developmentProfile)
     {
+        if (index.Schema != (developmentProfile
+            ? TrRmArtifactSchema.Development : TrRmArtifactSchema.Standard))
+        {
+            throw InvalidMetadata();
+        }
+
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
             || !index.TryGetSection(0x0002, out var stringBytes, out var stringCount))
         {
@@ -161,10 +173,13 @@ public static class TrRmStructuralMetadataValidator
         }
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,
             strings, modules);
-        var typeSpecs = typeSpecCount == 0 && nativeFunctionPointerSignatureCount == 0 ? default
+        var selectedNativeFunctionPointerSignatureCount = developmentProfile
+            ? nativeFunctionPointerSignatureCount : 0;
+        var typeSpecs = typeSpecCount == 0
+            && selectedNativeFunctionPointerSignatureCount == 0 ? default
             : new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
                 typeDefCount, importCount, genericParamCount,
-                nativeFunctionPointerSignatureCount);
+                selectedNativeFunctionPointerSignatureCount);
         var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
             strings, modules, fieldDefCount, genericParamCount, layoutCount, contractCount);
         var targetProfiles = new TrRmTargetProfileTableReader(
@@ -197,34 +212,48 @@ public static class TrRmStructuralMetadataValidator
             strings, moduleRefs, types, methods, properties);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports);
-        var nativeImports = new TrRmNativeImportTableReader(nativeImportBytes,
-            nativeImportCount, strings, methods, signatures, parameters,
-            typeSpecs, contracts, layouts);
-        var nativeFunctionPointerSignatures =
-            new TrRmNativeFunctionPointerSignatureTableReader(
-                nativeFunctionPointerSignatureBytes, nativeFunctionPointerSignatureCount,
-                methods, signatures, parameters, typeSpecs, contracts);
-        var nativeCallables = new TrRmNativeCallableTableReader(nativeCallableBytes,
-            nativeCallableCount, strings, methods, signatures, parameters, typeSpecs, contracts,
-            nativeFunctionPointerSignatures, imports);
-        var nativeVTables = new TrRmNativeVTableTableReader(nativeVTableBytes,
-            nativeVTableCount, methods, signatures, parameters, typeSpecs, contracts);
-        for (var method = 1; method <= methods.Count; method++)
+        var nativeImports = developmentProfile
+            ? new TrRmNativeImportTableReader(nativeImportBytes,
+                nativeImportCount, strings, methods, signatures, parameters,
+                typeSpecs, contracts, layouts)
+            : default;
+        var nativeFunctionPointerSignatures = developmentProfile
+            ? new TrRmNativeFunctionPointerSignatureTableReader(
+                nativeFunctionPointerSignatureBytes,
+                nativeFunctionPointerSignatureCount, methods, signatures, parameters,
+                typeSpecs, contracts)
+            : default;
+        var nativeCallables = developmentProfile
+            ? new TrRmNativeCallableTableReader(nativeCallableBytes,
+                nativeCallableCount, strings, methods, signatures, parameters, typeSpecs,
+                contracts, nativeFunctionPointerSignatures, imports)
+            : default;
+        var nativeVTables = developmentProfile
+            ? new TrRmNativeVTableTableReader(nativeVTableBytes,
+                nativeVTableCount, methods, signatures, parameters, typeSpecs, contracts)
+            : default;
+        if (developmentProfile)
         {
-            if (contracts.HasNativeAbi(method)
-                && contracts.GetNativeAbi(method).Role is not (1 or 2 or 3 or 4))
+            for (var method = 1; method <= methods.Count; method++)
             {
-                throw InvalidMetadata();
+                if (contracts.HasNativeAbi(method)
+                    && contracts.GetNativeAbi(method).Role is not (1 or 2 or 3 or 4))
+                {
+                    throw InvalidMetadata();
+                }
             }
+
+            ValidateNativeBoundaryFeatureAssignments(features, modules, typeSpecs,
+                signatures, parameters, methods, bodies, contracts, layouts, nativeImports,
+                nativeCallables, nativeFunctionPointerSignatures, nativeVTables,
+                developmentProfile);
         }
-        ValidateNativeBoundaryFeatureAssignments(features, modules, typeSpecs, signatures,
-            parameters, methods, bodies, contracts, layouts, nativeImports, nativeCallables,
-            nativeFunctionPointerSignatures, nativeVTables, developmentProfile);
         var sourceFiles = sourceFileCount == 0 ? default
             : new TrRmSourceFileTableReader(sourceFileBytes, sourceFileCount, strings, modules);
         var sourceMaps = sourceMapCount == 0 ? default
             : new TrRmSourceMapTableReader(sourceMapBytes, sourceMapCount,
-                methods, sourceFiles);
+                methods, sourceFiles, developmentProfile
+                    ? TrRmArtifactSchema.Development : TrRmArtifactSchema.Standard);
 
         if (inspection != BodyInspection.None)
         {
@@ -309,7 +338,8 @@ public static class TrRmStructuralMetadataValidator
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             fields, layouts, layoutFields, targetProfiles, signatures, parameters, methods,
             bodies, contracts, nativeImports,
-            nativeCallables, nativeFunctionPointerSignatures, nativeVTables, imports);
+            nativeCallables, nativeFunctionPointerSignatures, nativeVTables, imports,
+            index.Schema);
     }
 
     private static void ValidateNativeBoundaryFeatureAssignments(

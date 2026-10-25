@@ -36,6 +36,11 @@ with identical-duplicate tolerance, canonical sorted/deduplicated output, and
 catalog-derived prerequisite closure. This executable path still uses
 separate development Feature assignments and compact Bodies; the Module and
 Feature migrations do not claim current-schema TRRM execution support.
+Artifact framing now selects the standard registry or the internal development
+executable profile explicitly before indexing/writing, without fallback between
+their section meanings. The standard index recognizes the current assignments
+through `0x004B`, including standard SourceMap Body slots; semantic table
+binding and standard execution remain incomplete.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute

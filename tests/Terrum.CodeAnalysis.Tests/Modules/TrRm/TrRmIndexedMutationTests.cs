@@ -27,7 +27,7 @@ public sealed class TrRmIndexedMutationTests
         var artifact = TrRmExecutableCompiler.Emit(original, "indexed-mutations");
         TrRmStructuralMetadataValidator.ValidateCompact(artifact);
         var loaded = TrRmExecutableCompiler.Load(artifact);
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
         Assert.That(new TrRmBodyTableReader(bodyBytes, count).GetRow(1)[0] & 0x0C, Is.EqualTo(0x08));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));

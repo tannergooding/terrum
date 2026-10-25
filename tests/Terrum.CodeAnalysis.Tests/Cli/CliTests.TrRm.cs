@@ -80,7 +80,7 @@ public sealed partial class CliTests
     }
 
     [Test]
-    public async Task ValidateTrRmCompactLinearChecksBodiesWithoutChangingStructuralValidationAsync()
+    public async Task ValidateTrRmCompactLinearRequiresExplicitDevelopmentSchemaAsync()
     {
         var module = new byte[48];
         foreach (var offset in new[] { 0, 4, 8, 32, 36, 40, 44 })
@@ -116,7 +116,7 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(24), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(36), 1);
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(40), 2);
-        byte[] Encode() => TrRmArtifactWriter.Encode([
+        byte[] Encode() => TrRmArtifactWriter.EncodeDevelopment([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 3, strings),
             new TrRmSection(0x0011, 0, 1, typeSpec),
@@ -151,7 +151,7 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralMapExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.That(structuralMapExit, Is.EqualTo(0));
+            Assert.That(structuralMapExit, Is.EqualTo(1));
             var (invalidMapExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
             Assert.That(invalidMapExit, Is.EqualTo(1));
@@ -168,7 +168,7 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.That(structuralExit, Is.EqualTo(0));
+            Assert.That(structuralExit, Is.EqualTo(1));
             var (invalidExit, invalidOutput, invalidError) = await RunAsync([],
                 "validate-trrm-compact-linear", path, "--json");
             Assert.That(invalidExit, Is.EqualTo(1));
@@ -221,10 +221,14 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(import, 1);
         BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(4), 3);
         BinaryPrimitives.WriteUInt32LittleEndian(import.AsSpan(8), 0x1600_0002);
-        var owner = new byte[40];
+        var owner = new byte[44];
         BinaryPrimitives.WriteUInt32LittleEndian(owner, 4);
         BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(4), 3);
         BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 6);
+        BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(28), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(32), 1);
+        var layout = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(layout, 1);
         byte[] Artifact(byte[] moduleBytes, uint moduleCount, byte[] callerBody,
             bool imported = false, bool typeOwned = false)
         {
@@ -242,6 +246,7 @@ public sealed partial class CliTests
             if (typeOwned)
             {
                 sections.Add(new(0x0013, 0, 1, owner));
+                sections.Add(new(0x0015, 0, 1, layout));
             }
 
             sections.Add(new(0x0016, 0, 2, methods));
@@ -255,7 +260,7 @@ public sealed partial class CliTests
             sections.Add(new(0x0020, 0, imported ? 1u : 2u,
                 imported ? TrRmVariableTableWriter.EncodeBodies([callerBody])
                     : TrRmVariableTableWriter.EncodeBodies([callerBody, callee])));
-            return TrRmArtifactWriter.Encode(sections);
+            return TrRmArtifactWriter.EncodeDevelopment(sections);
         }
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
@@ -263,6 +268,9 @@ public sealed partial class CliTests
         try
         {
             await File.WriteAllBytesAsync(path, Artifact(module, 1, caller));
+            var (standardSchemaExit, _, _) = await RunAsync([],
+                "validate-trrm-structure", path, "--json");
+            Assert.That(standardSchemaExit, Is.EqualTo(0));
             foreach (var command in new[] { "validate-trrm-structure",
                 "validate-trrm-compact-linear", "validate-trrm-compact" })
             {
@@ -412,7 +420,7 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(sourceMap.AsSpan(40), 2);
         byte[] Encode(byte[]? methodRows = null, int methodCount = 1,
             byte[]? bodyRows = null, int bodyCount = 1,
-            byte[]? mapRows = null, int mapCount = 1) => TrRmArtifactWriter.Encode([
+            byte[]? mapRows = null, int mapCount = 1) => TrRmArtifactWriter.EncodeDevelopment([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 3, strings),
             new TrRmSection(0x0011, 0, 2, typeSpec),
@@ -442,7 +450,7 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode());
             var (structuralExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.That(structuralExit, Is.EqualTo(0));
+            Assert.That(structuralExit, Is.EqualTo(1));
             var (invalidMapExit, _, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
             Assert.That(invalidMapExit, Is.EqualTo(1));
@@ -459,7 +467,7 @@ public sealed partial class CliTests
             await File.WriteAllBytesAsync(path, Encode());
             var (opaqueExit, _, _) = await RunAsync([],
                 "validate-trrm-structure", path, "--json");
-            Assert.That(opaqueExit, Is.EqualTo(0));
+            Assert.That(opaqueExit, Is.EqualTo(1));
             var (invalidBodyExit, invalidOutput, _) = await RunAsync([],
                 "validate-trrm-compact-indexed", path, "--json");
             Assert.That(invalidBodyExit, Is.EqualTo(1));
@@ -594,7 +602,7 @@ public sealed partial class CliTests
             }
 
             sections.Add(new TrRmSection(0x0020, 0, 1, body));
-            return TrRmArtifactWriter.Encode([.. sections]);
+            return TrRmArtifactWriter.EncodeDevelopment([.. sections]);
         }
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-call-{Guid.NewGuid():N}.trrm");
@@ -640,7 +648,7 @@ public sealed partial class CliTests
                     Artifact(withImport: true, importTarget: target, importPolicy: policy));
                 var (importStructure, _, _) = await RunAsync([],
                     "validate-trrm-structure", path, "--json");
-                Assert.That(importStructure, Is.EqualTo(0));
+                Assert.That(importStructure, Is.EqualTo(1));
                 var (incompatibleImport, _, _) = await RunAsync([],
                     "validate-trrm-compact-indexed", path, "--json");
                 Assert.That(incompatibleImport, Is.EqualTo(1));
@@ -686,7 +694,7 @@ public sealed partial class CliTests
             BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), sourceType);
             var body = TrRmBodyExampleTests.IndexedScalarOperation(
                 operation, [sourceType], resultType);
-            return TrRmArtifactWriter.Encode([
+            return TrRmArtifactWriter.EncodeDevelopment([
                 new TrRmSection(0x0001, 0, 1, module),
                 new TrRmSection(0x0002, 0, 2, strings),
                 new TrRmSection(0x0011, 0, 2, typeSpec),
@@ -706,7 +714,7 @@ public sealed partial class CliTests
             {
                 await File.WriteAllBytesAsync(path, Artifact(
                     [0x16, 2, destination, 1], source, destination));
-                foreach (var command in new[] { "validate-trrm-structure",
+                foreach (var command in new[] {
                     "validate-trrm-compact-indexed", "validate-trrm-compact" })
                 {
                     var (valid, output, error) = await RunAsync([], command, path, "--json");
@@ -763,13 +771,20 @@ public sealed partial class CliTests
         }
         BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(40), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(methods.AsSpan(52), 2);
-        var owner = new byte[40];
+        var owner = new byte[44];
         BinaryPrimitives.WriteUInt32LittleEndian(owner, 3);
         BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(4), 2);
         BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(8), 6);
-        var formal = new byte[20];
+        BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(28), 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(owner.AsSpan(32), 1);
+        var layout = new byte[28];
+        BinaryPrimitives.WriteUInt32LittleEndian(layout, 1);
+        var formal = new byte[32];
         BinaryPrimitives.WriteUInt32LittleEndian(formal, 0x1300_0001);
         BinaryPrimitives.WriteUInt32LittleEndian(formal.AsSpan(8), 2);
+        formal[20] = 1;
+        formal[21] = 1;
+        formal[22] = 1;
         var caller = TrRmBodyExampleTests.IndexedScalarOperation(
             [0x12, 2, 0, 2, 0, 0, 0x16, 1, 1], [2], 2);
         var producer = TrRmBodyExampleTests.IndexedScalarOperation([3, 2, 1], [2], 2);
@@ -790,6 +805,7 @@ public sealed partial class CliTests
             if (typeOwned)
             {
                 sections.Add(new(0x0013, 0, 1, owner));
+                sections.Add(new(0x0015, 0, 1, layout));
             }
 
             sections.Add(new(0x0016, 0, 2, methods));
@@ -801,7 +817,7 @@ public sealed partial class CliTests
             }
 
             sections.Add(new(0x0020, 0, 2, body));
-            return TrRmArtifactWriter.Encode(sections);
+            return TrRmArtifactWriter.EncodeDevelopment(sections);
         }
 
         var path = Path.Combine(TestArtifactPaths.DirectoryPath,
@@ -908,7 +924,7 @@ public sealed partial class CliTests
         BinaryPrimitives.WriteUInt32LittleEndian(parameter.AsSpan(8), nestedLoop ? 1u : 2u);
         var body = nestedLoop ? TrRmBodyExampleTests.IndexedNestedLoop()
             : TrRmBodyExampleTests.IndexedScalarLoop(siblingLoop: siblingLoop);
-        byte[] Artifact() => TrRmArtifactWriter.Encode([
+        byte[] Artifact() => TrRmArtifactWriter.EncodeDevelopment([
             new TrRmSection(0x0001, 0, 1, module),
             new TrRmSection(0x0002, 0, 2, strings),
             new TrRmSection(0x0011, 0, 2, typeSpec),

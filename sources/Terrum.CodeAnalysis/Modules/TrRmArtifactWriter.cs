@@ -9,11 +9,18 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly record struct TrRmSection(
     ushort Kind, ushort Flags, uint RecordCount, ReadOnlyMemory<byte> Bytes);
 
-/// <summary>Frames independently authored sections in a provisional TRRM (1, 0) artifact.</summary>
+/// <summary>Frames independently authored sections in a standard TRRM (1, 0) artifact.</summary>
 /// <remarks>Does not replace the semantic-module writer or establish executable metadata validity.</remarks>
 public static class TrRmArtifactWriter
 {
     public static byte[] Encode(IReadOnlyList<TrRmSection> sections)
+        => Encode(sections, TrRmArtifactSchema.Standard);
+
+    internal static byte[] EncodeDevelopment(IReadOnlyList<TrRmSection> sections)
+        => Encode(sections, TrRmArtifactSchema.Development);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmSection> sections,
+        TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(sections);
         if (sections.Count is <= 0 or > 32790)
@@ -77,7 +84,7 @@ public static class TrRmArtifactWriter
             throw new InvalidOperationException("TRRM section offsets did not match the computed artifact size.");
         }
 
-        _ = new TrRmArtifactIndex(result);
+        _ = new TrRmArtifactIndex(result, schema);
         return result;
     }
 

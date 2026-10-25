@@ -6,6 +6,12 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+internal enum TrRmArtifactSchema
+{
+    Standard,
+    Development,
+}
+
 /// <summary>Validates TRRM (1, 0) framing and indexes present sections without binding them.</summary>
 /// <remarks>The borrowed artifact bytes must remain unchanged while this index is in use.</remarks>
 public readonly ref struct TrRmArtifactIndex
@@ -13,12 +19,20 @@ public readonly ref struct TrRmArtifactIndex
     private readonly ReadOnlySpan<byte> _artifact;
     private readonly ReadOnlySpan<byte> _directory;
     private readonly int _entryCount;
+    private readonly TrRmArtifactSchema _schema;
 
     public int SectionCount => _entryCount;
+    internal TrRmArtifactSchema Schema => _schema;
 
     public TrRmArtifactIndex(ReadOnlySpan<byte> artifact)
+        : this(artifact, TrRmArtifactSchema.Standard)
     {
-        if (artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
+    }
+
+    internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact, TrRmArtifactSchema schema)
+    {
+        if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development)
+            || artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
             || ReadU16(artifact, 4) != 1 || ReadU16(artifact, 6) != 0
             || ReadU32(artifact, 8) != 32 || ReadU32(artifact, 16) != artifact.Length
             || ReadU32(artifact, 20) != 32)
@@ -44,8 +58,8 @@ public readonly ref struct TrRmArtifactIndex
         _artifact = artifact;
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
-        // Reference slots target only kinds 1 through 0x20; NativeImport is not referenceable.
-        Span<uint> sectionCounts = stackalloc uint[0x33 + 1];
+        _schema = schema;
+        Span<uint> sectionCounts = stackalloc uint[0x4B + 1];
         sectionCounts.Clear();
         var previousKind = 0;
         // Keep directory-ordered payloads allocation-free while retaining support for alternate layouts.
@@ -76,17 +90,18 @@ public readonly ref struct TrRmArtifactIndex
                 moduleFound = true;
             }
 
-            var stride = FixedStride(kind);
+            var stride = FixedStride(kind, schema);
             if ((kind < 0x8000 && stride == -1)
                 || (kind < 0x8000 && flags != (kind == 0x7F00 ? 2 : 0))
                 || (kind >= 0x8000 && flags is not (1 or 2 or 3))
                 || (stride > 0 && length != (long)count * stride)
                 || (kind == 0x0002 && (start & 3) != 0))
             {
-                throw InvalidArtifact();
+                throw new InvalidDataException(
+                    $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
             }
 
-            if (kind <= 0x0033)
+            if (kind <= 0x004B)
             {
                 sectionCounts[kind] = count;
             }
@@ -184,11 +199,14 @@ public readonly ref struct TrRmArtifactIndex
                 var start = ReadU32(_directory, entry * 16 + 8);
                 var length = ReadU32(_directory, entry * 16 + 12);
                 var count = ReadU32(_directory, entry * 16 + 4);
-                ValidateSlots(artifact.Slice((int)start, (int)length), Kind(entry), count,
-                    sectionCounts);
+                ValidateSlots(artifact.Slice((int)start, (int)length), Kind(entry),
+                    count, sectionCounts, schema);
             }
         }
     }
+
+    internal static TrRmArtifactIndex ForDevelopment(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.Development);
 
     public bool TryGetSection(ushort kind, out ReadOnlySpan<byte> section, out int recordCount)
     {
@@ -242,7 +260,7 @@ public readonly ref struct TrRmArtifactIndex
         => ReadU16(_directory, entry * 16);
 
     private void ValidateSlots(ReadOnlySpan<byte> section, int kind, uint recordCount,
-        ReadOnlySpan<uint> sectionCounts)
+        ReadOnlySpan<uint> sectionCounts, TrRmArtifactSchema schema)
     {
         if (section.Length < 4)
         {
@@ -265,31 +283,113 @@ public readonly ref struct TrRmArtifactIndex
             var row = ReadU32(section, offset + 4);
             var block = ReadU32(section, offset + 8);
             var ordinal = ReadU32(section, offset + 12);
-            if (row is 0 or > 0xFF_FFFF
-                || targetKind is < 0x0001 or > 0x0020 or 0x0004
-                || FixedStride(targetKind) == -1
-                || sectionCounts[targetKind] == 0 || row > sectionCounts[targetKind]
-                || (selector == 0 && (block != 0 || ordinal != 0))
-                || (selector == 1 && (targetKind != 0x0020 || block == 0))
-                || (kind == 0x7F00 && !((selector == 0 && targetKind == 0x001F)
-                    || (selector == 1 && targetKind == 0x0020)))
-                || selector > 1)
+            var reserved = ReadU16(section, offset + 10);
+            if (row is 0 or > 0xFF_FFFF || reserved != 0 || selector > 1
+                || (selector == 0 && (block != 0 || ordinal != 0
+                    || !IsReferenceSlotTableKind(targetKind, schema)
+                    || FixedStride(targetKind, schema) == -1
+                    || sectionCounts[targetKind] == 0
+                    || row > sectionCounts[targetKind]))
+                || (selector == 1 && (schema == TrRmArtifactSchema.Standard
+                    ? targetKind != 0 || sectionCounts[0x0020] == 0
+                        || row > sectionCounts[0x0020]
+                    : targetKind != 0x0020 || sectionCounts[0x0020] == 0
+                        || row > sectionCounts[0x0020] || block == 0))
+                || (kind == 0x7F00 && (schema == TrRmArtifactSchema.Standard
+                    ? !((selector == 0 && targetKind == 0x001F)
+                        || (selector == 1 && targetKind == 0))
+                    : !((selector == 0 && targetKind == 0x001F)
+                        || (selector == 1 && targetKind == 0x0020)))))
             {
                 throw InvalidArtifact();
             }
         }
     }
 
-    private static int FixedStride(int kind) => kind switch
+    private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
+        => schema == TrRmArtifactSchema.Standard
+            ? kind is >= 0x0001 and <= 0x004B
+            : kind is >= 0x0001 and <= 0x0020 && kind != 0x0004;
+
+    private static int FixedStride(int kind, TrRmArtifactSchema schema)
     {
-        0x0001 => 48, 0x0002 or 0x0003 or 0x0011 or 0x001B or 0x0020 or 0x7F00 => 0,
-        0x0004 => 8, 0x0010 => 12, 0x0013 => 44,
-        0x0014 => 16, 0x0015 => 28, 0x0016 => 28, 0x0017 => 24,
-        0x0018 => 16, 0x0019 => 32, 0x001A => 12, 0x001C => 12,
-        0x001D => 8, 0x001E => 20, 0x001F => 8, 0x0030 => 16, 0x0031 => 8,
-        0x0023 => 12, 0x0032 => 16, 0x0033 => 8, 0x0048 => 8,
-        _ => -1,
-    };
+        if (schema == TrRmArtifactSchema.Development)
+        {
+            return kind switch
+            {
+                0x0001 => 48,
+                0x0002 or 0x0003 or 0x0011 or 0x001B or 0x0020 or 0x7F00 => 0,
+                0x0004 => 8,
+                0x0010 => 12,
+                0x0013 => 44,
+                0x0014 => 16,
+                0x0015 or 0x0016 => 28,
+                0x0017 => 24,
+                0x0018 => 16,
+                0x0019 => 32,
+                0x001A => 12,
+                0x001C => 12,
+                0x001D => 8,
+                0x001E => 20,
+                0x001F => 8,
+                0x0023 => 12,
+                0x0030 => 16,
+                0x0031 => 8,
+                0x0032 => 16,
+                0x0033 => 8,
+                0x0048 => 8,
+                _ => -1,
+            };
+        }
+
+        return kind switch
+        {
+            0x0001 => 48,
+            0x0002 or 0x0003 or 0x0011 or 0x001B or 0x0020
+                or 0x004B or 0x7F00 => 0,
+            0x0004 => 8,
+            0x0010 => 12,
+            0x0013 => 44,
+            0x0014 => 16,
+            0x0015 or 0x0016 => 28,
+            0x0017 => 24,
+            0x0018 => 16,
+            0x0019 => 32,
+            0x001A => 12,
+            0x001C => 12,
+            0x001D => 8,
+            0x001E => 20,
+            0x001F => 8,
+            0x0021 or 0x0022 => 16,
+            0x0023 or 0x0024 or 0x0026 or 0x0027 or 0x0032 or 0x0036 => 12,
+            0x0025 => 48,
+            0x0028 => 32,
+            0x0029 or 0x002A => 20,
+            0x002B or 0x002C => 12,
+            0x002D => 20,
+            0x002E => 16,
+            0x002F => 40,
+            0x0030 => 8,
+            0x0031 or 0x0033 => 16,
+            0x0034 => 20,
+            0x0035 => 16,
+            0x0037 or 0x0039 or 0x003A or 0x003C => 8,
+            0x0038 => 16,
+            0x003B => 16,
+            0x003D => 12,
+            0x003E => 16,
+            0x003F => 24,
+            0x0040 or 0x0041 => 12,
+            0x0042 => 80,
+            0x0043 or 0x0044 => 8,
+            0x0045 or 0x0046 => 20,
+            0x0047 => 24,
+            0x0048 => 8,
+            0x0049 => 16,
+            0x004A => 4,
+            _ => -1,
+        };
+    }
 
     private static bool ValidFeatureRange(uint first, uint count, int featureCount)
     {

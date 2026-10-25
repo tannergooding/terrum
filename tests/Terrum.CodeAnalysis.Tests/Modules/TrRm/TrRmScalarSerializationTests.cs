@@ -262,7 +262,7 @@ public sealed class TrRmScalarSerializationTests
 
     private static byte[] Body(byte[] artifact, int method)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bytes, out var count), Is.True);
         return new TrRmBodyTableReader(bytes, count).GetRow(method).ToArray();
     }

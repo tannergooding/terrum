@@ -622,7 +622,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     }
 
     private static bool IsIndexedFamily(byte familyCode)
-        => familyCode is >= 0x80 and <= 0x84 or 0x8A;
+        => IsAssignedInlineFamily(familyCode);
 
     private static bool IsNoncanonicalAtomic(TrRmTypeSpecRefInfo reference)
         => reference.IsRow && reference.Form == 0x01 && reference.TypeCode < 0x80;

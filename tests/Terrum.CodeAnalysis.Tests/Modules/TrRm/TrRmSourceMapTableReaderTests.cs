@@ -16,10 +16,10 @@ public sealed class TrRmSourceMapTableReaderTests
         Create(Map());
         Assert.Throws<InvalidDataException>(() => Create(Map(), crossModule: true));
     }
-    [TestCase(4,(byte)(0))]
+    [TestCase(4,(byte)(1))]
     [TestCase(6,(byte)(0))]
     [TestCase(8,(byte)(2))]
-    [TestCase(12,(byte)(0))]
+    [TestCase(14,(byte)(1))]
     [TestCase(20,(byte)(0))]
     [TestCase(24,(byte)(2))]
     [TestCase(36,(byte)(0))]
@@ -61,10 +61,10 @@ public sealed class TrRmSourceMapTableReaderTests
         var section = new byte[84];
         Write(section, 0, 3);
         Map().AsSpan(4, 32).CopyTo(section.AsSpan(4));
-        WriteU16(section, 36, 0x0020);
+        WriteU16(section, 36, 0);
         WriteU16(section, 38, 1);
         Write(section, 40, 2);
-        Write(section, 44, 1);
+        Write(section, 44, 0);
         Map().AsSpan(36, 16).CopyTo(section.AsSpan(52));
         Write(section, 68, 3);
         Write(section, 72, 2);
@@ -80,7 +80,7 @@ public sealed class TrRmSourceMapTableReaderTests
     [Test]
     public void WriterMatchesWorkedBytesAndSharesSourceFileSlots()
     {
-        var first = new TrRmSourceMapEntry(1, 1, 0, 1, 0, 2);
+        var first = new TrRmSourceMapEntry(1, 0, 0, 1, 0, 2);
         Assert.That(Encode([first]), Is.EqualTo(Map()));
         var second = first with { Ordinal = 1, StartUtf16 = 2, LengthUtf16 = 3 };
         var section = Encode([first, second]);
@@ -99,7 +99,9 @@ public sealed class TrRmSourceMapTableReaderTests
         Assert.Throws<InvalidDataException>(() => Encode([entry, entry]));
         Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 0 }]));
         Assert.Throws<InvalidDataException>(() => Encode([entry with { BodyRow = 2 }]));
-        Assert.Throws<InvalidDataException>(() => Encode([entry with { Block = 0 }]));
+        Assert.Throws<InvalidDataException>(() => Encode([entry with { Block = -1 }]));
+        Assert.Throws<InvalidDataException>(() =>
+            Encode([entry with { Block = ushort.MaxValue + 1 }]));
         Assert.Throws<InvalidDataException>(() => Encode([entry with { Ordinal = -1 }]));
         Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 0 }]));
         Assert.Throws<InvalidDataException>(() => Encode([entry with { SourceFileRow = 2 }]));
@@ -190,10 +192,10 @@ public sealed class TrRmSourceMapTableReaderTests
     {
         var bytes = new byte[52];
         Write(bytes, 0, 2);
-        WriteU16(bytes, 4, 0x0020);
+        WriteU16(bytes, 4, 0);
         WriteU16(bytes, 6, 1);
         Write(bytes, 8, 1);
-        Write(bytes, 12, 1);
+        Write(bytes, 12, 0);
         WriteU16(bytes, 20, 0x001F);
         Write(bytes, 24, 1);
         Write(bytes, 36, 1);

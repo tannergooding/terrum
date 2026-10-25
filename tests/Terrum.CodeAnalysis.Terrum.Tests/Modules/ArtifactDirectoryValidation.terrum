@@ -149,6 +149,7 @@ public static bool TryGetArtifactSection(int32 queryKind,
                 || !TryReadArtifactHalfWord(slotOffset + 2, init var selector)
                 || !TryReadArtifactWord(slotOffset + 4, init var targetRow)
                 || !TryReadArtifactWord(slotOffset + 8, init var block)
+                || !TryReadArtifactHalfWord(slotOffset + 10, init var reserved)
                 || !TryReadArtifactWord(slotOffset + 12, init var ordinal))
             {
                 return false;
@@ -156,15 +157,18 @@ public static bool TryGetArtifactSection(int32 queryKind,
 
             int32 targetKindValue = int32(targetKind);
             if (targetRow == 0 || targetRow > 0xFF_FFFF
-                || targetKindValue < 1 || targetKindValue > 0x0020
-                || targetKindValue == 0x0004
-                || GetArtifactSectionStride(targetKindValue) < 0
-                || targetRow > GetArtifactSectionCount(targetKindValue)
+                || reserved != 0
                 || (selector == 0 && (block != 0 || ordinal != 0))
-                || (selector == 1 && (targetKindValue != 0x0020 || block == 0))
+                || (selector == 0 && (targetKindValue < 1
+                    || targetKindValue > 0x004B
+                    || GetArtifactSectionStride(targetKindValue) < 0
+                    || targetRow > GetArtifactSectionCount(targetKindValue)))
+                || (selector == 1 && (targetKindValue != 0
+                    || GetArtifactSectionCount(0x0020) == 0
+                    || targetRow > GetArtifactSectionCount(0x0020)))
                 || (sectionKind == 0x7F00
                     && !((selector == 0 && targetKindValue == 0x001F)
-                        || (selector == 1 && targetKindValue == 0x0020)))
+                        || (selector == 1 && targetKindValue == 0)))
                 || selector > 1)
             {
                 return false;
@@ -216,18 +220,48 @@ int32 GetArtifactSectionStride(int32 kind)
 {
     if (kind == 0x0001) { return 48; }
     if (kind == 0x0002 || kind == 0x0003 || kind == 0x0011
-        || kind == 0x001B || kind == 0x0020 || kind == 0x7F00) { return 0; }
+        || kind == 0x001B || kind == 0x0020 || kind == 0x004B
+        || kind == 0x7F00) { return 0; }
     if (kind == 0x0004) { return 8; }
     if (kind == 0x0010 || kind == 0x001C) { return 12; }
-    if (kind == 0x0013) { return 40; }
-    if (kind == 0x0014) { return 20; }
-    if (kind == 0x0015 || kind == 0x0017) { return 24; }
-    if (kind == 0x0016) { return 28; }
-    if (kind == 0x0018 || kind == 0x001A) { return 16; }
-    if (kind == 0x0019 || kind == 0x001E) { return 20; }
+    if (kind == 0x0013) { return 44; }
+    if (kind == 0x0014) { return 16; }
+    if (kind == 0x0015 || kind == 0x0016) { return 28; }
+    if (kind == 0x0017) { return 24; }
+    if (kind == 0x0018) { return 16; }
+    if (kind == 0x0019) { return 32; }
+    if (kind == 0x001A) { return 12; }
     if (kind == 0x001D) { return 8; }
+    if (kind == 0x001E) { return 20; }
     if (kind == 0x001F) { return 8; }
-
+    if (kind == 0x0021 || kind == 0x0022) { return 16; }
+    if (kind == 0x0023 || kind == 0x0024 || kind == 0x0026
+        || kind == 0x0027 || kind == 0x0032 || kind == 0x0036) { return 12; }
+    if (kind == 0x0025) { return 48; }
+    if (kind == 0x0028) { return 32; }
+    if (kind == 0x0029 || kind == 0x002A) { return 20; }
+    if (kind == 0x002B || kind == 0x002C) { return 12; }
+    if (kind == 0x002D) { return 20; }
+    if (kind == 0x002E) { return 16; }
+    if (kind == 0x002F) { return 40; }
+    if (kind == 0x0030) { return 8; }
+    if (kind == 0x0031 || kind == 0x0033) { return 16; }
+    if (kind == 0x0034) { return 20; }
+    if (kind == 0x0035) { return 16; }
+    if (kind == 0x0037 || kind == 0x0039 || kind == 0x003A
+        || kind == 0x003C) { return 8; }
+    if (kind == 0x0038 || kind == 0x003B) { return 16; }
+    if (kind == 0x003D) { return 12; }
+    if (kind == 0x003E) { return 16; }
+    if (kind == 0x003F) { return 24; }
+    if (kind == 0x0040 || kind == 0x0041) { return 12; }
+    if (kind == 0x0042) { return 80; }
+    if (kind == 0x0043 || kind == 0x0044) { return 8; }
+    if (kind == 0x0045 || kind == 0x0046) { return 20; }
+    if (kind == 0x0047) { return 24; }
+    if (kind == 0x0048) { return 8; }
+    if (kind == 0x0049) { return 16; }
+    if (kind == 0x004A) { return 4; }
     return -1;
 }
 

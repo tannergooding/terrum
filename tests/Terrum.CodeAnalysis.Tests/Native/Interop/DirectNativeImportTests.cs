@@ -1295,7 +1295,7 @@ public sealed class DirectNativeImportTests
                     NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 1),
             }));
 
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(featureCount, Is.EqualTo(3));
@@ -1362,7 +1362,7 @@ public sealed class DirectNativeImportTests
             Is.EqualTo([PrimitiveType.Int32, PrimitiveType.UInt32]));
         Assert.That(addresses.All(static address => address.IsReadonly), Is.True);
 
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(featureCount, Is.EqualTo(4));
@@ -1497,7 +1497,7 @@ public sealed class DirectNativeImportTests
         Assert.That(loadedImport.Parameters.Single().PointeeType,
             Is.EqualTo((PrimitiveType)(100 + loadedStructureIndex)));
 
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(0x0100,
@@ -1903,7 +1903,7 @@ public sealed class DirectNativeImportTests
     public void TrRmNativeImportRoundTripsIntoAnUnsafeSourceConsumer()
     {
         var artifact = EmitPublicImportArtifact();
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.GetFeature(1),

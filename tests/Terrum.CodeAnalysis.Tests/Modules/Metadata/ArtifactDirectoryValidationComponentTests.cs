@@ -48,6 +48,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
         byte[] extensions = ExtensionArtifact();
         byte[] outOfOrder = OutOfOrderArtifact();
         byte[] referenceSlots = ReferenceSlotArtifact();
+        byte[] standardMetadataRows = StandardMetadataRowsArtifact();
         byte[] featureArtifact = FeatureArtifact(1, 1,
             FeatureRow(1, 6));
         var cases = new List<TestCase> {
@@ -59,6 +60,14 @@ public sealed class ArtifactDirectoryValidationComponentTests
             NewCase(referenceSlots, 0x8000),
             NewCase(BodyReferenceSlotArtifact(), 0x8000),
             NewCase(SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0x7F00),
+            NewCase(standardMetadataRows, 0x0021),
+            NewCase(standardMetadataRows, 0x0022),
+            NewCase(standardMetadataRows, 0x0030),
+            NewCase(standardMetadataRows, 0x0031),
+            NewCase(standardMetadataRows, 0x0032),
+            NewCase(standardMetadataRows, 0x0033),
+            NewCase(standardMetadataRows, 0x0043),
+            NewCase(standardMetadataRows, 0x0044),
             NewCase(featureArtifact, 0x0004),
             NewCase(FeatureArtifact(0, 0,
                 FeatureRow(1, 8)), 0x0004),
@@ -95,7 +104,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
             Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 2, 1)),
             Invalid(ChangeExtensionSlotHalfWord(referenceSlots, 0, 5)),
             Invalid(ChangeSlotCount(referenceSlots, 2)),
-            Invalid(ChangeExtensionSlotWord(BodyReferenceSlotArtifact(), 8, 0)),
+            NewCase(ChangeExtensionSlotWord(BodyReferenceSlotArtifact(), 8, 0), 0x8000),
             Invalid(ChangeSourceMapSlotHalfWord(
                 SourceMapArtifact(new TrRmReferenceSlot(0x001F, 0, 1, 0, 0)), 0, 0x0002)),
             Invalid(SourceMapWithTrailingPayload()),
@@ -258,7 +267,7 @@ public sealed class ArtifactDirectoryValidationComponentTests
     private static byte[] BodyReferenceSlotArtifact()
     {
         var extension = TrRmOptionalSectionSlots.Create(0x8000, 1,
-            [new TrRmReferenceSlot(0x0020, 1, 1, 1, 0)], new byte[] { 0xA5 });
+            [new TrRmReferenceSlot(0, 1, 1, 0, 0)], new byte[] { 0xA5 });
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, new byte[48]),
             new TrRmSection(0x0002, 0, 1,
@@ -267,6 +276,21 @@ public sealed class ArtifactDirectoryValidationComponentTests
             extension,
         ]);
     }
+
+    private static byte[] StandardMetadataRowsArtifact()
+        => TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
+            new TrRmSection(0x0002, 0, 1,
+                TrRmStringTableWriter.EncodeNames([("A", 0)])),
+            new TrRmSection(0x0021, 0, 1, new byte[16]),
+            new TrRmSection(0x0022, 0, 1, new byte[16]),
+            new TrRmSection(0x0030, 0, 1, new byte[8]),
+            new TrRmSection(0x0031, 0, 1, new byte[16]),
+            new TrRmSection(0x0032, 0, 1, new byte[12]),
+            new TrRmSection(0x0033, 0, 1, new byte[16]),
+            new TrRmSection(0x0043, 0, 1, new byte[8]),
+            new TrRmSection(0x0044, 0, 1, new byte[8]),
+        ]);
 
     private static byte[] SourceMapArtifact(TrRmReferenceSlot slot)
     {
@@ -452,7 +476,8 @@ public sealed class ArtifactDirectoryValidationComponentTests
         WriteHalfWord(bytes, offset, slot.TargetKind);
         WriteHalfWord(bytes, offset + 2, slot.Selector);
         WriteWord(bytes, offset + 4, slot.TargetRow);
-        WriteWord(bytes, offset + 8, slot.Block);
+        WriteHalfWord(bytes, offset + 8, checked((ushort)slot.Block));
+        WriteHalfWord(bytes, offset + 10, 0);
         WriteWord(bytes, offset + 12, slot.Ordinal);
     }
 

@@ -7,6 +7,12 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>A standard TRRM optional-section row or Body-instruction reference.</summary>
+/// <param name="TargetKind">The assigned section kind, or zero for a Body instruction.</param>
+/// <param name="Selector">Zero for a table row or one for a Body instruction.</param>
+/// <param name="TargetRow">The one-based row in the selected table.</param>
+/// <param name="Block">The zero-based u16 Body block index, or zero for a table row.</param>
+/// <param name="Ordinal">The zero-based instruction ordinal, or zero for a table row.</param>
 public readonly record struct TrRmReferenceSlot(
     ushort TargetKind, ushort Selector, uint TargetRow, uint Block, uint Ordinal);
 
@@ -36,21 +42,37 @@ public static class TrRmOptionalSectionSlots
     }
 
     public static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact, TrRmSection extension)
+        => InsertInArtifact(artifact, extension, TrRmArtifactSchema.Standard);
+
+    internal static byte[] InsertInDevelopmentArtifact(ReadOnlySpan<byte> artifact,
+        TrRmSection extension)
+        => InsertInArtifact(artifact, extension, TrRmArtifactSchema.Development);
+
+    private static byte[] InsertInArtifact(ReadOnlySpan<byte> artifact,
+        TrRmSection extension, TrRmArtifactSchema schema)
     {
         if (extension.Kind < 0x8000 || extension.Flags != 2)
         {
             throw InvalidSlots();
         }
 
-        var index = new TrRmArtifactIndex(artifact);
+        var index = new TrRmArtifactIndex(artifact, schema);
         var sections = CopySections(index);
         sections.Add(extension);
         sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     public static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
         IReadOnlyList<TrRmReferenceSlot> slots)
+        => ReplaceInArtifact(artifact, kind, slots, TrRmArtifactSchema.Standard);
+
+    internal static byte[] ReplaceInDevelopmentArtifact(ReadOnlySpan<byte> artifact,
+        ushort kind, IReadOnlyList<TrRmReferenceSlot> slots)
+        => ReplaceInArtifact(artifact, kind, slots, TrRmArtifactSchema.Development);
+
+    private static byte[] ReplaceInArtifact(ReadOnlySpan<byte> artifact, ushort kind,
+        IReadOnlyList<TrRmReferenceSlot> slots, TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(slots);
         if (kind < 0x8000)
@@ -58,7 +80,7 @@ public static class TrRmOptionalSectionSlots
             throw InvalidSlots();
         }
 
-        var index = new TrRmArtifactIndex(artifact);
+        var index = new TrRmArtifactIndex(artifact, schema);
         var sections = CopySections(index);
         var found = false;
         for (var entry = 0; entry < sections.Count; entry++)
@@ -75,7 +97,7 @@ public static class TrRmOptionalSectionSlots
             throw InvalidSlots();
         }
 
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static List<TrRmSection> CopySections(TrRmArtifactIndex index)
@@ -121,11 +143,17 @@ public static class TrRmOptionalSectionSlots
 
     private static void WriteSlot(byte[] bytes, int index, TrRmReferenceSlot slot)
     {
+        if (slot.Block > ushort.MaxValue)
+        {
+            throw InvalidSlots();
+        }
+
         var offset = 4 + index * 16;
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset), slot.TargetKind);
         BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 2), slot.Selector);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 4), slot.TargetRow);
-        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 8), slot.Block);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 8), (ushort)slot.Block);
+        BinaryPrimitives.WriteUInt16LittleEndian(bytes.AsSpan(offset + 10), 0);
         BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset + 12), slot.Ordinal);
     }
 

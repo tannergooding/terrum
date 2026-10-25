@@ -92,7 +92,7 @@ public sealed class TrRmExecutableCompilerTests
     {
         var original = Compile(source);
         var artifact = TrRmExecutableCompiler.Emit(original, "init-output");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
 
         Assert.That(index.TryGetSection(4, out var featureBytes, out var featureCount), Is.True);
         Assert.That(featureCount, Is.EqualTo(1));
@@ -847,7 +847,7 @@ public sealed class TrRmExecutableCompilerTests
                 return result;
             }
             """), "missing-feature");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         for (var section = 0; section < index.SectionCount; section++)
         {
             index.GetSection(section, out var kind, out _, out _, out _);
@@ -1019,7 +1019,7 @@ public sealed class TrRmExecutableCompilerTests
     {
         const string source = "public float64 Widen(float32 value) { return float64(value); }";
         var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "constructed-float-convert");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x11, out var typeBytes, out var typeCount), Is.True);
         var originalTypes = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
         var typeRows = new List<ReadOnlyMemory<byte>>(typeCount + 1);
@@ -1078,7 +1078,7 @@ public sealed class TrRmExecutableCompilerTests
                     _ => bytes.ToArray(),
                 }));
         }
-        var malformed = TrRmArtifactWriter.Encode(sections);
+        var malformed = TrRmArtifactWriter.EncodeDevelopment(sections);
 
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformed));
     }
@@ -1107,10 +1107,10 @@ public sealed class TrRmExecutableCompilerTests
             """;
         var mixed = TrRmExecutableCompiler.Emit(Compile(mixedSource), "mixed-float");
 
-        var integerOnlyIndex = new TrRmArtifactIndex(integerOnly);
+        var integerOnlyIndex = TrRmArtifactIndex.ForDevelopment(integerOnly);
         Assert.That(integerOnlyIndex.TryGetSection(0x20, out var integerOnlyBodies, out var integerOnlyCount), Is.True);
         var integerOnlyBody = new TrRmBodyTableReader(integerOnlyBodies, integerOnlyCount).GetRow(1);
-        var mixedIndex = new TrRmArtifactIndex(mixed);
+        var mixedIndex = TrRmArtifactIndex.ForDevelopment(mixed);
         Assert.That(mixedIndex.TryGetSection(0x20, out var mixedBodies, out var mixedCount), Is.True);
         var integerMethodBody = new TrRmBodyTableReader(mixedBodies, mixedCount).GetRow(2);
 
@@ -2324,7 +2324,7 @@ public sealed class TrRmExecutableCompilerTests
         }
         source.Append("x = +x; return x; }");
         var artifact = TrRmExecutableCompiler.Emit(Compile(source.ToString()), "wide-values");
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var count), Is.True);
         var bodies = new TrRmBodyTableReader(bodyBytes, count);
         Assert.That(bodies.GetRow(1)[0], Is.EqualTo((byte)0x05));
@@ -2355,7 +2355,7 @@ public sealed class TrRmExecutableCompilerTests
     public void TamperedPolicyAndUnknownSectionsNeverBecomeExecutable()
     {
         var bytes = TrRmExecutableCompiler.Emit(Compile("int32 Main() { return 42; }"), "tamper");
-        var index = new TrRmArtifactIndex(bytes);
+        var index = TrRmArtifactIndex.ForDevelopment(bytes);
         for (var i = 0; i < index.SectionCount; i++)
         {
             index.GetSection(i, out var kind, out _, out _, out _);
@@ -2670,7 +2670,7 @@ public sealed class TrRmExecutableCompilerTests
     {
         var original = TrRmExecutableCompiler.Emit(
             Compile("int32 Main() { return 0; }"), "optional-body");
-        var index = new TrRmArtifactIndex(original);
+        var index = TrRmArtifactIndex.ForDevelopment(original);
         var rows = new List<ReadOnlyMemory<byte>>();
         index.TryGetSection(0x11, out var typeBytes, out var typeCount);
         var existingTypes = new TrRmTypeSpecTableReader(typeBytes, typeCount, 0, 0, 0, 0);
@@ -2722,12 +2722,12 @@ public sealed class TrRmExecutableCompilerTests
                 _ => bytes.ToArray(),
             }));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static byte[] ReplaceBodyRow(byte[] artifact, int destinationRow, int sourceRow)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount), Is.True);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
         var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
@@ -2744,12 +2744,12 @@ public sealed class TrRmExecutableCompilerTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static byte[] SetScalarInitOutputRuleRevision(byte[] artifact, uint revision)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x0004, out var featureBytes, out var featureCount), Is.True);
         Assert.That(featureCount, Is.EqualTo(1));
         var features = featureBytes.ToArray();
@@ -2762,13 +2762,13 @@ public sealed class TrRmExecutableCompilerTests
                 kind == 0x0004 ? features : bytes.ToArray()));
         }
 
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static byte[] SetConditionalInheritedPlaceState(byte[] artifact,
         int blockIndex, bool initialized, int placeId = 1)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount), Is.True);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
         var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
@@ -2831,7 +2831,7 @@ public sealed class TrRmExecutableCompilerTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
 
         static int ReadLocal(byte[] body, ref int position, int width)
         {
@@ -2855,7 +2855,7 @@ public sealed class TrRmExecutableCompilerTests
     private static (int WidthCode, int OperationBytes) LongestSingleBlockOperationSpan(
         byte[] artifact)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount), Is.True);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
         byte[]? body = null;
@@ -2967,7 +2967,7 @@ public sealed class TrRmExecutableCompilerTests
 
     private static uint ScalarInitOutputRevision(byte[] artifact)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(4, out var featureBytes, out var featureCount), Is.True);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount);
         Assert.That(features.TryGetFeature(1,
@@ -2977,7 +2977,7 @@ public sealed class TrRmExecutableCompilerTests
 
     private static byte[] ReplaceParameterMode(byte[] artifact, byte mode)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x18, out var parameterBytes, out var parameterCount), Is.True);
         Assert.That(parameterCount, Is.EqualTo(1));
         var parameters = parameterBytes.ToArray();
@@ -2989,14 +2989,14 @@ public sealed class TrRmExecutableCompilerTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x18 ? parameters : bytes.ToArray()));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static byte[] ReplaceBodyConstant(byte[] artifact, int bodyRow,
         byte[] originalBits, byte[] replacementBits)
     {
         Assert.That(replacementBits.Length, Is.EqualTo(originalBits.Length));
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount), Is.True);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
         var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
@@ -3018,13 +3018,13 @@ public sealed class TrRmExecutableCompilerTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static byte[] ReplaceBodyOperationByte(byte[] artifact, int bodyRow,
         byte opcode, int fieldOffset, byte replacement)
     {
-        var index = new TrRmArtifactIndex(artifact);
+        var index = TrRmArtifactIndex.ForDevelopment(artifact);
         Assert.That(index.TryGetSection(0x20, out var bodyBytes, out var bodyCount), Is.True);
         var bodies = new TrRmBodyTableReader(bodyBytes, bodyCount);
         var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
@@ -3046,7 +3046,7 @@ public sealed class TrRmExecutableCompilerTests
             sections.Add(new TrRmSection(kind, flags, (uint)count,
                 kind == 0x20 ? rewrittenBodies : bytes.ToArray()));
         }
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.EncodeDevelopment(sections);
     }
 
     private static async Task<(int ExitCode, string Output, string Error)> RunTrRmAsync(string artifact)
