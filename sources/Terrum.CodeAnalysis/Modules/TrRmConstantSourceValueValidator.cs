@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -9,6 +10,101 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal static class TrRmConstantSourceValueValidator
 {
+    internal static void ValidateConstructedTypeSpecValues(uint typeSpecRef,
+        int ownerModule, TrRmTypeSpecTableReader typeSpecs,
+        TrRmTypeDefTableReader typeDefs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs, TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, HashSet<int> visitedTypeSpecRows)
+    {
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (!reference.IsRow || !visitedTypeSpecRows.Add(reference.Row))
+        {
+            return;
+        }
+
+        var data = typeSpecs.GetRow(reference.Row);
+        switch (data[0])
+        {
+            case 0x05:
+                var genericTypeSpecRow = checked((int)Read(data, 2));
+                var genericTypeSpec = typeSpecs.GetRow(genericTypeSpecRow);
+                var definition = genericTypeSpec[0] switch
+                {
+                    0x02 => 0x1300_0000u | Read(genericTypeSpec, 2),
+                    0x03 => imports.GetExpectedDefinitionForImportRow(
+                        checked((int)Read(genericTypeSpec, 2))),
+                    _ => throw InvalidConstructedTypeSpec(),
+                };
+                var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+                if ((definition >> 24) != 0x13
+                    || typeDefRow <= 0 || typeDefRow > typeDefs.Count)
+                {
+                    throw InvalidConstructedTypeSpec();
+                }
+
+                var (formalFirst, formalCount) = typeDefs.GetGenericRange(typeDefRow);
+                var argumentCount = typeSpecs.GetConstructedArgumentCount(reference.Row);
+                if (argumentCount != formalCount)
+                {
+                    throw InvalidConstructedTypeSpec();
+                }
+
+                for (var ordinal = 0; ordinal < argumentCount; ordinal++)
+                {
+                    var formalRow = formalFirst + ordinal;
+                    if (genericParams.GetOwnerDefId(formalRow) != definition
+                        || genericParams.GetOrdinal(formalRow) != (uint)ordinal)
+                    {
+                        throw InvalidConstructedTypeSpec();
+                    }
+
+                    var argument = typeSpecs.GetConstructedArgument(
+                        reference.Row, ordinal);
+                    switch (genericParams.GetFormalKind(formalRow))
+                    {
+                        case 1:
+                            ValidateConstructedTypeSpecValues(argument, ownerModule,
+                                typeSpecs, typeDefs, genericParams, imports,
+                                constantSources, frozenValueNodes, blobs, features,
+                                modules, visitedTypeSpecRows);
+                            break;
+                        case 2:
+                            ValidateFrozenScalar(checked((int)argument),
+                                genericParams.GetConstantTypeSpecRef(formalRow),
+                                ownerModule, constantSources, frozenValueNodes,
+                                blobs, typeSpecs, features, modules);
+                            break;
+                        default:
+                            throw InvalidConstructedTypeSpec();
+                    }
+                }
+                break;
+
+            case >= 0x06 and <= 0x0B:
+            case 0x0E:
+                ValidateConstructedTypeSpecValues(Read(data, 2), ownerModule,
+                    typeSpecs, typeDefs, genericParams, imports, constantSources,
+                    frozenValueNodes, blobs, features, modules, visitedTypeSpecRows);
+                break;
+
+            case 0x0C:
+                var innerTypeSpecRef = Read(data, 3);
+                var innerReference = typeSpecs.GetTypeSpecRef(innerTypeSpecRef,
+                    allowInitQualifier: data[2] == 0x8A);
+                if (innerReference.IsRow)
+                {
+                    ValidateConstructedTypeSpecValues(innerTypeSpecRef, ownerModule,
+                        typeSpecs, typeDefs, genericParams, imports, constantSources,
+                        frozenValueNodes, blobs, features, modules, visitedTypeSpecRows);
+                }
+                break;
+        }
+    }
+
     internal static BoundConstant MaterializeFrozenScalar(int constantSourceRow,
         uint expectedTypeSpecRef, int ownerModule, uint selectedTargetRequirement,
         TrRmConstantSourceTableReader constantSources,
@@ -114,4 +210,10 @@ internal static class TrRmConstantSourceValueValidator
 
         frozenValueNodes.ValidateScalarValue(checked((int)nodeRow), blobs);
     }
+
+    private static uint Read(ReadOnlySpan<byte> data, int offset)
+        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+
+    private static InvalidDataException InvalidConstructedTypeSpec()
+        => new("Invalid TRRM constructed TypeSpec value binding.");
 }

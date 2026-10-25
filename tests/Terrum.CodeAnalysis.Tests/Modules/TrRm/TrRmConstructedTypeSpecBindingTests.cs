@@ -105,11 +105,13 @@ public sealed class TrRmConstructedTypeSpecBindingTests
         var stringReader = new TrRmStringTableReader(strings, 6);
         var moduleRefCount = importedGenericType ? 1 : 0;
         var methodCount = includeMethodImport ? 1 : 0;
+        var featureCount = constantSourceCount == 0 ? 0 : 1;
         var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
-        ], stringReader, moduleRefCount, 1, methodCount, 0);
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1,
+                featureCount == 0 ? 0 : 1, featureCount),
+        ], stringReader, moduleRefCount, 1, methodCount, 0, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, stringReader,
-            moduleRefCount, 1, methodCount, 0);
+            moduleRefCount, 1, methodCount, 0, featureCount);
         var moduleRefBytes = importedGenericType
             ? TrRmModuleRefTableWriter.Encode([
                 new TrRmModuleRefRow(2, 1, 0),
@@ -209,11 +211,14 @@ public sealed class TrRmConstructedTypeSpecBindingTests
         }
         if (constantSourceCount != 0)
         {
+            sections.Add(new TrRmSection(0x0004, 0, 1,
+                TrRmFeatureTableWriter.Encode([TrRmFeatureRow.TypedFrozenValues])));
             sections.Add(new TrRmSection(0x0030, 0,
                 (uint)constantSourceCount, constantSourceBytes));
             sections.Add(new TrRmSection(0x003F, 0, 1, frozenValueNodeBytes));
         }
 
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
     }
 

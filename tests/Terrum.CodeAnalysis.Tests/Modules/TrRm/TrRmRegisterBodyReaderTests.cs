@@ -947,6 +947,26 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void BindsConstructedConstantArgumentsInMethodSignatures()
+    {
+        var body = CreateBody(code: [0x17, 0x0E]);
+        ValidateSelectedConstructedTypeMap(body,
+            methodParameterTypeSpecRef: 5,
+            constantFormal: true, includeFeature11: true);
+
+        Assert.Throws<NotSupportedException>(() =>
+            ValidateSelectedConstructedTypeMap(body,
+                methodParameterTypeSpecRef: 5,
+                constantFormal: true));
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedConstructedTypeMap(body,
+                methodParameterTypeSpecRef: 5,
+                constantFormal: true, includeFeature11: true,
+                constantTypeSpecRef: 0xF200_000D));
+    }
+
+    [Test]
     public void MatchesHomeTypesThroughNestedConstructedTypeArguments()
     {
         var counts = new uint[5];

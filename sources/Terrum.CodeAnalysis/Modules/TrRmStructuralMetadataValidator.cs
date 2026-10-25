@@ -176,6 +176,187 @@ public static class TrRmStructuralMetadataValidator
                 Parameters, Fields, FieldPaths, ConstantSources, FrozenValueNodes,
                 Blobs, Contracts, Imports, ModuleRefs);
         }
+
+        internal void ValidateNonBodyTypeSpecModuleContexts()
+        {
+            if (Schema != TrRmArtifactSchema.Standard)
+            {
+                return;
+            }
+
+            var visitedTypeSpecRows = new HashSet<int>[Modules.Count + 1];
+            for (var typeDef = 1; typeDef <= TypeDefs.Count; typeDef++)
+            {
+                var ownerModule = TypeDefs.GetOwnerModule(typeDef);
+                var (firstField, endField) = TypeDefs.GetFieldRange(typeDef);
+                for (var field = firstField; field < endField; field++)
+                {
+                    ValidateTypeSpecModuleContext(Fields.GetTypeSpecRef(field),
+                        ownerModule, visitedTypeSpecRows);
+                }
+            }
+
+            for (var method = 1; method <= Methods.Count; method++)
+            {
+                var ownerModule = Methods.GetOwnerModule(method);
+                var signature = Methods.GetSignature(method);
+                ValidateTypeSpecModuleContext(
+                    Signatures.GetResultTypeSpec(signature), ownerModule,
+                    visitedTypeSpecRows);
+                ValidateTypeSpecModuleContext(
+                    Signatures.GetReceiverTypeSpec(signature), ownerModule,
+                    visitedTypeSpecRows);
+                var (firstParameter, parameterCount) =
+                    Signatures.GetParamRange(signature);
+                for (var parameter = 0; parameter < parameterCount; parameter++)
+                {
+                    ValidateTypeSpecModuleContext(
+                        Parameters.GetTypeSpec(firstParameter + parameter),
+                        ownerModule, visitedTypeSpecRows);
+                }
+            }
+
+            for (var formal = 1; formal <= GenericParams.Count; formal++)
+            {
+                var ownerModule = GetGenericParamOwnerModule(formal);
+                if (GenericParams.GetFormalKind(formal) == 1)
+                {
+                    var defaultType = GenericParams.GetDefaultArgumentRef(formal);
+                    if (defaultType != 0)
+                    {
+                        ValidateTypeSpecModuleContext(defaultType, ownerModule,
+                            visitedTypeSpecRows);
+                    }
+                }
+                else
+                {
+                    ValidateTypeSpecModuleContext(
+                        GenericParams.GetConstantTypeSpecRef(formal), ownerModule,
+                        visitedTypeSpecRows);
+                }
+            }
+
+            for (var constraint = 1; constraint <= Constraints.Count; constraint++)
+            {
+                if (Constraints.GetKind(constraint) != 1)
+                {
+                    continue;
+                }
+
+                var formal = Constraints.GetOwnerGenericParam(constraint);
+                ValidateTypeSpecModuleContext(Constraints.GetPayload(constraint),
+                    GetGenericParamOwnerModule(formal), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= InterfaceBases.Count; row++)
+            {
+                var ownerInterface = InterfaceBases.GetOwnerInterfaceDef(row);
+                var ownerType = Interfaces.GetOwnerTypeDef(ownerInterface);
+                ValidateTypeSpecModuleContext(InterfaceBases.GetBaseTypeSpecRef(row),
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= AssociatedTypeDefs.Count; row++)
+            {
+                var defaultType = AssociatedTypeDefs.GetDefaultTypeSpecRef(row);
+                if (defaultType == 0)
+                {
+                    continue;
+                }
+
+                var ownerInterface = AssociatedTypeDefs.GetOwnerInterfaceDef(row);
+                var ownerType = Interfaces.GetOwnerTypeDef(ownerInterface);
+                ValidateTypeSpecModuleContext(defaultType,
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= InterfaceConstDefs.Count; row++)
+            {
+                var ownerInterface = InterfaceConstDefs.GetOwnerInterfaceDef(row);
+                var ownerType = Interfaces.GetOwnerTypeDef(ownerInterface);
+                ValidateTypeSpecModuleContext(
+                    InterfaceConstDefs.GetConstantTypeSpecRef(row),
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= AssociatedConstDefs.Count; row++)
+            {
+                var ownerInterface = AssociatedConstDefs.GetOwnerInterfaceDef(row);
+                var ownerType = Interfaces.GetOwnerTypeDef(ownerInterface);
+                ValidateTypeSpecModuleContext(
+                    AssociatedConstDefs.GetConstantTypeSpecRef(row),
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= UnionCaseFields.Count; row++)
+            {
+                var caseDef = UnionCaseFields.GetOwnerUnionCaseDef(row);
+                var ownerType = UnionCaseDefs.GetOwnerTypeDef(caseDef);
+                ValidateTypeSpecModuleContext(UnionCaseFields.GetTypeSpecRef(row),
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= BuilderRegistrations.Count; row++)
+            {
+                var ownerModule = TypeDefs.GetOwnerModule(
+                    BuilderRegistrations.GetTargetTypeDef(row));
+                ValidateTypeSpecModuleContext(
+                    BuilderRegistrations.GetSchemaTypeSpecRef(row), ownerModule,
+                    visitedTypeSpecRows);
+                ValidateTypeSpecModuleContext(
+                    BuilderRegistrations.GetRecipeTypeSpecRef(row), ownerModule,
+                    visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= TextTargets.Count; row++)
+            {
+                var ownerMethod = TextTargets.GetOwnerMethodDef(row);
+                ValidateTypeSpecModuleContext(TextTargets.GetSchemaTypeSpecRef(row),
+                    Methods.GetOwnerModule(ownerMethod), visitedTypeSpecRows);
+            }
+
+            for (var row = 1; row <= TextCaptureShapes.Count; row++)
+            {
+                var shape = TextCaptureShapes.GetShapeRow(row);
+                var ownerType = TextContentShapes.GetGeneratedTypeDef(shape);
+                ValidateTypeSpecModuleContext(TextCaptureShapes.GetTypeSpecRef(row),
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+        }
+
+        private void ValidateTypeSpecModuleContext(uint typeSpecRef, int ownerModule,
+            HashSet<int>[] visitedTypeSpecRows)
+        {
+            if (typeSpecRef == 0)
+            {
+                return;
+            }
+
+            var visited = visitedTypeSpecRows[ownerModule];
+            if (visited is null)
+            {
+                visited = new HashSet<int>();
+                visitedTypeSpecRows[ownerModule] = visited;
+            }
+
+            TrRmConstantSourceValueValidator.ValidateConstructedTypeSpecValues(
+                typeSpecRef, ownerModule, TypeSpecs, TypeDefs, GenericParams,
+                Imports, ConstantSources, FrozenValueNodes, Blobs, Features,
+                Modules, visited);
+        }
+
+        private int GetGenericParamOwnerModule(int formal)
+        {
+            var owner = GenericParams.GetOwnerDefId(formal);
+            var ownerRow = checked((int)(owner & 0x00FF_FFFF));
+            return (byte)(owner >> 24) switch
+            {
+                0x13 => TypeDefs.GetOwnerModule(ownerRow),
+                0x16 => Methods.GetOwnerModule(ownerRow),
+                _ => throw InvalidMetadata(),
+            };
+        }
+
     }
 
     private enum BodyInspection
@@ -861,7 +1042,8 @@ public static class TrRmStructuralMetadataValidator
         _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
-        return new ValidatedExecutionTables(strings, features, modules, moduleRefs,
+        var executionTables = new ValidatedExecutionTables(strings, features,
+            modules, moduleRefs,
             types, typeSpecs,
             generics,
             constraints,
@@ -879,6 +1061,8 @@ public static class TrRmStructuralMetadataValidator
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,
             nativeCallables, nativeFunctionPointerSignatures, nativeVTables, imports,
             index.Schema);
+        executionTables.ValidateNonBodyTypeSpecModuleContexts();
+        return executionTables;
     }
 
     private static void ValidateNativeBoundaryFeatureAssignments(
