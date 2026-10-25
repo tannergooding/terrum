@@ -458,13 +458,15 @@ InterfaceWitness/WitnessMember rows now validate complete type references,
 exclusive member/associated ranges and direct MethodDef bounds. A provisional
 WitnessAssociatedType reader/writer now validates 20-byte extents, witness
 range ownership, direct/import AssociatedTypeDef identity and owner agreement,
-complete declaring/value TypeSpecRefs, and only binding-origin tags 1 or 2.
-Tag 2 requires a nonzero default on the identified local/expected declaration.
+complete declaring/value TypeSpecRefs, nominal declaring-interface membership
+in the witness interface's inherited closure, and only binding-origin tags 1
+or 2. Base rows must identify interfaces. Tag 2 requires a nonzero default on
+the identified local/expected declaration.
 Those tags and the effective-origin contract remain unapproved in
 [`witness-associated-type-binding-origin.md`](../proposals/witness-associated-type-binding-origin.md);
-exact selected binding,
-inherited substitution, default equality, requirement compatibility,
-dependency remapping and runtime use remain incomplete.
+exact constructed-interface membership/substitution, selected binding,
+default equality, requirement compatibility, dependency remapping and runtime
+use remain incomplete.
 Standard AssociatedRelation rows now validate complete declaring/required
 TypeSpecRefs and direct AssociatedTypeDef or Import references expected to
 denote that definition kind; the declaring-interface reference must be a

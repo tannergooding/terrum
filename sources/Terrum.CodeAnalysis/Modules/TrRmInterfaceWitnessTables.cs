@@ -404,12 +404,14 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
     /// <param name="types">The validated TypeSpec table.</param>
     /// <param name="typeDefs">The validated TypeDef table.</param>
     /// <param name="interfaces">The validated InterfaceDef table.</param>
+    /// <param name="interfaceBases">The validated InterfaceBase table.</param>
     /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table.</param>
     /// <param name="imports">The validated Import table.</param>
     public TrRmWitnessAssociatedTypeTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmInterfaceWitnessTableReader witnesses,
         TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
         TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmImportTableReader imports)
     {
@@ -425,6 +427,14 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
         for (var witness = 1; witness <= witnesses.Count; witness++)
         {
             var (first, count) = witnesses.GetAssociatedTypeRange(witness);
+            if (count == 0)
+            {
+                continue;
+            }
+
+            var interfaceClosure = GetInterfaceClosure(
+                witnesses.GetInterfaceTypeSpecRef(witness), types, typeDefs,
+                interfaces, interfaceBases, imports);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
                 var row = first + ordinal;
@@ -445,10 +455,17 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
 
                 var declaringType = types.GetTypeSpecRef(declaringInterface);
                 if (!declaringType.IsRow
-                    || declaringType.Form is not (0x02 or 0x03 or 0x05)
-                    || types.GetNominalTypeDefRow(declaringInterface, typeDefs, imports)
-                        != interfaces.GetOwnerTypeDef(
-                            associatedTypeDefs.GetOwnerInterfaceDef(associatedTypeDefRow)))
+                    || declaringType.Form is not (0x02 or 0x03 or 0x05))
+                {
+                    throw InvalidWitnessAssociatedType();
+                }
+
+                var declaringTypeDef = types.GetNominalTypeDefRow(
+                    declaringInterface, typeDefs, imports);
+                var associatedOwnerTypeDef = interfaces.GetOwnerTypeDef(
+                    associatedTypeDefs.GetOwnerInterfaceDef(associatedTypeDefRow));
+                if (declaringTypeDef != associatedOwnerTypeDef
+                    || !interfaceClosure.Contains(declaringTypeDef))
                 {
                     throw InvalidWitnessAssociatedType();
                 }
@@ -461,6 +478,48 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
                 }
             }
         }
+    }
+
+    private static HashSet<int> GetInterfaceClosure(uint interfaceTypeSpecRef,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmImportTableReader imports)
+    {
+        var rootTypeDef = types.GetNominalTypeDefRow(
+            interfaceTypeSpecRef, typeDefs, imports);
+        var pending = new Stack<int>();
+        var closure = new HashSet<int>();
+        pending.Push(rootTypeDef);
+        while (pending.TryPop(out var typeDef))
+        {
+            if (!closure.Add(typeDef))
+            {
+                continue;
+            }
+
+            var interfaceDef = interfaces.GetInterfaceDefForTypeDef(typeDef);
+            if (interfaceDef == 0)
+            {
+                throw InvalidWitnessAssociatedType();
+            }
+
+            var (first, count) = interfaces.GetBaseRange(interfaceDef);
+            for (var ordinal = 0; ordinal < count; ordinal++)
+            {
+                var baseTypeDef = types.GetNominalTypeDefRow(
+                    interfaceBases.GetBaseTypeSpecRef(first + ordinal),
+                    typeDefs, imports);
+                if (interfaces.GetInterfaceDefForTypeDef(baseTypeDef) == 0)
+                {
+                    throw InvalidWitnessAssociatedType();
+                }
+
+                pending.Push(baseTypeDef);
+            }
+        }
+
+        return closure;
     }
 
     /// <summary>Gets the one-based owning InterfaceWitness row.</summary>
@@ -511,12 +570,14 @@ public static class TrRmWitnessAssociatedTypeTableWriter
     /// <param name="types">The validated TypeSpec table.</param>
     /// <param name="typeDefs">The validated TypeDef table.</param>
     /// <param name="interfaces">The validated InterfaceDef table.</param>
+    /// <param name="interfaceBases">The validated InterfaceBase table.</param>
     /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table.</param>
     /// <param name="imports">The validated Import table.</param>
     /// <returns>The encoded WitnessAssociatedType section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmWitnessAssociatedTypeRow> rows,
         TrRmInterfaceWitnessTableReader witnesses, TrRmTypeSpecTableReader types,
         TrRmTypeDefTableReader typeDefs, TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmImportTableReader imports)
     {
@@ -539,7 +600,8 @@ public static class TrRmWitnessAssociatedTypeTableWriter
         }
 
         _ = new TrRmWitnessAssociatedTypeTableReader(result, rows.Count,
-            witnesses, types, typeDefs, interfaces, associatedTypeDefs, imports);
+            witnesses, types, typeDefs, interfaces, interfaceBases,
+            associatedTypeDefs, imports);
         return result;
     }
 

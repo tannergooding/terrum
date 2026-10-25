@@ -74,6 +74,8 @@ public sealed class TrRmAssociatedTypeImportExportTests
             moduleRefs, types, methods, default, interfaces, associatedTypeDefs);
         var imports = new TrRmImportTableReader(importBytes, importRows.Length,
             strings, moduleRefs, types, methods, default, interfaces, associatedTypeDefs);
+        var interfaceBases = new TrRmInterfaceBaseTableReader([], 0,
+            typeSpecs, interfaces);
         var witnessBytes = TrRmInterfaceWitnessTableWriter.Encode([
             new TrRmInterfaceWitnessRow(1, 2, 0, 0, 1, 1, 0, 0),
         ], typeSpecs, 0, 1, 0);
@@ -81,7 +83,8 @@ public sealed class TrRmAssociatedTypeImportExportTests
             witnessBytes, 1, typeSpecs, 0, 1, 0);
         var associatedBindingBytes = TrRmWitnessAssociatedTypeTableWriter.Encode([
             new TrRmWitnessAssociatedTypeRow(1, 2, 0x1C00_0002, 1, 2),
-        ], witnesses, typeSpecs, types, interfaces, associatedTypeDefs, imports);
+        ], witnesses, typeSpecs, types, interfaces, interfaceBases,
+            associatedTypeDefs, imports);
 
         Assert.That(Read(fixture, importRows, [], interfaceWitnessBytes: witnessBytes,
             witnessAssociatedTypeBytes: associatedBindingBytes), Is.True);

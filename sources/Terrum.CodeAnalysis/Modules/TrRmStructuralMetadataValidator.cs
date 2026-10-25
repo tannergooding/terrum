@@ -677,7 +677,7 @@ public static class TrRmStructuralMetadataValidator
         {
             witnessAssociatedTypes = new TrRmWitnessAssociatedTypeTableReader(
                 witnessAssociatedTypeBytes, witnessAssociatedTypeCount,
-                interfaceWitnesses, typeSpecs, types, interfaces,
+                interfaceWitnesses, typeSpecs, types, interfaces, interfaceBases,
                 associatedTypeDefs, imports);
             targetLayoutDependencyFields = new TrRmTargetLayoutDependencyFieldTableReader(
                 targetLayoutDependencyFieldBytes, targetLayoutDependencyFieldCount,
