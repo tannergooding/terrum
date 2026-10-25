@@ -162,6 +162,16 @@ public sealed class TrRmConstructedTypeSpecBindingTests
                 types, methods, default)
             : [];
         var constantSourceBytes = new byte[constantSourceCount * 8];
+        var blobBytes = constantSourceCount == 0 ? []
+            : TrRmVariableTableWriter.EncodeBlobs([new byte[] { 0, 0, 0, 0 }]);
+        var frozenValueNodeBytes = new byte[constantSourceCount == 0 ? 0 : 24];
+        if (constantSourceCount != 0)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(frozenValueNodeBytes, 2);
+            frozenValueNodeBytes[4] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                frozenValueNodeBytes.AsSpan(8), 1);
+        }
         for (var row = 0; row < constantSourceCount; row++)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(
@@ -175,6 +185,10 @@ public sealed class TrRmConstructedTypeSpecBindingTests
             new(0x0001, 0, 1, moduleBytes),
             new(0x0002, 0, 6, strings),
         };
+        if (constantSourceCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0003, 0, 1, blobBytes));
+        }
         if (importedGenericType)
         {
             sections.Add(new TrRmSection(0x0010, 0, 1, moduleRefBytes));
@@ -197,6 +211,7 @@ public sealed class TrRmConstructedTypeSpecBindingTests
         {
             sections.Add(new TrRmSection(0x0030, 0,
                 (uint)constantSourceCount, constantSourceBytes));
+            sections.Add(new TrRmSection(0x003F, 0, 1, frozenValueNodeBytes));
         }
 
         return TrRmArtifactWriter.Encode(sections);

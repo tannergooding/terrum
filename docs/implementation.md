@@ -126,10 +126,13 @@ complete type references in the currently integrated FieldDef, MethodSig,
 Param, PropertyDef, GenericParam type fields and Constraint kind-1 payload.
 Constructed TypeSpec rows now carry their argument words inline; the separate
 TypeArg table and section `0x0012` are no longer parsed as standard metadata.
-Formal arity/kind and ConstantSource binding, remaining registered
-TypeSpecRef-bearing records, dependency/remapping, Body codecs and broader
-execution are still incomplete, so this does not establish current-schema
-conformance.
+Constructed TypeSpec arity/formal-kind checks, local/imported TypeDef
+resolution, TypeSpecRef/ConstantSource row bounds and TypeSpec-reference
+acyclicity are now structural checks. ConstantSource tags and target-row bounds
+are also read from standard section `0x0030`; their payload/value semantics,
+exact substitution, remaining registered TypeSpecRef-bearing records,
+dependency/remapping, Body codecs and broader execution are still incomplete,
+so this does not establish current-schema conformance.
 Selected Body access now has a register-stream reader for kind-01 framing,
 all optional-map extents, fixed Blocks, typed-record offsets/payload shapes,
 instruction boundaries and block terminators, plus shape decoding for compact

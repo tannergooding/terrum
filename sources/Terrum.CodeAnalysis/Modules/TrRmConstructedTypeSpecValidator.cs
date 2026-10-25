@@ -207,7 +207,7 @@ internal static class TrRmConstructedTypeSpecValidator
             return count;
         }
 
-        if ((bytes[0] is >= 0x06 and <= 0x0B) || bytes[0] == 0x0E)
+        if (bytes[0] is (>= 0x06 and <= 0x0B) or 0x0E)
         {
             return typeSpecs.GetTypeSpecRef(Read(bytes, 2)).IsRow ? 1 : 0;
         }

@@ -47,9 +47,10 @@ InterfaceBase and InterfaceMethod rows validate their range ownership,
 ordinals, complete base TypeSpecRefs and directly declared instance MethodDef
 owners. Base-instance interface binding, associated Import/Export binding,
 ConstantSource payload/value semantics and associated-relation/witness
-execution remain incomplete. AssociatedTypeDef Import/Export identity has a
-provisional C# path; selected provider-owner equality and exact default
-comparison are not implemented. InterfaceConstDef
+execution remain incomplete. Standard ConstantSource rows validate tags and
+their selected target-table row bounds only. AssociatedTypeDef Import/Export
+identity has a provisional C# path; selected provider-owner equality and exact
+default comparison are not implemented. InterfaceConstDef
 and AssociatedConstDef rows validate their declaration ranges, owners, names
 and complete type references; InterfaceConstDef also checks its bounded
 ConstantSource row reference.

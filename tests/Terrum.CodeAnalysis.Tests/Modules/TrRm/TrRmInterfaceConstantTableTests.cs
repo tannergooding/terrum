@@ -173,9 +173,18 @@ public sealed class TrRmInterfaceConstantTableTests
 
     private static byte[] CreateArtifact(Fixture fixture, byte[] interfaceDefBytes,
         byte[] interfaceConstDefBytes, byte[] associatedConstDefBytes)
-        => TrRmArtifactWriter.Encode([
+    {
+        var blobBytes = TrRmVariableTableWriter.EncodeBlobs(
+            [new byte[] { 0, 0, 0, 0 }]);
+        var frozenValueBytes = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(frozenValueBytes, 1);
+        frozenValueBytes[4] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            frozenValueBytes.AsSpan(8), 1);
+        return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, fixture.Modules),
             new TrRmSection(0x0002, 0, 4, fixture.Strings),
+            new TrRmSection(0x0003, 0, 1, blobBytes),
             new TrRmSection(0x0011, 0, 1, fixture.TypeSpecs),
             new TrRmSection(0x0013, 0, 1, fixture.TypeDefs),
             new TrRmSection(0x0015, 0, 1, fixture.Layouts),
@@ -183,7 +192,9 @@ public sealed class TrRmInterfaceConstantTableTests
             new TrRmSection(0x0030, 0, 1, fixture.ConstantSources),
             new TrRmSection(0x0031, 0, 1, interfaceConstDefBytes),
             new TrRmSection(0x0032, 0, 1, associatedConstDefBytes),
+            new TrRmSection(0x003F, 0, 1, frozenValueBytes),
         ]);
+    }
 
     private sealed record Fixture(
         byte[] Strings,

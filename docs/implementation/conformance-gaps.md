@@ -376,8 +376,9 @@ conformance/constraint/generic-method forms. The assigned 32-byte
 GenericParam and 12-byte Constraint rows now have C# readers/writers and
 Terrum-authored structural validators for ownership, formal domains, ranges,
 flags and currently assigned payload tags. This does not resolve complete
-TypeSpecRef/ConstantSource references, the associated-relation payload, or
-generic substitution, proof, witness and execution semantics; row framing
+complete TypeSpecRef shapes and ConstantSource row bounds are structurally
+checked, but payload/value semantics, the associated-relation payload, generic
+substitution, proof, witness and execution semantics remain open; row framing
 alone does not execute a generic contract. The standard structural validator
 also checks InterfaceDef/AssociatedTypeDef ownership, self-formal identity,
 range extents, associated-row partitioning, names and optional default
