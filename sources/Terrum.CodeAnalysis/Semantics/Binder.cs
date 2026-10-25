@@ -2174,11 +2174,11 @@ internal sealed partial class Binder
                 && _structNames.TryGetValue(Qualify(containingType), out var structType)
                 && IsStruct(structType) ? (int)structType - 100 : -1;
             var structure = structureIndex < 0 ? null : _structs[structureIndex];
-            if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable || !isNoThrow
+            if (structure is null || !structure.IsUnique || isStatic || constructor || isMutable
                 || requiresUnsafeCaller || returnType != PrimitiveType.Void || parameters?.Children.Length != 2
                 || structure.CleanupMethod is not null || isPrivate || isInternal)
             {
-                Report("TRM3023", "Cleanup requires one public, NoThrow, nonmutating, parameterless instance method on a unique struct.", declaration.Span);
+                Report("TRM3023", "Cleanup requires one public, nonmutating, parameterless instance method on a unique struct.", declaration.Span);
             }
             else
             {

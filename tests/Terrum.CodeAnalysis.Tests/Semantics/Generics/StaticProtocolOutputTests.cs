@@ -589,7 +589,7 @@ public sealed class StaticProtocolOutputTests
     }
 
     [Test]
-    public void GenericFloatingResultDoesNotRelaxFinallyNoThrow()
+    public void GenericFloatingResultMayFailInFinally()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             float64 Fill<T>(T value, out T copied) where T : [Copy] {
@@ -602,8 +602,8 @@ public sealed class StaticProtocolOutputTests
             }
             int32 Main() { return 0; }
             """), BoundRuntimePolicy.CheckedExceptions);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Not.Null);
     }
     [TestCase("copied")]
     [TestCase("initialized")]

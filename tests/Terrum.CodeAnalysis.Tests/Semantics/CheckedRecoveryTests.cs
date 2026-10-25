@@ -20,7 +20,6 @@ public sealed class CheckedRecoveryTests
 {
     [TestCase("int32 Main() { try { require false; } catch { return 1; } return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3021")]
     [TestCase("int32 Main() { unsafe { try { require false; } catch { return 1; } } return 0; }",BoundRuntimePolicy.FailFast,"TRM3022")]
-    [TestCase("int32 Main() { unsafe { try { require false; } catch { return 1; } finally { require false; } } return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3017")]
     [TestCase("bool Take(out int32 x) { unsafe { try { require false; x = 1; } catch { return x == 1; } } return false; } int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
     [TestCase("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { Clear(out x); return x == 1; } } return false; } bool Clear(out int32 x) { return false; } int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
     [TestCase("bool Take(out int32 x) { unsafe { try { require Set(out x); require false; } catch { return x == 1; } } return false; } bool Set(out int32 x) { x = 1; return true; } int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
@@ -42,7 +41,6 @@ public sealed class CheckedRecoveryTests
             return 0;
         }
         """,BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
-    [TestCase("int32 Main() { unsafe { try { require false; } catch { return 42; } } try { return 1; } finally { require false; } }",BoundRuntimePolicy.CheckedExceptions,"TRM3017")]
     [TestCase("bool Take(out int32 x, int32 divisor) { try { x = 10 / divisor; return true; } finally { Observe(x); } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
     [TestCase("bool Take(out int32 x, int32 divisor) { unsafe { try { require false; } catch { x = 10 / divisor; return true; } finally { Observe(x); } } } [NoThrow] void Observe(int32 x) {} int32 Main() { return 0; }",BoundRuntimePolicy.CheckedExceptions,"TRM3016")]
     [TestCase("""
@@ -107,10 +105,67 @@ public sealed class CheckedRecoveryTests
     }
     [TestCase("bool Take(out int32 x) { unsafe { try { x = 1; require false; } catch { return x == 1; } } return false; } int32 Main() { return 0; }")]
     [TestCase("bool Take(out int32 x) { unsafe { try { try { require false; } finally { x = 1; } } catch { return x == 1; } } return false; } int32 Main() { return 0; }")]
+    [TestCase("int32 Main() { unsafe { try { try { return 1; } finally { require false; } } catch { return 42; } } return 0; }")]
     public void FailureEdgesIncludeOnlyCompletedWritesAndUnwoundCleanup(string source)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task CleanupAndFinallyFailuresPropagateThroughNestedRegionsAsync()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Owner {
+                public int32 Value;
+                public Owner() { Value = 1; }
+                [Cleanup] public void Close() { require false; }
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        try {
+                            Owner owner = new Owner();
+                        } catch { }
+                        try {
+                            return 1;
+                        } finally {
+                            require false;
+                        }
+                    } catch {
+                        return 42;
+                    }
+                }
+                return 0;
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        var image = NativeEmitter.Emit(program, NativeRuntimePolicy.CheckedExceptions);
+        var executable = Path.Combine(TestArtifactPaths.DirectoryPath, $"cleanup-unwind-{Guid.NewGuid():N}.exe");
+        try
+        {
+            await File.WriteAllBytesAsync(executable, image);
+            using var process = Process.Start(new ProcessStartInfo(executable) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            }) ?? throw new InvalidOperationException("Could not start native worker.");
+            try
+            {
+                await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            catch (TimeoutException)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync();
+                throw;
+            }
+            Assert.That(process.ExitCode, Is.EqualTo(42));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
+        }
     }
 
     [Test]
@@ -242,8 +297,8 @@ public sealed class CheckedRecoveryTests
             "catch" => recovery with { Catch = null! },
             "finally" => recovery with {
                 Finally = new BoundBlock([
-                new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, default), default),
-            ], default)
+                    new BoundReturn(null, default),
+                ], default)
             },
             _ => recovery,
         };

@@ -327,7 +327,6 @@ public sealed class OwnershipTests
         Assert.That(compilation.Program, Is.Null);
     }
     [TestCase("struct Copy { public int32 Id; public Copy() { Id = 1; } [NoThrow] [Cleanup] public void Close() {} }","TRM3023")]
-    [TestCase("unique struct U { public int32 Id; public U() { Id = 1; } [Cleanup] public void Close() {} }","TRM3023")]
     [TestCase("unique struct U { public int32 Id; public U() { Id = 1; } } struct Copy { public U Value; public Copy() { Value = new U(); } }","TRM3023")]
     [TestCase("unique struct U { public int32 Id; public U() { Id = 1; U duplicate = this; } }","TRM3023")]
     public void UnsupportedOwnershipContractsAreDiagnosed(string declarations, string code)
@@ -769,6 +768,37 @@ public sealed class OwnershipTests
                         bool success = Fail(out value);
                     } catch {
                         if (Host.Trace[0] == 3 && Host.Trace[1] == 2) { return 42; }
+                    }
+                }
+                return 0;
+            }
+            """;
+        Assert.That(await RunNativeAsync(source, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [Test]
+    public async Task ThrowingCleanupDoesNotResumeGeneratedChildRetirementAsync()
+    {
+        var source = """
+            unique struct Child {
+                public int32 Id;
+                public Child(int32 id) { Id = id; }
+                [Cleanup] public void Close() { Host.Trace[1] = 1; }
+            }
+            unique struct Owner {
+                public Child Child;
+                public Owner() { Child = new Child(1); }
+                [Cleanup] public void Close() {
+                    Host.Trace[0] = 1;
+                    require false;
+                }
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        Owner owner = new Owner();
+                    } catch {
+                        if (Host.Trace[0] == 1 && Host.Trace[1] == 0) { return 42; }
                     }
                 }
                 return 0;

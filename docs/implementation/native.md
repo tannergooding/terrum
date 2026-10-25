@@ -913,12 +913,13 @@ an ordinary local initializer. Output fields are assigned as a complete
 owner; piecewise output construction remains unsupported. Neither these
 transfers nor the cleanup trace prove an allocator or real OS resource.
 
-`[NoThrow] [Cleanup]` on one public parameterless readonly `void` instance
-method declares that unique type's cleanup contract. The method name is
-unimportant; ordinary Copy structs cannot declare cleanup. It cannot be
-called directly. The owner enters a structured cleanup region only after
-its initializer completes. A frame-local live bit conditions its cleanup
-on normal fallthrough, return and checked-exception unwind, inside-out.
+`[Cleanup]` on one public parameterless readonly `void` instance method
+declares that unique type's cleanup contract; a general `[NoThrow]`
+declaration is not required. The method name is unimportant; ordinary Copy
+structs cannot declare cleanup. It cannot be called directly. The owner enters
+a structured cleanup region only after its initializer completes. A frame-local
+live bit conditions cleanup on normal fallthrough, return and checked-exception
+unwind, inside-out.
 For a complete composite owner, its own cleanup runs while its fields are
 readable, followed by owning children in reverse field-declaration order.
 When construction fails, only completed owning fields are destroyed, in the
@@ -976,13 +977,10 @@ return value. General catch objects and GC root tracking remain unimplemented.
 Structured [`try`/`finally`](../../samples/LanguageFeatures/EffectsAndCleanup/try-finally.terrum) executes
 cleanup on ordinary fallthrough, every normal return and exiting loop transfers, from inner region
 to outer. Body locals are not in scope in the cleanup block; shared outer
-locals remain accessible. Cleanup independently obeys NoThrow even within a
-MayThrow function: calls need declared NoThrow contracts, and potentially
-failing arithmetic, conversions and host-buffer access diagnose. A return
-from cleanup diagnoses. This bounded profile also rejects potentially executing
-cleanup loops other than `while (true) { break; }`, and reachable calls declared
-`DoesNotReturn`; it does not infer
-termination from the bodies or contracts of other NoThrow callees.
+locals remain accessible. Authored finally may throw or fail to complete
+normally; checked failures follow ordinary replacement and propagation, while
+noncompleting paths do not create a normal continuation. A return from cleanup
+still diagnoses.
 The backend snapshots scalar and compact aggregate pending results before
 cleanup, then commits bool/out outputs only when the earlier return predicate
 was true and the post-cleanup definite-assignment proof permits publication.
@@ -1024,9 +1022,10 @@ not source recovery.
 The verifier intersects initialized state at each checked failure site,
 including left-to-right argument evaluation, invalidated out destinations and
 nested exceptional cleanup. Catch and finally bodies cannot assume the try body
-finished. Cleanup remains independently NoThrow; body-derived guarantees are
-not published as module contracts. Windows `__C_specific_handler` dispatches
-version-1 scope records shared by PE and registered JIT unwind images. Recovery
+finished. Cleanup failures remain ordinary effects; selecting Cleanup does
+not publish a general NoThrow guarantee. Windows
+`__C_specific_handler` dispatches version-1 scope records shared by PE and
+registered JIT unwind images. Recovery
 filters are leaf machine-code thunks; exceptional cleanup calls the same
 source-frame-aware funclets used for normal exits. A native entry filter contains
 unhandled owned failures before they reach the managed JIT caller.

@@ -17,12 +17,6 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 public sealed class TryFinallyTests
 {
     [TestCase("int32 Main() { try { return 42; } finally { return 0; } }","TRM3019")]
-    [TestCase("int32 Main() { try { return 42; } finally { while (true) { } } }","TRM3020")]
-    [TestCase("int32 Main() { try { return 42; } finally { if (Maybe()) { Stop(); } } } [NoThrow] bool Maybe() { return true; } [NoThrow] [DoesNotReturn] void Stop() { while (true) { } }","TRM3020")]
-    [TestCase("int32 Main() { try { return 42; } finally { while (Maybe()) { } } } [NoThrow] bool Maybe() { return false; }","TRM3020")]
-    [TestCase("int32 Main() { try { return 42; } finally { require false; } }","TRM3017")]
-    [TestCase("int32 Main() { try { return 42; } finally { Unsafe(); } } void Unsafe() { }","TRM3017")]
-    [TestCase("int32 Main() { try { return 42; } finally { mut int32 x = 1 / 0; } }","TRM3017")]
     [TestCase("int32 Main() { try { return 42; } catch { return 0; } }","TRM")]
     [TestCase("int32 Main() { try { return 42; } }","TRM1001")]
     [TestCase("bool Take(out int32 x) { x = 42; try { return true; } finally { Clear(out x); } } [NoThrow] bool Clear(out int32 x) { return false; } int32 Main() { return 0; }","TRM3016")]
@@ -38,10 +32,23 @@ public sealed class TryFinallyTests
         Assert.That(result.HasErrors, Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(result.Diagnostics,item => item.Code.StartsWith(diagnostic, StringComparison.Ordinal)),Is.True);
     }
+    [TestCase("int32 Main() { try { return 42; } finally { while (true) { } } }", BoundRuntimePolicy.FailFast)]
+    [TestCase("int32 Main() { try { return 42; } finally { if (Maybe()) { Stop(); } } } [NoThrow] bool Maybe() { return true; } [NoThrow] [DoesNotReturn] void Stop() { while (true) { } }", BoundRuntimePolicy.FailFast)]
+    [TestCase("int32 Main() { try { return 42; } finally { while (Maybe()) { } } } [NoThrow] bool Maybe() { return false; }", BoundRuntimePolicy.FailFast)]
+    [TestCase("int32 Main() { try { return 42; } finally { require false; } }", BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase("int32 Main() { try { return 42; } finally { mut int32 value = 1 / 0; } }", BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase("int32 Main() { try { return 42; } finally { Touch(); } } void Touch() { require false; }", BoundRuntimePolicy.CheckedExceptions)]
+    [TestCase("[DoesNotReturn] int32 Stop() { try { return 1; } finally { while (true) { } } } int32 Main() { return 0; }", BoundRuntimePolicy.FailFast)]
+    [TestCase("bool Fill(out int32 value) { try { return true; } finally { while (true) { } } } int32 Main() { return 0; }", BoundRuntimePolicy.FailFast)]
+    public void FinallyMayThrowOrNotComplete(string source, BoundRuntimePolicy policy)
+    {
+        var result = Compilation.Create(SyntaxTree.Parse(source), policy);
+        Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
+        SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = result.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))());
+    }
     [TestCase("return")]
     [TestCase("null-body")]
     [TestCase("null-finally")]
-    [TestCase("throwing-cleanup")]
     public void MutableIrCannotForgeUnsafeCleanup(string kind)
     {
         var valid = Compile("int32 Main() { try { return 42; } finally { } }");
@@ -54,10 +61,6 @@ public sealed class TryFinallyTests
             },
             "null-body" => region with { Body = null! },
             "null-finally" => region with { Finally = null! },
-            "throwing-cleanup" => region with {
-                Finally = new BoundBlock([new BoundRequire(new BoundConstant(0, PrimitiveType.Bool, default),
-                    default)], default),
-            },
             _ => throw new InvalidOperationException("Unknown forged region."),
         };
         var invalid = valid with {
