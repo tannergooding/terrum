@@ -16,6 +16,39 @@ public readonly record struct TrRmAssociatedRelationRow(
     uint AssociatedTypeDefReference,
     uint RequiredTypeSpecRef);
 
+internal static class TrRmAssociatedTypeReference
+{
+    internal static bool TryGetLocalRow(uint reference, int associatedTypeDefCount,
+        TrRmImportTableReader imports, out int row)
+    {
+        row = (int)(reference & 0x00FF_FFFF);
+        if (row == 0)
+        {
+            return false;
+        }
+
+        switch (reference >> 24)
+        {
+            case 0x20 when row <= associatedTypeDefCount:
+                return true;
+
+            case 0x1C when row <= imports.Count:
+                var expected = imports.GetExpectedDefinitionForImportRow(row);
+                var expectedRow = (int)(expected & 0x00FF_FFFF);
+                if ((expected >> 24) == 0x20
+                    && expectedRow is > 0 && expectedRow <= associatedTypeDefCount)
+                {
+                    row = expectedRow;
+                    return true;
+                }
+                break;
+        }
+
+        row = 0;
+        return false;
+    }
+}
+
 /// <summary>Validates associated-relation type references and declaration identities.</summary>
 public readonly ref struct TrRmAssociatedRelationTableReader
 {
@@ -52,8 +85,8 @@ public readonly ref struct TrRmAssociatedRelationTableReader
             var associatedTypeDef = Read(data, 4);
             var requiredType = Read(data, 8);
             if (declaringInterface == 0 || requiredType == 0
-                || !ValidAssociatedTypeReference(associatedTypeDef,
-                    associatedTypeDefCount, imports))
+                || !TrRmAssociatedTypeReference.TryGetLocalRow(
+                    associatedTypeDef, associatedTypeDefCount, imports, out _))
             {
                 throw InvalidAssociatedRelation();
             }
@@ -87,24 +120,6 @@ public readonly ref struct TrRmAssociatedRelationTableReader
         }
 
         return _rows.Slice((row - 1) * RowSize, RowSize);
-    }
-
-    private static bool ValidAssociatedTypeReference(uint reference,
-        int associatedTypeDefCount, TrRmImportTableReader imports)
-    {
-        var row = (int)(reference & 0xFF_FFFF);
-        if (row <= 0)
-        {
-            return false;
-        }
-
-        return (reference >> 24) switch
-        {
-            0x20 => row <= associatedTypeDefCount,
-            0x1C => row <= imports.Count
-                && (imports.GetExpectedDefinitionForImportRow(row) >> 24) == 0x20,
-            _ => false,
-        };
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

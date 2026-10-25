@@ -374,3 +374,214 @@ public static class TrRmWitnessMemberTableWriter
     private static void Write(byte[] bytes, int offset, uint value)
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }
+
+/// <summary>An effective associated-type selection owned by one interface witness.</summary>
+/// <param name="WitnessRow">The one-based owning InterfaceWitness row.</param>
+/// <param name="DeclaringInterfaceTypeSpecRef">The complete declaring interface instance.</param>
+/// <param name="AssociatedTypeDefReference">The direct or imported AssociatedTypeDef identity.</param>
+/// <param name="ValueTypeSpecRef">The complete selected associated type.</param>
+/// <param name="BindingOrigin">The effective selection tag: 1=explicit or 2=declaration default.</param>
+public readonly record struct TrRmWitnessAssociatedTypeRow(
+    int WitnessRow, uint DeclaringInterfaceTypeSpecRef,
+    uint AssociatedTypeDefReference, uint ValueTypeSpecRef,
+    uint BindingOrigin);
+
+/// <summary>Validates witness-associated type selections and their owning ranges.</summary>
+public readonly ref struct TrRmWitnessAssociatedTypeTableReader
+{
+    private const int RowSize = 20;
+
+    private readonly ReadOnlySpan<byte> _rows;
+    private readonly int _recordCount;
+
+    /// <summary>Gets the number of validated WitnessAssociatedType rows.</summary>
+    public int Count => _recordCount;
+
+    /// <summary>Validates typed declaration, type and selection-origin references.</summary>
+    /// <param name="section">The borrowed 20-byte WitnessAssociatedType rows.</param>
+    /// <param name="recordCount">The number of WitnessAssociatedType rows.</param>
+    /// <param name="witnesses">The validated InterfaceWitness table.</param>
+    /// <param name="types">The validated TypeSpec table.</param>
+    /// <param name="typeDefs">The validated TypeDef table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table.</param>
+    /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table.</param>
+    /// <param name="imports">The validated Import table.</param>
+    public TrRmWitnessAssociatedTypeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmInterfaceWitnessTableReader witnesses,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmImportTableReader imports)
+    {
+        if (recordCount is < 0 or > 0xFF_FFFF
+            || recordCount != witnesses.AssociatedTypeCount
+            || (long)recordCount * RowSize != section.Length)
+        {
+            throw InvalidWitnessAssociatedType();
+        }
+
+        _rows = section;
+        _recordCount = recordCount;
+        for (var witness = 1; witness <= witnesses.Count; witness++)
+        {
+            var (first, count) = witnesses.GetAssociatedTypeRange(witness);
+            for (var ordinal = 0; ordinal < count; ordinal++)
+            {
+                var row = first + ordinal;
+                var data = GetRow(row);
+                var witnessRow = Read(data, 0);
+                var declaringInterface = Read(data, 4);
+                var associatedTypeDef = Read(data, 8);
+                var valueType = Read(data, 12);
+                var bindingOrigin = Read(data, 16);
+                if (witnessRow != (uint)witness
+                    || !TrRmAssociatedTypeReference.TryGetLocalRow(
+                        associatedTypeDef, associatedTypeDefs.Count, imports,
+                        out var associatedTypeDefRow)
+                    || bindingOrigin is not (1 or 2))
+                {
+                    throw InvalidWitnessAssociatedType();
+                }
+
+                var declaringType = types.GetTypeSpecRef(declaringInterface);
+                if (!declaringType.IsRow
+                    || declaringType.Form is not (0x02 or 0x03 or 0x05)
+                    || GetNominalTypeDefRow(declaringInterface, types, typeDefs, imports)
+                        != interfaces.GetOwnerTypeDef(
+                            associatedTypeDefs.GetOwnerInterfaceDef(associatedTypeDefRow)))
+                {
+                    throw InvalidWitnessAssociatedType();
+                }
+
+                _ = types.GetTypeSpecRef(valueType);
+                if (bindingOrigin == 2
+                    && associatedTypeDefs.GetDefaultTypeSpecRef(associatedTypeDefRow) == 0)
+                {
+                    throw InvalidWitnessAssociatedType();
+                }
+            }
+        }
+    }
+
+    /// <summary>Gets the one-based owning InterfaceWitness row.</summary>
+    public int GetWitnessRow(int row)
+        => checked((int)Read(GetRow(row), 0));
+
+    /// <summary>Gets the complete declaring-interface TypeSpecRef.</summary>
+    public uint GetDeclaringInterfaceTypeSpecRef(int row)
+        => Read(GetRow(row), 4);
+
+    /// <summary>Gets the direct or imported AssociatedTypeDef identity.</summary>
+    public uint GetAssociatedTypeDefReference(int row)
+        => Read(GetRow(row), 8);
+
+    /// <summary>Gets the complete selected value TypeSpecRef.</summary>
+    public uint GetValueTypeSpecRef(int row)
+        => Read(GetRow(row), 12);
+
+    /// <summary>Gets the effective selection kind.</summary>
+    public uint GetBindingOrigin(int row)
+        => Read(GetRow(row), 16);
+
+    private ReadOnlySpan<byte> GetRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidWitnessAssociatedType();
+        }
+
+        return _rows.Slice((row - 1) * RowSize, RowSize);
+    }
+
+    private static int GetNominalTypeDefRow(uint typeSpecRef,
+        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
+        TrRmImportTableReader imports)
+    {
+        var typeSpec = types.GetTypeSpecRef(typeSpecRef);
+        if (!typeSpec.IsRow)
+        {
+            throw InvalidWitnessAssociatedType();
+        }
+
+        var data = types.GetRow(typeSpec.Row);
+        if (typeSpec.Form == 0x05)
+        {
+            var genericTypeSpecRow = checked((int)Read(data, 2));
+            var genericTypeSpec = types.GetTypeSpecRef((uint)genericTypeSpecRow);
+            if (!genericTypeSpec.IsRow || genericTypeSpec.Form is not (0x02 or 0x03))
+            {
+                throw InvalidWitnessAssociatedType();
+            }
+
+            data = types.GetRow(genericTypeSpec.Row);
+        }
+
+        var definition = data[0] switch
+        {
+            0x02 => 0x1300_0000u | Read(data, 2),
+            0x03 => imports.GetExpectedDefinitionForImportRow(
+                checked((int)Read(data, 2))),
+            _ => throw InvalidWitnessAssociatedType(),
+        };
+        var typeDefRow = (int)(definition & 0x00FF_FFFF);
+        if ((definition >> 24) != 0x13 || typeDefRow <= 0 || typeDefRow > typeDefs.Count)
+        {
+            throw InvalidWitnessAssociatedType();
+        }
+
+        return typeDefRow;
+    }
+
+    private static uint Read(ReadOnlySpan<byte> data, int offset)
+        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+
+    private static InvalidDataException InvalidWitnessAssociatedType()
+        => new("Invalid TRRM WitnessAssociatedType table.");
+}
+
+/// <summary>Encodes effective associated-type selections with checked witness and declaration references.</summary>
+public static class TrRmWitnessAssociatedTypeTableWriter
+{
+    private const int RowSize = 20;
+
+    /// <summary>Encodes WitnessAssociatedType rows in one-based table order.</summary>
+    /// <param name="rows">The effective associated-type selections.</param>
+    /// <param name="witnesses">The validated InterfaceWitness table.</param>
+    /// <param name="types">The validated TypeSpec table.</param>
+    /// <param name="typeDefs">The validated TypeDef table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table.</param>
+    /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table.</param>
+    /// <param name="imports">The validated Import table.</param>
+    /// <returns>The encoded WitnessAssociatedType section.</returns>
+    public static byte[] Encode(IReadOnlyList<TrRmWitnessAssociatedTypeRow> rows,
+        TrRmInterfaceWitnessTableReader witnesses, TrRmTypeSpecTableReader types,
+        TrRmTypeDefTableReader typeDefs, TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmImportTableReader imports)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var result = new byte[rows.Count * RowSize];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var offset = index * RowSize;
+            Write(result, offset, unchecked((uint)row.WitnessRow));
+            Write(result, offset + 4, row.DeclaringInterfaceTypeSpecRef);
+            Write(result, offset + 8, row.AssociatedTypeDefReference);
+            Write(result, offset + 12, row.ValueTypeSpecRef);
+            Write(result, offset + 16, row.BindingOrigin);
+        }
+
+        _ = new TrRmWitnessAssociatedTypeTableReader(result, rows.Count,
+            witnesses, types, typeDefs, interfaces, associatedTypeDefs, imports);
+        return result;
+    }
+
+    private static void Write(byte[] bytes, int offset, uint value)
+        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+}

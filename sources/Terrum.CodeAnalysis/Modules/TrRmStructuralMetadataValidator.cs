@@ -18,6 +18,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmAssociatedTypeDefTableReader associatedTypeDefs,
             TrRmInterfaceWitnessTableReader interfaceWitnesses,
             TrRmWitnessMemberTableReader witnessMembers,
+            TrRmWitnessAssociatedTypeTableReader witnessAssociatedTypes,
             TrRmInterfaceBaseTableReader interfaceBases,
             TrRmInterfaceMethodTableReader interfaceMethods,
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
@@ -55,6 +56,7 @@ public static class TrRmStructuralMetadataValidator
             AssociatedTypeDefs = associatedTypeDefs;
             InterfaceWitnesses = interfaceWitnesses;
             WitnessMembers = witnessMembers;
+            WitnessAssociatedTypes = witnessAssociatedTypes;
             InterfaceBases = interfaceBases;
             InterfaceMethods = interfaceMethods;
             InterfaceConstDefs = interfaceConstDefs;
@@ -98,6 +100,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmAssociatedTypeDefTableReader AssociatedTypeDefs { get; }
         internal TrRmInterfaceWitnessTableReader InterfaceWitnesses { get; }
         internal TrRmWitnessMemberTableReader WitnessMembers { get; }
+        internal TrRmWitnessAssociatedTypeTableReader WitnessAssociatedTypes { get; }
         internal TrRmInterfaceBaseTableReader InterfaceBases { get; }
         internal TrRmInterfaceMethodTableReader InterfaceMethods { get; }
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
@@ -202,7 +205,8 @@ public static class TrRmStructuralMetadataValidator
             out var interfaceWitnessCount);
         _ = index.TryGetSection(0x0029, out var witnessMemberBytes,
             out var witnessMemberCount);
-        _ = index.TryGetSection(0x002A, out _, out var witnessAssociatedTypeCount);
+        _ = index.TryGetSection(0x002A, out var witnessAssociatedTypeBytes,
+            out var witnessAssociatedTypeCount);
         _ = index.TryGetSection(0x002B, out var builderRegistrationBytes,
             out var builderRegistrationCount);
         _ = index.TryGetSection(0x002C, out var textTargetBytes, out var textTargetCount);
@@ -321,6 +325,7 @@ public static class TrRmStructuralMetadataValidator
         var associatedTypeDefs = default(TrRmAssociatedTypeDefTableReader);
         var interfaceWitnesses = default(TrRmInterfaceWitnessTableReader);
         var witnessMembers = default(TrRmWitnessMemberTableReader);
+        var witnessAssociatedTypes = default(TrRmWitnessAssociatedTypeTableReader);
         var interfaceBases = default(TrRmInterfaceBaseTableReader);
         var interfaceMethods = default(TrRmInterfaceMethodTableReader);
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
@@ -410,6 +415,10 @@ public static class TrRmStructuralMetadataValidator
             generics, imports, selectedConstantSourceCount);
         if (!developmentProfile)
         {
+            witnessAssociatedTypes = new TrRmWitnessAssociatedTypeTableReader(
+                witnessAssociatedTypeBytes, witnessAssociatedTypeCount,
+                interfaceWitnesses, typeSpecs, types, interfaces,
+                associatedTypeDefs, imports);
             targetLayoutDependencyFields = new TrRmTargetLayoutDependencyFieldTableReader(
                 targetLayoutDependencyFieldBytes, targetLayoutDependencyFieldCount,
                 fields, imports);
@@ -548,6 +557,7 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
+            witnessAssociatedTypes,
             interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,

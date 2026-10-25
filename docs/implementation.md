@@ -171,8 +171,13 @@ InterfaceDef ranges, owners, names and complete type references; initialized
 interface constants also require a bounded ConstantSource row reference. The
 standard InterfaceWitness/WitnessMember readers additionally validate
 complete witness type pairs, exclusive member/associated-binding ranges and
-WitnessMember method/type-reference bounds; they do not prove selected-method
-compatibility or bind associated declarations. The
+WitnessMember method/type-reference bounds. A provisional
+`WitnessAssociatedType` codec also validates row ownership, nominal declaring
+interface ownership, complete selected types, direct/import declaration
+references and the unapproved binding-origin tags; declaration-default rows
+must identify a nonzero published default. These checks do not establish
+selected-method compatibility, inherited associated-type selection,
+substitution, exact default equality or remapping. The
 standard UnionCaseDef/UnionCaseField readers validate TypeDef/UnionCaseDef
 owners, exclusive payload ranges, ordered payload ordinals and complete
 UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so this
