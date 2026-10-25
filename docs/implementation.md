@@ -139,15 +139,19 @@ instruction boundaries and block terminators, plus shape decoding for compact
 descriptor kinds. The standard metadata validator still indexes the Body
 table without pre-scanning unrelated Body rows; consumers validate a selected
 Body through `TrRmBodyTableReader`. The selected method-aware map validator
-checks HomeMap structure and local indexes, TypeMap token forms and pseudo-base
-acyclicity, MethodMap and FieldMap target kinds/ranges, top-level direct/Import module ownership, selected FieldPath step ownership,
+checks HomeMap structure and local indexes, exact receiver/formal type matches
+for direct/Import TypeDefs and TypeSpec/F2/F3 spellings, TypeMap references
+with provisional F0/F1 rejection, MethodMap and FieldMap target kinds/ranges,
+top-level direct/Import module ownership, selected FieldPath step ownership,
 and ConstantMap TypeSpecRef/ConstantSource row bounds. It also checks
 module-context references reached through selected TypeMap/ConstantMap types,
 MethodSig result/receiver/parameters, FieldDef types and FieldPath roots/steps,
-including constructed type arguments. Exact Home-to-signature type
-substitution, callee contract/replacement equality, ConstantSource/value type
-equality, full instruction operands/control verification, canonical writing,
-re-emission and execution remain incomplete.
+including constructed type arguments. Normalized HomeMap comparison through
+nested constructed types and generic substitution, callee
+contract/replacement equality, ConstantSource/value type equality, full
+instruction operands/control verification, canonical writing, re-emission and
+execution remain incomplete. F0/F1 rejection is provisional under the
+unapproved pseudo-retirement proposal; normative assignments remain unchanged.
 Artifact framing now selects standard TRRM or the internal development
 executable schema before indexing and writing. The standard index follows the
 registry's assigned section kinds/strides, including `NativeImport`/

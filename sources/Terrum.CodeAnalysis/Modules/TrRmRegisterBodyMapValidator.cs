@@ -20,7 +20,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmModuleRefTableReader moduleRefs)
     {
         var visitedTypeSpecRows = new HashSet<int>();
-        ValidateHomeMap(body, methodDefRow, methods, signatures);
+        ValidateHomeMap(body, methodDefRow, methods, signatures, parameters, typeSpecs);
         ValidateTypeMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, visitedTypeSpecRows);
         ValidateMethodMap(body, ownerModule, methods, signatures, parameters,
@@ -32,11 +32,13 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,
-        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures)
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs)
     {
         var signature = methods.GetSignature(methodDefRow);
-        var parameterCount = signatures.GetParamRange(signature).Count;
-        var hasReceiver = signatures.GetReceiverTypeSpec(signature) != 0;
+        var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
+        var receiverType = signatures.GetReceiverTypeSpec(signature);
+        var hasReceiver = receiverType != 0;
         var formalOrdinals = new HashSet<int>();
         var hasReceiverHome = false;
         for (var home = 0; home < body.HomeCount; home++)
@@ -55,7 +57,8 @@ internal static class TrRmRegisterBodyMapValidator
             switch (role)
             {
                 case 1:
-                    if (flags != 0 || formalOrdinal != 0 || !hasReceiver || hasReceiverHome)
+                    if (flags != 0 || formalOrdinal != 0 || !hasReceiver || hasReceiverHome
+                        || !MatchesTypeMapEntry(body, typeMapIndex, receiverType, typeSpecs))
                     {
                         throw InvalidMap();
                     }
@@ -63,7 +66,9 @@ internal static class TrRmRegisterBodyMapValidator
                     break;
                 case 2:
                     if (flags != 0 || formalOrdinal >= parameterCount
-                        || !formalOrdinals.Add(formalOrdinal))
+                        || !formalOrdinals.Add(formalOrdinal)
+                        || !MatchesTypeMapEntry(body, typeMapIndex,
+                            parameters.GetTypeSpec(firstParameter + formalOrdinal), typeSpecs))
                     {
                         throw InvalidMap();
                     }
@@ -76,6 +81,75 @@ internal static class TrRmRegisterBodyMapValidator
                     break;
             }
         }
+    }
+
+    private static bool MatchesTypeMapEntry(TrRmRegisterBodyReader body,
+        int typeMapIndex, uint expectedType, TrRmTypeSpecTableReader typeSpecs)
+    {
+        var token = ReadUInt32(body.TypeMap, typeMapIndex * sizeof(uint));
+        var kind = (byte)(token >> 24);
+        if (kind is 0x11 or 0xF2 or 0xF3)
+        {
+            var typeSpecRef = kind == 0x11 ? token & 0x00FF_FFFF : token;
+            var mapType = typeSpecs.GetTypeSpecRef(typeSpecRef);
+            var formalType = typeSpecs.GetTypeSpecRef(expectedType);
+            if (mapType.Form == 0x0C && formalType.Form == 0x01)
+            {
+                return MatchesInlineFamilyTypeSpec(expectedType, typeSpecRef, typeSpecs);
+            }
+            if (formalType.Form == 0x0C && mapType.Form == 0x01)
+            {
+                return MatchesInlineFamilyTypeSpec(typeSpecRef, expectedType, typeSpecs);
+            }
+
+            return typeSpecs.AreEquivalentTypeSpecRefs(typeSpecRef, expectedType);
+        }
+
+        if (kind is not (0x13 or 0x1C))
+        {
+            return false;
+        }
+
+        var expected = typeSpecs.GetTypeSpecRef(expectedType);
+        if (!expected.IsRow || expected.Qualifiers != 0)
+        {
+            return false;
+        }
+
+        var expectedRow = typeSpecs.GetRow(expected.Row);
+        return kind switch
+        {
+            0x13 => expected.Form == 0x02
+                && ReadUInt32(expectedRow, 2) == (token & 0x00FF_FFFF),
+            0x1C => expected.Form == 0x03
+                && ReadUInt32(expectedRow, 2) == (token & 0x00FF_FFFF),
+            _ => false,
+        };
+    }
+
+    private static bool MatchesInlineFamilyTypeSpec(uint inlineTypeSpecRef,
+        uint indexedTypeSpecRef, TrRmTypeSpecTableReader typeSpecs)
+    {
+        var inlineType = typeSpecs.GetTypeSpecRef(inlineTypeSpecRef);
+        var indexedType = typeSpecs.GetTypeSpecRef(indexedTypeSpecRef);
+        if (inlineType.Form != 0x01 || inlineType.TypeCode < 0x80
+            || !indexedType.IsRow || indexedType.Form != 0x0C
+            || inlineType.Qualifiers != indexedType.Qualifiers)
+        {
+            return false;
+        }
+
+        var indexedRow = typeSpecs.GetRow(indexedType.Row);
+        if (indexedRow[2] != inlineType.TypeCode)
+        {
+            return false;
+        }
+
+        var argument = typeSpecs.GetTypeSpecRef(ReadUInt32(indexedRow, 3),
+            allowInitQualifier: inlineType.TypeCode == 0x8A);
+        return argument.Form == 0x01 && argument.Qualifiers == 0
+            && argument.TypeCode < 0x80
+            && argument.TypeCode == inlineType.ArgumentCode;
     }
 
     private static void ValidateTypeMap(TrRmRegisterBodyReader body, int ownerModule,

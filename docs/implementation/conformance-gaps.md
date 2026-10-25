@@ -125,15 +125,20 @@ method-aware selected-Body map validator now checks HomeMap structure and
 signature ordinal bounds, TypeMap references, and provisionally rejects F0/F1
 at selected use under the unapproved
 [TypeMap pseudo-retirement proposal](../proposals/body-typemap-pseudo-type-retirement.md).
-MethodMap/FieldMap row kinds and bounds, top-level direct/Import module
-ownership, selected FieldPath step ownership, and ConstantMap TypeSpecRef/
-ConstantSource row bounds. Map-reachable TypeSpec references are traversed
-under the selected Module, including constructed type arguments, MethodSig
-result/receiver/parameter types, FieldDef types and FieldPath roots/steps.
-Exact HomeMap type substitution, callee/provider contract equality and
-ConstantMap source/value type equality remain incomplete. Full record and
-instruction semantics, descriptor eligibility, canonical writing, remapping,
-re-emission and execution remain unfinished.
+It also validates MethodMap/FieldMap row kinds and bounds, top-level
+direct/Import module ownership, selected FieldPath step ownership, and
+ConstantMap TypeSpecRef/ConstantSource row bounds. Map-reachable TypeSpec
+references are traversed under the selected Module, including constructed
+type arguments, MethodSig result/receiver/parameter types, FieldDef types and
+FieldPath roots/steps.
+Receiver and formal HomeMap types are compared with their MethodSig types
+across direct/Import TypeDefs, TypeSpec rows, F2/F3 spellings, and indexed
+family terms; qualification and unrelated type forms do not match. Exact
+normalized equality through nested constructed arguments and generic
+substitution, callee/provider contract equality and ConstantMap source/value
+type equality remain incomplete. Full record and instruction semantics,
+descriptor eligibility, canonical writing, remapping, re-emission and
+execution remain unfinished.
 
 Artifact framing now takes an explicit standard or internal development
 schema before table indexing and writing. Standard `TrRmArtifactIndex` uses
@@ -1191,18 +1196,22 @@ schema. It assigns the `17 + 4*popcount(mapMask)` register-stream prefix,
 five optional Body maps including four-byte FieldMap tokens, global FieldPath
 and target-layout field-reference sections, zero-based `u16` local indexes
 with `u32` counts, `DE` query/TypeIdentity controls, BlockEntryState carrier
-2, instruction/record layouts, F0/F1/F2/F3 TypeMap tokens and TypeSpecRef
-fields, plus the accepted integer, binary-floating and decimal type matrices.
+2, instruction/record layouts, F2/F3 TypeMap tokens and TypeSpecRef fields;
+the accepted registry still assigns F0/F1, which the provisional selected
+schema rejects. Also cover the accepted integer, binary-floating and decimal
+type matrices.
 
 **Current/evidence:** development fixture/reader behavior is not independent
 proof of the selected schema. The selected-Body validator checks map token
 kinds, row bounds and direct/Import ownership; its provisional path rejects
 examined F0/F1 tokens under the unapproved retirement proposal while accepted
-registry assignments remain unchanged. It traverses map-reachable TypeSpec
-references under the using Module. It does not establish exact substitution,
-HomeMap-to-signature equivalence, ConstantSource value-type equality,
-canonical writing or runtime execution, and is not current-schema
-conformance.
+registry assignments remain unchanged. It checks receiver/formal HomeMap
+types against MethodSig types for direct/Import TypeDefs and TypeSpec/F2/F3
+forms, including inline/indexed family equivalence, and traverses map-reachable
+TypeSpec references under the using Module. It does not establish normalized
+constructed-type substitution, callee/provider contract equality,
+ConstantSource value-type equality, canonical writing or runtime execution,
+and is not current-schema conformance.
 Numerical portable resource minima remain unassigned, not invented defaults.
 A lower fixed-width ID is not smaller on disk.
 
