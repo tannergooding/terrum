@@ -33,8 +33,8 @@ public sealed partial class GenericControlFlowModuleTests
         var replacementProgram = Compile(Replacement, policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, ["Read"]);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(76));
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(replacement, false), Is.EqualTo(ModuleCompiler.GetNativeProfileVersion(original, false)));
         Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions).Name, Is.EqualTo("Read"));
 

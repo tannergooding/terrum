@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
@@ -302,6 +303,227 @@ public sealed class SourceArithmeticProfileTests
     }
 
     [Test]
+    public void PrivateSemanticModulePreservesProducerArithmeticAcrossProfiles()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Calculate() {
+                mut int32 increment = int32.MaxValue;
+                increment++;
+                increment += 1;
+                int32 negated = -int32.MinValue;
+                return increment + negated;
+            }
+            public int32 Compute() { return Calculate(); }
+            """), new CompilationOptions {
+            SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+        });
+        var producer = ModuleCompiler.CreateProducer(GetProgram(provider,
+            BoundRuntimePolicy.CheckedExceptions), ["Compute"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(sizeof(int), sizeof(int))),
+            Is.EqualTo(89));
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumer = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(); }"),
+            reference, new CompilationOptions {
+                SourceArithmeticProfile = SourceArithmeticProfile.Development,
+                RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            });
+        var consumerBytes = ModuleCompiler.CreateConsumer(GetProgram(consumer,
+            BoundRuntimePolicy.CheckedExceptions), producer);
+            var consumerSnapshot = (byte[])consumerBytes.Clone();
+            var linked = ModuleCompiler.Link(consumerBytes, producer);
+            Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(1));
+
+            var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+                int32 Calculate() {
+                    mut int32 increment = int32.MaxValue;
+                    increment++;
+                    increment += 1;
+                    int32 negated = -int32.MinValue;
+                    return increment + negated + 41;
+                }
+                public int32 Compute() { return Calculate(); }
+                """), new CompilationOptions {
+                SourceArithmeticProfile = SourceArithmeticProfile.Release,
+                RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            });
+            var replacement = ModuleCompiler.CreateProducer(GetProgram(replacementCompilation,
+                BoundRuntimePolicy.CheckedExceptions), ["Compute"]);
+            Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumerBytes, replacement),
+                NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+            Assert.That(consumerBytes, Is.EqualTo(consumerSnapshot));
+    }
+
+    [Test]
+    public void Revision88ArithmeticRemainsCheckedAndInvalidModesReject()
+    {
+        const string source = """
+            public int32 Add(int32 left, int32 right) { return left + right; }
+            """;
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions { RuntimePolicy = BoundRuntimePolicy.CheckedExceptions });
+        var program = GetProgram(providerCompilation, BoundRuntimePolicy.CheckedExceptions);
+        var function = program.Functions.Single(static candidate => candidate.Name == "Add");
+        var binary = (BoundBinary)((BoundReturn)function.Body.Statements.Single()).Value!;
+        var producer = ModuleCompiler.CreateProducer(program, ["Add"]);
+        var modeOffset = FindBinaryOverflowModeOffset(producer, binary);
+
+        var invalidMode = (byte[])producer.Clone();
+        invalidMode[modeOffset] = 2;
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalidMode));
+        var unknownRevision = (byte[])producer.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(unknownRevision.AsSpan(sizeof(int), sizeof(int)), 90);
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(unknownRevision));
+
+        // Revision 88 predates the mode byte, so its arithmetic records are checked-only.
+        var legacy = new byte[producer.Length - 1];
+        producer.AsSpan(0, modeOffset).CopyTo(legacy);
+        producer.AsSpan(modeOffset + 1).CopyTo(legacy.AsSpan(modeOffset));
+        BinaryPrimitives.WriteInt32LittleEndian(legacy.AsSpan(sizeof(int), sizeof(int)), 88);
+
+        var reference = ModuleCompiler.CreateReference(legacy);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    try { return Add(int32.MaxValue, 1); }
+                    catch { return 42; }
+                }
+                return 0;
+            }
+            """), reference, new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+        });
+        var consumer = ModuleCompiler.CreateConsumer(GetProgram(consumerCompilation,
+            BoundRuntimePolicy.CheckedExceptions), legacy);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, legacy),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+
+        var comparisonCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public bool Less(int32 left, int32 right) { return left < right; }
+            """));
+        var comparisonProgram = GetProgram(comparisonCompilation, BoundRuntimePolicy.FailFast);
+        var comparisonFunction = comparisonProgram.Functions.Single(static candidate =>
+            candidate.Name == "Less");
+        var comparison = (BoundBinary)((BoundReturn)comparisonFunction.Body.Statements.Single()).Value!;
+        var comparisonProducer = ModuleCompiler.CreateProducer(comparisonProgram, ["Less"]);
+        var comparisonModeOffset = FindBinaryOverflowModeOffset(comparisonProducer, comparison);
+        comparisonProducer[comparisonModeOffset] = 1;
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(comparisonProducer));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NativeGraphJitPreservesPrivateArithmeticPoliciesAsync(NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Calculate() {
+                mut int32 increment = int32.MaxValue;
+                increment++;
+                increment += 1;
+                int32 negated = -int32.MinValue;
+                return increment + negated;
+            }
+            public int32 Compute() { return Calculate(); }
+            """), new CompilationOptions {
+            SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            RuntimePolicy = boundPolicy,
+        });
+        var provider = NativeModuleCompiler.CreateProducer(GetProgram(providerCompilation,
+            boundPolicy), ["Compute"], "ArithmeticProvider", policy);
+        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Calculate() {
+                mut int32 increment = int32.MaxValue;
+                increment++;
+                increment += 1;
+                int32 negated = -int32.MinValue;
+                return increment + negated + 41;
+            }
+            public int32 Compute() { return Calculate(); }
+            """), new CompilationOptions {
+            SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            RuntimePolicy = boundPolicy,
+        });
+        var replacement = NativeModuleCompiler.CreateProducer(GetProgram(replacementCompilation,
+            boundPolicy), ["Compute"], "ArithmeticProvider", policy);
+
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 threshold = int32.MaxValue;
+                threshold++;
+                return threshold == int32.MinValue ? Compute() : 0;
+            }
+            """), NativeModuleCompiler.CreateGraphReference([provider]),
+            new CompilationOptions {
+                SourceArithmeticProfile = SourceArithmeticProfile.Release,
+                RuntimePolicy = boundPolicy,
+            });
+        var root = NativeModuleCompiler.CreateGraphConsumer(GetProgram(consumerCompilation,
+            boundPolicy), [provider], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [provider]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [provider],
+            TimeSpan.FromSeconds(15), policy).ConfigureAwait(true), Is.EqualTo(1));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [provider], Apphost(),
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(1));
+        NativeModuleCompiler.ValidateGraph(root, [replacement]);
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [replacement], Apphost(),
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NativeSetPersistsConsumerArithmeticPoliciesAsync(NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Value() { return 1; }"), new CompilationOptions {
+            RuntimePolicy = boundPolicy,
+        });
+        var provider = NativeModuleCompiler.CreateProducer(GetProgram(providerCompilation,
+            boundPolicy), ["Value"], "ArithmeticSetProvider", policy);
+        var unusedProviderCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Helper() { return 0; }"), new CompilationOptions {
+            RuntimePolicy = boundPolicy,
+        });
+        var unusedProvider = NativeModuleCompiler.CreateProducer(GetProgram(unusedProviderCompilation,
+            boundPolicy), ["Helper"], "ArithmeticSetHelper", policy);
+        var providers = new[] { provider, unusedProvider };
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 value = int32.MaxValue;
+                value++;
+                return value == int32.MinValue ? Value() : 0;
+            }
+            """), NativeModuleCompiler.CreateReferenceSet(providers), new CompilationOptions {
+            SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            RuntimePolicy = boundPolicy,
+        });
+        var consumer = NativeModuleCompiler.CreateConsumerSet(GetProgram(consumerCompilation,
+            boundPolicy), providers, policy);
+
+        NativeModuleCompiler.ValidateConsumerSet(consumer, providers);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, providers,
+            TimeSpan.FromSeconds(15), policy).ConfigureAwait(true), Is.EqualTo(1));
+
+        var replacementCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Value() { return 42; }"), new CompilationOptions {
+            RuntimePolicy = boundPolicy,
+        });
+        var replacement = NativeModuleCompiler.CreateProducer(GetProgram(replacementCompilation,
+            boundPolicy), ["Value"], "ArithmeticSetProvider", policy);
+        var replacements = new[] { replacement, unusedProvider };
+        NativeModuleCompiler.ValidateConsumerSet(consumer, replacements);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer, replacements,
+            TimeSpan.FromSeconds(15), policy).ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [Test]
     public void InvalidOptionsAreRejectedBeforeSourceEnumeration()
     {
         var enumerated = false;
@@ -335,5 +557,38 @@ public sealed class SourceArithmeticProfileTests
         Assert.That(program, Is.Not.Null);
         Assert.That(program!.RuntimePolicy, Is.EqualTo(runtimePolicy));
         return program;
+    }
+
+    private static int FindBinaryOverflowModeOffset(byte[] module, BoundBinary binary)
+    {
+        var offsets = new List<int>();
+        for (var offset = 0; offset <= module.Length - 18; offset++)
+        {
+            if (module[offset] == 4
+                && BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(offset + 1, sizeof(int)))
+                    == (int)binary.Type
+                && BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(offset + 5, sizeof(int)))
+                    == binary.Span.Start
+                && BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(offset + 9, sizeof(int)))
+                    == binary.Span.Length
+                && BinaryPrimitives.ReadInt32LittleEndian(module.AsSpan(offset + 13, sizeof(int)))
+                    == (int)binary.Operator
+                && module[offset + 17] == 0)
+            {
+                offsets.Add(offset + 17);
+            }
+        }
+        Assert.That(offsets, Has.Count.EqualTo(1));
+        return offsets[0];
+    }
+
+    private static string Apphost()
+    {
+        var framework = new DirectoryInfo(AppContext.BaseDirectory);
+        var configuration = framework.Parent?.Name
+            ?? throw new InvalidOperationException("Missing test configuration directory.");
+        var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+        return Path.Combine(root, "artifacts", "bin", "sources", "terrumc",
+            configuration, framework.Name, "terrumc.exe");
     }
 }

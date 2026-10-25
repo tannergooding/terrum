@@ -38,9 +38,12 @@ DLL or root EXE.
 For managed roots and intermediate producers in persisted acyclic native DLL
 graphs, each participant uses the private semantic-module revision selected by
 its retained contracts: revision 76 is the base, while fixed layouts and
-direct-import metadata require their corresponding later revisions. This
-serialization revision is distinct from the graph container and native
-package formats. Participants
+direct-import metadata require their corresponding later revisions.
+Provisionally implemented candidate revision 89 also retains resolved
+per-operation arithmetic in graph contracts under the unapproved
+[private-persistence proposal](../proposals/source-arithmetic-private-persistence.md).
+This serialization revision is distinct from the unchanged
+version-2 graph container and native package formats. Participants
 communicate only through the established scalar and handle-free public `Copy`
 value contracts. Each persisted image has its own heap and root chain; an
 imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains

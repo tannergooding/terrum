@@ -21,7 +21,7 @@ public static partial class ModuleCompiler
             PrivateSpanVersion or DirectNativeImportVersion or DirectNativeParameterVersion
                 or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion or NativePointerVersion
             or NativeVTableVersion or NativeVTableOffsetVersion or NativeVTableContractVersion
-            or NativeVTableOutputVersion or NativeCallableEntryVersion })
+            or NativeVTableOutputVersion or NativeCallableEntryVersion or ArithmeticOperationVersion })
         {
             throw new ModuleFormatException(
                 "Private span IR requires a private-span semantic-module revision.");
@@ -80,7 +80,8 @@ public static partial class ModuleCompiler
         if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion
                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
-                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion)
+                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
+                or ArithmeticOperationVersion)
             || (module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant)
             || (hasSpans && !module.RequiresSourceGrant)
             || module.Functions.Any(static item => item.Import

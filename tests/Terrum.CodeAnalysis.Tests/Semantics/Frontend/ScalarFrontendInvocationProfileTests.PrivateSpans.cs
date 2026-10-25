@@ -51,7 +51,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var provider = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Terrum.CodeAnalysis.InspectPrivateSpan"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(provider.AsSpan(4)), Is.EqualTo(81));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(provider.AsSpan(4)), Is.EqualTo(89));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
             struct ConsumerLocal {
@@ -66,7 +66,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumerCompilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), provider);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)), Is.EqualTo(89));
 
         var replacementTrees = await ReadComponentsAsync(
             s_scannerComponents.Reverse().ToArray(),
@@ -351,7 +351,7 @@ public sealed partial class ScalarFrontendInvocationProfileTests
         using var reader = new BinaryReader(stream, Encoding.UTF8);
         _ = reader.ReadInt32();
         var version = reader.ReadInt32();
-        Assert.That(version, Is.EqualTo(81));
+        Assert.That(version, Is.EqualTo(89));
         string ReadString() => Encoding.UTF8.GetString(reader.ReadBytes(reader.ReadInt32()));
         _ = ReadString();
         _ = reader.ReadBoolean();

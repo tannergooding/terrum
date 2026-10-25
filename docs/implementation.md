@@ -35,8 +35,12 @@ generics, managed roots/classes, and deterministic cleanup. Hosted
 `CompilationOptions` currently defaults arithmetic selection to Development,
 offers Release explicitly, and keeps runtime-failure policy independent. The
 arithmetic selection currently applies to hosted source binding and direct
-native/JIT lowering; CLI/Terrum-authored frontends and persisted body routes
-remain unfinished under the unapproved proposal. Hosted calls also
+native/JIT lowering. The
+[unapproved private-persistence proposal](proposals/source-arithmetic-private-persistence.md) is
+provisionally implemented for structured semantic modules and their native
+package, set, and graph embeddings; CLI/Terrum-authored frontends, development
+executable persistence, and standard register-Body persistence remain
+unfinished. Hosted calls also
 support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 `void` functions across semantic modules, native libraries and native graphs;
 compilation-local `[Copy]` templates support the bounded generic `out T` and
@@ -66,10 +70,12 @@ predicate-refinement catalog for runtime values, so it does not fulfill the
 accepted v1 proof-floor scope.
 
 Current profile markers are syntax language version 46, semantic-module base
-revision 76 with private feature revisions through 88, and native profiles
-native-10 through native-20. These markers describe supported implementations,
-not approval of the remaining language contracts. The exact source, layout,
-metadata, ABI, and runtime contracts are in the
+revision 76, the provisionally implemented but unapproved private arithmetic
+candidate revision 89, and native profiles native-10 through native-20.
+Readers retain exact revisions 76–88 as checked-only arithmetic inputs.
+These markers describe supported implementations, not approval of the
+remaining language contracts. The exact source, layout, metadata, ABI, and
+runtime contracts are in the
 [specification index](specs/README.md).
 Public fixed-layout source support is implemented for natural Windows x64
 `Sequential` and scalar-or-raw-pointer-carrier `Transparent` layouts committed

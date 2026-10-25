@@ -89,8 +89,13 @@ are bounded executable profiles, separate from
 the wider syntax grammar and proposed libraries. The compiler is hosted in
 C#/.NET, but emitted programs are native PE32+ images with no CLR header,
 CIL, LLVM, source translation or external linker dependency.
-Persisted development semantic modules use base revision 76 and the private
-feature revisions documented in the
+Persisted development semantic modules use base revision 76. Candidate
+revision 89 provisionally persists per-operation checked/wrapping arithmetic
+in structured bodies and their private native package, set, and graph
+embeddings under the unapproved
+[private-persistence proposal](../proposals/source-arithmetic-private-persistence.md).
+Exact revisions 76–88 are read as checked-only arithmetic inputs. The
+remaining private feature revisions are documented in the
 [module inventory](modules.md); these revisions are not standard TRRM
 extensions. The current formats retain class/`ManagedNode` access contracts,
 non-exported compact-struct `MutReceiver` contracts and nested mutable-field
@@ -848,10 +853,11 @@ division by zero and out-of-range casts retain their existing failure behavior;
 a later cancellation cannot erase an earlier checked failure. Calls and storage
 reads stay opaque, including a call multiplied by zero. Folding does not provide
 missing literal context, change operator binding, or infer a callee's effect
-contract. The source profile is compile-time-only; direct AOT/JIT lowering uses
-the resolved operation facts. CLI and Terrum-authored frontends and private,
-development and standard body persistence remain unfinished under the
-unapproved proposal.
+contract. The source profile is compile-time-only; direct AOT/JIT lowering and
+revision-89 private semantic bodies use the resolved operation facts. CLI and
+Terrum-authored frontends, development executable persistence, and standard
+register-Body persistence remain unfinished under their respective
+provisional or accepted contracts.
 
 Matching constant integer/code-unit comparisons and boolean equality also
 fold into boolean constants, as do built-in boolean `!`, `&&`, `||`, `&`, `|`

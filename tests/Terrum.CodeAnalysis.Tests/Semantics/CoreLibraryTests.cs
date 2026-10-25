@@ -35,7 +35,7 @@ public sealed class CoreLibraryTests
         Assert.That(program.Structures, Is.Empty);
         var producer = ModuleCompiler.CreateProducer(program,
             ["int32.TryParse", "int32.TryFormat", "int32.Identity", "int32.ReadBacking"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(89));
         var consumer = Compilation.Create(SyntaxTree.Parse(
             """
             int32 Main() {
@@ -49,7 +49,7 @@ public sealed class CoreLibraryTests
         Assert.That(consumer.HasErrors, Is.False, string.Join(Environment.NewLine, consumer.Diagnostics));
         var consumerBytes = ModuleCompiler.CreateConsumer(
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = consumer.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumerBytes.AsSpan(4)), Is.EqualTo(89));
         var linked = ModuleCompiler.Link(consumerBytes, producer);
         Assert.That(NativeJit.Execute(linked, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
 
@@ -118,13 +118,13 @@ public sealed class CoreLibraryTests
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == $"{name}.get_Value").PropertyName, Is.Null);
         var exports = new[] { $"{name}.Identity", $"{name}.#get:Value", $"{name}.ReadPrivate" };
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(89));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(source),
             ModuleCompiler.CreateReference(producer), runtimePolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4)), Is.EqualTo(89));
         var linked = ModuleCompiler.Link(consumer, producer);
         var policy = (NativeRuntimePolicy)runtimePolicy;
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(7));

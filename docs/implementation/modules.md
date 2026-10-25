@@ -104,8 +104,14 @@ routes to revalidate the selected provider identity, slot, offset, and parameter
 contracts when rebinding a TRRM-derived import stub to its provider export.
 Revision 87 additionally retains expected vtable output contracts, and
 revision 88 retains explicit native-callable export names.
+Candidate revision 89 adds one checked/wrapping mode byte to unary, binary,
+update and compound-assignment arithmetic records. This private schema is
+provisionally implemented under the unapproved
+[private-persistence proposal](../proposals/source-arithmetic-private-persistence.md):
+all new writes use 89, while exact revisions 76–88 reconstruct these
+operations as checked.
 Ordinary private-module replacement remains slot-flexible. Readers accept
-the supported private revisions through 88 while rejecting unsupported
+the supported private revisions through 89 while rejecting unsupported
 combinations. Older artifacts must
 be recreated from source. These private formats preserve verified, typed,
 source-mapped structured IR and the supported declaration, layout,

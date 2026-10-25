@@ -24,7 +24,7 @@ public sealed partial class NativeManagedClassModuleTests
         NativeRuntimePolicy policy, int fieldCount)
     {
         var producer = ModuleCompiler.CreateProducer(Compile(WideSource(fieldCount), policy), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
         if (fieldCount > 16)
         {
             var retiredRevision = producer.ToArray();
@@ -70,7 +70,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source, policy);
         Assert.That(global::System.Linq.Enumerable.Single(program.Structures).IsTransparent, Is.True);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -139,7 +139,7 @@ public sealed partial class NativeManagedClassModuleTests
             + " public int32 Read() { require Dense.TryCreate(out var value);"
             + " return value.F31 + value.F11; }";
         var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
         var consumer = ModuleCompiler.CreateConsumer(Compile("int32 Main() { return Read(); }",
             policy, ModuleCompiler.CreateReference(producer), library: false), producer);
         var linked = ModuleCompiler.Link(consumer, producer);
@@ -156,7 +156,7 @@ public sealed partial class NativeManagedClassModuleTests
         var source = WideSource(32) + " int32 Main() { return Read() + Bias(); }";
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(producer), library: false), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(global::System.Linq.Enumerable.Single(linked.Classes).Fields.Length, Is.EqualTo(32));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(42));

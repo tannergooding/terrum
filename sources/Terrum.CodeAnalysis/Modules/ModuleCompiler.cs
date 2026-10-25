@@ -28,6 +28,7 @@ public static partial class ModuleCompiler
     private const int NativeVTableContractVersion = 86;
     private const int NativeVTableOutputVersion = 87;
     private const int NativeCallableEntryVersion = 88;
+    private const int ArithmeticOperationVersion = 89;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -4340,6 +4341,7 @@ public static partial class ModuleCompiler
         {
             module = module with { FormatVersion = NativeCallableEntryVersion };
         }
+        module = module with { FormatVersion = ArithmeticOperationVersion };
         ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null
             ? !module.InvocationBuffers.IsEmpty
@@ -4391,7 +4393,8 @@ public static partial class ModuleCompiler
             if (module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
-                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion)
+                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
+                or ArithmeticOperationVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -4597,7 +4600,8 @@ public static partial class ModuleCompiler
                 && module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
                     or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
                     or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
-                    or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion))
+                    or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
+                    or ArithmeticOperationVersion))
             {
                 ValidateProducer(module);
             }
@@ -4623,7 +4627,7 @@ public static partial class ModuleCompiler
             or DirectNativeImportVersion or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
             or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
             or NativeVTableOffsetVersion or NativeVTableContractVersion or NativeVTableOutputVersion
-            or NativeCallableEntryVersion)
+            or NativeCallableEntryVersion or ArithmeticOperationVersion)
             || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
@@ -4642,6 +4646,7 @@ public static partial class ModuleCompiler
             or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
+            or ArithmeticOperationVersion
                 ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
@@ -4650,7 +4655,8 @@ public static partial class ModuleCompiler
                                 or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
                                 or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
                                 or NativeVTableOffsetVersion or NativeVTableContractVersion
-                                or NativeVTableOutputVersion or NativeCallableEntryVersion)
+                                or NativeVTableOutputVersion or NativeCallableEntryVersion
+                                or ArithmeticOperationVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId)))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -4749,7 +4755,8 @@ public static partial class ModuleCompiler
                 FormatVersion: PrivateSpanVersion or DirectNativeImportVersion
                     or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
                         or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
-                        or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion,
+                        or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
+                        or ArithmeticOperationVersion,
             }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
@@ -5876,15 +5883,19 @@ public static partial class ModuleCompiler
                 break;
             case BoundUnary unary:
                 writer.Write((int)unary.Operator);
+                PutOverflowMode(writer, unary.OverflowBehavior, CanWrapUnary(unary.Operator, unary.Type));
                 PutExpression(writer, unary.Operand, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundUpdate update:
                 writer.Write((int)update.Operator);
+                PutOverflowMode(writer, update.OverflowBehavior, CanWrapUpdate(update.Operator, update.Type));
                 writer.Write(update.IsPrefix);
                 PutExpression(writer, update.Place, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundCompoundAssignment compound:
                 writer.Write((int)compound.Operator);
+                PutOverflowMode(writer, compound.OverflowBehavior,
+                    CanWrapCompoundAssignment(compound.Operator, compound.Type));
                 PutExpression(writer, compound.Place, names, ref remaining, depth + 1, inUnsafe);
                 PutExpression(writer, compound.Right, names, ref remaining, depth + 1, inUnsafe);
                 break;
@@ -5905,6 +5916,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundBinary binary:
                 writer.Write((int)binary.Operator);
+                PutOverflowMode(writer, binary.OverflowBehavior, CanWrapBinary(binary.Operator, binary.Type));
                 PutExpression(writer, binary.Left, names, ref remaining, depth + 1, inUnsafe);
                 PutExpression(writer, binary.Right, names, ref remaining, depth + 1, inUnsafe);
                 break;
@@ -5994,6 +6006,46 @@ public static partial class ModuleCompiler
         }
     }
 
+    private static bool IsProfiledIntegerType(PrimitiveType type) =>
+        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64;
+
+    private static bool CanWrapUnary(TokenKind operation, PrimitiveType type) =>
+        operation == TokenKind.Minus && IsProfiledIntegerType(type);
+
+    private static bool CanWrapUpdate(TokenKind operation, PrimitiveType type) =>
+        (operation is TokenKind.PlusPlus or TokenKind.MinusMinus) && IsProfiledIntegerType(type);
+
+    private static bool CanWrapCompoundAssignment(TokenKind operation, PrimitiveType type) =>
+        (operation is TokenKind.PlusEquals or TokenKind.MinusEquals or TokenKind.StarEquals)
+            && IsProfiledIntegerType(type);
+
+    private static bool CanWrapBinary(TokenKind operation, PrimitiveType type) =>
+        (operation is TokenKind.Plus or TokenKind.Minus or TokenKind.Star) && IsProfiledIntegerType(type);
+
+    private static void PutOverflowMode(BinaryWriter writer, BoundIntegerOverflowBehavior behavior,
+        bool allowsWrapping)
+    {
+        var mode = behavior switch {
+            BoundIntegerOverflowBehavior.Checked => (byte)0,
+            BoundIntegerOverflowBehavior.Wrapping when allowsWrapping => (byte)1,
+            _ => throw new ModuleContractException("Unsupported private arithmetic operation policy."),
+        };
+        writer.Write(mode);
+    }
+
+    private static BoundIntegerOverflowBehavior GetOverflowMode(BinaryReader reader, bool allowsWrapping)
+    {
+        if (reader is not ModuleReader { FormatVersion: >= ArithmeticOperationVersion })
+        {
+            return BoundIntegerOverflowBehavior.Checked;
+        }
+        return reader.ReadByte() switch {
+            0 => BoundIntegerOverflowBehavior.Checked,
+            1 when allowsWrapping => BoundIntegerOverflowBehavior.Wrapping,
+            _ => throw new ModuleFormatException("Invalid private arithmetic operation policy."),
+        };
+    }
+
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unknown serialized node tags are rejected.")]
     private static BoundExpression GetExpression(BinaryReader reader, ref int remaining, int depth)
     {
@@ -6008,17 +6060,28 @@ public static partial class ModuleCompiler
             case 2:
                 return new BoundRead(reader.ReadInt32(), type, span);
             case 3:
-                return new BoundUnary((TokenKind)reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), type, span);
+                var unaryOperator = (TokenKind)reader.ReadInt32();
+                var unaryOverflow = GetOverflowMode(reader, CanWrapUnary(unaryOperator, type));
+                return new BoundUnary(unaryOperator, GetExpression(reader, ref remaining, depth + 1), type, span) {
+                    OverflowBehavior = unaryOverflow,
+                };
             case 24:
                 var updateOperator = (TokenKind)reader.ReadInt32();
+                var updateOverflow = GetOverflowMode(reader, CanWrapUpdate(updateOperator, type));
                 var prefix = reader.ReadBoolean();
                 return new BoundUpdate(updateOperator, GetExpression(reader, ref remaining, depth + 1),
-                    prefix, type, span);
+                    prefix, type, span) {
+                    OverflowBehavior = updateOverflow,
+                };
             case 26:
                 var compoundOperator = (TokenKind)reader.ReadInt32();
+                var compoundOverflow = GetOverflowMode(reader,
+                    CanWrapCompoundAssignment(compoundOperator, type));
                 var compoundPlace = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundCompoundAssignment(compoundOperator, compoundPlace,
-                    GetExpression(reader, ref remaining, depth + 1), type, span);
+                    GetExpression(reader, ref remaining, depth + 1), type, span) {
+                    OverflowBehavior = compoundOverflow,
+                };
             case 25:
                 var nominalOperator = (TokenKind)reader.ReadInt32();
                 var nominalPrefix = reader.ReadBoolean();
@@ -6028,8 +6091,11 @@ public static partial class ModuleCompiler
                     nominalPrefix, nominalName, type, span);
             case 4:
                 var op = (TokenKind)reader.ReadInt32();
+                var binaryOverflow = GetOverflowMode(reader, CanWrapBinary(op, type));
                 var left = GetExpression(reader, ref remaining, depth + 1);
-                return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1), type, span);
+                return new BoundBinary(op, left, GetExpression(reader, ref remaining, depth + 1), type, span) {
+                    OverflowBehavior = binaryOverflow,
+                };
             case 22:
                 var condition = GetExpression(reader, ref remaining, depth + 1);
                 var whenTrue = GetExpression(reader, ref remaining, depth + 1);

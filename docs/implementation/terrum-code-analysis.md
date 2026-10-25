@@ -433,9 +433,13 @@ combined native schema may carry span/fixed-layout facts under its selected
 revision instead of 81; these cases are not added to the frontend invocation
 profile by reader capability alone.
 
-`ReadModuleHeader` explicitly admits revisions **76–88**, with **88** the
+`ReadModuleHeader` explicitly admits revisions **76–89**, with **89** the
 current maximum, then checks each exact schema and feature combination.
-The private-span gate admits 77, 79, 80 and 81–88; 76/78 remain span-free.
+Revision 89 provisionally adds private checked/wrapping operation modes under
+the unapproved
+[private-persistence proposal](../proposals/source-arithmetic-private-persistence.md);
+revisions 76–88 remain checked-only for those operations. The private-span
+gate admits 77, 79, 80 and 81–89; 76/78 remain span-free.
 Header acceptance is not arbitrary payload acceptance or a decoder fallback.
 Private roles/layouts, invocation requirements, backing, staged arguments,
 initialization, owner liveness and cleanup are revalidated after read/link.

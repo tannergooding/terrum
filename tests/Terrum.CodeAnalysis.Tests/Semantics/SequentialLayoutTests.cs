@@ -132,7 +132,7 @@ public sealed class SequentialLayoutTests
         var producer = ModuleCompiler.CreateProducer(annotated, ["Compute"]);
         var automaticProducer = ModuleCompiler.CreateProducer(automatic, ["Compute"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(BinaryPrimitives.ReadInt32LittleEndian(automaticProducer.AsSpan(4, 4))));
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.Structures, Is.Empty);
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(37); }"),

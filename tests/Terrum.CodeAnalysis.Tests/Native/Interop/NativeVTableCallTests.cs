@@ -136,7 +136,7 @@ public sealed class NativeVTableCallTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
 
         var privateArtifact = ModuleCompiler.CreateProducer(offsetLoaded, ["Invoke"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(86));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(89));
         var privateReference = ModuleCompiler.CreateReference(privateArtifact);
         var privateConsumer = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -470,7 +470,7 @@ public sealed class NativeVTableCallTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformedProvider));
 
         var semanticProvider = ModuleCompiler.CreateProducer(loadedProvider, ["Invoke"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProvider.AsSpan(4)), Is.EqualTo(87));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProvider.AsSpan(4)), Is.EqualTo(89));
         var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             bool Failed(int32 status) { return status < 0; }

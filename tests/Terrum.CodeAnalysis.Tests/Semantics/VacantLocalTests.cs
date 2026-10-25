@@ -213,7 +213,7 @@ public sealed class VacantLocalTests
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = library.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
         var oldHeader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(oldHeader.AsSpan(4, 4), 39);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(oldHeader))!;

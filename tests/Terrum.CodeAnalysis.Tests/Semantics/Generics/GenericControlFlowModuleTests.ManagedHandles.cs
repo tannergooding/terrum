@@ -177,7 +177,7 @@ public sealed partial class GenericControlFlowModuleTests
         var hash = SHA256.HashData(consumer);
         var replacementProgram = Compile(ManagedGenericSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, ["Models.Proof"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
         _ = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Functions);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(linked.Classes.Select(static @class => @class.Name), Is.EqualTo(["Models.Cell", "$producer.Models.Cell", "$producer.Models.Marker"]));

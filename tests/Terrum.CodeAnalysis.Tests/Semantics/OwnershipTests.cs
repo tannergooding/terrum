@@ -1866,7 +1866,7 @@ public sealed class OwnershipTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual44 = compilation.Program; Assert.That(__nunitActual44, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual44!; }))();
         var exports = new[] { "Token.Close", "Token.Read", "Pair.Close", "Pair.Read", "Make", "Take" };
         var semanticProducer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProducer.AsSpan(4, 4)), Is.EqualTo(89));
         var staleVersion = (byte[])semanticProducer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(staleVersion.AsSpan(4, 4), 13);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(staleVersion))!;

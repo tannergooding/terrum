@@ -240,11 +240,11 @@ public sealed partial class GenericControlFlowModuleTests
             }
             """, policy, ModuleCompiler.CreateReference(stub), library: false), stub);
         var consumerHash = SHA256.HashData(consumer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
 
         var replacement = ModuleCompiler.CreateProducer(Compile(await PowerSourceAsync().ConfigureAwait(true), policy),
             ["PowerProbe"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(replacement, false), Is.EqualTo(policy == NativeRuntimePolicy.FailFast ? "native-10" : "native-11"));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.That(reference.Structures, Is.Empty);

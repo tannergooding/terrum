@@ -86,11 +86,11 @@ public sealed partial class NativeManagedClassModuleTests
             "box.Data.First + 1", StringComparison.Ordinal), policy);
         var original = ModuleCompiler.CreateProducer(originalProgram, exports);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(89));
         var source = ManagedConsumerSource(policy, linked: true, bias: false);
         var consumer = ModuleCompiler.CreateConsumer(Compile(source, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
         var consumerHash = SHA256.HashData(consumer);
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(linked.Classes.Select(static @class => @class.Name), Is.EqualTo(["Cell", "$producer.Cell"]));
@@ -128,7 +128,7 @@ public sealed partial class NativeManagedClassModuleTests
         var replacement = ModuleCompiler.CreateProducer(Compile(replacementSource, policy), exports);
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
         var hash = SHA256.HashData(consumer);
         var linkedOriginal = ModuleCompiler.Link(consumer, original);
         var linkedReplacement = ModuleCompiler.Link(consumer, replacement);
@@ -190,7 +190,7 @@ public sealed partial class NativeManagedClassModuleTests
             ["Value"]);
         var consumer = ModuleCompiler.CreateConsumer(Compile(ConsumerSource, policy,
             ModuleCompiler.CreateReference(original), library: false), original);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
         Assert.That(ModuleCompiler.Link(consumer, replacement).Classes, Is.Empty);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(consumer, original), policy))
             .ConfigureAwait(true), Is.EqualTo(40));
@@ -222,6 +222,10 @@ public sealed partial class NativeManagedClassModuleTests
             _ = reader.ReadInt32();
             Assert.That(reader.ReadInt32(), Is.EqualTo(1));
             SkipString(reader);
+            if (formatVersion is 77 or 79 or 80 or >= 81)
+            {
+                _ = reader.ReadByte();
+            }
             _ = reader.ReadInt32();
             _ = reader.ReadBoolean();
             _ = reader.ReadBoolean();
@@ -258,11 +262,11 @@ public sealed partial class NativeManagedClassModuleTests
 
         var scalarProducer = ModuleCompiler.CreateProducer(Compile(
             "public int32 Value() { return 42; }", policy), ["Value"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(scalarProducer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(scalarProducer.AsSpan(4, 4)), Is.EqualTo(89));
         var scalarConsumer = ModuleCompiler.CreateConsumer(Compile(
             "int32 Main() { return Value(); }", policy,
             ModuleCompiler.CreateReference(scalarProducer), library: false), scalarProducer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(scalarConsumer.AsSpan(4, 4)), Is.EqualTo(76));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(scalarConsumer.AsSpan(4, 4)), Is.EqualTo(89));
         _ = ModuleCompiler.Link(scalarConsumer, scalarProducer);
         var forged = (byte[])scalarConsumer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), 32);

@@ -1446,7 +1446,7 @@ public sealed class NativeFunctionPointerTests
         using var stream = new MemoryStream(module, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(82));
+        Assert.That(reader.ReadInt32(), Is.EqualTo(89));
         SkipString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();

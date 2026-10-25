@@ -897,7 +897,7 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(
         CompileLibrary(UnsafeFieldExpressionModuleSource, policy),
         ["MakeOuter", "MakeLeafOuter", "ReadValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var (owner, fieldName, expected) in new[]
@@ -935,7 +935,7 @@ public sealed class CallerUnsafeTests
         var unsafeRead = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual9 = expressionReturn.Value; Assert.That(__nunitActual9, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual9!; }))();
         var expressionConsumer = ModuleCompiler.CreateConsumer(expressionProgram, producer);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])expressionConsumer.Clone();
@@ -1059,7 +1059,7 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
 
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
@@ -2479,7 +2479,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
         var computeContract = GetModuleStringStartingWith(producer, "Value.Compute|");
         var forgedProducer = ReplaceModuleString(producer, "Value.Compute", "Value.$producer.Compute");
         forgedProducer = ReplaceModuleString(forgedProducer, computeContract,
@@ -2625,7 +2625,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2743,7 +2743,7 @@ public sealed class CallerUnsafeTests
         string[] exports = ["Value.#get:Read", "Value.SafeRead"];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2823,7 +2823,7 @@ public sealed class CallerUnsafeTests
             "ScalarOps.ReadInstance", "Top", "Forward", "MakeScalarOps", "EchoForward",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(source, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var name in exports[..3])
@@ -2848,7 +2848,7 @@ public sealed class CallerUnsafeTests
         var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual92 = main.Body.Statements[1]; Assert.That(__nunitActual92, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual92!; }))();
         var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual93 = returned.Value; Assert.That(__nunitActual93, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual93!; }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
@@ -2923,7 +2923,7 @@ public sealed class CallerUnsafeTests
         ];
         var producer = ModuleCompiler.CreateProducer(
             CompileLibrary(CopyValueExpressionProviderSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(
             SyntaxTree.Parse(CopyValueExpressionConsumerSource), reference, policy);
@@ -3078,7 +3078,7 @@ public sealed class CallerUnsafeTests
             "GetterOwner.#get:StaticNested",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(CopyValueGetterSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(78));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
         var reference = ModuleCompiler.CreateReference(producer);
 
         foreach (var (name, isStatic, parameterCount) in new[]
@@ -4049,7 +4049,7 @@ public sealed class CallerUnsafeTests
         {
             var name = ReadModuleString(forged, ref offset);
             structureIndexes.Add(name, index);
-            if (version is 77 or 79 or 80)
+            if (version is 77 or 79 or 80 or >= 81)
             {
                 offset += sizeof(byte);
             }
@@ -4628,7 +4628,7 @@ public sealed class CallerUnsafeTests
         for (var structure = 0; structure < structureCount; structure++)
         {
             var name = ReadModuleString(module, ref offset);
-            if (version is 77 or 79 or 80)
+            if (version is 77 or 79 or 80 or >= 81)
             {
                 offset += sizeof(byte);
             }
