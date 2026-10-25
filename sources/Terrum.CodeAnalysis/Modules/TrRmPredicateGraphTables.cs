@@ -147,7 +147,7 @@ public readonly ref struct TrRmPredicateCaptureTableReader
         foreach (var identity in identities)
         {
             var graph = (uint)(identity >> 32);
-            var ordinal = (uint)identity;
+            var ordinal = unchecked((uint)identity);
             if (graph != previousGraph)
             {
                 if (ordinal != 0)
