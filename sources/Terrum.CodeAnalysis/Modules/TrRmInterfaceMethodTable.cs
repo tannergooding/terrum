@@ -68,8 +68,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
                 if (owner != (uint)interfaceDef || rowOrdinal != (uint)ordinal
                     || methodDef is 0 or > 0xFF_FFFF || methodDef > methods.Count
                     || methods.GetOwnerType((int)methodDef) != ownerTypeDef
-                    || signatures.GetReceiverTypeSpec(methods.GetSignature((int)methodDef)) == 0
-                    || _methodOwners[methodDef] != 0)
+                    || signatures.GetReceiverTypeSpec(methods.GetSignature((int)methodDef)) == 0)
                 {
                     throw InvalidInterfaceMethod();
                 }
