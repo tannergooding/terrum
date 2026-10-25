@@ -2347,8 +2347,9 @@ internal sealed partial class Binder
             {
                 var operation = update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus;
                 var next = FoldScalarConstant(new BoundBinary(operation, old,
-                    new BoundConstant(1, update.Type, update.Span), update.Type, update.Span))
-                    as BoundConstant ?? throw new ConstEvalFailure("ConstEval checked update overflowed.");
+                    new BoundConstant(1, update.Type, update.Span), update.Type, update.Span) {
+                    OverflowBehavior = update.OverflowBehavior,
+                }) as BoundConstant ?? throw new ConstEvalFailure("ConstEval update arithmetic failed.");
                 slots[read.Variable] = next;
                 return update.IsPrefix ? next : old;
             }
@@ -2356,8 +2357,10 @@ internal sealed partial class Binder
             {
                 var right = EvaluateConstExpression(compound.Right, slots, functions, depth, state);
                 var next = FoldScalarConstant(new BoundBinary(CompoundOperators.Binary(compound.Operator),
-                    old, right, compound.Type, compound.Span)) as BoundConstant
-                    ?? throw new ConstEvalFailure("ConstEval checked compound assignment failed.");
+                    old, right, compound.Type, compound.Span) {
+                    OverflowBehavior = compound.OverflowBehavior,
+                }) as BoundConstant
+                    ?? throw new ConstEvalFailure("ConstEval compound arithmetic failed.");
                 slots[read.Variable] = next;
                 return next;
             }

@@ -3995,7 +3995,11 @@ internal sealed partial class PeCompiler
                                 _code.Byte(0x48);
                             }
                             _code.Bytes(0xF7, 0xD8);
-                            RuntimeBranch(0x80, 0);
+                            if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                            {
+                                RuntimeBranch(unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                                    ? (byte)0x82 : (byte)0x80, 0);
+                            }
                         }
                         break;
                     case TokenKind.Tilde:
@@ -4028,8 +4032,11 @@ internal sealed partial class PeCompiler
                     _code.Byte(0x48);
                 }
                 _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
-                RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
-                    ? (byte)0x82 : (byte)0x80, 0);
+                if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                {
+                    RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                        ? (byte)0x82 : (byte)0x80, 0);
+                }
                 _code.Load64(Spill(spill + 1), destinationRegister: true);
                 if (IsWide(update.Type))
                 {
@@ -4075,7 +4082,7 @@ internal sealed partial class PeCompiler
                     _code.Bytes(0x89, 0xC1);
                 }
                 LoadValue(Spill(spill + 2), compound.Type);
-                Binary(CompoundOperators.Binary(compound.Operator), compound.Type);
+                Binary(CompoundOperators.Binary(compound.Operator), compound.Type, compound.OverflowBehavior);
                 _code.Load64(Spill(spill + 1), destinationRegister: true);
                 if (IsWide(compound.Type))
                 {
@@ -4232,7 +4239,7 @@ internal sealed partial class PeCompiler
                         _code.Bytes(0x89, 0xC1); // mov ecx,eax
                     }
                     LoadValue(Spill(spill), binary.Left.Type);
-                    Binary(binary.Operator, binary.Left.Type);
+                    Binary(binary.Operator, binary.Left.Type, binary.OverflowBehavior);
                 }
                 break;
             case BoundConditional conditional:
@@ -5278,11 +5285,12 @@ internal sealed partial class PeCompiler
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verifier excludes other token kinds before reaching the comparison encoder.")]
-    private void Binary(TokenKind op, PrimitiveType type)
+    private void Binary(TokenKind op, PrimitiveType type,
+        BoundIntegerOverflowBehavior overflowBehavior = BoundIntegerOverflowBehavior.Checked)
     {
         if (IsWide(type))
         {
-            BinaryWide(op, type == PrimitiveType.UInt64);
+            BinaryWide(op, type == PrimitiveType.UInt64, overflowBehavior);
             return;
         }
         var unsigned = type is PrimitiveType.UInt32 or PrimitiveType.Char16;
@@ -5298,23 +5306,35 @@ internal sealed partial class PeCompiler
                 break;
             case TokenKind.Plus:
                 _code.Bytes(0x01, 0xC8);
-                RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                {
+                    RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                }
                 break;
             case TokenKind.Minus:
                 _code.Bytes(0x29, 0xC8);
-                RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                {
+                    RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                }
                 break;
             case TokenKind.Star:
                 if (unsigned)
                 {
                     _code.Bytes(0xF7, 0xE1); // mul ecx; high half in edx
-                    _code.Bytes(0x85, 0xD2);
-                    RuntimeBranch(0x85, 0);
+                    if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                    {
+                        _code.Bytes(0x85, 0xD2);
+                        RuntimeBranch(0x85, 0);
+                    }
                 }
                 else
                 {
                     _code.Bytes(0x0F, 0xAF, 0xC1);
-                    RuntimeBranch(0x80, 0);
+                    if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                    {
+                        RuntimeBranch(0x80, 0);
+                    }
                 }
                 break;
             case TokenKind.Slash:
@@ -5381,7 +5401,7 @@ internal sealed partial class PeCompiler
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "The verifier excludes unsupported token kinds before reaching this encoder.")]
-    private void BinaryWide(TokenKind op, bool unsigned)
+    private void BinaryWide(TokenKind op, bool unsigned, BoundIntegerOverflowBehavior overflowBehavior)
     {
         switch (op)
         {
@@ -5396,19 +5416,28 @@ internal sealed partial class PeCompiler
             case TokenKind.Plus:
             case TokenKind.Minus:
                 _code.Bytes(0x48, op == TokenKind.Plus ? (byte)0x01 : (byte)0x29, 0xC8);
-                RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                {
+                    RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                }
                 break;
             case TokenKind.Star:
                 if (unsigned)
                 {
                     _code.Bytes(0x48, 0xF7, 0xE1); // mul rcx; the upper product must be zero
-                    _code.Bytes(0x48, 0x85, 0xD2);
-                    RuntimeBranch(0x85, 0);
+                    if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                    {
+                        _code.Bytes(0x48, 0x85, 0xD2);
+                        RuntimeBranch(0x85, 0);
+                    }
                 }
                 else
                 {
                     _code.Bytes(0x48, 0x0F, 0xAF, 0xC1);
-                    RuntimeBranch(0x80, 0);
+                    if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                    {
+                        RuntimeBranch(0x80, 0);
+                    }
                 }
                 break;
             case TokenKind.Slash:

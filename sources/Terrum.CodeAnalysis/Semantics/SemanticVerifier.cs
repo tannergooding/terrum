@@ -4649,12 +4649,26 @@ public static partial class SemanticVerifier
             case BoundUnary unary:
                 var operandCompletes = EvaluateExpression(unary.Operand, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1, failures);
+                if (unary.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
+                    or BoundIntegerOverflowBehavior.Wrapping))
+                {
+                    throw Invalid();
+                }
+                var integerNegation = unary.Operator == TokenKind.Minus
+                    && (unary.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64);
+                if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping
+                    && !integerNegation)
+                {
+                    throw Invalid();
+                }
                 var unaryValid = unary.Operator switch {
                     TokenKind.Plus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
                         or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
                     TokenKind.Tilde => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64 && unary.Type == unary.Operand.Type,
-                    TokenKind.Minus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.Float32
+                    TokenKind.Minus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32
                         or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
                     TokenKind.Bang => unary.Operand.Type == PrimitiveType.Bool && unary.Type == PrimitiveType.Bool,
                     _ => false,
@@ -4667,14 +4681,22 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (function.IsNoThrow && unary.Operator == TokenKind.Minus
-                    && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64
+                var checkedNegation = integerNegation
+                    && unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked;
+                var unaryNegationMayOverflow = checkedNegation
                     && (unary.Operand is not BoundConstant operand
-                        || operand.Value == (unary.Type == PrimitiveType.Int32 ? int.MinValue : long.MinValue)))
+                        || (unary.Type switch {
+                            PrimitiveType.Int32 => operand.Value == int.MinValue,
+                            PrimitiveType.UInt32 => operand.Value != 0,
+                            PrimitiveType.Int64 => operand.Value == long.MinValue,
+                            PrimitiveType.UInt64 => operand.Value != 0,
+                            _ => false,
+                        }));
+                if (function.IsNoThrow && unaryNegationMayOverflow)
                 {
                     throw InvalidEffect(unary.Span);
                 }
-                if (unary.Operator == TokenKind.Minus && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64)
+                if (unaryNegationMayOverflow)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -4683,6 +4705,8 @@ public static partial class SemanticVerifier
                 if (update.Place is null || update.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
                     || update.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    || update.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
+                        or BoundIntegerOverflowBehavior.Wrapping)
                     || update.Place.Type != update.Type
                     || (update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
                         && !function.IsStatic))
@@ -4695,11 +4719,14 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (function.IsNoThrow)
+                if (function.IsNoThrow && update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                 {
                     throw InvalidEffect(update.Span);
                 }
-                failures?.Add(initialized, fieldMasks);
+                if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                {
+                    failures?.Add(initialized, fieldMasks);
+                }
                 var updateRoot = UpdateRoot(update.Place, ref remaining, depth + 1);
                 if (updateRoot >= 0)
                 {
@@ -4711,6 +4738,8 @@ public static partial class SemanticVerifier
                     || !CompoundOperators.IsSupported(compound.Operator)
                     || compound.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    || compound.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
+                        or BoundIntegerOverflowBehavior.Wrapping)
                     || compound.Place.Type != compound.Type
                     || compound.Right.Type != (CompoundOperators.IsShift(compound.Operator)
                         ? PrimitiveType.Int32 : compound.Type)
@@ -4742,8 +4771,16 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(compound.Right.Span, "Ownership");
                 }
-                if (CompoundOperators.Binary(compound.Operator) is not (TokenKind.Ampersand
-                    or TokenKind.Pipe or TokenKind.Caret))
+                var compoundOperation = CompoundOperators.Binary(compound.Operator);
+                var compoundUsesProfile = compoundOperation is TokenKind.Plus or TokenKind.Minus or TokenKind.Star;
+                if (compound.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping && !compoundUsesProfile)
+                {
+                    throw Invalid();
+                }
+                var compoundCanFail = !compoundUsesProfile
+                    || compound.OverflowBehavior == BoundIntegerOverflowBehavior.Checked;
+                if (compoundOperation is not (TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret)
+                    && compoundCanFail)
                 {
                     if (function.IsNoThrow)
                     {
@@ -4818,8 +4855,19 @@ public static partial class SemanticVerifier
                     or TokenKind.Star or TokenKind.Slash);
                 var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
                     or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
-                var checkedIntegerOperation = integerArithmetic || (integerOperands
-                    && (binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned));
+                var integerOverflowOperation = integerOperands
+                    && (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star);
+                if (binary.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
+                    or BoundIntegerOverflowBehavior.Wrapping)
+                    || (binary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping
+                        && !integerOverflowOperation))
+                {
+                    throw Invalid();
+                }
+                var checkedIntegerOperation = (integerOverflowOperation
+                        && binary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                    || (integerOperands && (binary.Operator is TokenKind.Slash or TokenKind.Percent
+                        or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned));
                 var binaryValid = binary.Operator switch {
                     TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent =>
                         operands && (integerArithmetic || floatingArithmetic)

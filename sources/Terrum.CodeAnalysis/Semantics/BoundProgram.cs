@@ -235,6 +235,13 @@ public enum BoundRuntimePolicy
     CheckedExceptions,
 }
 
+/// <summary>The resolved overflow behavior of a source integer operation.</summary>
+internal enum BoundIntegerOverflowBehavior
+{
+    Checked,
+    Wrapping,
+}
+
 /// <summary>A source-mapped, structured program with resolved function and local indexes.</summary>
 /// <param name="Functions">Functions in declaration order.</param>
 /// <param name="EntryPoint">The index of the parameterless Main function, or -1 for a library requiring linking.</param>
@@ -860,7 +867,7 @@ public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType T
         };
 }
 
-/// <summary>A checked unary operation.</summary>
+/// <summary>A unary source operation with resolved arithmetic behavior.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Operand">The input.</param>
 /// <param name="Type">The result type.</param>
@@ -868,15 +875,19 @@ public sealed record BoundMutableFieldLoan(BoundFieldRead Place, PrimitiveType T
 public sealed record BoundUnary(TokenKind Operator, BoundExpression Operand, PrimitiveType Type, TextSpan Span)
     : BoundExpression(Type, Span)
 {
+    internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
+
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Operand];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Operand = rewrite(Operand) };
 }
 
-/// <summary>Reads a writable integer place once and commits a checked replacement before returning its selected value.</summary>
+/// <summary>Reads a writable integer place once and commits a resolved replacement before returning its selected value.</summary>
 public sealed record BoundUpdate(TokenKind Operator, BoundExpression Place, bool IsPrefix,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
+
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
@@ -886,6 +897,8 @@ public sealed record BoundUpdate(TokenKind Operator, BoundExpression Place, bool
 public sealed record BoundCompoundAssignment(TokenKind Operator, BoundExpression Place, BoundExpression Right,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
+
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Place, Right];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {
@@ -905,7 +918,7 @@ public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Plac
         Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
 }
 
-/// <summary>A checked binary or short-circuit boolean operation.</summary>
+/// <summary>A binary or short-circuit boolean operation with resolved arithmetic behavior.</summary>
 /// <param name="Operator">The operator token.</param>
 /// <param name="Left">The first input.</param>
 /// <param name="Right">The second input.</param>
@@ -914,6 +927,8 @@ public sealed record BoundNominalUpdate(TokenKind Operator, BoundExpression Plac
 public sealed record BoundBinary(TokenKind Operator, BoundExpression Left, BoundExpression Right,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal BoundIntegerOverflowBehavior OverflowBehavior { get; init; }
+
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Left, Right];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {

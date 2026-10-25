@@ -831,20 +831,27 @@ complement, and calls to other NoThrow declarations. Numeric casts are total
 for identity conversions, `char16` to the supported integers, `int32` to `int64`,
 and `uint32` to `int64`/`uint64`. Negation of a constant operand is accepted
 when its result is representable, including ordinary negative literals.
-Other conversions, checked arithmetic, general negation and host-buffer
-accesses without a statically constant, proven in-range index remain
-potentially throwing in the verified IR.
+The provisional source arithmetic profile is resolved before verification:
+Development-default and explicit checked integer operations remain potentially
+throwing, while Release-default add/subtract/multiply/negation and updates wrap
+and contribute no arithmetic-failure edge. Other conversions and host-buffer
+accesses without a statically constant, proven in-range index remain potentially
+throwing in the verified IR.
 
-Source binding first folds already-typed constant `+`, `-`, `*`, `/`, `%`,
-`&`, `|` and `^`, supported unary plus/negation/complement, and integer/code-unit
-conversions into existing constants when every intermediate result is
-representable. Thus `[NoThrow] int32 Answer() { return (1 + 2) * 14; }`
-is accepted without extending the verifier's arithmetic proof. Overflow,
-division by zero and out-of-range casts remain runtime operations; a later
-cancellation cannot erase an earlier failure. Calls and storage reads stay
-opaque, including a call multiplied by zero. Folding does not provide missing
-literal context, change operator binding, or infer a callee's effect contract.
-It runs in every build and does not change semantic formats or native profiles.
+Source binding folds already-typed constant `+`, `-`, `*`, `/`, `%`, `&`, `|`
+and `^`, supported unary plus/negation/complement, and integer/code-unit
+conversions under their resolved operation policies. Checked results must be
+representable; Release-default integer operations fold modulo their destination
+width. Thus `[NoThrow] int32 Answer() { return (1 + 2) * 14; }` remains accepted,
+and a profile-selected wrapping overflow adds no failure. Checked overflow,
+division by zero and out-of-range casts retain their existing failure behavior;
+a later cancellation cannot erase an earlier checked failure. Calls and storage
+reads stay opaque, including a call multiplied by zero. Folding does not provide
+missing literal context, change operator binding, or infer a callee's effect
+contract. The source profile is compile-time-only; direct AOT/JIT lowering uses
+the resolved operation facts. CLI and Terrum-authored frontends and private,
+development and standard body persistence remain unfinished under the
+unapproved proposal.
 
 Matching constant integer/code-unit comparisons and boolean equality also
 fold into boolean constants, as do built-in boolean `!`, `&&`, `||`, `&`, `|`

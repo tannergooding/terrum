@@ -29,8 +29,14 @@ source literal/conversion rules.
 The compiler host is written in C#. It exposes a Unicode-aware, lossless
 syntax API and a bounded Windows x64 native profile with direct PE emission
 and a JIT worker. The implemented language subset includes checked scalar
-operations, compact values and unique owners, conditional outputs, bounded
-generics, managed roots/classes, and deterministic cleanup. Hosted calls also
+operations and provisional Release wrapping selection for currently admitted
+integer arithmetic, compact values and unique owners, conditional outputs, bounded
+generics, managed roots/classes, and deterministic cleanup. Hosted
+`CompilationOptions` currently defaults arithmetic selection to Development,
+offers Release explicitly, and keeps runtime-failure policy independent. The
+arithmetic selection currently applies to hosted source binding and direct
+native/JIT lowering; CLI/Terrum-authored frontends and persisted body routes
+remain unfinished under the unapproved proposal. Hosted calls also
 support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 `void` functions across semantic modules, native libraries and native graphs;
 compilation-local `[Copy]` templates support the bounded generic `out T` and

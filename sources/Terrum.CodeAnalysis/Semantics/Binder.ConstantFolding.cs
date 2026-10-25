@@ -172,7 +172,15 @@ internal sealed partial class Binder
                 return expression;
         }
 
-        return TryEncodeScalar(value, expression.Type, out var bits)
+        var overflowBehavior = expression switch {
+            BoundUnary unary => unary.OverflowBehavior,
+            BoundBinary binary => binary.OverflowBehavior,
+            _ => BoundIntegerOverflowBehavior.Checked,
+        };
+        var encoded = overflowBehavior == BoundIntegerOverflowBehavior.Wrapping
+            ? TryWrapScalar(value, expression.Type, out var bits)
+            : TryEncodeScalar(value, expression.Type, out bits);
+        return encoded
             ? new BoundConstant(bits, expression.Type, expression.Span) : expression;
     }
 
@@ -258,6 +266,37 @@ internal sealed partial class Binder
             PrimitiveType.UInt32 => unchecked((int)(uint)value),
             PrimitiveType.UInt64 => unchecked((long)(ulong)value),
             _ => (long)value,
+        };
+        return true;
+    }
+
+    private static bool TryWrapScalar(BigInteger value, PrimitiveType type, out long bits)
+    {
+        bits = default;
+        var width = type switch {
+            PrimitiveType.Int32 or PrimitiveType.UInt32 => 32,
+            PrimitiveType.Int64 or PrimitiveType.UInt64 => 64,
+            _ => 0,
+        };
+        if (width == 0)
+        {
+            return false;
+        }
+        var modulus = BigInteger.One << width;
+        var wrapped = value % modulus;
+        if (wrapped.Sign < 0)
+        {
+            wrapped += modulus;
+        }
+        if ((type is PrimitiveType.Int32 or PrimitiveType.Int64)
+            && wrapped >= (BigInteger.One << (width - 1)))
+        {
+            wrapped -= modulus;
+        }
+        bits = type switch {
+            PrimitiveType.UInt32 => unchecked((int)(uint)wrapped),
+            PrimitiveType.UInt64 => unchecked((long)(ulong)wrapped),
+            _ => (long)wrapped,
         };
         return true;
     }

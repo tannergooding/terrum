@@ -13,9 +13,29 @@ namespace Terrum.CodeAnalysis.Semantics;
 /// <summary>A compiler diagnostic paired with the source snapshot that owns its UTF-16 span.</summary>
 public sealed record SourceDiagnostic(SyntaxTree SyntaxTree, Diagnostic Diagnostic);
 
+/// <summary>The default overflow policy for ordinary source integer arithmetic.</summary>
+public enum SourceArithmeticProfile
+{
+    /// <summary>Integer addition, subtraction, multiplication and negation are checked.</summary>
+    Development = 0,
+    /// <summary>Integer addition, subtraction, multiplication and negation wrap to their destination width.</summary>
+    Release = 1,
+}
+
+/// <summary>Immutable semantic options for one source compilation.</summary>
+public readonly record struct CompilationOptions
+{
+    /// <summary>The source arithmetic defaults; zero-initialized options select Development.</summary>
+    public SourceArithmeticProfile SourceArithmeticProfile { get; init; }
+
+    /// <summary>The checked-failure delivery policy; zero-initialized options select FailFast.</summary>
+    public BoundRuntimePolicy RuntimePolicy { get; init; }
+}
+
 /// <summary>
 /// The semantic result for one or more syntax snapshots. The executable profile supports only
-/// checked scalar values and compact POD structs with structured control flow.
+/// admitted scalar values and compact POD structs with structured control flow. Source arithmetic
+/// profile selection is provisional and is resolved into individual integer operations.
 /// </summary>
 public sealed class Compilation
 {
@@ -489,6 +509,15 @@ public sealed class Compilation
     public static Compilation Create(SyntaxTree tree, CancellationToken cancellationToken = default) =>
         CreateCore(tree, isLibrary: false, cancellationToken);
 
+    /// <summary>Binds a source snapshot using explicit source arithmetic and checked-failure runtime options.</summary>
+    public static Compilation Create(SyntaxTree tree, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(tree, isLibrary: false, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds a source snapshot under an explicit checked-failure runtime policy.</summary>
     public static Compilation Create(SyntaxTree tree, BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         CreateCore([tree], [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
@@ -501,14 +530,42 @@ public sealed class Compilation
         return CreateCore([tree], [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
     }
 
+    /// <summary>Binds source for native-import emission using explicit compilation options.</summary>
+    public static Compilation CreateWithNativeImports(SyntaxTree tree, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(tree);
+        return CreateCore([tree], [], isLibrary: false, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds source snapshots for explicit native-import emission.</summary>
     public static Compilation CreateWithNativeImports(IEnumerable<SyntaxTree> trees,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: false, cancellationToken, runtimePolicy: runtimePolicy);
 
+    /// <summary>Binds source snapshots for native-import emission using explicit compilation options.</summary>
+    public static Compilation CreateWithNativeImports(IEnumerable<SyntaxTree> trees, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(trees, [], isLibrary: false, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds a library snapshot under an explicit checked-failure runtime policy.</summary>
     public static Compilation CreateLibrary(SyntaxTree tree, BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         CreateCore([tree], [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
+
+    /// <summary>Binds library definitions using explicit source arithmetic and checked-failure runtime options.</summary>
+    public static Compilation CreateLibrary(SyntaxTree tree, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(tree, isLibrary: true, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
 
     /// <summary>Binds and verifies library definitions without requiring or selecting a Main entry point.</summary>
     /// <param name="tree">The source snapshot containing the definitions.</param>
@@ -533,6 +590,16 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: true, cancellationToken, reference, runtimePolicy);
     }
 
+    /// <summary>Binds a library against a reference using explicit compilation options.</summary>
+    public static Compilation CreateLibrary(SyntaxTree tree, CompilationReference reference,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(tree, isLibrary: true, cancellationToken, reference,
+            options.RuntimePolicy, options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds consumer source against validated module declarations, without reading producer source or binding its bodies.</summary>
     public static Compilation Create(SyntaxTree tree, CompilationReference reference, CancellationToken cancellationToken = default)
     {
@@ -548,8 +615,28 @@ public sealed class Compilation
         return CreateCore(tree, isLibrary: false, cancellationToken, reference, runtimePolicy);
     }
 
+    /// <summary>Binds a consumer against a producer using explicit compilation options.</summary>
+    public static Compilation Create(SyntaxTree tree, CompilationReference reference,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(tree, isLibrary: false, cancellationToken, reference,
+            options.RuntimePolicy, options.SourceArithmeticProfile);
+    }
+
+    private static void ValidateOptions(CompilationOptions options)
+    {
+        if (options.SourceArithmeticProfile is not (SourceArithmeticProfile.Development or SourceArithmeticProfile.Release)
+            || options.RuntimePolicy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options));
+        }
+    }
+
     private static Compilation CreateCore(SyntaxTree tree, bool isLibrary, CancellationToken cancellationToken,
-        CompilationReference? reference = null, BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast)
+        CompilationReference? reference = null, BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast,
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
@@ -560,7 +647,8 @@ public sealed class Compilation
             return new Compilation(tree, tree.Diagnostics, null);
         }
 
-        var binder = new Binder([tree], [], cancellationToken, isLibrary, reference, runtimePolicy);
+        var binder = new Binder([tree], [], cancellationToken, isLibrary, reference, runtimePolicy,
+            sourceArithmeticProfile: sourceArithmeticProfile);
         var program = binder.Bind();
         var diagnosticCount = tree.Diagnostics.Length + binder.Diagnostics.Count;
         if (diagnosticCount == 0)
@@ -596,6 +684,15 @@ public sealed class Compilation
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: false, cancellationToken);
 
+    /// <summary>Binds source snapshots using explicit source arithmetic and checked-failure runtime options.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(trees, [], isLibrary: false, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds multiple source snapshots under an explicit checked-failure runtime policy.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
@@ -605,6 +702,15 @@ public sealed class Compilation
     public static Compilation Create(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, buffers, isLibrary: false, cancellationToken);
+
+    /// <summary>Binds source snapshots and host buffers using explicit compilation options.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(trees, buffers, isLibrary: false, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
 
     /// <summary>Binds source snapshots and shared host buffers under an explicit checked-failure runtime policy.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
@@ -620,6 +726,15 @@ public sealed class Compilation
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken);
 
+    /// <summary>Binds library source snapshots using explicit compilation options.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(trees, [], isLibrary: true, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds multiple library snapshots under an explicit checked-failure runtime policy.</summary>
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, BoundRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
@@ -629,6 +744,15 @@ public sealed class Compilation
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
         BoundRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         CreateCore(trees, buffers, isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy);
+
+    /// <summary>Binds library source snapshots and host buffers using explicit compilation options.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(trees, buffers, isLibrary: true, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
 
     /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
     public static Compilation CreateCoreLibrary(IEnumerable<SyntaxTree> trees,
@@ -640,6 +764,16 @@ public sealed class Compilation
         CancellationToken cancellationToken = default) =>
         CreateCore(trees, [], isLibrary: true, cancellationToken, runtimePolicy: runtimePolicy,
             coreLibrary: true);
+
+    /// <summary>Binds compiler-owned Core declarations using explicit compilation options.</summary>
+    public static Compilation CreateCoreLibrary(IEnumerable<SyntaxTree> trees, CompilationOptions options,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        return CreateCore(trees, [], isLibrary: true, cancellationToken,
+            runtimePolicy: options.RuntimePolicy, coreLibrary: true,
+            sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
 
     /// <summary>Binds multiple library source snapshots against validated external declarations.</summary>
     public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CompilationReference reference,
@@ -657,6 +791,16 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: true, cancellationToken, reference, runtimePolicy);
     }
 
+    /// <summary>Binds library snapshots against a reference using explicit compilation options.</summary>
+    public static Compilation CreateLibrary(IEnumerable<SyntaxTree> trees, CompilationReference reference,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(trees, [], isLibrary: true, cancellationToken, reference,
+            options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
     public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationReference reference, CancellationToken cancellationToken = default)
     {
@@ -671,9 +815,21 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(reference);
         return CreateCore(trees, [], isLibrary: false, cancellationToken, reference, runtimePolicy);
     }
+
+    /// <summary>Binds consumer snapshots against a reference using explicit compilation options.</summary>
+    public static Compilation Create(IEnumerable<SyntaxTree> trees, CompilationReference reference,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(reference);
+        return CreateCore(trees, [], isLibrary: false, cancellationToken, reference,
+            options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile);
+    }
+
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
         CancellationToken cancellationToken, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -709,7 +865,7 @@ public sealed class Compilation
                 snapshotArray, sourceDiagnosticBuilder.ToImmutable());
         }
         var binder = new Binder(snapshotArray, buffers, cancellationToken, isLibrary, reference,
-            runtimePolicy, coreLibrary);
+            runtimePolicy, coreLibrary, sourceArithmeticProfile);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
         {
@@ -738,6 +894,24 @@ public sealed class Compilation
             return new Compilation(tree, tree.Diagnostics, null);
         }
         var binder = new Binder([tree], buffers, cancellationToken);
+        var program = binder.Bind();
+        var diagnostics = tree.Diagnostics.AddRange(binder.Diagnostics);
+        return new Compilation(tree, diagnostics, diagnostics.IsEmpty ? program : null);
+    }
+
+    /// <summary>Binds a source snapshot with host buffers using explicit compilation options.</summary>
+    public static Compilation Create(SyntaxTree tree, ImmutableArray<HostBuffer> buffers,
+        CompilationOptions options, CancellationToken cancellationToken = default)
+    {
+        ValidateOptions(options);
+        ArgumentNullException.ThrowIfNull(tree);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (tree.HasErrors)
+        {
+            return new Compilation(tree, tree.Diagnostics, null);
+        }
+        var binder = new Binder([tree], buffers, cancellationToken, runtimePolicy: options.RuntimePolicy,
+            sourceArithmeticProfile: options.SourceArithmeticProfile);
         var program = binder.Bind();
         var diagnostics = tree.Diagnostics.AddRange(binder.Diagnostics);
         return new Compilation(tree, diagnostics, diagnostics.IsEmpty ? program : null);

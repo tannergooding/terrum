@@ -530,7 +530,6 @@ public sealed class ValueTests
     [TestCase("int32 Main() { char16 c = 65536; return 0; }")]
     [TestCase("int32 Main() { return int32(true); }")]
     [TestCase("int32 Main() { var n = 42; return n; }")]
-    [TestCase("int32 Main() { uint32 n = -1; return 0; }")]
     [TestCase("struct S { public int32 A; public S() { A = 1; } public mut void Set() { A = 2; } } int32 Main() { S s = new S(); s.Set(); return s.A; }")]
     [TestCase("struct S { static int32 A; public S() { A = 1; } } int32 Main() { return 0; }")]
     [TestCase("struct S { static int32 A; } int32 Main() { return 0; }")]

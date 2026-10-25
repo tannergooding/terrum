@@ -70,6 +70,7 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly BoundRuntimePolicy _runtimePolicy;
+    private readonly SourceArithmeticProfile _sourceArithmeticProfile;
     private bool _usesNativeBuffer;
     private bool _usesManagedNode;
 
@@ -114,7 +115,8 @@ internal sealed partial class Binder
 
     internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
         bool isLibrary = false, CompilationReference? reference = null,
-        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false)
+        BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development)
     {
         if (coreLibrary && (!isLibrary || reference is not null))
         {
@@ -128,6 +130,25 @@ internal sealed partial class Binder
         _coreLibrary = coreLibrary;
         _reference = reference;
         _runtimePolicy = runtimePolicy;
+        _sourceArithmeticProfile = sourceArithmeticProfile;
+    }
+
+    private BoundIntegerOverflowBehavior SourceOverflowBehavior(TokenKind operation, PrimitiveType type,
+        bool unary = false)
+    {
+        if (_sourceArithmeticProfile != SourceArithmeticProfile.Release
+            || type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+        {
+            return BoundIntegerOverflowBehavior.Checked;
+        }
+        var arithmeticOperator = operation switch {
+            TokenKind.PlusPlus => TokenKind.Plus,
+            TokenKind.MinusMinus => TokenKind.Minus,
+            _ => operation,
+        };
+        var profileAffectsOperation = arithmeticOperator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star;
+        return profileAffectsOperation && (!unary || arithmeticOperator == TokenKind.Minus)
+            ? BoundIntegerOverflowBehavior.Wrapping : BoundIntegerOverflowBehavior.Checked;
     }
 
     internal IReadOnlyList<Diagnostic> Diagnostics => _diagnostics is not null
@@ -3790,8 +3811,10 @@ internal sealed partial class Binder
                 {
                     Report("TRM3007", "Compound assignment requires an exact operand type.", op.Span);
                 }
-                return new BoundExpressionStatement(
-                    new BoundCompoundAssignment(op.Kind, place, right, place.Type, node.Span), node.Span);
+                return new BoundExpressionStatement(new BoundCompoundAssignment(op.Kind, place, right,
+                    place.Type, node.Span) {
+                    OverflowBehavior = SourceOverflowBehavior(CompoundOperators.Binary(op.Kind), place.Type),
+                }, node.Span);
             }
 
             case SyntaxKind.ExpressionStatement:
@@ -4879,7 +4902,8 @@ internal sealed partial class Binder
                     Report("TRM3007", $"Unary operator requires {TypeName(operandType)}.", op.Span);
                 }
                 if (op.Kind is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Tilde or TokenKind.Bang)
-                    || (op.Kind == TokenKind.Minus && operandType is not (PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.Float32 or PrimitiveType.Float64))
+                    || (op.Kind == TokenKind.Minus && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
+                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64))
                     || (op.Kind == TokenKind.Plus && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64))
                     || (op.Kind == TokenKind.Tilde && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
@@ -4887,7 +4911,9 @@ internal sealed partial class Binder
                     Report("TRM3001", "Unsupported unary operator.", op.Span);
                 }
 
-                expression = new BoundUnary(op.Kind, operand, operandType, node.Span);
+                expression = new BoundUnary(op.Kind, operand, operandType, node.Span) {
+                    OverflowBehavior = SourceOverflowBehavior(op.Kind, operandType, unary: true),
+                };
                 break;
             }
 
@@ -4932,7 +4958,9 @@ internal sealed partial class Binder
                 }
                 else
                 {
-                    expression = new BoundUpdate(op.Kind, place, prefix, place.Type, node.Span);
+                    expression = new BoundUpdate(op.Kind, place, prefix, place.Type, node.Span) {
+                        OverflowBehavior = SourceOverflowBehavior(op.Kind, place.Type),
+                    };
                 }
                 break;
             }
@@ -5252,7 +5280,9 @@ internal sealed partial class Binder
             Report("TRM3007", "Binary operands must have the same supported type.", op.Span);
         }
 
-        return new BoundBinary(op.Kind, left, right, resultType, node.Span);
+        return new BoundBinary(op.Kind, left, right, resultType, node.Span) {
+            OverflowBehavior = SourceOverflowBehavior(op.Kind, resultType),
+        };
     }
 
     private BoundExpression BindCall(SyntaxNode node, PrimitiveType? expected)
