@@ -941,16 +941,23 @@ the invocation's normal edge. The hosted binder/verifier and scalar frontend
 retain the complete signature, type-check arguments and unreachable source,
 and reject reachable normal returns or fallthrough. No public bottom type,
 void-to-value conversion or normal result is introduced. Source JIT and private
-native-module tests cover non-unit failure calls. The instance-struct-constructor
-JIT slice is implemented provisionally under the unapproved
+native-module tests cover non-unit failure calls. The instance-struct and
+managed-class constructor source slices are implemented provisionally under
+the unapproved
 [constructor-applicability proposal](../proposals/constructor-no-return-applicability.md).
 
 This does not establish current-schema TRRM execution: the development indexed
 Body retains non-unit no-return declaration/body facts but not terminal
 non-unit CallSites. Standard register CallSite decoding, canonical writing,
-dependency remapping and execution remain unfinished. Constructor AOT/module,
-managed-class and static-initialization execution remain gated by their actual
-ownership, initialization and representation contracts.
+dependency remapping and execution remain unfinished. Class-factory
+regressions exercise a failing no-return constructor through emitted native
+code and the JIT under fail-fast and checked-exception policies; checked
+unwinding confirms the unpublished allocation is reclaimed. Private semantic
+module linking and native-module consumer execution also retain the class
+constructor effect. This does not establish standard register-Body support,
+imported constructor replacement compatibility, or authored static
+initialization, which remain gated by their ownership, initialization and
+representation contracts.
 
 For supported calls, a bool/out failure branch ending in a nonreturning call
 leaves only the successful, initialized output path at the join. It neither

@@ -656,10 +656,12 @@ and public contracts store the checked `IsNoThrow` and `DoesNotReturn`
 declarations. Either promise can be strengthened independently: MayThrow may
 be replaced by NoThrow, and MayReturn by DoesNotReturn. Weakening either
 promise is rejected without inferring effects from replacement bodies.
-`DoesNotReturn` applies only to void functions and means normal continuation
-is unreachable, including after an imported call; it does not introduce a
-public never type, general exception objects or asynchronous cleanup. Producer
-bodies claiming either promise must independently pass the verifier's
+`DoesNotReturn` preserves any declared logical result type and means normal
+continuation is unreachable, including after an imported call; it does not
+introduce a public never type, general exception objects or asynchronous
+cleanup. Constructor applicability remains provisional; constructor-specific
+standard interchange and imported replacement contracts are separate work.
+Producer bodies claiming either promise must independently pass the verifier's
 structured-flow or conservative effect proof. NoThrow is about permitted
 operations and declared callees, not an exception handler or a claim that
 fail-fast process termination counts as NoThrow. A version-ordering policy and

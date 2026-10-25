@@ -267,11 +267,13 @@ types and normal-return publication for non-Boolean or void results are
 supported; definite publication remains a hosted proof. Void callers can invoke
 scalar callees; void calls are direct statement roots, including supported
 `for` clauses, never values.
-The void-only `[DoesNotReturn]` effect is checked at direct call-statement
-roots. Both current projection families source-audit caller-unsafe declarations,
-unsafe blocks/expressions, named argument mappings and scalar `is init`.
-Unscoped calls retain `TRM3028`; single-function self calls are also checked.
-These facts do not make either projection an independent compiler.
+The `[DoesNotReturn]` effect is checked for supported scalar signatures and
+removes normal completion without changing a non-unit result type. The
+projection carries it across direct call statements and supported result
+expressions. Both current projection families source-audit caller-unsafe
+declarations, unsafe blocks/expressions, named argument mappings and scalar
+`is init`. Unscoped calls retain `TRM3028`; single-function self calls are also
+checked. These facts do not make either projection an independent compiler.
 
 The frontend projects same-format `float32`/`float64` signs, target-typed
 decimal/hexadecimal literals, based integers targeting either format, `+`,

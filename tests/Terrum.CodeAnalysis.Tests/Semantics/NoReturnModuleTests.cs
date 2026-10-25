@@ -38,9 +38,10 @@ public sealed class NoReturnModuleTests
     private static byte[] NativeProducer(string source) =>
         NativeModuleCompiler.CreateProducer(CompileLibrary(source), ["Stop"], "Termination", NativeRuntimePolicy.FailFast);
 
-    private static BoundProgram CompileConsumer(string source, byte[] producer)
+    private static BoundProgram CompileConsumer(string source, byte[] producer,
+        BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
     {
-        var result = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer));
+        var result = Compilation.Create(SyntaxTree.Parse(source), ModuleCompiler.CreateReference(producer), policy);
         Assert.That(result.HasErrors, Is.False, string.Join(Environment.NewLine, result.Diagnostics));
         return ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = result.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
     }
@@ -82,6 +83,62 @@ public sealed class NoReturnModuleTests
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, nativeProducer, NativeRuntimePolicy.FailFast);
         Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
             TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ManagedClassConstructorNoReturnSurvivesPrivateModulesAsync(BoundRuntimePolicy policy)
+    {
+        const string classSource = """
+            class Leaf {
+                public int32 Value;
+                [DoesNotReturn] public Leaf() { require false; }
+            }
+            """;
+        var source = policy == BoundRuntimePolicy.CheckedExceptions ? classSource + """
+            public int32 Exercise() {
+                unsafe {
+                    try {
+                        if (Leaf.TryCreate(out var leaf)) { return 1; }
+                        return 2;
+                    } catch {
+                        return ManagedHeap.Collect() == 0 ? 42 : 3;
+                    }
+                }
+                return 0;
+            }
+            """ : classSource + """
+            public int32 Exercise() {
+                if (Leaf.TryCreate(out var leaf)) { return 1; }
+                return 2;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), policy);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        var semanticProducer = ModuleCompiler.CreateProducer(program, ["Exercise"]);
+        var semanticConsumer = CompileConsumer("int32 Main() { return Exercise(); }", semanticProducer, policy);
+        var linked = ModuleCompiler.Link(ModuleCompiler.CreateConsumer(semanticConsumer, semanticProducer),
+            semanticProducer);
+        Assert.That(global::System.Linq.Enumerable.Single(linked.Functions,
+            static function => function.IsClassConstructor).DoesNotReturn, Is.True);
+
+        var nativePolicy = (NativeRuntimePolicy)policy;
+        var nativeProducer = NativeModuleCompiler.CreateProducer(program, ["Exercise"], "Constructor", nativePolicy);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            NativeModuleCompiler.CreateReference(nativeProducer), policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumerProgram = ((global::System.Func<BoundProgram>)(() => {
+            var __nunitActual3 = consumerCompilation.Program;
+            Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>());
+            return (BoundProgram)__nunitActual3!;
+        }))();
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumerProgram, nativeProducer, nativePolicy);
+        var expected = policy == BoundRuntimePolicy.CheckedExceptions
+            ? 42 : unchecked((int)0xE0540003);
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(expected));
     }
 
     [Test]

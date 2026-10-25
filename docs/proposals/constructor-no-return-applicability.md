@@ -226,13 +226,18 @@ Implementation evidence is narrower than this recommendation:
 
 - [Binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs) represents
   instance constructors using containing-type/value and managed receiver paths.
-  It now suppresses synthesized normal receiver publication for a truthful
-  no-return constructor. Shared verification checks its body, and a source/JIT
-  regression covers a failing struct constructor used as a direct construction
-  statement. The [BoundFunction](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs)
-  retains the constructed type and constructor identity. This provisional
-  source slice does not establish class/static construction, constructor AOT,
-  standard interchange or every nested construction adaptation.
+  It suppresses synthesized normal receiver publication for a truthful
+  no-return constructor. Shared verification checks its body, and source
+  regressions cover failing struct and managed-class constructors while the
+  receiver remains vacant. The managed-class case traverses its compiler-owned
+  `TryCreate` factory; emitted-native and JIT execution under both runtime
+  policies confirms failure does not publish the receiver, and checked
+  unwinding reclaims the provisional allocation. The
+  [BoundFunction](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs)
+  retains the constructed type and constructor identity. Static construction,
+  imported-constructor replacement compatibility, standard interchange,
+  broader nested construction adaptations and the full ownership/cleanup
+  matrix remain open.
 - [NoReturnTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NoReturnTests.cs)
   now accepts a truthful struct constructor and rejects a normally completing
   false claim. It also exercises non-unit completion and output nonpublication.

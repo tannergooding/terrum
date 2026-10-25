@@ -57,6 +57,38 @@ public sealed partial class JitTests
     }
     [TestCase(false)]
     [TestCase(true)]
+    public Task NonReturningManagedClassConstructorDoesNotPublishOrLeakItsAllocationAsync(bool checkedFailures)
+    {
+        const string classSource = """
+            class Leaf {
+                public int32 Value;
+                [DoesNotReturn] public Leaf() { require false; }
+            }
+            """;
+        var source = checkedFailures ? classSource + """
+            int32 Main() {
+                unsafe {
+                    try {
+                        if (Leaf.TryCreate(out var leaf)) { return 1; }
+                        return 2;
+                    } catch {
+                        return ManagedHeap.Collect() == 0 ? 42 : 3;
+                    }
+                }
+                return 0;
+            }
+            """ : classSource + """
+            int32 Main() {
+                if (Leaf.TryCreate(out var leaf)) { return 1; }
+                return 2;
+            }
+            """;
+        return checkedFailures
+            ? AssertCheckedExecutionAsync(source, 42)
+            : AssertFailFastExecutionAsync(source, unchecked((int)0xE0540003));
+    }
+    [TestCase(false)]
+    [TestCase(true)]
     public Task ManagedClassReturnStaysRootedAcrossFollowingArgumentAsync(bool checkedFailures)
     {
         const string Source = """

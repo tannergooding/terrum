@@ -109,6 +109,27 @@ public sealed class NoReturnTests
     }
 
     [Test]
+    public void ManagedClassConstructorsCanPublishNoReturnWithoutPublishingAReceiver()
+    {
+        const string source =
+            "class C { public int32 Value; [DoesNotReturn] public C() { require false; } }";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))();
+        var constructor = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.IsClassConstructor);
+        Assert.That(constructor.DoesNotReturn, Is.True);
+        Assert.That(constructor.ReturnType, Is.EqualTo(PrimitiveType.Void));
+        SemanticVerifier.VerifyLibrary(program);
+
+        var normal = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "class C { public int32 Value; [DoesNotReturn] public C() { Value = 0; } }"));
+        Assert.That(normal.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(normal.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3018"), Is.True);
+    }
+
+    [Test]
     public void NonReturningCallsPropagateThroughInitializersAndArguments()
     {
         const string source = """

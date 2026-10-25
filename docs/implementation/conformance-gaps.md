@@ -918,8 +918,14 @@ accepted register CallSite gate above is independent of that source slice.
 The constructor applicability recommendation in
 [`constructor-no-return-applicability.md`](../proposals/constructor-no-return-applicability.md)
 remains unapproved and provisional; its source/JIT slice is tracked
-separately. Standard constructor/static execution and unsupported result
-representations remain gated by their actual codecs.
+separately. Struct and managed-class constructor source tests cover truthful
+no-return declarations with vacant receivers; emitted-native and JIT class
+factory tests cover failure under both runtime policies and checked-path
+allocation cleanup. Private semantic-module linking and native-module
+consumer execution retain the class constructor effect. Static constructors,
+imported constructor replacement compatibility, broader nested construction
+and standard register CallSites remain gated by their actual codecs and
+initialization contracts.
 
 <a id="cg-014"></a>
 ## CG-014: Signed-minimum bootstrap remainder
