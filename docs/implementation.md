@@ -151,22 +151,25 @@ nested constructed types and generic substitution, callee
 contract/replacement equality, ConstantSource/value type equality, full
 instruction operands/control verification, canonical writing, re-emission and
 execution remain incomplete. Short control forms now bind `A0..AF`/`B1`
-edge records, `B2` switch and `B3` requirement records, validate `B0` block
-targets and `B8` Home indexes, and require zero operands for `B5`/`B7`.
+edge records, `B2` switch, `B3` requirement and `B4` Throw records, validate
+`B0` block targets and `B8` Home indexes, and require zero operands for
+`B5`/`B7`.
 Tiny/short Home, Type, Constant and Method map indexes plus `61`/`90`/`91`/
 `92` typed-record references are also bounds- and kind-checked. Long
-`D0..DE`/`E0..E7`/`EB` forms validate assigned map, Block and typed-record
+`D0..DE`/`E0..E8`/`EB` forms validate assigned map, Block and typed-record
 references and their record kinds; required zero controls and query selectors
 are checked where assigned. Long `C0..C2` operation selectors and `C3..C5`
-predicate controls are validated against their assigned domains. `E8`/`EA`
-remain unsupported and rejected.
+predicate controls are validated against their assigned domains. `B4`/`E8`
+bind Throw record kind `09`; `B6`/`EA` remain rejected because the region
+carrier is unassigned.
 Common-family `C0..C2` payloads validate one/two-result layouts, required
 unused R15 fields, unary-source omissions, distinct dual results and R14
 destination rejection; `C3..C6`/`CB..CC` reject R14 destinations. This is
 structural evidence only: operation type/effect checks and per-operation R15
 discard eligibility remain in mandatory instruction verification. Other
-record-to-instruction links and unsupported `B4`/`B6` forms remain outside this
-slice. The `C7..CA` parser enforces domain-specific absent-operand tokens and
+record-to-instruction links, Throw unwind/runtime behavior and unsupported
+region-exit forms remain outside this slice. The `C7..CA` parser enforces
+domain-specific absent-operand tokens and
 the 182 valid control patterns, including the outer-negation order rule; it
 does not verify recipe input/result types or arithmetic semantics. F0/F1
 rejection is provisional under the unapproved pseudo-retirement proposal;

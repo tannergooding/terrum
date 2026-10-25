@@ -193,7 +193,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         while (position < block.Length)
         {
             var opcode = block[position];
-            if (opcode is 0xB4 or 0xB6 or 0xE8 or 0xEA)
+            if (opcode is 0xB6 or 0xEA)
             {
                 throw InvalidBody();
             }
@@ -295,6 +295,9 @@ internal readonly ref struct TrRmRegisterBodyReader
                 break;
             case 0xB3:
                 ValidateRecordReference(instruction[1], 0x08);
+                break;
+            case 0xB4:
+                ValidateRecordReference(instruction[1], 0x09);
                 break;
             case 0xB5:
             case 0xB7:
@@ -534,6 +537,13 @@ internal readonly ref struct TrRmRegisterBodyReader
                     throw InvalidBody();
                 }
                 ValidateRecordReference(reference, 0x08);
+                break;
+            case 0xE8:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x09);
                 break;
             case 0xEB:
                 if (control != 0)

@@ -139,9 +139,9 @@ substitution, callee/provider contract equality and ConstantMap source/value
 type equality remain incomplete. Full record and instruction semantics,
 descriptor eligibility, canonical writing, remapping, re-emission and
 execution remain unfinished. The selected Body reader now validates short
-control-flow targets and selected conditional-edge, switch and requirement
-records, plus zero operands for fail-fast/unreachable and the short Home return
-index. Tiny/short Home, Type, Constant and Method map indexes and the
+control-flow targets and selected conditional-edge, switch, requirement and
+Throw records, plus zero operands for fail-fast/unreachable and the short Home
+return index. Tiny/short Home, Type, Constant and Method map indexes and the
 `61`/`90`/`91`/`92` typed-record references are also checked for local bounds
 and expected record kind. Long `C0..C2` selectors and `C3..C5` predicate
 controls are checked against their assigned domains. `C0..C2` common-family
@@ -152,9 +152,10 @@ and assigned `CC` is admitted as a four-byte operation. Long
 operands and the 182 valid patterns, including outer-negation order. Input/
 result type relationships and recipe arithmetic/failure semantics remain
 unverified. Long
-`D0..DE`/`E0..E7`/`EB` forms validate map, Block and record references,
-selected record kinds, reserved controls and query-kind routing; `E8`/`EA`
-remain rejected.
+`D0..DE`/`E0..E8`/`EB` forms validate map, Block and record references,
+selected record kinds, reserved controls and query-kind routing. `B4`/`E8`
+bind Throw record kind `09`; `B6`/`EA` remain rejected without the unassigned
+region carrier.
 The reader also rejects R14 in explicit destination roles, restricts
 place/window registers to R0..R13, and bounds paired-formal windows; per-
 operation source roles and R15 discard eligibility remain unverified.

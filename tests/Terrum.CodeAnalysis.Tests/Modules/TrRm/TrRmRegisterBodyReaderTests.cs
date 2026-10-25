@@ -121,6 +121,26 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void BindsShortAndLongThrowInstructionsToThrowRecords()
+    {
+        var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        var throwRecord = new byte[] { 9, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0 };
+        var records = new[] { blockState, throwRecord };
+        _ = new TrRmRegisterBodyReader(
+            CreateBodyWithRecords(records, code: [0xB4, 1]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBodyWithRecords(records, code: [0xE8, 0, 1, 0]));
+
+        var edge = new byte[] { 6, 0, 0, 0, 0, 0, 0, 0 };
+        AssertInvalid(CreateBodyWithRecords(
+            [blockState, edge], code: [0xB4, 1]));
+        AssertInvalid(CreateBodyWithRecords(
+            [blockState, edge], code: [0xE8, 0, 1, 0]));
+        AssertInvalid(CreateBodyWithRecords(
+            records, code: [0xE8, 1, 1, 0]));
+    }
+
+    [Test]
     public void ValidatesShortInstructionMapAndRecordIndexes()
     {
         var homeCounts = new uint[5];
