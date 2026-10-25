@@ -27,12 +27,14 @@ numbers do not save bytes.
 | Proposal | Review boundary |
 |---|---|
 | [Core-library reference](core-library-reference.md) | Broad candidate APIs and dependency layers; accepted members/protocols link to the adopted inventory rather than being redefined. |
+| [Source arithmetic profile selection](source-arithmetic-profile-selection.md) | Unapproved, provisional per-compilation options and CLI selection with a deterministic Development default; preserves accepted arithmetic and explicit compiled policies without a profile wire field. |
 
 ## Callable contracts
 
 | Proposal | Review boundary |
 |---|---|
 | [Constructor no-return applicability](constructor-no-return-applicability.md) | Unapproved, explicitly provisional direction admitting instance and authored static constructors; preserves initialization/cleanup contracts and separate constructor/static representation gates. |
+| [Static-initializer trigger identities](static-initializer-trigger-identities.md) | Unapproved Core schema/enum/case registration and exact trigger normalization; preserves both accepted choices and separate static metadata/runtime gates. |
 
 ## Batch 4: Encoding and operation representation
 
