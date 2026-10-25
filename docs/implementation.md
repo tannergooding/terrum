@@ -166,8 +166,11 @@ destination rejection; `C3..C6`/`CB..CC` reject R14 destinations. This is
 structural evidence only: operation type/effect checks and per-operation R15
 discard eligibility remain in mandatory instruction verification. Other
 record-to-instruction links and unsupported `B4`/`B6` forms remain outside this
-slice. F0/F1 rejection is provisional under the unapproved pseudo-retirement
-proposal; normative assignments remain unchanged. The reader also rejects R14 in explicit
+slice. The `C7..CA` parser enforces domain-specific absent-operand tokens and
+the 182 valid control patterns, including the outer-negation order rule; it
+does not verify recipe input/result types or arithmetic semantics. F0/F1
+rejection is provisional under the unapproved pseudo-retirement proposal;
+normative assignments remain unchanged. The reader also rejects R14 in explicit
 destination roles, requires place handles/call windows to use general
 registers, and bounds paired-formal windows to R0..R13. Per-operation source
 roles and R15 discard eligibility remain in instruction verification.

@@ -148,6 +148,10 @@ controls are checked against their assigned domains. `C0..C2` common-family
 payloads validate one/two-result and unary-source fillers, distinct dual
 outputs and R14 output rejection; `C3..C6`/`CB..CC` reject R14 destinations,
 and assigned `CC` is admitted as a four-byte operation. Long
+`C7..CA` controls and payloads enforce the domain-specific absent unary
+operands and the 182 valid patterns, including outer-negation order. Input/
+result type relationships and recipe arithmetic/failure semantics remain
+unverified. Long
 `D0..DE`/`E0..E7`/`EB` forms validate map, Block and record references,
 selected record kinds, reserved controls and query-kind routing; `E8`/`EA`
 remain rejected.

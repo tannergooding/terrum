@@ -369,6 +369,9 @@ internal readonly ref struct TrRmRegisterBodyReader
                     throw InvalidBody();
                 }
                 break;
+            case >= 0xC7 and <= 0xCA:
+                ValidateArithmeticRecipePayload(opcode, instruction);
+                break;
             case 0xC3:
             case 0xC4:
             case 0xC5:
@@ -382,6 +385,49 @@ internal readonly ref struct TrRmRegisterBodyReader
                 break;
         }
     }
+
+    private static void ValidateArithmeticRecipePayload(byte opcode,
+        ReadOnlySpan<byte> instruction)
+    {
+        var control = instruction[1];
+        var payload = ReadUInt16(instruction, 2);
+        var destination = payload & 0x0F;
+        var sourceA = (payload >> 4) & 0x0F;
+        var sourceB = (payload >> 8) & 0x0F;
+        var sourceC = (payload >> 12) & 0x0F;
+        var innerOperation = control & 0x03;
+        var outerOperation = (control >> 2) & 0x03;
+        var innerIsNegation = innerOperation == 0;
+        var outerIsNegation = outerOperation == 0;
+        var outerOperandOrder = (control & 0x10) != 0;
+        var negateA = (control & 0x20) != 0;
+        var negateB = (control & 0x40) != 0;
+        var negateC = (control & 0x80) != 0;
+        var absentRegister = opcode == 0xCA ? 15 : 14;
+        if (destination == 14 || IsArithmeticRecipeAbsent(sourceA, negateA, absentRegister))
+        {
+            throw InvalidBody();
+        }
+
+        var innerUsesAbsentOperand = IsArithmeticRecipeAbsent(
+            sourceB, negateB, absentRegister);
+        if (innerIsNegation != innerUsesAbsentOperand)
+        {
+            throw InvalidBody();
+        }
+
+        var outerUsesAbsentOperand = IsArithmeticRecipeAbsent(
+            sourceC, negateC, absentRegister);
+        var hasInvalidOuterOrder = outerIsNegation && outerOperandOrder;
+        if (outerIsNegation != outerUsesAbsentOperand || hasInvalidOuterOrder)
+        {
+            throw InvalidBody();
+        }
+    }
+
+    private static bool IsArithmeticRecipeAbsent(int register, bool modifier,
+        int absentRegister)
+        => register == absentRegister && modifier;
 
     private void ValidateLongInstructionReferences(byte opcode,
         ReadOnlySpan<byte> instruction)

@@ -443,6 +443,63 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesArithmeticRecipeAbsentOperandPatterns()
+    {
+        foreach (var opcode in new byte[] { 0xC7, 0xC8, 0xC9, 0xCA })
+        {
+            var absentRegister = opcode == 0xCA ? 15 : 14;
+            var acceptedCount = 0;
+            for (var control = 0; control <= byte.MaxValue; control++)
+            {
+                var innerUsesAbsent = (control & 0x03) == 0;
+                var outerNegate = ((control >> 2) & 0x03) == 0;
+                var sourceB = innerUsesAbsent ? absentRegister : 2;
+                var sourceC = outerNegate ? absentRegister : 3;
+                var payload = (ushort)(0x0010 | (sourceB << 8) | (sourceC << 12));
+                var expected = (!innerUsesAbsent || (control & 0x40) != 0)
+                    && (!outerNegate
+                        || ((control & 0x80) != 0 && (control & 0x10) == 0));
+                var code = new byte[] {
+                    opcode, (byte)control, (byte)payload, (byte)(payload >> 8), 0,
+                };
+                var accepted = true;
+                try
+                {
+                    _ = new TrRmRegisterBodyReader(CreateBody(0, code: code));
+                }
+                catch (InvalidDataException)
+                {
+                    accepted = false;
+                }
+
+                Assert.That(accepted, Is.EqualTo(expected),
+                    $"opcode={opcode:X2}, control={control:X2}");
+                if (accepted)
+                {
+                    acceptedCount++;
+                }
+            }
+
+            Assert.That(acceptedCount, Is.EqualTo(182));
+        }
+
+        AssertValidRecipeControl(0xC7, 0xC0, 0xEEE0);
+        AssertInvalidRecipeControl(0xC7, 0xE0, 0xEEE0);
+        AssertInvalidRecipeControl(0xC7, 0x45, 0xEE10);
+        AssertInvalidRecipeControl(0xC7, 0x85, 0xEE10);
+    }
+
+    private static void AssertValidRecipeControl(byte opcode, byte control, ushort payload)
+        => _ = new TrRmRegisterBodyReader(CreateBody(0, code: [
+            opcode, control, (byte)payload, (byte)(payload >> 8), 0,
+        ]));
+
+    private static void AssertInvalidRecipeControl(byte opcode, byte control, ushort payload)
+        => AssertInvalid(CreateBody(0, code: [
+            opcode, control, (byte)payload, (byte)(payload >> 8), 0,
+        ]));
+
+    [Test]
     public void RejectsInvalidPrefixCountsAndInstructionExtents()
     {
         AssertInvalid(Mutate(CreateBody(), 0, 0x02));
