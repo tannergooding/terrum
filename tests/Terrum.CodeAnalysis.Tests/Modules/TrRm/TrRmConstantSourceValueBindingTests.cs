@@ -45,6 +45,30 @@ public sealed class TrRmConstantSourceValueBindingTests
         ValidateRegisterBodyMaps(artifact);
     }
 
+    [Test]
+    public void ConstantFormalDefaultBindsFeatureAndScalarTypeToOwnerModule()
+    {
+        var valid = AddConstantFormalDefault(
+            CreateArtifact(includeFeature11: true, includeConstant: false,
+                mapTypeSpecRef: 0, nodeTypeSpecRef: 0xF200_0008),
+            0xF200_0008);
+        Assert.DoesNotThrow(() => TrRmStructuralMetadataValidator.Validate(valid));
+
+        var missingFeature = AddConstantFormalDefault(
+            CreateArtifact(includeFeature11: false, includeConstant: false,
+                mapTypeSpecRef: 0, nodeTypeSpecRef: 0xF200_0008),
+            0xF200_0008);
+        Assert.Throws<NotSupportedException>(
+            () => TrRmStructuralMetadataValidator.Validate(missingFeature));
+
+        var mismatchedType = AddConstantFormalDefault(
+            CreateArtifact(includeFeature11: true, includeConstant: false,
+                mapTypeSpecRef: 0, nodeTypeSpecRef: 0xF200_0008),
+            0xF200_000D);
+        Assert.Throws<InvalidDataException>(
+            () => TrRmStructuralMetadataValidator.Validate(mismatchedType));
+    }
+
     private static void ValidateRegisterBodyMaps(byte[] artifact)
     {
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
@@ -160,4 +184,33 @@ public sealed class TrRmConstantSourceValueBindingTests
 
     private static byte[] CreateInt32Blob()
         => [0, 0, 0, 0, 4, 0, 0, 0, 42, 0, 0, 0];
+
+    private static byte[] AddConstantFormalDefault(byte[] artifact, uint constantTypeSpecRef)
+    {
+        var index = new TrRmArtifactIndex(artifact);
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = bytes.ToArray();
+            if (kind == 0x0017)
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(sectionBytes.AsSpan(16), 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(sectionBytes.AsSpan(20), 1);
+            }
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount, sectionBytes));
+        }
+
+        var formal = new byte[32];
+        BinaryPrimitives.WriteUInt32LittleEndian(formal, 0x1600_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(formal.AsSpan(8), 3);
+        formal[20] = 2;
+        BinaryPrimitives.WriteUInt32LittleEndian(formal.AsSpan(24),
+            constantTypeSpecRef);
+        BinaryPrimitives.WriteUInt32LittleEndian(formal.AsSpan(28), 1);
+        sections.Add(new TrRmSection(0x0019, 0, 1, formal));
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections);
+    }
 }
