@@ -6170,12 +6170,12 @@ public static partial class SemanticVerifier
         Dictionary<BoundExpression, byte> flowFacts, ref int remaining) =>
         (FlowFacts(expression, flowFacts, ref remaining) & InitializationTestFact) != 0;
 
-    // These structural classifications share a tree walk and remain independent of flow-state clones.
+    // Structural facts are state-independent and shared across flow-state clones;
+    // the work budget counts the first classification, not cache reads.
     // Unknown forms stay conservative for both properties.
     private static byte FlowFacts(BoundExpression expression,
         Dictionary<BoundExpression, byte> flowFacts, ref int remaining)
     {
-        Count(ref remaining, 0);
         if (expression is null)
         {
             return AllFlowFacts;
@@ -6184,6 +6184,7 @@ public static partial class SemanticVerifier
         {
             return facts;
         }
+        Count(ref remaining, 0);
 
         facts = expression switch {
             BoundUnsafeExpression unsafeExpression =>
