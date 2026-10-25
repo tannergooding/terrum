@@ -27,6 +27,9 @@ public static class TrRmStructuralMetadataValidator
             TrRmTextTargetTableReader textTargets,
             TrRmTextContentShapeTableReader textContentShapes,
             TrRmTextCaptureShapeTableReader textCaptureShapes,
+            TrRmTextFragmentShapeTableReader textFragmentShapes,
+            TrRmPredicateGraphTableReader predicateGraphs,
+            TrRmPredicateCaptureTableReader predicateCaptures,
             TrRmConstantSourceTableReader constantSources,
             TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
             TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
@@ -59,6 +62,9 @@ public static class TrRmStructuralMetadataValidator
             TextTargets = textTargets;
             TextContentShapes = textContentShapes;
             TextCaptureShapes = textCaptureShapes;
+            TextFragmentShapes = textFragmentShapes;
+            PredicateGraphs = predicateGraphs;
+            PredicateCaptures = predicateCaptures;
             ConstantSources = constantSources;
             TargetLayoutDependencies = targetLayoutDependencies;
             TargetLayoutDependencyFields = targetLayoutDependencyFields;
@@ -97,6 +103,9 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTextTargetTableReader TextTargets { get; }
         internal TrRmTextContentShapeTableReader TextContentShapes { get; }
         internal TrRmTextCaptureShapeTableReader TextCaptureShapes { get; }
+        internal TrRmTextFragmentShapeTableReader TextFragmentShapes { get; }
+        internal TrRmPredicateGraphTableReader PredicateGraphs { get; }
+        internal TrRmPredicateCaptureTableReader PredicateCaptures { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
         internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
         internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
@@ -190,7 +199,15 @@ public static class TrRmStructuralMetadataValidator
             out var textContentShapeCount);
         _ = index.TryGetSection(0x002E, out var textCaptureShapeBytes,
             out var textCaptureShapeCount);
-        _ = index.TryGetSection(0x002F, out _, out var textFragmentShapeCount);
+        _ = index.TryGetSection(0x002F, out var textFragmentShapeBytes,
+            out var textFragmentShapeCount);
+        _ = index.TryGetSection(0x0028, out _, out var interfaceWitnessCount);
+        _ = index.TryGetSection(0x0037, out var predicateGraphBytes,
+            out var predicateGraphCount);
+        _ = index.TryGetSection(0x0038, out _, out var predicateReadFootprintCount);
+        _ = index.TryGetSection(0x003B, out _, out var predicateNodeCount);
+        _ = index.TryGetSection(0x003E, out var predicateCaptureBytes,
+            out var predicateCaptureCount);
         _ = index.TryGetSection(0x0030, out var constantSourceBytes,
             out var constantSourceCount);
         _ = index.TryGetSection(0x0031, out var interfaceConstBytes,
@@ -302,6 +319,9 @@ public static class TrRmStructuralMetadataValidator
         var textTargets = default(TrRmTextTargetTableReader);
         var textContentShapes = default(TrRmTextContentShapeTableReader);
         var textCaptureShapes = default(TrRmTextCaptureShapeTableReader);
+        var textFragmentShapes = default(TrRmTextFragmentShapeTableReader);
+        var predicateGraphs = default(TrRmPredicateGraphTableReader);
+        var predicateCaptures = default(TrRmPredicateCaptureTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
         var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
@@ -318,6 +338,12 @@ public static class TrRmStructuralMetadataValidator
             textCaptureShapes = new TrRmTextCaptureShapeTableReader(
                 textCaptureShapeBytes, textCaptureShapeCount, typeSpecs,
                 textContentShapes);
+            predicateGraphs = new TrRmPredicateGraphTableReader(
+                predicateGraphBytes, predicateGraphCount, predicateNodeCount,
+                predicateReadFootprintCount);
+            predicateCaptures = new TrRmPredicateCaptureTableReader(
+                predicateCaptureBytes, predicateCaptureCount,
+                predicateGraphCount, typeSpecs);
             unionCaseDefs = new TrRmUnionCaseDefTableReader(
                 unionCaseDefBytes, unionCaseDefCount, strings, types,
                 unionCaseFieldCount);
@@ -356,6 +382,10 @@ public static class TrRmStructuralMetadataValidator
             associatedRelations = new TrRmAssociatedRelationTableReader(
                 associatedRelationBytes, associatedRelationCount, typeSpecs,
                 associatedTypeDefs.Count, imports);
+            textFragmentShapes = new TrRmTextFragmentShapeTableReader(
+                textFragmentShapeBytes, textFragmentShapeCount, textContentShapes,
+                textCaptureShapes, types, methods, generics, constraints,
+                interfaceWitnessCount);
         }
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
             generics, imports, selectedConstantSourceCount);
@@ -501,7 +531,9 @@ public static class TrRmStructuralMetadataValidator
             interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
-            textContentShapes, textCaptureShapes, constantSources,
+            textContentShapes, textCaptureShapes, textFragmentShapes,
+            predicateGraphs, predicateCaptures,
+            constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,

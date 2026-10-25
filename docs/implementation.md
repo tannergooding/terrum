@@ -177,10 +177,19 @@ BuilderRegistration and TextTarget rows now validate TypeDef/MethodDef
 references, complete schema/recipe TypeSpecRefs, parameter ordinal bounds and
 duplicate targets. TextContentShape/TextCaptureShape rows validate generated
 TypeDef ownership, exclusive capture/fragment ranges, capture order/modes and
-complete capture TypeSpecRefs. These structural readers do not resolve
-TextFragmentShape's typed formatter/writer references, implement source recipe
-checking, reconstruct generated text operations or provide runtime
-construction. The associated-type identity and relation-payload proposals
+complete capture TypeSpecRefs. `TextFragmentShape` typed formatter/writer
+reference forms remain an unapproved
+[design candidate](proposals/text-fragment-reference-forms.md), provisionally
+implemented by a standard structural reader/writer that checks
+literal/formatted field presence, shape-local captures, MethodDef row/module
+bounds and open kind-1 constraints owned by the generated type. It does not
+bind formatter/witness semantics or remap these identities, and does not
+implement source recipe checking, generated text operations or runtime
+construction. PredicateGraph rows now validate required PredicateNode and
+PredicateReadFootprint row bounds; PredicateCapture validates graph-local
+ordinals, assigned roles/flags and complete captured TypeSpecRefs. Other
+predicate nodes, footprints, operands, edges and evaluation remain
+incomplete. The associated-type identity and relation-payload proposals
 remain unapproved; their implementation directions are provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation

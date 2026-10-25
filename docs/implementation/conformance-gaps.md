@@ -144,6 +144,10 @@ Standard UnionCaseDef/UnionCaseField rows now validate their TypeDef and case
 owners, exclusive payload-field ranges, ordered payload ordinals and complete
 UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so these
 structural checks do not establish nominal-union source or runtime support.
+PredicateGraph and PredicateCapture readers validate required node/footprint
+row bounds, graph-local contiguous capture ordinals, role-specific flags and
+complete captured TypeSpecRefs. Predicate nodes, footprints, operands, edges
+and evaluation remain incomplete.
 
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,
@@ -532,11 +536,16 @@ readers/writers now validate target TypeDef/MethodDef rows, complete
 schema/recipe TypeSpecRefs, parameter ordinal bounds and duplicate targets.
 TextContentShape/TextCaptureShape readers now validate generated TypeDef
 ownership, exclusive capture/fragment ranges, capture order/modes and complete
-capture TypeSpecRefs. These checks do not decode TextFragmentShape references,
-prove source recipe meaning, establish builder protocol conformance, implement
-runtime construction or provide retained constant programs. A self-hosted
-method or candidate API sketch supplies no registered identity, retained
-constant program or frozen value codec.
+capture TypeSpecRefs. The unapproved
+[TextFragmentShape reference-form proposal](../proposals/text-fragment-reference-forms.md)
+is provisionally implemented by structural checks for literal/formatted field
+presence, shape-local capture rows, MethodDef row/module bounds and
+generated-type-owned kind-1 Constraints. It does not verify selected
+formatter/witness identity or remap these obligations. These checks do not
+prove source recipe meaning, establish builder protocol conformance,
+implement runtime construction or provide retained constant programs. A
+self-hosted method or candidate API sketch supplies no registered identity,
+retained constant program or frozen value codec.
 
 **Routes/gate:** retain exact role/member/witness identities and contextual
 result, once-only source-ordered captures, after-capture acquisition, ordered
