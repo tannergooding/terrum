@@ -3723,9 +3723,8 @@ internal sealed partial class PeCompiler
                 else
                 {
                     _code.Byte(0xB8);
-                    _code.Int32(constant.Type == PrimitiveType.Float32
-                        ? unchecked((int)constant.Value)
-                        : checked((int)constant.Value));
+                    _code.Int32(constant.Type is PrimitiveType.Float32 or PrimitiveType.UInt32
+                        ? unchecked((int)constant.Value) : checked((int)constant.Value));
                 }
                 break;
             case BoundNull:
