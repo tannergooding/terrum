@@ -714,6 +714,34 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ReadsIndependentRegisterBodyMapVector()
+    {
+        var vector = new byte[] {
+            0x01, 0x01, 0x02, 0, 0,
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            1, 0, 0, 0,
+            4, 0, 0, 0,
+            0x08, 0, 0, 0xF2,
+            0, 0, 0, 0,
+            4, 0, 0, 0,
+            0, 0, 0, 0,
+            0, 0, 0, 0,
+            8, 0, 0, 0,
+            1, 0, 0, 0, 0, 0, 0, 0,
+            0x50, 0, 0x18, 0,
+        };
+        var reader = new TrRmRegisterBodyReader(vector);
+        Assert.That(reader.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] { 0x50, 0, 0x18, 0 }));
+        ValidateSelectedBodyMaps(vector);
+
+        var invalidTypeMapIndex = (byte[])vector.Clone();
+        invalidTypeMapIndex[^3] = 0x10;
+        Assert.Throws<InvalidDataException>(() => ReadRegisterBody(invalidTypeMapIndex));
+    }
+
+    [Test]
     public void BindsSelectedHomeTypeAndMethodMapsToTheOwningMethod()
     {
         var counts = new uint[5];
