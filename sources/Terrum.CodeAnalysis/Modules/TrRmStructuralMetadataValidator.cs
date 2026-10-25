@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -17,6 +18,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs,
             TrRmGenericParamTableReader genericParams,
+            TrRmConstraintTableReader constraints,
             TrRmInterfaceDefTableReader interfaces,
             TrRmAssociatedTypeDefTableReader associatedTypeDefs,
             TrRmInterfaceWitnessTableReader interfaceWitnesses,
@@ -57,6 +59,7 @@ public static class TrRmStructuralMetadataValidator
             TypeDefs = typeDefs;
             TypeSpecs = typeSpecs;
             GenericParams = genericParams;
+            Constraints = constraints;
             Interfaces = interfaces;
             AssociatedTypeDefs = associatedTypeDefs;
             InterfaceWitnesses = interfaceWitnesses;
@@ -103,6 +106,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTypeDefTableReader TypeDefs { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmGenericParamTableReader GenericParams { get; }
+        internal TrRmConstraintTableReader Constraints { get; }
         internal TrRmInterfaceDefTableReader Interfaces { get; }
         internal TrRmAssociatedTypeDefTableReader AssociatedTypeDefs { get; }
         internal TrRmInterfaceWitnessTableReader InterfaceWitnesses { get; }
@@ -176,6 +180,18 @@ public static class TrRmStructuralMetadataValidator
         => _ = ValidateCore(new TrRmArtifactIndex(artifact), BodyInspection.None,
             developmentProfile: false);
 
+    /// <summary>Validates selected text shapes against their using-Module profile identities.</summary>
+    /// <param name="artifact">The exact standard TRRM artifact.</param>
+    /// <param name="profiles">The resolved text-operation identities, keyed by using Module row.</param>
+    public static void ValidateTextConstructionProfile(ReadOnlySpan<byte> artifact,
+        IReadOnlyList<TrRmTextConstructionProfile> profiles)
+    {
+        ArgumentNullException.ThrowIfNull(profiles);
+        var tables = ValidateCore(new TrRmArtifactIndex(artifact),
+            BodyInspection.None, developmentProfile: false);
+        ValidateTextConstructionProfile(tables, profiles);
+    }
+
     internal static void Validate(TrRmArtifactIndex index)
         => _ = ValidateCore(index, BodyInspection.None, developmentProfile: false);
 
@@ -201,6 +217,221 @@ public static class TrRmStructuralMetadataValidator
         => _ = ValidateCore(new TrRmArtifactIndex(artifact,
                 TrRmArtifactSchema.Development), BodyInspection.CompactMixed,
             developmentProfile: true);
+
+    private static void ValidateTextConstructionProfile(
+        ValidatedExecutionTables tables,
+        IReadOnlyList<TrRmTextConstructionProfile> profiles)
+    {
+        var profilesByModule = new Dictionary<int, TrRmTextConstructionProfile>();
+        foreach (var profile in profiles)
+        {
+            if (profile.ModuleRow <= 0 || profile.ModuleRow > tables.Modules.Count
+                || !profilesByModule.TryAdd(profile.ModuleRow, profile))
+            {
+                throw InvalidMetadata();
+            }
+
+            ValidateProfileMethod(tables, profile.ModuleRow,
+                profile.FormatterInterfaceDefRow, profile.FormatterTryFormatMethodDefRow,
+                profile, TextConstructionMethodRole.FormatterTryFormat);
+            ValidateProfileMethod(tables, profile.ModuleRow,
+                profile.WriterInterfaceDefRow, profile.WriterTryWriteMethodDefRow,
+                profile, TextConstructionMethodRole.WriterTryWrite);
+            ValidateProfileMethod(tables, profile.ModuleRow,
+                profile.WriterInterfaceDefRow, profile.WriterTryWriteScalarMethodDefRow,
+                profile, TextConstructionMethodRole.WriterTryWriteScalar);
+            ValidateProfileMethod(tables, profile.ModuleRow,
+                profile.WriterInterfaceDefRow, profile.WriterTryWriteFormattedMethodDefRow,
+                profile, TextConstructionMethodRole.WriterTryWriteFormatted);
+            if (profile.FormatterInterfaceDefRow == profile.WriterInterfaceDefRow
+                || profile.TextSpanTypeSpecRef == 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            _ = tables.TypeSpecs.GetTypeSpecRef(profile.TextSpanTypeSpecRef);
+        }
+
+        for (var shape = 1; shape <= tables.TextContentShapes.Count; shape++)
+        {
+            var generatedTypeDef = tables.TextContentShapes.GetGeneratedTypeDef(shape);
+            var module = tables.TypeDefs.GetOwnerModule(generatedTypeDef);
+            if (!profilesByModule.TryGetValue(module, out var profile))
+            {
+                throw InvalidMetadata();
+            }
+
+            var (first, count) = tables.TextContentShapes.GetFragmentRange(shape);
+            for (var ordinal = 0; ordinal < count; ordinal++)
+            {
+                var fragment = first + ordinal;
+                var writerMethod = tables.TextFragmentShapes.GetWriterRequirementMethodDefRow(fragment);
+                var kind = tables.TextFragmentShapes.GetKind(fragment);
+                var expectedWriter = kind == 0
+                    ? profile.WriterTryWriteMethodDefRow
+                    : profile.WriterTryWriteFormattedMethodDefRow;
+                if (writerMethod != (uint)expectedWriter
+                    || (kind == 1
+                        && tables.TextFragmentShapes.GetFormatterMethodDefRow(fragment)
+                            != (uint)profile.FormatterTryFormatMethodDefRow))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
+    }
+
+    private static void ValidateProfileMethod(ValidatedExecutionTables tables,
+        int module, int interfaceDef, int methodDef,
+        TrRmTextConstructionProfile profile, TextConstructionMethodRole role)
+    {
+        if (interfaceDef <= 0 || interfaceDef > tables.Interfaces.Count
+            || methodDef <= 0 || methodDef > tables.Methods.Count)
+        {
+            throw InvalidMetadata();
+        }
+
+        var ownerTypeDef = tables.Interfaces.GetOwnerTypeDef(interfaceDef);
+        if (tables.TypeDefs.GetOwnerModule(ownerTypeDef) != module
+            || (tables.TypeDefs.GetFlags(ownerTypeDef) & 3) != 2
+            || tables.TypeDefs.GetGenericRange(ownerTypeDef).Count != 0
+            || tables.Methods.GetOwnerModule(methodDef) != module
+            || tables.Methods.GetOwnerType(methodDef) != ownerTypeDef
+            || (tables.Methods.GetFlags(methodDef) & 3) != 2
+            || (tables.Contracts.GetEffectsMask(methodDef) & 0x06) != 0
+            || tables.InterfaceMethods.GetOwnerInterfaceDefForMethod(methodDef) != interfaceDef)
+        {
+            throw InvalidMetadata();
+        }
+
+        var signature = tables.Methods.GetSignature(methodDef);
+        var expectedReceiverQualifier = role == TextConstructionMethodRole.FormatterTryFormat
+            ? (byte)0 : (byte)1;
+        var receiver = tables.Signatures.GetReceiverTypeSpec(signature);
+        var receiverInfo = tables.TypeSpecs.GetTypeSpecRef(receiver);
+        if (!tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                tables.Signatures.GetResultTypeSpec(signature), 0xF200_0001)
+            || !receiverInfo.IsRow || receiverInfo.Form is not (0x02 or 0x03)
+            || receiverInfo.Qualifiers != expectedReceiverQualifier
+            || tables.TypeSpecs.GetNominalTypeDefRow(receiver,
+                tables.TypeDefs, tables.Imports) != ownerTypeDef)
+        {
+            throw InvalidMetadata();
+        }
+
+        var (parameterFirst, parameterCount) = tables.Signatures.GetParamRange(signature);
+        var (formalFirst, formalCount) = tables.Signatures.GetGenericRange(signature);
+        var expectedParameterCount = role switch
+        {
+            TextConstructionMethodRole.FormatterTryFormat => 2,
+            TextConstructionMethodRole.WriterTryWrite => 1,
+            TextConstructionMethodRole.WriterTryWriteScalar => 1,
+            TextConstructionMethodRole.WriterTryWriteFormatted => 3,
+            _ => throw InvalidMetadata(),
+        };
+        var expectedFormalCount = role is TextConstructionMethodRole.FormatterTryFormat
+            or TextConstructionMethodRole.WriterTryWriteFormatted ? 1 : 0;
+        if (parameterCount != expectedParameterCount || formalCount != expectedFormalCount)
+        {
+            throw InvalidMetadata();
+        }
+
+        var formal = formalCount == 0 ? 0 : formalFirst;
+        if (formalCount != 0)
+        {
+            var expectedOwner = 0x1600_0000u | (uint)methodDef;
+            var (constraintFirst, constraintCount) =
+                tables.GenericParams.GetConstraintRange(formal);
+            var expectedConstraintType = role == TextConstructionMethodRole.FormatterTryFormat
+                ? profile.WriterInterfaceDefRow
+                : profile.FormatterInterfaceDefRow;
+            var expectedConstraintTypeDef = tables.Interfaces.GetOwnerTypeDef(
+                expectedConstraintType);
+            if (tables.GenericParams.GetOwnerDefId(formal) != expectedOwner
+                || tables.GenericParams.GetOrdinal(formal) != 0
+                || tables.GenericParams.GetFormalKind(formal) != 1
+                || tables.GenericParams.GetOwnershipDomain(formal) != 1
+                || tables.GenericParams.GetNullabilityDomain(formal) != 1
+                || tables.GenericParams.GetDefaultArgumentRef(formal) != 0
+                || constraintCount != 1
+                || tables.Constraints.GetOwnerGenericParam(constraintFirst) != formal
+                || tables.Constraints.GetKind(constraintFirst) != 1)
+            {
+                throw InvalidMetadata();
+            }
+
+            var constraintTypeSpec = tables.Constraints.GetPayload(constraintFirst);
+            var constraintTypeInfo = tables.TypeSpecs.GetTypeSpecRef(constraintTypeSpec);
+            if (!constraintTypeInfo.IsRow || constraintTypeInfo.Form is not (0x02 or 0x03)
+                || constraintTypeInfo.Qualifiers != 0
+                || tables.TypeSpecs.GetNominalTypeDefRow(constraintTypeSpec,
+                    tables.TypeDefs, tables.Imports) != expectedConstraintTypeDef)
+            {
+                throw InvalidMetadata();
+            }
+        }
+
+        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+        {
+            var parameter = parameterFirst + ordinal;
+            if (tables.Parameters.GetMode(parameter) != 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            var typeSpec = tables.Parameters.GetTypeSpec(parameter);
+            var validType = role switch
+            {
+                TextConstructionMethodRole.FormatterTryFormat when ordinal == 0
+                => IsReferenceToFormal(typeSpec, formal, true, tables.TypeSpecs),
+                TextConstructionMethodRole.FormatterTryFormat when ordinal == 1
+                    => tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        typeSpec, profile.TextSpanTypeSpecRef),
+                TextConstructionMethodRole.WriterTryWrite
+                    => tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        typeSpec, profile.TextSpanTypeSpecRef),
+                TextConstructionMethodRole.WriterTryWriteScalar
+                    => tables.TypeSpecs.AreEquivalentTypeSpecRefs(typeSpec, 0xF200_0005),
+                TextConstructionMethodRole.WriterTryWriteFormatted when ordinal == 0
+                    => IsReferenceToFormal(typeSpec, formal, false, tables.TypeSpecs),
+                TextConstructionMethodRole.WriterTryWriteFormatted when ordinal == 1
+                    => tables.TypeSpecs.AreEquivalentTypeSpecRefs(typeSpec, 0xF200_0008),
+                TextConstructionMethodRole.WriterTryWriteFormatted when ordinal == 2
+                    => tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        typeSpec, profile.TextSpanTypeSpecRef),
+                _ => false,
+            };
+            if (!validType)
+            {
+                throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static bool IsReferenceToFormal(uint typeSpecRef, int formal,
+        bool write, TrRmTypeSpecTableReader typeSpecs)
+    {
+        var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (!reference.IsRow || reference.Form != 0x07
+            || reference.Qualifiers != (write ? (byte)0x01 : (byte)0))
+        {
+            return false;
+        }
+
+        var inner = typeSpecs.GetTypeSpecRef(BinaryPrimitives.ReadUInt32LittleEndian(
+            typeSpecs.GetRow(reference.Row)[2..]));
+        return inner.IsRow && inner.Form == 0x04 && inner.Qualifiers == 0
+            && BinaryPrimitives.ReadUInt32LittleEndian(
+                typeSpecs.GetRow(inner.Row)[2..]) == (uint)formal;
+    }
+
+    private enum TextConstructionMethodRole
+    {
+        FormatterTryFormat,
+        WriterTryWrite,
+        WriterTryWriteScalar,
+        WriterTryWriteFormatted,
+    }
 
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
         BodyInspection inspection, bool developmentProfile)
@@ -579,13 +810,13 @@ public static class TrRmStructuralMetadataValidator
         _ = fields;
         _ = layouts;
         _ = parameters;
-        _ = constraints;
         _ = contracts;
         _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, moduleRefs, types, typeSpecs,
             generics,
+            constraints,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
             witnessAssociatedTypes,
             interfaceBases, interfaceMethods,

@@ -325,19 +325,27 @@ Its structural checks cover:
 The raw MethodDef rows may name imported expected stubs, whose Import
 structures are separately validated.
 
-The focused Release selection passed **6/6**, and the combined active
-TRRM/metadata/CLI selection passed **1,744/1,744** with zero skipped. The
+The provisional public `TrRmStructuralMetadataValidator.ValidateTextConstructionProfile`
+path consumes exact per-Module identities and checks the selected MethodDefs,
+direct interface membership, public visibility, Boolean result, receiver
+access, ordered parameter types/modes, generic formal domains/constraints and
+the profile's exact TextSpan TypeSpecRef; it rejects DoesNotReturn and
+caller-unsafe requirements. It does not resolve or compare the
+selected provider artifacts; ordinary Import/Export structure alone is not
+provider-binding evidence. The structural-only `Validate` path remains
+profile-agnostic, and no current CLI/source-free consumer supplies this context.
+
+The focused Release selection passed **7/7**, and the combined active
+TRRM/metadata/CLI selection passed **1,745/1,745** with zero skipped. The
 normal Release analyzer build still reports **1,514 repository-wide
 diagnostics**; line mapping found none on the changed C# lines. These results
 do not establish a clean repository-wide analyzer checkpoint.
 
-The implementation does not compare the selected methods with the profile's
-exact Core requirement identities or complete signatures. Semantic
-import/replacement binding, remapping/packing, producer equivalence,
-runtime/source construction and complete capability closure remain
-incomplete. General generic evidence and WitnessProjection remain separately
-gated. These checks do not establish generated text-graph reconstruction,
-source-free execution or runtime support. The [current inventory](../implementation.md#persistent-and-self-hosted-components)
+Semantic provider Import/Export binding and replacement, remapping/packing,
+producer equivalence, runtime/source construction and complete capability
+closure remain incomplete. General generic evidence and WitnessProjection
+remain separately gated. These checks do not establish generated text-graph
+reconstruction, source-free execution or runtime support. The [current inventory](../implementation.md#persistent-and-self-hosted-components)
 and [construction gate](../implementation/conformance-gaps.md#cg-007) retain
 their separate roles. This proposal remains unapproved; normative owners
 are unchanged, and no milestone completion is claimed.

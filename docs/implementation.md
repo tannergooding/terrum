@@ -203,10 +203,16 @@ validation also requires both methods to be InterfaceMethod rows, keeps the
 writer interface and formatter requirement consistent per shape, matches
 closed witness implementing types to value captures and their exact
 WitnessMember requirement, and checks open formal captures against the
-constraint's formatter-interface closure. It still does not compare these
-requirements with the profile-selected Core identities or their complete
-signatures, remap/rebind them, or implement source recipe checking, generated
-text operations or runtime construction. PredicateGraph rows now validate required PredicateNode and
+constraint's formatter-interface closure. A provisional profile-aware
+`ValidateTextConstructionProfile` overload accepts exact per-Module role rows
+and checks exact row selection, direct interface membership, public role
+declarations, Boolean results, receiver access, ordered parameter types/modes,
+generic formal domains/constraints, resolved TextSpan identity and absence of
+DoesNotReturn/caller-unsafe effects. The structural-only `Validate` entry
+remains profile-agnostic; no current CLI or source-free consumer supplies the
+profile context. Selected-provider Import/Export comparison, replacement,
+remapping/packing, source recipe checking, generated text operations and
+runtime construction remain unimplemented. PredicateGraph rows now validate required PredicateNode and
 PredicateReadFootprint row bounds; PredicateCapture validates graph-local
 ordinals, assigned roles/flags and complete captured TypeSpecRefs. Other
 predicate nodes, footprints, operands, edges and evaluation remain

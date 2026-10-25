@@ -7,6 +7,22 @@ using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Exact text-operation declarations selected for one using Module.</summary>
+/// <remarks>This in-memory caller context has no TRRM row or serialized profile identifier.</remarks>
+/// <param name="ModuleRow">The one-based using Module row.</param>
+/// <param name="FormatterInterfaceDefRow">The selected IFormattable InterfaceDef row.</param>
+/// <param name="FormatterTryFormatMethodDefRow">The selected IFormattable.TryFormat MethodDef row.</param>
+/// <param name="WriterInterfaceDefRow">The selected ITextWriter InterfaceDef row.</param>
+/// <param name="WriterTryWriteMethodDefRow">The selected ITextWriter.TryWrite MethodDef row.</param>
+/// <param name="WriterTryWriteScalarMethodDefRow">The selected ITextWriter.TryWriteScalar MethodDef row.</param>
+/// <param name="WriterTryWriteFormattedMethodDefRow">The selected ITextWriter.TryWriteFormatted MethodDef row.</param>
+/// <param name="TextSpanTypeSpecRef">The complete selected TextSpan TypeSpecRef.</param>
+public readonly record struct TrRmTextConstructionProfile(
+    int ModuleRow, int FormatterInterfaceDefRow, int FormatterTryFormatMethodDefRow,
+    int WriterInterfaceDefRow, int WriterTryWriteMethodDefRow,
+    int WriterTryWriteScalarMethodDefRow, int WriterTryWriteFormattedMethodDefRow,
+    uint TextSpanTypeSpecRef);
+
 /// <summary>A literal or formatted operation in a generated text shape.</summary>
 /// <param name="ShapeRow">The one-based owning TextContentShape row.</param>
 /// <param name="Ordinal">The zero-based fragment ordinal.</param>

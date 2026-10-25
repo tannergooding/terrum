@@ -564,12 +564,17 @@ generated-type-owned kind-1 Constraints. Selected-use validation binds methods
 to InterfaceMethod rows, checks formatter/writer interface separation and
 per-shape consistency, matches closed witness implementing types to captured
 types and exact WitnessMember requirements, and checks open type-formal capture
-and interface-constraint closure. It still does not bind those requirements to
-the profile-selected Core identities/signatures or remap/rebind the obligations.
-These checks do not prove source recipe meaning, establish builder protocol
-conformance, implement runtime construction or provide retained constant
-programs. A self-hosted method or candidate API sketch supplies no registered
-identity, retained constant program or frozen value codec.
+and interface-constraint closure. The provisional public
+`ValidateTextConstructionProfile` path accepts exact per-Module role rows and
+checks direct interface membership, public declarations, Boolean results,
+receiver access, ordered parameter types/modes, generic domains/constraints,
+TextSpan identity and absence of no-normal-return/caller-unsafe effects. The
+structural-only `Validate` API does not imply this profile check, and no
+current CLI/source-free consumer supplies the context. Provider Import/Export
+resolution, replacement/remapping, source recipe meaning, runtime
+construction and retained constant programs remain open. A self-hosted method
+or candidate API sketch supplies no selected profile identity, retained
+constant program or frozen value codec.
 
 **Routes/gate:** retain exact role/member/witness identities and contextual
 result, once-only source-ordered captures, after-capture acquisition, ordered
