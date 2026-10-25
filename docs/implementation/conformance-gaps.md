@@ -413,6 +413,10 @@ default TypeSpecRefs. InterfaceBase/InterfaceMethod ownership, ordinals,
 complete base TypeSpecRefs and direct instance MethodDef ownership are now
 checked; InterfaceConstDef/AssociatedConstDef ownership, names, complete type
 references and bounded ConstantSource row references are also checked.
+InterfaceWitness/WitnessMember rows now validate complete type references,
+exclusive member/associated ranges and direct MethodDef bounds; exact
+requirement selection, implementation compatibility and associated binding
+remain incomplete.
 Standard AssociatedRelation rows now validate complete declaring/required
 TypeSpecRefs and direct AssociatedTypeDef or Import references expected to
 denote that definition kind; the declaring-interface reference must be a

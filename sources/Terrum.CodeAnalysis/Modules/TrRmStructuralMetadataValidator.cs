@@ -16,6 +16,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs, TrRmInterfaceDefTableReader interfaces,
             TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+            TrRmInterfaceWitnessTableReader interfaceWitnesses,
+            TrRmWitnessMemberTableReader witnessMembers,
             TrRmInterfaceBaseTableReader interfaceBases,
             TrRmInterfaceMethodTableReader interfaceMethods,
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
@@ -51,6 +53,8 @@ public static class TrRmStructuralMetadataValidator
             TypeSpecs = typeSpecs;
             Interfaces = interfaces;
             AssociatedTypeDefs = associatedTypeDefs;
+            InterfaceWitnesses = interfaceWitnesses;
+            WitnessMembers = witnessMembers;
             InterfaceBases = interfaceBases;
             InterfaceMethods = interfaceMethods;
             InterfaceConstDefs = interfaceConstDefs;
@@ -92,6 +96,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmInterfaceDefTableReader Interfaces { get; }
         internal TrRmAssociatedTypeDefTableReader AssociatedTypeDefs { get; }
+        internal TrRmInterfaceWitnessTableReader InterfaceWitnesses { get; }
+        internal TrRmWitnessMemberTableReader WitnessMembers { get; }
         internal TrRmInterfaceBaseTableReader InterfaceBases { get; }
         internal TrRmInterfaceMethodTableReader InterfaceMethods { get; }
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
@@ -192,6 +198,11 @@ public static class TrRmStructuralMetadataValidator
             out var interfaceBaseCount);
         _ = index.TryGetSection(0x0027, out var associatedTypeBytes,
             out var associatedTypeCount);
+        _ = index.TryGetSection(0x0028, out var interfaceWitnessBytes,
+            out var interfaceWitnessCount);
+        _ = index.TryGetSection(0x0029, out var witnessMemberBytes,
+            out var witnessMemberCount);
+        _ = index.TryGetSection(0x002A, out _, out var witnessAssociatedTypeCount);
         _ = index.TryGetSection(0x002B, out var builderRegistrationBytes,
             out var builderRegistrationCount);
         _ = index.TryGetSection(0x002C, out var textTargetBytes, out var textTargetCount);
@@ -201,7 +212,6 @@ public static class TrRmStructuralMetadataValidator
             out var textCaptureShapeCount);
         _ = index.TryGetSection(0x002F, out var textFragmentShapeBytes,
             out var textFragmentShapeCount);
-        _ = index.TryGetSection(0x0028, out _, out var interfaceWitnessCount);
         _ = index.TryGetSection(0x0037, out var predicateGraphBytes,
             out var predicateGraphCount);
         _ = index.TryGetSection(0x0038, out _, out var predicateReadFootprintCount);
@@ -214,6 +224,7 @@ public static class TrRmStructuralMetadataValidator
             out var interfaceConstCount);
         _ = index.TryGetSection(0x0032, out var associatedConstBytes,
             out var associatedConstCount);
+        _ = index.TryGetSection(0x0033, out _, out var witnessAssociatedConstCount);
         _ = index.TryGetSection(0x0034, out var unionCaseDefBytes, out var unionCaseDefCount);
         _ = index.TryGetSection(0x0035, out var unionCaseFieldBytes, out var unionCaseFieldCount);
         _ = index.TryGetSection(0x0036, out var associatedRelationBytes,
@@ -308,6 +319,8 @@ public static class TrRmStructuralMetadataValidator
             selectedConstantSourceCount);
         var interfaces = default(TrRmInterfaceDefTableReader);
         var associatedTypeDefs = default(TrRmAssociatedTypeDefTableReader);
+        var interfaceWitnesses = default(TrRmInterfaceWitnessTableReader);
+        var witnessMembers = default(TrRmWitnessMemberTableReader);
         var interfaceBases = default(TrRmInterfaceBaseTableReader);
         var interfaceMethods = default(TrRmInterfaceMethodTableReader);
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
@@ -367,6 +380,12 @@ public static class TrRmStructuralMetadataValidator
                 targetValueBindingCount);
             associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
                 associatedTypeBytes, associatedTypeCount, strings, typeSpecs, interfaces);
+            interfaceWitnesses = new TrRmInterfaceWitnessTableReader(
+                interfaceWitnessBytes, interfaceWitnessCount, typeSpecs,
+                witnessMemberCount, witnessAssociatedTypeCount,
+                witnessAssociatedConstCount);
+            witnessMembers = new TrRmWitnessMemberTableReader(witnessMemberBytes,
+                witnessMemberCount, interfaceWitnesses, typeSpecs, methods);
         }
 
         var constraints = constraintCount == 0 ? default
@@ -528,7 +547,8 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceFiles;
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
-            interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
+            interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
+            interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
             textContentShapes, textCaptureShapes, textFragmentShapes,

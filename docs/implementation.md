@@ -169,6 +169,10 @@ F2/F3 forms; exact instance binding and the Constraint kind-3 row link remain
 incomplete. InterfaceConstDef and AssociatedConstDef rows validate their
 InterfaceDef ranges, owners, names and complete type references; initialized
 interface constants also require a bounded ConstantSource row reference. The
+standard InterfaceWitness/WitnessMember readers additionally validate
+complete witness type pairs, exclusive member/associated-binding ranges and
+WitnessMember method/type-reference bounds; they do not prove selected-method
+compatibility or bind associated declarations. The
 standard UnionCaseDef/UnionCaseField readers validate TypeDef/UnionCaseDef
 owners, exclusive payload ranges, ordered payload ordinals and complete
 UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so this
