@@ -154,7 +154,10 @@ execution remain incomplete. Short control forms now bind `A0..AF`/`B1`
 edge records, `B2` switch and `B3` requirement records, validate `B0` block
 targets and `B8` Home indexes, and require zero operands for `B5`/`B7`.
 Tiny/short Home, Type, Constant and Method map indexes plus `61`/`90`/`91`/
-`92` typed-record references are also bounds- and kind-checked.
+`92` typed-record references are also bounds- and kind-checked. Long
+`D0..DE`/`E0..E7`/`EB` forms validate assigned map, Block and typed-record
+references and their record kinds; required zero controls and query selectors
+are checked where assigned. `E8`/`EA` remain unsupported and rejected.
 Register/type/effect semantics, other record-to-instruction links, and
 unsupported `B4`/`B6` forms remain outside this slice. F0/F1 rejection is
 provisional under the unapproved pseudo-retirement proposal; normative

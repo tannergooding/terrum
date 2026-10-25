@@ -222,6 +222,12 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     private void ValidateInstructionReferences(byte opcode, ReadOnlySpan<byte> instruction)
     {
+        if (instruction.Length == 4)
+        {
+            ValidateLongInstructionReferences(opcode, instruction);
+            return;
+        }
+
         if (opcode is >= 0xA0 and <= 0xAF)
         {
             ValidateRecordReference(instruction[1] >> 4, 0x06);
@@ -300,6 +306,122 @@ internal readonly ref struct TrRmRegisterBodyReader
                 {
                     throw InvalidBody();
                 }
+                break;
+        }
+    }
+
+    private void ValidateLongInstructionReferences(byte opcode,
+        ReadOnlySpan<byte> instruction)
+    {
+        var control = instruction[1];
+        var reference = ReadUInt16(instruction, 2);
+        switch (opcode)
+        {
+            case >= 0xD0 and <= 0xD3:
+                ValidateMapIndex(reference, TypeCount);
+                break;
+            case 0xD4:
+                if ((control & 0xF0) != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateMapIndex(reference, ConstantCount);
+                break;
+            case 0xD5:
+            case 0xD7:
+                if ((control & 0xF0) != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateMapIndex(reference, HomeCount);
+                break;
+            case 0xD6:
+                if ((control >> 4) is < 1 or > 3)
+                {
+                    throw InvalidBody();
+                }
+                ValidateMapIndex(reference, HomeCount);
+                break;
+            case 0xD8:
+            case 0xDA:
+            case 0xDB:
+            case 0xDD:
+                if ((control & 0xF0) != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x04);
+                break;
+            case 0xD9:
+            case 0xDC:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, opcode == 0xD9 ? (byte)0x05 : (byte)0x04);
+                break;
+            case 0xDE:
+                var queryKind = control >> 4;
+                if (queryKind is < 1 or > 5 || (control & 0x0F) == 14)
+                {
+                    throw InvalidBody();
+                }
+                ValidateMapIndex(reference,
+                    queryKind is 3 or 4 ? FieldCount : TypeCount);
+                break;
+            case 0xE0:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x02);
+                break;
+            case 0xE1:
+                ValidateMapIndex(reference, MethodCount);
+                break;
+            case 0xE2:
+                if ((reference & 0xFFF0) != 0)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xE3:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateMapIndex(reference, BlockCount);
+                break;
+            case 0xE4:
+                if ((control & 0xF0) != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x06);
+                break;
+            case 0xE5:
+                ValidateRecordReference(reference, 0x06);
+                break;
+            case 0xE6:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x07);
+                break;
+            case 0xE7:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x08);
+                break;
+            case 0xEB:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateMapIndex(reference, HomeCount);
                 break;
         }
     }
