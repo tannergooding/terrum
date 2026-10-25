@@ -160,10 +160,14 @@ references and their record kinds; required zero controls and query selectors
 are checked where assigned. Long `C0..C2` operation selectors and `C3..C5`
 predicate controls are validated against their assigned domains. `E8`/`EA`
 remain unsupported and rejected.
-Register/type/effect semantics, other record-to-instruction links, and
-unsupported `B4`/`B6` forms remain outside this slice. F0/F1 rejection is
-provisional under the unapproved pseudo-retirement proposal; normative
-assignments remain unchanged. The reader also rejects R14 in explicit
+Common-family `C0..C2` payloads validate one/two-result layouts, required
+unused R15 fields, unary-source omissions, distinct dual results and R14
+destination rejection; `C3..C6`/`CB..CC` reject R14 destinations. This is
+structural evidence only: operation type/effect checks and per-operation R15
+discard eligibility remain in mandatory instruction verification. Other
+record-to-instruction links and unsupported `B4`/`B6` forms remain outside this
+slice. F0/F1 rejection is provisional under the unapproved pseudo-retirement
+proposal; normative assignments remain unchanged. The reader also rejects R14 in explicit
 destination roles, requires place handles/call windows to use general
 registers, and bounds paired-formal windows to R0..R13. Per-operation source
 roles and R15 discard eligibility remain in instruction verification.

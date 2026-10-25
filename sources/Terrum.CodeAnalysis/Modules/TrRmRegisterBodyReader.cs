@@ -225,6 +225,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         if (instruction.Length == 4)
         {
             ValidateLongControlSelector(opcode, instruction[1]);
+            ValidateLongRegisterFamilyPayload(opcode, instruction);
             ValidateLongInstructionReferences(opcode, instruction);
             return;
         }
@@ -326,6 +327,59 @@ internal readonly ref struct TrRmRegisterBodyReader
         if (!isAssigned)
         {
             throw InvalidBody();
+        }
+    }
+
+    private static void ValidateLongRegisterFamilyPayload(byte opcode,
+        ReadOnlySpan<byte> instruction)
+    {
+        if (opcode is < 0xC0 or > 0xCC)
+        {
+            return;
+        }
+
+        var payload = ReadUInt16(instruction, 2);
+        var result0 = payload & 0x0F;
+        var result1 = (payload >> 4) & 0x0F;
+        var source1 = (payload >> 12) & 0x0F;
+        switch (opcode)
+        {
+            case 0xC0:
+                var hasTwoResults = instruction[1] is 0x0E or 0x0F;
+                var hasSingleInput = instruction[1] is 0x04 or 0x08 or 0x25;
+                if (result0 == 14 || (!hasTwoResults && result1 != 15)
+                    || (hasTwoResults && result1 == 14)
+                    || (hasTwoResults && result0 < 14 && result1 < 14
+                        && result0 == result1)
+                    || (hasSingleInput && source1 != 15))
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xC1:
+                if (result0 == 14 || result1 != 15
+                    || (instruction[1] == 0x04 && source1 != 15))
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xC2:
+                if (result0 == 14 || result1 != 15)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xC3:
+            case 0xC4:
+            case 0xC5:
+            case 0xC6:
+            case 0xCB:
+            case 0xCC:
+                if (result0 == 14)
+                {
+                    throw InvalidBody();
+                }
+                break;
         }
     }
 
@@ -584,7 +638,7 @@ internal readonly ref struct TrRmRegisterBodyReader
             return 2;
         }
 
-        if (opcode is >= 0xC0 and <= 0xCB
+        if (opcode is >= 0xC0 and <= 0xCC
             or >= 0xD0 and <= 0xDE
             or >= 0xE0 and <= 0xE8
             or 0xEA or 0xEB)

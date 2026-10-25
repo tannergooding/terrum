@@ -144,7 +144,10 @@ records, plus zero operands for fail-fast/unreachable and the short Home return
 index. Tiny/short Home, Type, Constant and Method map indexes and the
 `61`/`90`/`91`/`92` typed-record references are also checked for local bounds
 and expected record kind. Long `C0..C2` selectors and `C3..C5` predicate
-controls are checked against their assigned domains. Long
+controls are checked against their assigned domains. `C0..C2` common-family
+payloads validate one/two-result and unary-source fillers, distinct dual
+outputs and R14 output rejection; `C3..C6`/`CB..CC` reject R14 destinations,
+and assigned `CC` is admitted as a four-byte operation. Long
 `D0..DE`/`E0..E7`/`EB` forms validate map, Block and record references,
 selected record kinds, reserved controls and query-kind routing; `E8`/`EA`
 remain rejected.

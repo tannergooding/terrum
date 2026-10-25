@@ -367,20 +367,30 @@ public sealed class TrRmRegisterBodyReaderTests
             0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
         })
         {
+            var payload = control is 0x0E or 0x0F
+                ? 0x3210
+                : control is 0x04 or 0x08 or 0x25
+                    ? 0xF0F0
+                    : 0x21F0;
             _ = new TrRmRegisterBodyReader(
-                CreateBody(0, code: [0xC0, control, 0, 0, 0]));
+                CreateBody(0, code: [
+                    0xC0, control, (byte)payload, (byte)(payload >> 8), 0,
+                ]));
         }
 
         foreach (var control in new byte[] { 1, 2, 3, 4, 5, 6, 7 })
         {
+            var payload = control == 4 ? 0xF0F0 : 0x21F0;
             _ = new TrRmRegisterBodyReader(
-                CreateBody(0, code: [0xC1, control, 0, 0, 0]));
+                CreateBody(0, code: [
+                    0xC1, control, (byte)payload, (byte)(payload >> 8), 0,
+                ]));
         }
 
         foreach (var control in new byte[] { 0, 1, 2 })
         {
             _ = new TrRmRegisterBodyReader(
-                CreateBody(0, code: [0xC2, control, 0, 0, 0]));
+                CreateBody(0, code: [0xC2, control, 0xF0, 0x21, 0]));
         }
 
         foreach (var opcode in new byte[] { 0xC3, 0xC4, 0xC5 })
@@ -399,6 +409,37 @@ public sealed class TrRmRegisterBodyReaderTests
         AssertInvalid(CreateBody(0, code: [0xC1, 0, 0, 0, 0]));
         AssertInvalid(CreateBody(0, code: [0xC1, 8, 0, 0, 0]));
         AssertInvalid(CreateBody(0, code: [0xC2, 3, 0, 0, 0]));
+    }
+
+    [Test]
+    public void ValidatesCommonRegisterFamilyPayloadRoles()
+    {
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0xC0, 0x01, 0xF0, 0x21, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0xC0, 0x04, 0xF0, 0xF0, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0xC0, 0x0E, 0x10, 0x32, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0xC1, 0x01, 0xF0, 0x21, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0xC1, 0x04, 0xF0, 0xF0, 0]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBody(0, code: [0xC2, 0x00, 0xF0, 0x21, 0]));
+
+        foreach (var opcode in new byte[] { 0xC3, 0xC4, 0xC5, 0xC6, 0xCB, 0xCC })
+        {
+            _ = new TrRmRegisterBodyReader(
+                CreateBody(0, code: [opcode, 0x0F, 0x32, 0x10, 0]));
+            AssertInvalid(CreateBody(0, code: [opcode, 0, 0x0E, 0, 0]));
+        }
+
+        AssertInvalid(CreateBody(0, code: [0xC0, 0x01, 0, 0, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC0, 0x04, 0xF0, 0x00, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC0, 0x0E, 0, 0, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC1, 0x01, 0, 0, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC1, 0x04, 0xF0, 0x00, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC2, 0x00, 0, 0, 0]));
     }
 
     [Test]
