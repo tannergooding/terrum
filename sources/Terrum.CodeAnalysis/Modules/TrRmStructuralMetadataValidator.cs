@@ -23,6 +23,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmAssociatedRelationTableReader associatedRelations,
             TrRmUnionCaseDefTableReader unionCaseDefs,
             TrRmUnionCaseFieldTableReader unionCaseFields,
+            TrRmBuilderRegistrationTableReader builderRegistrations,
+            TrRmTextTargetTableReader textTargets,
             TrRmConstantSourceTableReader constantSources,
             TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
             TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
@@ -51,6 +53,8 @@ public static class TrRmStructuralMetadataValidator
             AssociatedRelations = associatedRelations;
             UnionCaseDefs = unionCaseDefs;
             UnionCaseFields = unionCaseFields;
+            BuilderRegistrations = builderRegistrations;
+            TextTargets = textTargets;
             ConstantSources = constantSources;
             TargetLayoutDependencies = targetLayoutDependencies;
             TargetLayoutDependencyFields = targetLayoutDependencyFields;
@@ -85,6 +89,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmAssociatedRelationTableReader AssociatedRelations { get; }
         internal TrRmUnionCaseDefTableReader UnionCaseDefs { get; }
         internal TrRmUnionCaseFieldTableReader UnionCaseFields { get; }
+        internal TrRmBuilderRegistrationTableReader BuilderRegistrations { get; }
+        internal TrRmTextTargetTableReader TextTargets { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
         internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
         internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
@@ -171,6 +177,9 @@ public static class TrRmStructuralMetadataValidator
             out var interfaceBaseCount);
         _ = index.TryGetSection(0x0027, out var associatedTypeBytes,
             out var associatedTypeCount);
+        _ = index.TryGetSection(0x002B, out var builderRegistrationBytes,
+            out var builderRegistrationCount);
+        _ = index.TryGetSection(0x002C, out var textTargetBytes, out var textTargetCount);
         _ = index.TryGetSection(0x0030, out var constantSourceBytes,
             out var constantSourceCount);
         _ = index.TryGetSection(0x0031, out var interfaceConstBytes,
@@ -278,12 +287,18 @@ public static class TrRmStructuralMetadataValidator
         var associatedRelations = default(TrRmAssociatedRelationTableReader);
         var unionCaseDefs = default(TrRmUnionCaseDefTableReader);
         var unionCaseFields = default(TrRmUnionCaseFieldTableReader);
+        var builderRegistrations = default(TrRmBuilderRegistrationTableReader);
+        var textTargets = default(TrRmTextTargetTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
         var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
         var fieldPaths = default(TrRmFieldPathTableReader);
         if (!developmentProfile)
         {
+            builderRegistrations = new TrRmBuilderRegistrationTableReader(
+                builderRegistrationBytes, builderRegistrationCount, types, typeSpecs);
+            textTargets = new TrRmTextTargetTableReader(textTargetBytes,
+                textTargetCount, methods, signatures, typeSpecs);
             unionCaseDefs = new TrRmUnionCaseDefTableReader(
                 unionCaseDefBytes, unionCaseDefCount, strings, types,
                 unionCaseFieldCount);
@@ -466,7 +481,8 @@ public static class TrRmStructuralMetadataValidator
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, associatedRelations,
-            unionCaseDefs, unionCaseFields, constantSources,
+            unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
+            constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,

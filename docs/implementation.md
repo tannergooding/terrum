@@ -172,9 +172,13 @@ interface constants also require a bounded ConstantSource row reference. The
 standard UnionCaseDef/UnionCaseField readers validate TypeDef/UnionCaseDef
 owners, exclusive payload ranges, ordered payload ordinals and complete
 UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so this
-row validation does not admit nominal-union source or runtime support. The
-associated-type identity and relation-payload proposals remain unapproved;
-their implementation directions are provisional only.
+row validation does not admit nominal-union source or runtime support.
+BuilderRegistration and TextTarget rows now validate TypeDef/MethodDef
+references, complete schema/recipe TypeSpecRefs, parameter ordinal bounds and
+duplicate targets. They do not implement source recipe checking, generated
+text-shape reconstruction or runtime construction. The associated-type
+identity and relation-payload proposals remain unapproved; their
+implementation directions are provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar

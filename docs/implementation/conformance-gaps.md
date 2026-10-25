@@ -527,8 +527,13 @@ sections are in [metadata](../specs/il-metadata.md).
 
 **Current/evidence:** [library support](libraries.md) distinguishes parsed
 spread syntax and private generic specializations from executable registered
-builders/protocols. A self-hosted method or candidate API sketch supplies no
-registered identity, retained constant program or frozen value codec.
+builders/protocols. Standard structural BuilderRegistration and TextTarget
+readers/writers now validate target TypeDef/MethodDef rows, complete
+schema/recipe TypeSpecRefs, parameter ordinal bounds and duplicate targets.
+This does not check source recipe meaning, TextContentShape graphs, builder
+protocol conformance, runtime construction or retained constant programs. A
+self-hosted method or candidate API sketch supplies no registered identity,
+retained constant program or frozen value codec.
 
 **Routes/gate:** retain exact role/member/witness identities and contextual
 result, once-only source-ordered captures, after-capture acquisition, ordered
