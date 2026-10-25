@@ -16,18 +16,25 @@ transitional and is removed when the Terrum compiler is self-sustaining after
 GA. Future Terrum features can be bootstrapped using the preceding stable
 compiler.
 
-The process-level fallback is an architectural decision, not evidence that
-the current prototype has wired it. The [compiler conformance handoff](conformance-gaps.md)
-tracks that work. A profile miss must not make otherwise valid Terrum source
-invalid.
+`frontend-build`, `frontend-build-library`, and `frontend-run` invoke a
+separate C# compiler process on the original source for every input. They
+preserve the source name and selected runtime/arithmetic profiles; library
+build selects public top-level functions. No AST, partial semantic projection,
+or `Host.Source` buffer crosses this compiler boundary.
+`frontend-component` remains an explicit test-only projection prototype; it
+does not select executable build, library, JIT, private-module or standard
+metadata behavior. The C# compiler is therefore the selected implementation
+until the Terrum-authored compiler can process source independently.
+The [compiler conformance handoff](conformance-gaps.md) tracks its isolation
+and completion.
 
 ## Current implementation experiments
 
 | Component | Current evidence | Boundary |
 |---|---|---|
 | Direct-source bootstrap emitter | Test components parse a narrow `int32 Main`/helper subset and produce Windows x64 code/PE fixtures. | A development slice of the Terrum compiler, not a language subset or general compiler. Unsupported source belongs on the whole-source C# process path. |
-| Scalar frontend projection | Prototype Terrum code writes private v87/v88 buffers that a C# host currently audits, verifies, and emits. | This AST/projection handoff is not the selected compiler architecture. Do not use it as the Terrum-to-C# fallback or as an accepted persistent profile. |
-| Scanner, token snapshots, and spans | Terrum-authored scanner/token components run under hosted verification and native JIT/AOT test paths. | Token values and `Span<Token>` views are runtime data. Keep views compilation-local; no TokenCursor wrapper, private persisted Span IR, `Host.Source` grant, or persisted scanner profile is selected. Existing source-grant execution is prototype evidence, not the compiler input/JIT boundary. |
+| Scalar frontend projection | Prototype Terrum code writes private v87/v88 buffers; the C# host can audit, verify and emit the projection for component tests. | Only the explicitly named `frontend-component` test command retains this path. Build/library/run commands use original-source process compilation and never consume its projection. |
+| Scanner, token snapshots, and spans | Terrum-authored scanner/token components run under hosted and native prototype tests with explicit source grants. | `Span<Token>` remains compilation-local and is rejected by private semantic-module readers/writers. Source-grant and invocation-profile APIs remain test-only prototypes; native packages and standard metadata do not admit them, and they are not compiler input or ordinary JIT routes. |
 
 The component inventory distinguishes current code from the intended
 standalone compiler path. Prototypes may remain as test fixtures while the
@@ -70,13 +77,14 @@ creation fails.
 
 ## Current migration gaps
 
-The existing C# host and test prototypes still contain fixed v87/v88
-projection buffers, low count/depth caps, private Span<Token> serialization,
-and separate code/image buffers. The C# `IndexedBody.Verify` path also shares
-a 100,000-visit counter across functions. These are implementation facts to
-migrate or remove, not the selected design. Track replacement of the
-projection path, source-level C# subprocess fallback, count-sized Terrum
-frontend records, per-function verification summaries, and atomic PE publication in
+The test-only `frontend-component` prototype still contains fixed v87/v88
+projection buffers and low count/depth caps; those limits do not constrain the
+selected build/library/run commands. Private semantic modules reject Span IR,
+while explicitly tagged source-grant profiles remain test/prototype support.
+The C# `IndexedBody.Verify` path also shares a 100,000-visit counter across
+functions. These are implementation facts to migrate or remove, not the
+selected design. Track replacement of the projection prototype, count-sized
+Terrum frontend records, per-function verification summaries, and atomic PE publication in
 [CG-015](conformance-gaps.md#cg-015), [CG-016](conformance-gaps.md#cg-016),
 and [CG-017](conformance-gaps.md#cg-017). Existing tests that assert the
 prototype layouts are not acceptance evidence for the revised architecture.

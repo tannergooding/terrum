@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -118,6 +119,11 @@ internal static partial class Program
                 }
             }
             source = SourceText.From(ReadSource(args[2]), args[2] == "-" ? "<stdin>" : args[2]);
+            if (build || runExecutable)
+            {
+                return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                    sourceArithmeticProfile, json);
+            }
             if (source.Length > ScannerHost.MaximumSourceLength)
             {
                 WriteInputError(json, "TRM2001", "The frontend input exceeds its bounded source limit.");
@@ -164,6 +170,11 @@ internal static partial class Program
         }
         catch (NotSupportedException exception)
         {
+            if (build || runExecutable)
+            {
+                return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                    sourceArithmeticProfile, json);
+            }
             WriteInputError(json, "TRM4001", exception.Message);
             return 1;
         }
@@ -172,6 +183,11 @@ internal static partial class Program
         {
             if (native.ExitCode != 0)
             {
+                if (build || runExecutable)
+                {
+                    return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                        sourceArithmeticProfile, json);
+                }
                 var diagnosticBytes = native.Data.AsSpan(native.BufferOffsets[4],
                     program.Buffers[4].Values.Length * sizeof(int));
                 var diagnostics = ScannerHost.ReadDiagnostics(source, diagnosticBytes);
@@ -193,6 +209,11 @@ internal static partial class Program
             }
             catch (ArgumentException exception)
             {
+                if (build || runExecutable)
+                {
+                    return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                        sourceArithmeticProfile, json);
+                }
                 if (TryWriteUnsafeCallerDiagnostic(args[0], source, sourceOptions, json, exception))
                 {
                     return 1;
@@ -200,6 +221,11 @@ internal static partial class Program
                 throw;
             }
             var result = read.Projection;
+            if (!result.IsValid && (build || runExecutable))
+            {
+                return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                    sourceArithmeticProfile, json);
+            }
             if ((build || runExecutable) && result.IsValid)
             {
                 var functions = result.Functions.IsDefault ? ImmutableArray.Create(result) : result.Functions;
@@ -237,6 +263,11 @@ internal static partial class Program
                 }
                 catch (ArgumentException exception)
                 {
+                    if (build || runExecutable)
+                    {
+                        return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                            sourceArithmeticProfile, json);
+                    }
                     if (TryWriteUnsafeCallerDiagnostic(args[0], source, sourceOptions, json, exception))
                     {
                         return 1;
@@ -250,7 +281,12 @@ internal static partial class Program
                         return NativeJit.Execute(library with { EntryPoint = entryIndex }, policy,
                             GraphJitRegistrarAssemblyPath());
                     }
-                    catch (Exception exception) when (exception is NotSupportedException or IOException
+                    catch (NotSupportedException)
+                    {
+                        return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                            sourceArithmeticProfile, json);
+                    }
+                    catch (Exception exception) when (exception is IOException
                         or Win32Exception or InvalidOperationException or TimeoutException)
                     {
                         WriteInputError(json, "TRM4001", exception.Message);
@@ -264,15 +300,15 @@ internal static partial class Program
                         ? NativeEmitter.Emit(library with { EntryPoint = entryIndex }, policy)
                         : NativeEmitter.EmitLibrary(library, exports, policy);
                 }
-                catch (NotSupportedException exception)
+                catch (NotSupportedException)
                 {
-                    WriteInputError(json, "TRM4001", exception.Message);
-                    return 1;
+                    return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                        sourceArithmeticProfile, json);
                 }
-                catch (ArgumentException exception)
+                catch (ArgumentException)
                 {
-                    WriteInputError(json, "TRM4002", exception.Message);
-                    return 1;
+                    return RunOriginalSourceFallback(args[0], source, outputPath, policy,
+                        sourceArithmeticProfile, json);
                 }
                 try
                 {
@@ -292,6 +328,83 @@ internal static partial class Program
         catch (ArgumentException exception)
         {
             WriteInputError(json, "TRM5001", exception.Message);
+            return 1;
+        }
+    }
+
+    private static int RunOriginalSourceFallback(string command, SourceText source,
+        string? outputPath, NativeRuntimePolicy runtimePolicy,
+        SourceArithmeticProfile sourceArithmeticProfile, bool json)
+    {
+        var fallbackCommand = command switch {
+            "frontend-build" => "build",
+            "frontend-build-library" => "build-library",
+            "frontend-run" => "jit",
+            _ => throw new ArgumentOutOfRangeException(nameof(command)),
+        };
+        var processPath = Environment.ProcessPath
+            ?? throw new InvalidOperationException("Cannot locate the compiler process for source fallback.");
+        var start = new ProcessStartInfo(processPath) {
+            RedirectStandardInput = true,
+            UseShellExecute = false,
+        };
+        if (Path.GetFileNameWithoutExtension(processPath).Equals("dotnet", StringComparison.OrdinalIgnoreCase))
+        {
+            var assemblyPath = typeof(Program).Assembly.Location;
+            if (assemblyPath.Length == 0)
+            {
+                throw new NotSupportedException("The compiler assembly path is unavailable for source fallback.");
+            }
+            start.ArgumentList.Add(assemblyPath);
+        }
+        start.ArgumentList.Add(fallbackCommand);
+        start.ArgumentList.Add("-");
+        start.ArgumentList.Add("--frontend-command");
+        start.ArgumentList.Add(command);
+        start.ArgumentList.Add("--source-name");
+        start.ArgumentList.Add(source.Path);
+        if (fallbackCommand == "build-library")
+        {
+            start.ArgumentList.Add("--export-all-public");
+        }
+        if (outputPath is not null)
+        {
+            start.ArgumentList.Add("-o");
+            start.ArgumentList.Add(outputPath);
+        }
+        start.ArgumentList.Add("--runtime");
+        start.ArgumentList.Add(runtimePolicy == NativeRuntimePolicy.FailFast
+            ? "fail-fast" : "checked-exceptions");
+        start.ArgumentList.Add("--arithmetic-profile");
+        start.ArgumentList.Add(sourceArithmeticProfile == SourceArithmeticProfile.Development
+            ? "development" : "release");
+        if (json)
+        {
+            start.ArgumentList.Add("--json");
+        }
+
+        try
+        {
+            using var process = Process.Start(start)
+                ?? throw new InvalidOperationException("Could not start the C# source fallback process.");
+            try
+            {
+                var sourceBytes = Encoding.UTF8.GetBytes(source.Text);
+                process.StandardInput.BaseStream.Write(sourceBytes);
+                process.StandardInput.Close();
+            }
+            catch (IOException) when (process.HasExited)
+            {
+                process.WaitForExit();
+                return process.ExitCode;
+            }
+            process.WaitForExit();
+            return process.ExitCode;
+        }
+        catch (Exception exception) when (exception is IOException or Win32Exception
+            or InvalidOperationException or ArgumentException or NotSupportedException)
+        {
+            WriteInputError(json, "TRM4001", exception.Message);
             return 1;
         }
     }
@@ -349,7 +462,6 @@ internal static partial class Program
                 writer.WriteStartObject("result");
                 writer.WriteBoolean("valid", frontend.IsValid);
                 writer.WriteBoolean("public", frontend.IsPublic);
-                writer.WriteBoolean("noThrow", frontend.IsNoThrow);
                 writer.WriteBoolean("doesNotReturn", frontend.DoesNotReturn);
                 writer.WriteNumber("errorCode", frontend.ErrorCode);
                 WriteFrontendSpan(writer, "errorSpan", frontend.ErrorSpan);
@@ -369,7 +481,6 @@ internal static partial class Program
                         writer.WriteStartObject();
                         writer.WriteNumber("index", functionIndex);
                         writer.WriteBoolean("public", function.IsPublic);
-                        writer.WriteBoolean("noThrow", function.IsNoThrow);
                         writer.WriteNumber("returnType", function.ReturnType);
                         writer.WriteNumber("parameterCount", function.ParameterCount);
                         writer.WriteNumber("outParameterMask", function.OutParameterMask);

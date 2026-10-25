@@ -19,11 +19,11 @@ namespace Terrum.Tools;
 internal static partial class Program
 {
     private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\n"
-        + "       terrumc analyze <path|-> [--source <path>] [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--corelib] [--json]\n"
-        + "       terrumc build <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
-        + "       terrumc build-native-import <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
-        + "       terrumc build-library <path|-> [--source <path>] --export <name> [--export <name>] -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--corelib | --source-grant --abi-output <output.json>] [--json]\n"
-        + "       terrumc jit <path|-> [--source <path>] --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc analyze <path|-> [--source <path>] [--source-name <path>] [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--corelib] [--json]\n"
+        + "       terrumc build <path|-> [--source <path>] [--source-name <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc build-native-import <path|-> [--source <path>] [--source-name <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc build-library <path|-> [--source <path>] [--source-name <path>] (--export <name> [--export <name>] | --export-all-public) -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--corelib | --source-grant --abi-output <output.json>] [--json]\n"
+        + "       terrumc jit <path|-> [--source <path>] [--source-name <path>] --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc scan-component <scanner.terrum|terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc build-component <scanner.terrum|terrum-project-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc frontend-component <terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
@@ -63,13 +63,14 @@ internal static partial class Program
         + "jit/run-module/run-trrm execute in this process and return the program's status; supervise them with a deadline.\n"
         + "compile-trrm/build-trrm/build-trrm-library/run-trrm use audited fail-fast scalar metadata and compact Bodies, not the development semantic-module encoding.\n"
         + "run-trrm returns Main's raw exit status; --json applies to diagnostics only. Checked-exception TRRM execution is unsupported.\n"
-        + "scan-component/build-component/frontend-component/frontend-build-library/frontend-build/frontend-run execute native components in this process; supervise them with a deadline.\n"
+        + "scan-component/build-component/frontend-component execute test-only native components in this process; supervise them with a deadline.\n"
         + "frontend-run returns Main's raw exit status without a success envelope; --json applies to diagnostics only.\n"
+        + "scan-component/build-component/frontend-component are test-only component prototypes; frontend build/run commands compile the original source in a separate C# compiler process.\n"
         + "validate-trrm-structure checks provisional (1, 0) framing and structural metadata only, not Body instructions or executable contracts.\n"
         + "validate-trrm-compact-linear additionally checks the bounded scalar compact-linear Body shape, not effects or execution.\n"
         + "validate-trrm-compact-indexed checks the bounded forward-branching scalar indexed Body shape, not effects or execution.\n"
         + "validate-trrm-compact checks both bounded compact forms per Body row, not general Bodies, effects or execution.\n"
-        + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
+        + "'-' reads strict UTF-8 from stdin; --source-name overrides its diagnostic path. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
 
     private static bool TryParseSourceArithmeticProfile(string value, out SourceArithmeticProfile profile)
     {

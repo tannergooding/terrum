@@ -82,7 +82,7 @@ public sealed partial class CliTests
         using var result = JsonDocument.Parse(output);
         Assert.That(result.RootElement.GetProperty("success").GetBoolean(), Is.False);
         Assert.That(result.RootElement.GetProperty("diagnostics")[0]
-            .GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
+            .GetProperty("code").GetString(), Is.EqualTo("TRM3002"));
     }
 
     [Test]
@@ -251,7 +251,7 @@ public sealed partial class CliTests
     }
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
-    public async Task FrontendBuildRejectsSourceBeyondMaximumLengthAsync(string policy)
+    public async Task FrontendBuildDoesNotApplyTheScannerSourceLimitAsync(string policy)
     {
         var directory = TerrumProjectPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
             "..", "..", "..", "..", "..", "..")));
@@ -261,11 +261,11 @@ public sealed partial class CliTests
         {
             var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(source), "frontend-build",
                 directory, "-", "-o", outputPath, "--runtime", policy, "--json");
-            Assert.That(exit, Is.EqualTo(2));
+            Assert.That(exit, Is.EqualTo(1));
             Assert.That(error, Is.Empty);
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString(), Is.EqualTo("TRM2001"));
+                .GetProperty("code").GetString(), Is.EqualTo("TRM3002"));
             Assert.That(File.Exists(outputPath), Is.False);
         }
         finally
@@ -315,6 +315,127 @@ public sealed partial class CliTests
             File.Delete(hostedPath);
         }
     }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task FrontendCommandsFallBackThroughOriginalSourceProcessAsync(string policy)
+    {
+        const string ExecutableSource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            int32 Main() {
+                Value value = new Value(42);
+                return value.Number;
+            }
+            """;
+        const string LibrarySource = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Value {
+                public int32 Number;
+                public Value(int32 number) { Number = number; }
+            }
+            public int32 Read() {
+                Value value = new Value(42);
+                return value.Number;
+            }
+            """;
+        var directory = TerrumProjectPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-fallback-{Guid.NewGuid():N}");
+        var frontendExecutable = prefix + ".frontend.exe";
+        var hostedExecutable = prefix + ".hosted.exe";
+        var frontendLibrary = prefix + ".frontend.dll";
+        var hostedLibrary = prefix + ".hosted.dll";
+        try
+        {
+            var executableBytes = Encoding.UTF8.GetBytes(ExecutableSource);
+            var (frontendBuildExit, frontendBuildOutput, frontendBuildError) = await RunAsync(executableBytes,
+                "frontend-build", directory, "-", "-o", frontendExecutable, "--runtime", policy, "--json");
+            var (hostedBuildExit, hostedBuildOutput, hostedBuildError) = await RunAsync(executableBytes,
+                "build", "-", "-o", hostedExecutable, "--runtime", policy, "--json");
+            Assert.That(frontendBuildExit, Is.EqualTo(0), frontendBuildOutput + frontendBuildError);
+            Assert.That(hostedBuildExit, Is.EqualTo(0), hostedBuildOutput + hostedBuildError);
+            Assert.That(frontendBuildError, Is.Empty);
+            Assert.That(hostedBuildError, Is.Empty);
+            using (var document = JsonDocument.Parse(frontendBuildOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("command").GetString(), Is.EqualTo("frontend-build"));
+                Assert.That(document.RootElement.GetProperty("artifact").GetProperty("target").GetString(),
+                    Is.EqualTo("windows-x64"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(frontendExecutable),
+                Is.EqualTo(await File.ReadAllBytesAsync(hostedExecutable)));
+
+            var (frontendRunExit, frontendRunOutput, frontendRunError) = await RunAsync(executableBytes,
+                "frontend-run", directory, "-", "--runtime", policy, "--json");
+            Assert.That(frontendRunExit, Is.EqualTo(42), frontendRunOutput + frontendRunError);
+            Assert.That(frontendRunError, Is.Empty);
+
+            var libraryBytes = Encoding.UTF8.GetBytes(LibrarySource);
+            var (frontendLibraryExit, frontendLibraryOutput, frontendLibraryError) = await RunAsync(libraryBytes,
+                "frontend-build-library", directory, "-", "-o", frontendLibrary,
+                "--runtime", policy, "--json");
+            var (hostedLibraryExit, hostedLibraryOutput, hostedLibraryError) = await RunAsync(libraryBytes,
+                "build-library", "-", "--export", "Read", "-o", hostedLibrary, "--runtime", policy, "--json");
+            Assert.That(frontendLibraryExit, Is.EqualTo(0), frontendLibraryOutput + frontendLibraryError);
+            Assert.That(hostedLibraryExit, Is.EqualTo(0), hostedLibraryOutput + hostedLibraryError);
+            Assert.That(frontendLibraryError, Is.Empty);
+            Assert.That(hostedLibraryError, Is.Empty);
+            using (var document = JsonDocument.Parse(frontendLibraryOutput))
+            {
+                Assert.That(document.RootElement.GetProperty("command").GetString(),
+                    Is.EqualTo("frontend-build-library"));
+                Assert.That(document.RootElement.GetProperty("artifact").GetProperty("kind").GetString(),
+                    Is.EqualTo("dynamic-library"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(frontendLibrary),
+                Is.EqualTo(await File.ReadAllBytesAsync(hostedLibrary)));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(frontendExecutable).ConfigureAwait(true);
+            File.Delete(hostedExecutable);
+            File.Delete(frontendLibrary);
+            File.Delete(hostedLibrary);
+        }
+    }
+
+    [Test]
+    public async Task FrontendFallbackPreservesSourceIdentityAndExistingOutputOnFailureAsync()
+    {
+        var directory = TerrumProjectPaths.SourceDirectory(Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "..")));
+        var sourcePath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-fallback-{Guid.NewGuid():N}.terrum");
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-frontend-fallback-{Guid.NewGuid():N}.exe");
+        var originalOutput = new byte[] { 1, 2, 3, 4 };
+        try
+        {
+            await File.WriteAllTextAsync(sourcePath, "int32 Main() { return MissingValue; }", Encoding.UTF8);
+            await File.WriteAllBytesAsync(outputPath, originalOutput);
+
+            var (exit, output, error) = await RunAsync([], "frontend-build", directory, sourcePath,
+                "-o", outputPath, "--runtime", "fail-fast", "--json");
+            Assert.That(exit, Is.EqualTo(1));
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("command").GetString(), Is.EqualTo("frontend-build"));
+            Assert.That(document.RootElement.GetProperty("path").GetString(), Is.EqualTo(sourcePath));
+            Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
+            Assert.That(document.RootElement.GetProperty("diagnostics").GetArrayLength(), Is.GreaterThan(0));
+            Assert.That(await File.ReadAllBytesAsync(outputPath), Is.EqualTo(originalOutput));
+        }
+        finally
+        {
+            File.Delete(sourcePath);
+            File.Delete(outputPath);
+        }
+    }
+
     [TestCase("int32 Other() { return 42; }")]
     [TestCase("int32 Main(int32 x) { return x; }")]
     [TestCase("uint32 Main() { return 42; }")]
@@ -340,7 +461,7 @@ public sealed partial class CliTests
             using var document = JsonDocument.Parse(output);
             Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.False);
             Assert.That(document.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString(), Is.EqualTo("TRM4002"));
+                .GetProperty("code").GetString(), Is.EqualTo("TRM3002"));
             Assert.That(await File.ReadAllBytesAsync(outputPath), Is.EqualTo(image));
         }
         finally
@@ -660,7 +781,8 @@ public sealed partial class CliTests
             using (var document = JsonDocument.Parse(output))
             {
                 Assert.That(document.RootElement.GetProperty("success").GetBoolean(), Is.True);
-                Assert.That(document.RootElement.GetProperty("result").GetProperty("public").GetBoolean(), Is.True);
+                Assert.That(document.RootElement.GetProperty("command").GetString(),
+                    Is.EqualTo("frontend-build-library"));
                 Assert.That(document.RootElement.GetProperty("output").GetString(), Is.EqualTo(outputPath));
             }
             var image = await File.ReadAllBytesAsync(outputPath);
