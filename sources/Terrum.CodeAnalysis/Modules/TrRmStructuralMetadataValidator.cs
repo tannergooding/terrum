@@ -356,7 +356,6 @@ public static class TrRmStructuralMetadataValidator
                 _ => throw InvalidMetadata(),
             };
         }
-
     }
 
     private enum BodyInspection
