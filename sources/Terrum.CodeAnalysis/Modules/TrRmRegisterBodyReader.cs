@@ -224,6 +224,7 @@ internal readonly ref struct TrRmRegisterBodyReader
     {
         if (instruction.Length == 4)
         {
+            ValidateLongControlSelector(opcode, instruction[1]);
             ValidateLongInstructionReferences(opcode, instruction);
             return;
         }
@@ -310,6 +311,22 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
 
         ValidateShortRegisterRoles(opcode, x, y);
+    }
+
+    private static void ValidateLongControlSelector(byte opcode, byte control)
+    {
+        var isAssigned = opcode switch
+        {
+            0xC0 => control is (>= 0x01 and <= 0x0F) or (>= 0x20 and <= 0x25),
+            0xC1 => control is >= 0x01 and <= 0x07,
+            0xC2 => control <= 0x02,
+            0xC3 or 0xC4 or 0xC5 => control <= 0x0F,
+            _ => true,
+        };
+        if (!isAssigned)
+        {
+            throw InvalidBody();
+        }
     }
 
     private void ValidateLongInstructionReferences(byte opcode,

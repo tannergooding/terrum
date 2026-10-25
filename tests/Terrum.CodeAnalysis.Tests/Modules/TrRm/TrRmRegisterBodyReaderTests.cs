@@ -359,6 +359,49 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesLongOperationControlSelectors()
+    {
+        foreach (var control in new byte[] {
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
+            0x20, 0x21, 0x22, 0x23, 0x24, 0x25,
+        })
+        {
+            _ = new TrRmRegisterBodyReader(
+                CreateBody(0, code: [0xC0, control, 0, 0, 0]));
+        }
+
+        foreach (var control in new byte[] { 1, 2, 3, 4, 5, 6, 7 })
+        {
+            _ = new TrRmRegisterBodyReader(
+                CreateBody(0, code: [0xC1, control, 0, 0, 0]));
+        }
+
+        foreach (var control in new byte[] { 0, 1, 2 })
+        {
+            _ = new TrRmRegisterBodyReader(
+                CreateBody(0, code: [0xC2, control, 0, 0, 0]));
+        }
+
+        foreach (var opcode in new byte[] { 0xC3, 0xC4, 0xC5 })
+        {
+            _ = new TrRmRegisterBodyReader(
+                CreateBody(0, code: [opcode, 0, 0, 0, 0]));
+            _ = new TrRmRegisterBodyReader(
+                CreateBody(0, code: [opcode, 0x0F, 0, 0, 0]));
+            AssertInvalid(CreateBody(0, code: [opcode, 0x10, 0, 0, 0]));
+        }
+
+        foreach (var control in new byte[] { 0, 0x10, 0x1F, 0x26, 0xFF })
+        {
+            AssertInvalid(CreateBody(0, code: [0xC0, control, 0, 0, 0]));
+        }
+        AssertInvalid(CreateBody(0, code: [0xC1, 0, 0, 0, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC1, 8, 0, 0, 0]));
+        AssertInvalid(CreateBody(0, code: [0xC2, 3, 0, 0, 0]));
+    }
+
+    [Test]
     public void RejectsInvalidPrefixCountsAndInstructionExtents()
     {
         AssertInvalid(Mutate(CreateBody(), 0, 0x02));
