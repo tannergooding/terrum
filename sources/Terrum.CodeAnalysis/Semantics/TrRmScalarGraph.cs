@@ -126,6 +126,7 @@ internal sealed class TrRmScalarGraph
         {
             throw new ArgumentException("Indexed scalar Body does not match its declaration.");
         }
+        var requiresNoFailureProof = SemanticVerifier.RequiresNoFailureProof(function);
         for (var value = 0; value < Types.Length; value++)
         {
             if (function.Variables[value].Type != Types[value]
@@ -178,7 +179,7 @@ internal sealed class TrRmScalarGraph
                     throw new ArgumentException("Indexed optional scalar operation does not match its value types.");
                 }
                 if (operation is TrRmScalarDivRem divRem
-                    && (NoThrow || !IsInteger(divRem.Type)
+                    && (requiresNoFailureProof || !IsInteger(divRem.Type)
                         || divRem.QuotientVariable < 0 || divRem.QuotientVariable >= Types.Length
                         || divRem.RemainderVariable < 0 || divRem.RemainderVariable >= Types.Length
                         || divRem.QuotientVariable == divRem.RemainderVariable
@@ -294,7 +295,7 @@ internal sealed class TrRmScalarGraph
                     || target.RequiresUnsafeCaller && !block.IsCallerUnsafeScope
                     || target.ReturnType != call.Type
                     || target.ParameterCount != call.Arguments.Length
-                    || function.IsNoThrow && !target.IsNoThrow)
+                    || (requiresNoFailureProof && !SemanticVerifier.ProvidesNoFailureGuarantee(target)))
                 {
                     throw new ArgumentException("Indexed call target declaration does not match.");
                 }
@@ -340,7 +341,7 @@ internal sealed class TrRmScalarGraph
                     || !IsSwitchType(Types[block.SwitchValue - 1])
                     || block.SwitchCases.IsDefault || block.SwitchDefault is null))
                 || (!hasSwitch && (!block.SwitchCases.IsDefault || block.SwitchDefault is not null))
-                || (NoThrow && block.FailureReason != 0
+                || (requiresNoFailureProof && block.FailureReason != 0
                     && !HasTerminalDoesNotReturnCall(block, program)))
             {
                 throw new ArgumentException("Indexed terminator violates the scalar graph contract.");

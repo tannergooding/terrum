@@ -56,6 +56,12 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
     {
         Count(ref remaining, depth);
+        if (RequiresNoFailureProof(function)
+            && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+            && index is not BoundConstant)
+        {
+            throw InvalidNoFailureEffect(function, index?.Span ?? default);
+        }
         if (!NativeFixedArrayContract.MatchesProgram(program)
             || !NativeFixedArrayContract.IsCarrier(carrierType)
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -70,9 +76,6 @@ public static partial class SemanticVerifier
             || (index.Type != PrimitiveType.Int32
                 && !(index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(layout)))
-            || (function.IsNoThrow
-                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
-                && index is not BoundConstant)
             || (requiredStartIndex is int required
                 && index is BoundConstant { Type: PrimitiveType.Int32, Value: var actual }
                 && actual != required)

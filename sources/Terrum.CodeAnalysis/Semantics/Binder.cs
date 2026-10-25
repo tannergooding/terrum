@@ -681,6 +681,7 @@ internal sealed partial class Binder
             _tree = _signatures.Count == 0 ? _trees[0] : _signatures[functionIndex].Tree;
             var (code, message) = invalidEffect switch {
                 "NoThrow" => ("TRM3017", "NoThrow declarations cannot perform potentially throwing operations or call functions without a NoThrow contract."),
+                "NativeCallable" => ("TRM3030", "NativeCallable bodies must not allow Terrum failures to propagate across a native boundary."),
                 "DoesNotReturn" => ("TRM3018", "DoesNotReturn declarations must have no reachable normal return or fallthrough."),
                 "NormalReturn" => ("TRM3012", "Not all normally completing paths return a value."),
                 "FinallyReturn" => ("TRM3019", "A finally block cannot return or transfer control out of cleanup."),
@@ -2075,12 +2076,12 @@ internal sealed partial class Binder
         if (isNativeCallable)
         {
             if (isExternal || constructor || property || operatorDeclaration || isCleanup || doesNotReturn
-                || containingType is not null || !isNoThrow
+                || containingType is not null
                 || declaration.Children.OfType<SyntaxNode>().Any(static child =>
                     child.Kind is SyntaxKind.TypeParameterList or SyntaxKind.ConstraintClause))
             {
                 Report("TRM3030",
-                    "NativeCallable requires a top-level, non-generic, NoThrow function with no native receiver or output effects.",
+                    "NativeCallable requires a top-level, non-generic function with no native receiver or output effects.",
                     declaration.Span);
             }
             requiresUnsafeCaller = true;

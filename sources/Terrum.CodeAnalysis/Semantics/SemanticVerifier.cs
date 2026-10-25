@@ -2158,6 +2158,12 @@ public static partial class SemanticVerifier
         }
     }
 
+    internal static bool RequiresNoFailureProof(BoundFunction function) =>
+        function.IsNoThrow || (!function.IsExternal && function.NativeFunctionPointerType is not null);
+
+    internal static bool ProvidesNoFailureGuarantee(BoundFunction function) =>
+        function.IsNoThrow || function.NativeFunctionPointerType is not null;
+
     private static bool Statement(BoundStatement statement, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
         List<CleanupScope>? cleanups = null, bool inCleanup = false, bool inUnsafe = false, FailureEdges? failures = null,
@@ -2594,9 +2600,10 @@ public static partial class SemanticVerifier
                     == FullMask(program, ownerType);
                 return false;
             case BoundBufferAssignment bufferWrite:
-                if (function.IsNoThrow && !IsProvenBufferIndex(bufferWrite.Buffer, bufferWrite.Index, program))
+                if (RequiresNoFailureProof(function)
+                    && !IsProvenBufferIndex(bufferWrite.Buffer, bufferWrite.Index, program))
                 {
-                    throw InvalidEffect(bufferWrite.Span);
+                    throw InvalidNoFailureEffect(function, bufferWrite.Span);
                 }
                 if (bufferWrite.Buffer < 0 || bufferWrite.Buffer >= program.Buffers.Length
                     || !program.Buffers[bufferWrite.Buffer].IsWritable)
@@ -2633,9 +2640,9 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (function.IsNoThrow)
+                if (RequiresNoFailureProof(function))
                 {
-                    throw InvalidEffect(viewSet.Span);
+                    throw InvalidNoFailureEffect(function, viewSet.Span);
                 }
                 if (!EvaluateExpression(viewSet.Index, initialized, fieldMasks, declarations,
                     function, program, ref remaining, depth + 1, failures))
@@ -3051,9 +3058,9 @@ public static partial class SemanticVerifier
                         false, cleanups, inCleanup, inUnsafe, failures, loops);
                     return true;
                 }
-                if (function.IsNoThrow)
+                if (RequiresNoFailureProof(function))
                 {
-                    throw InvalidEffect(view.Span);
+                    throw InvalidNoFailureEffect(function, view.Span);
                 }
                 failures?.Add(initialized, fieldMasks);
                 initialized[view.Variable] = true;
@@ -3093,9 +3100,10 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (function.IsNoThrow && CanBe(requirement.Condition, false, ref remaining, initialized))
+                if (RequiresNoFailureProof(function)
+                    && CanBe(requirement.Condition, false, ref remaining, initialized))
                 {
-                    throw InvalidEffect(requirement.Span);
+                    throw InvalidNoFailureEffect(function, requirement.Span);
                 }
                 if (CanBe(requirement.Condition, false, ref remaining, initialized))
                 {
@@ -4351,9 +4359,9 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (function.IsNoThrow && !IsTotalConversion(cast.Operand.Type, cast.Type))
+                if (RequiresNoFailureProof(function) && !IsTotalConversion(cast.Operand.Type, cast.Type))
                 {
-                    throw InvalidEffect(cast.Span);
+                    throw InvalidNoFailureEffect(function, cast.Span);
                 }
                 if (!IsTotalConversion(cast.Operand.Type, cast.Type))
                 {
@@ -4541,9 +4549,9 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (function.IsNoThrow)
+                if (RequiresNoFailureProof(function))
                 {
-                    throw InvalidEffect(viewRead.Span);
+                    throw InvalidNoFailureEffect(function, viewRead.Span);
                 }
                 failures?.Add(initialized, fieldMasks);
                 break;
@@ -4586,9 +4594,9 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (function.IsNoThrow && !updateTarget.IsNoThrow)
+                if (RequiresNoFailureProof(function) && !ProvidesNoFailureGuarantee(updateTarget))
                 {
-                    throw InvalidEffect(update.Span);
+                    throw InvalidNoFailureEffect(function, update.Span);
                 }
                 VerifyUpdatePlace(update.Place, function, program, ref remaining, depth + 1);
                 if (!EvaluateExpression(update.Place, initialized, fieldMasks, declarations,
@@ -4596,7 +4604,7 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (!updateTarget.IsNoThrow)
+                if (!ProvidesNoFailureGuarantee(updateTarget))
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -4648,9 +4656,10 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (function.IsNoThrow && !IsProvenBufferIndex(bufferRead.Buffer, bufferRead.Index, program))
+                if (RequiresNoFailureProof(function)
+                    && !IsProvenBufferIndex(bufferRead.Buffer, bufferRead.Index, program))
                 {
-                    throw InvalidEffect(bufferRead.Span);
+                    throw InvalidNoFailureEffect(function, bufferRead.Span);
                 }
                 failures?.Add(initialized, fieldMasks);
                 break;
@@ -4700,9 +4709,9 @@ public static partial class SemanticVerifier
                             PrimitiveType.UInt64 => operand.Value != 0,
                             _ => false,
                         }));
-                if (function.IsNoThrow && unaryNegationMayOverflow)
+                if (RequiresNoFailureProof(function) && unaryNegationMayOverflow)
                 {
-                    throw InvalidEffect(unary.Span);
+                    throw InvalidNoFailureEffect(function, unary.Span);
                 }
                 if (unaryNegationMayOverflow)
                 {
@@ -4727,9 +4736,10 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (function.IsNoThrow && update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                if (RequiresNoFailureProof(function)
+                    && update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                 {
-                    throw InvalidEffect(update.Span);
+                    throw InvalidNoFailureEffect(function, update.Span);
                 }
                 if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                 {
@@ -4790,9 +4800,9 @@ public static partial class SemanticVerifier
                 if (compoundOperation is not (TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret)
                     && compoundCanFail)
                 {
-                    if (function.IsNoThrow)
+                    if (RequiresNoFailureProof(function))
                     {
-                        throw InvalidEffect(compound.Span);
+                        throw InvalidNoFailureEffect(function, compound.Span);
                     }
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -4901,12 +4911,12 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var verifiedNoThrowArithmetic = function.IsNoThrow && checkedIntegerOperation
+                var verifiedNoThrowArithmetic = RequiresNoFailureProof(function) && checkedIntegerOperation
                     && ReferenceEquals(binary, cleanupCounterStep);
-                if (function.IsNoThrow && checkedIntegerOperation
+                if (RequiresNoFailureProof(function) && checkedIntegerOperation
                     && binaryCompletes && !verifiedNoThrowArithmetic)
                 {
-                    throw InvalidEffect(binary.Span);
+                    throw InvalidNoFailureEffect(function, binary.Span);
                 }
                 if (checkedIntegerOperation && binaryCompletes && !verifiedNoThrowArithmetic)
                 {
@@ -5024,9 +5034,9 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(call.Span, "UnsafeCaller");
                 }
-                if (function.IsNoThrow && !target.IsNoThrow)
+                if (RequiresNoFailureProof(function) && !ProvidesNoFailureGuarantee(target))
                 {
-                    throw InvalidEffect(call.Span);
+                    throw InvalidNoFailureEffect(function, call.Span);
                 }
                 if (call.Arguments.Length != target.ParameterCount || call.Type != target.ReturnType)
                 {
@@ -5429,7 +5439,7 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(call.Span, "NativeImport");
                     }
                     ApplyNativeOutputCallEffects(call, target, initialized);
-                    if (!target.IsNoThrow)
+                    if (!ProvidesNoFailureGuarantee(target))
                     {
                         failures?.Add(initialized, fieldMasks);
                     }
@@ -6838,5 +6848,9 @@ public static partial class SemanticVerifier
         exception.Data[InvalidEffectKey] = contract;
         return exception;
     }
+
+    private static ArgumentException InvalidNoFailureEffect(BoundFunction function, TextSpan span) =>
+        InvalidEffect(span, function.IsNoThrow ? "NoThrow" : "NativeCallable");
+
     private static NotSupportedException Limit() => new("Bound program exceeds native resource limits.");
 }

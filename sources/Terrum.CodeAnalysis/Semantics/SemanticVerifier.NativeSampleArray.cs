@@ -54,6 +54,12 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
     {
         Count(ref remaining, depth);
+        if (element.Index is not null && RequiresNoFailureProof(function)
+            && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+            && element.Index is not BoundConstant)
+        {
+            throw InvalidNoFailureEffect(function, element.Index.Span);
+        }
         if (!NativeFixedArrayContract.MatchesProgram(program)
             || function.IsExternal || function.IndexedBody is not null
             || element.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -69,9 +75,6 @@ public static partial class SemanticVerifier
             || (element.Index.Type != PrimitiveType.Int32
                 && !(element.Index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(element.Layout)))
-            || (function.IsNoThrow
-                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
-                && element.Index is not BoundConstant)
             || (element.Index is BoundConstant index
                 && (index.Value < 0 || index.Value >= element.Layout.ElementCount)))
         {
@@ -86,6 +89,12 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
     {
         Count(ref remaining, depth);
+        if (address.Index is not null && RequiresNoFailureProof(function)
+            && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+            && address.Index is not BoundConstant)
+        {
+            throw InvalidNoFailureEffect(function, address.Index.Span);
+        }
         if (!address.IsUnsafeAuthorized
             || !NativePointerTypeContract.IsValidType(address.Type, program.NativePointerTypes)
             || !NativeFixedArrayContract.MatchesProgram(program)
@@ -102,9 +111,6 @@ public static partial class SemanticVerifier
             || (address.Index.Type != PrimitiveType.Int32
                 && !(address.Index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(address.Layout)))
-            || (function.IsNoThrow
-                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
-                && address.Index is not BoundConstant)
             || (address.Index is BoundConstant index
                 && (index.Value < 0 || index.Value >= address.Layout.ElementCount)))
         {
@@ -128,6 +134,12 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
     {
         Count(ref remaining, depth);
+        if (RequiresNoFailureProof(function)
+            && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
+            && write.Index is not BoundConstant)
+        {
+            throw InvalidNoFailureEffect(function, write.Index.Span);
+        }
         if (!NativeFixedArrayContract.MatchesProgram(program)
             || function.IsExternal || function.IndexedBody is not null
             || write.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -143,9 +155,6 @@ public static partial class SemanticVerifier
             || (write.Index.Type != PrimitiveType.Int32
                 && !(write.Index.Type == PrimitiveType.UInt32
                     && NativeFixedArrayContract.AllowsUInt32Indices(write.Layout)))
-            || (function.IsNoThrow
-                && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
-                && write.Index is not BoundConstant)
             || (write.Index is BoundConstant index
                 && (index.Value < 0 || index.Value >= write.Layout.ElementCount)))
         {

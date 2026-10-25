@@ -83,7 +83,7 @@ internal readonly ref struct TrRmNativeCallableTableReader
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
                 || !contracts.HasNativeAbi((int)method)
                 || contracts.GetNativeAbi((int)method) != new TrRmNativeAbiContract(1, 2, 0)
-                || (contracts.GetEffectsMask((int)method) & 5) != 5
+                || (contracts.GetEffectsMask((int)method) & 4) != 4
                 || (contracts.GetEffectsMask((int)method) & 2) != 0)
             {
                 throw InvalidNativeCallable();

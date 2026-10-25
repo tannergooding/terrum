@@ -77,7 +77,7 @@ internal static class NativeFunctionPointerContract
         if (!NativeFunctionPointerTypes.IsType(functionPointerType)
             || (uint)NativeFunctionPointerTypes.Index(functionPointerType) >= (uint)signatures.Length
             || function.NativeFunctionPointerType != functionPointerType
-            || !function.IsNoThrow || !function.RequiresUnsafeCaller
+            || !function.RequiresUnsafeCaller
             || function.DoesNotReturn || function.IsConstructor || function.IsClassConstructor
             || function.IsOperator || function.IsCleanup || function.PropertyName is not null
             || function.Intrinsic != BoundIntrinsic.None

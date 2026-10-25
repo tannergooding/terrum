@@ -108,17 +108,19 @@ and its writable fields are supported receiver places. Current artifacts
 record the validated access and receiver contracts directly; revision 76
 remains the base when no private span, fixed-layout or direct-import facts
 require a later revision.
-The current Windows x64 prototype also emits `NoThrow` native-callable
-functions and explicit native function-pointer values. It carries the exact
-scalar/raw-pointer signature through local and field storage, direct address
-formation, indirect-call verification, native x64 lowering, and private
+The current Windows x64 prototype emits native-callable functions whose
+defined bodies satisfy scoped no-failure verification; the general `NoThrow`
+annotation is not required. It also emits explicit native function-pointer
+values, carrying the exact scalar/raw-pointer signature through local and field
+storage, direct address formation, indirect-call verification, native x64 lowering, and private
 module/dependency paths. A nonzero provisional `NativeCallable.entryName` is
 preserved by TRRM and private semantic modules and emitted as an additional
 exactly named PE export, independently of the ordinary library export list.
 Forming or invoking a function pointer requires an explicit unsafe scope; a
 callback target remains valid only while its code image is loaded. These
-declarations and records remain separate from accepted grammar and canonical
-TRRM metadata.
+bounded implementation paths do not establish support for every accepted
+native target or metadata contract; the `NativeCallable.entryName` extension
+remains provisional.
 The `Host.Source` semantic-module JIT grant and `NativeSourceGrantLibrary` are
 unselected prototype paths, not compiler input or JIT contracts. Compiler
 frontends consume source text at their input boundary; JIT consumes semantic
