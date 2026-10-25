@@ -28,6 +28,7 @@ numbers do not save bytes.
 |---|---|
 | [Core-library reference](core-library-reference.md) | Broad candidate APIs and dependency layers; accepted members/protocols link to the adopted inventory rather than being redefined. |
 | [Source arithmetic profile selection](source-arithmetic-profile-selection.md) | Unapproved, provisional per-compilation options and CLI selection with a deterministic Development default; preserves accepted arithmetic and explicit compiled policies without a profile wire field. |
+| [Private arithmetic operation persistence](source-arithmetic-private-persistence.md) | Unapproved private revision 89 and per-operation mode-byte candidate for resolved checked/wrapping operations; distinguishes retained semantic bodies, already-lowered images, development executable encodings, and standard register Bodies. |
 
 ## Callable contracts
 
