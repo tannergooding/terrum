@@ -72,6 +72,55 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesShortControlFlowBlockAndRecordReferences()
+    {
+        var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        var edge = new byte[] { 6, 0, 0, 0, 0, 0, 0, 0 };
+        var edgeRecords = new[] { blockState, edge };
+        _ = new TrRmRegisterBodyReader(
+            CreateBodyWithRecords(edgeRecords, code: [0xA0, 0x10]));
+        _ = new TrRmRegisterBodyReader(
+            CreateBodyWithRecords(edgeRecords, code: [0xB1, 0x10]));
+
+        AssertInvalid(CreateBody(0, code: [0xB0, 1]));
+        AssertInvalid(CreateBodyWithRecords(edgeRecords, code: [0xA0, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(edgeRecords, code: [0xA0, 0x20]));
+        AssertInvalid(CreateBodyWithRecords(edgeRecords, code: [0xB1, 0x00]));
+
+        var switchRecord = new byte[] {
+            7, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        };
+        var typeCounts = new uint[5];
+        typeCounts[1] = 1;
+        _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
+            [blockState, switchRecord], 0x02, typeCounts, [0xB2, 1]));
+        AssertInvalid(CreateBodyWithRecords(
+            edgeRecords, code: [0xB2, 1]));
+
+        var constructorBinding = new byte[] {
+            0x0B, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        };
+        var requirementFailure = new byte[] { 8, 0, 0, 0, 0, 0, 1, 0, 1, 0, 0, 0 };
+        var callCounts = new uint[5];
+        callCounts[1] = 1;
+        callCounts[2] = 1;
+        _ = new TrRmRegisterBodyReader(CreateBodyWithRecords(
+            [blockState, constructorBinding, requirementFailure],
+            0x06, callCounts, [0xB3, 2, 0x00]));
+        AssertInvalid(CreateBodyWithRecords(edgeRecords, code: [0xB3, 1, 0x00]));
+
+        _ = new TrRmRegisterBodyReader(CreateBody(0, code: [0xB5, 0]));
+        _ = new TrRmRegisterBodyReader(CreateBody(0, code: [0xB7, 0]));
+        AssertInvalid(CreateBody(0, code: [0xB5, 1]));
+        AssertInvalid(CreateBody(0, code: [0xB7, 1]));
+
+        var homeCounts = new uint[5];
+        homeCounts[0] = 1;
+        _ = new TrRmRegisterBodyReader(CreateBody(0x01, homeCounts, [0xB8, 0]));
+        AssertInvalid(CreateBody(0x01, homeCounts, [0xB8, 1]));
+    }
+
+    [Test]
     public void RejectsInvalidPrefixCountsAndInstructionExtents()
     {
         AssertInvalid(Mutate(CreateBody(), 0, 0x02));

@@ -150,8 +150,13 @@ including constructed type arguments. Normalized HomeMap comparison through
 nested constructed types and generic substitution, callee
 contract/replacement equality, ConstantSource/value type equality, full
 instruction operands/control verification, canonical writing, re-emission and
-execution remain incomplete. F0/F1 rejection is provisional under the
-unapproved pseudo-retirement proposal; normative assignments remain unchanged.
+execution remain incomplete. Short control forms now bind `A0..AF`/`B1`
+edge records, `B2` switch and `B3` requirement records, validate `B0` block
+targets and `B8` Home indexes, and require zero operands for `B5`/`B7`.
+Register/type/effect semantics, other record-to-instruction links, and
+unsupported `B4`/`B6` forms remain outside this slice. F0/F1 rejection is
+provisional under the unapproved pseudo-retirement proposal; normative
+assignments remain unchanged.
 Artifact framing now selects standard TRRM or the internal development
 executable schema before indexing and writing. The standard index follows the
 registry's assigned section kinds/strides, including `NativeImport`/

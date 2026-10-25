@@ -186,7 +186,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private static void ValidateInstructions(ReadOnlySpan<byte> block)
+    private void ValidateInstructions(ReadOnlySpan<byte> block)
     {
         var position = 0;
         var lastOpcode = -1;
@@ -204,6 +204,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                 throw InvalidBody();
             }
 
+            ValidateControlReferences(opcode, block.Slice(position, instructionLength));
             position += instructionLength;
             if (IsDefiniteTerminator(opcode) && position != block.Length)
             {
@@ -214,6 +215,55 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
 
         if (!IsPotentialTerminator(lastOpcode))
+        {
+            throw InvalidBody();
+        }
+    }
+
+    private void ValidateControlReferences(byte opcode, ReadOnlySpan<byte> instruction)
+    {
+        if (opcode is >= 0xA0 and <= 0xAF)
+        {
+            ValidateRecordReference(instruction[1] >> 4, 0x06);
+            return;
+        }
+
+        switch (opcode)
+        {
+            case 0xB0:
+                if (instruction[1] >= BlockCount)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xB1:
+                ValidateRecordReference(instruction[1] >> 4, 0x06);
+                break;
+            case 0xB2:
+                ValidateRecordReference(instruction[1], 0x07);
+                break;
+            case 0xB3:
+                ValidateRecordReference(instruction[1], 0x08);
+                break;
+            case 0xB5:
+            case 0xB7:
+                if (instruction[1] != 0)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xB8:
+                if (instruction[1] >= HomeCount)
+                {
+                    throw InvalidBody();
+                }
+                break;
+        }
+    }
+
+    private void ValidateRecordReference(int recordIndex, byte expectedKind)
+    {
+        if (recordIndex >= _recordCount || GetRecord(recordIndex)[0] != expectedKind)
         {
             throw InvalidBody();
         }

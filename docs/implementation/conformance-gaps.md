@@ -138,7 +138,11 @@ normalized equality through nested constructed arguments and generic
 substitution, callee/provider contract equality and ConstantMap source/value
 type equality remain incomplete. Full record and instruction semantics,
 descriptor eligibility, canonical writing, remapping, re-emission and
-execution remain unfinished.
+execution remain unfinished. The selected Body reader now validates short
+control-flow targets and selected conditional-edge, switch and requirement
+records, plus zero operands for fail-fast/unreachable and the short Home return
+index; it does not establish register/type/effect semantics or the remaining
+instruction-record relationships.
 
 Artifact framing now takes an explicit standard or internal development
 schema before table indexing and writing. Standard `TrRmArtifactIndex` uses
