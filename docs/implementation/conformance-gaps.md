@@ -394,20 +394,27 @@ witnesses. `Binder`/`Binder.ManagedClasses` and
 conformance/constraint/generic-method forms. The assigned 32-byte
 GenericParam and 12-byte Constraint rows now have C# readers/writers and
 Terrum-authored structural validators for ownership, formal domains, ranges,
-flags and currently assigned payload tags. This does not resolve complete
-complete TypeSpecRef shapes and ConstantSource row bounds are structurally
-checked, but payload/value semantics, the associated-relation payload, generic
-substitution, proof, witness and execution semantics remain open; row framing
-alone does not execute a generic contract. The standard structural validator
-also checks InterfaceDef/AssociatedTypeDef ownership, self-formal identity,
-range extents, associated-row partitioning, names and optional default
-TypeSpecRefs. InterfaceBase/InterfaceMethod ownership, ordinals, complete
-base TypeSpecRefs and direct instance MethodDef ownership are now checked;
-InterfaceConstDef/AssociatedConstDef ownership, names, complete type
+flags and currently assigned payload tags. Complete TypeSpecRef shapes and
+ConstantSource row bounds are structurally checked, but payload/value
+semantics, the Constraint kind-3 associated-relation link,
+generic substitution, proof, witness and execution semantics remain open; row
+framing alone does not execute a generic contract. The standard structural
+validator also checks InterfaceDef/AssociatedTypeDef ownership, self-formal
+identity, range extents, associated-row partitioning, names and optional
+default TypeSpecRefs. InterfaceBase/InterfaceMethod ownership, ordinals,
+complete base TypeSpecRefs and direct instance MethodDef ownership are now
+checked; InterfaceConstDef/AssociatedConstDef ownership, names, complete type
 references and bounded ConstantSource row references are also checked.
-Base-instance binding, ConstantSource payload/value semantics, associated-type
-Import/Export identity, provider/default binding, relations, witnesses and
-execution remain incomplete. The focused
+Standard AssociatedRelation rows now validate complete declaring/required
+TypeSpecRefs and direct AssociatedTypeDef or Import references expected to
+denote that definition kind; the declaring-interface reference must be a
+TypeSpec row, not an inline F2/F3 form. Constraint kind-3 still accepts only a
+nonzero payload; the candidate row bound, owning-formal domain and exact
+relation binding remain unfinished. Base-instance binding, ConstantSource
+payload/value semantics,
+provider/default comparison, relation/witness binding and execution remain
+incomplete. AssociatedTypeDef Import/Export identity is implemented only as
+the unapproved provisional candidate. The focused
 [associated-relation payload proposal](../proposals/constraint-associated-relation-payload.md)
 is unapproved, provisionally guides implementation only under explicit user
 authorization, and does not itself approve or implement the separate

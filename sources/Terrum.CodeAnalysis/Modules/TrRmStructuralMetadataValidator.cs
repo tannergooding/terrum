@@ -20,6 +20,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmInterfaceMethodTableReader interfaceMethods,
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
             TrRmAssociatedConstDefTableReader associatedConstDefs,
+            TrRmAssociatedRelationTableReader associatedRelations,
             TrRmConstantSourceTableReader constantSources,
             TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
             TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
@@ -45,6 +46,7 @@ public static class TrRmStructuralMetadataValidator
             InterfaceMethods = interfaceMethods;
             InterfaceConstDefs = interfaceConstDefs;
             AssociatedConstDefs = associatedConstDefs;
+            AssociatedRelations = associatedRelations;
             ConstantSources = constantSources;
             TargetLayoutDependencies = targetLayoutDependencies;
             TargetLayoutDependencyFields = targetLayoutDependencyFields;
@@ -76,6 +78,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmInterfaceMethodTableReader InterfaceMethods { get; }
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
         internal TrRmAssociatedConstDefTableReader AssociatedConstDefs { get; }
+        internal TrRmAssociatedRelationTableReader AssociatedRelations { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
         internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
         internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
@@ -168,6 +171,8 @@ public static class TrRmStructuralMetadataValidator
             out var interfaceConstCount);
         _ = index.TryGetSection(0x0032, out var associatedConstBytes,
             out var associatedConstCount);
+        _ = index.TryGetSection(0x0036, out var associatedRelationBytes,
+            out var associatedRelationCount);
         _ = index.TryGetSection(0x003F, out _, out var frozenValueNodeCount);
         _ = index.TryGetSection(0x0042, out _, out var constantExecutionCount);
         _ = index.TryGetSection(0x0049, out _, out var targetValueBindingCount);
@@ -262,6 +267,7 @@ public static class TrRmStructuralMetadataValidator
         var interfaceMethods = default(TrRmInterfaceMethodTableReader);
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
         var associatedConstDefs = default(TrRmAssociatedConstDefTableReader);
+        var associatedRelations = default(TrRmAssociatedRelationTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
         var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
@@ -295,6 +301,12 @@ public static class TrRmStructuralMetadataValidator
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties,
             interfaces, associatedTypeDefs, fields);
+        if (!developmentProfile)
+        {
+            associatedRelations = new TrRmAssociatedRelationTableReader(
+                associatedRelationBytes, associatedRelationCount, typeSpecs,
+                associatedTypeDefs.Count, imports);
+        }
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
             generics, imports, selectedConstantSourceCount);
         if (!developmentProfile)
@@ -437,7 +449,7 @@ public static class TrRmStructuralMetadataValidator
         _ = sourceMaps;
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
-            interfaceConstDefs, associatedConstDefs, constantSources,
+            interfaceConstDefs, associatedConstDefs, associatedRelations, constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,

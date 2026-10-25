@@ -30,6 +30,50 @@ public sealed class TrRmAssociatedTypeImportExportTests
     }
 
     [Test]
+    public void ValidatesDirectAndImportedAssociatedRelationReferences()
+    {
+        var fixture = CreateFixture();
+        Assert.That(Read(fixture, [], []), Is.False);
+
+        var imports = new[]
+        {
+            new TrRmImportRow(1, 6, 0x1300_0002),
+            new TrRmImportRow(1, 7, 0x2000_0002),
+        };
+        Assert.That(Read(fixture, imports, []), Is.True);
+    }
+
+    [Test]
+    public void StructuralValidatorRejectsMalformedAssociatedRelations()
+    {
+        var fixture = CreateFixture();
+        var malformed = (byte[])fixture.RelationBytes.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(4), 0x1400_0001);
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [], associatedRelationBytes: malformed));
+
+        malformed = (byte[])fixture.RelationBytes.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(8), 0xF400_0008);
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [], associatedRelationBytes: malformed));
+
+        malformed = (byte[])fixture.RelationBytes.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(4), 0x2000_0003);
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [], associatedRelationBytes: malformed));
+
+        malformed = (byte[])fixture.RelationBytes.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed, 0xF200_0008);
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [], associatedRelationBytes: malformed));
+
+        malformed = (byte[])fixture.RelationBytes.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed, 0xF300_8B08);
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [], associatedRelationBytes: malformed));
+    }
+
+    [Test]
     public void RejectsAssociatedImportsWithoutTheirExpectedOwnerOrInWrongModule()
     {
         var fixture = CreateFixture();
@@ -75,7 +119,8 @@ public sealed class TrRmAssociatedTypeImportExportTests
 
     private static bool Read(Fixture fixture,
         IReadOnlyList<TrRmImportRow> importRows,
-        IReadOnlyList<TrRmExportRow> exportRows, bool writeRows = false)
+        IReadOnlyList<TrRmExportRow> exportRows, bool writeRows = false,
+        byte[]? associatedRelationBytes = null)
     {
         var strings = new TrRmStringTableReader(fixture.Strings, 7);
         var modules = new TrRmModuleTableReader(fixture.Modules, 2, strings,
@@ -90,7 +135,8 @@ public sealed class TrRmAssociatedTypeImportExportTests
         var signatures = default(TrRmMethodSigTableReader);
         var methods = new TrRmMethodDefTableReader([], 0,
             strings, modules, types, signatures, 0, 0);
-        var typeSpecs = default(TrRmTypeSpecTableReader);
+        var typeSpecs = new TrRmTypeSpecTableReader(
+            fixture.TypeSpecs, 2, 2, 0, 0, 0);
         var generics = new TrRmGenericParamTableReader([], 0,
             strings, types, methods, signatures, typeSpecs, 0);
         var interfaces = new TrRmInterfaceDefTableReader(fixture.InterfaceDefs, 2,
@@ -104,6 +150,10 @@ public sealed class TrRmAssociatedTypeImportExportTests
             : EncodeImportRows(importRows);
         var imports = new TrRmImportTableReader(importBytes, importRows.Count,
             strings, moduleRefs, types, methods, default, interfaces, associatedTypeDefs);
+        var relations = associatedRelationBytes ?? TrRmAssociatedRelationTableWriter.Encode([
+            new TrRmAssociatedRelationRow(importRows.Count > 1 ? 2u : 1u,
+                importRows.Count > 1 ? 0x1C00_0002u : 0x2000_0001u, 1),
+        ], typeSpecs, 2, imports);
         var exportBytes = writeRows
             ? TrRmExportTableWriter.Encode(exportRows, strings, types, methods,
                 default, imports, interfaces, associatedTypeDefs)
@@ -116,13 +166,23 @@ public sealed class TrRmAssociatedTypeImportExportTests
             new(0x0001, 0, 2, fixture.Modules),
             new(0x0002, 0, 7, fixture.Strings),
             new(0x0010, 0, 1, fixture.ModuleRefs),
+            new(0x0011, 0, 2, fixture.TypeSpecs),
             new(0x0013, 0, 2, fixture.TypeDefs),
             new(0x0015, 0, 2, fixture.Layouts),
-            new(0x001C, 0, (uint)importRows.Count, importBytes),
-            new(0x001D, 0, (uint)exportRows.Count, exportBytes),
             new(0x0025, 0, 2, fixture.InterfaceDefs),
             new(0x0027, 0, 2, fixture.AssociatedTypeDefs),
+            new(0x0036, 0, 1, relations),
         };
+        if (importBytes.Length != 0)
+        {
+            sections.Insert(6,
+                new TrRmSection(0x001C, 0, (uint)importRows.Count, importBytes));
+        }
+        if (exportBytes.Length != 0)
+        {
+            sections.Insert(importBytes.Length == 0 ? 6 : 7,
+                new TrRmSection(0x001D, 0, (uint)exportRows.Count, exportBytes));
+        }
         TrRmStructuralMetadataValidator.Validate(TrRmArtifactWriter.Encode(sections));
         return imports.IsExpectedDefinition(0x2000_0002);
     }
@@ -159,7 +219,11 @@ public sealed class TrRmAssociatedTypeImportExportTests
         var signatures = default(TrRmMethodSigTableReader);
         var methods = new TrRmMethodDefTableReader([], 0,
             strings, modules, types, signatures, 0, 0);
-        var typeSpecs = default(TrRmTypeSpecTableReader);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+            TrRmTypeSpecTableWriter.Reference(0x02, 2),
+        ], 2, 0, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 2, 0, 0, 0);
         var generics = new TrRmGenericParamTableReader([], 0,
             strings, types, methods, signatures, typeSpecs, 0);
         var interfaceDefBytes = TrRmInterfaceDefTableWriter.Encode([
@@ -174,9 +238,13 @@ public sealed class TrRmAssociatedTypeImportExportTests
             new TrRmAssociatedTypeDefRow(1, 5, 0),
             new TrRmAssociatedTypeDefRow(2, 5, 0),
         ], strings, typeSpecs, interfaces);
+        var relationBytes = TrRmAssociatedRelationTableWriter.Encode([
+            new TrRmAssociatedRelationRow(1, 0x2000_0001, 1),
+        ], typeSpecs, 2, default);
 
         return new Fixture(stringBytes, moduleBytes, moduleRefBytes,
-            typeDefBytes, layoutBytes, interfaceDefBytes, associatedTypeDefBytes);
+            typeSpecBytes, typeDefBytes, layoutBytes, interfaceDefBytes,
+            associatedTypeDefBytes, relationBytes);
     }
 
     private static byte[] EncodeImportRows(IReadOnlyList<TrRmImportRow> rows)
@@ -213,8 +281,10 @@ public sealed class TrRmAssociatedTypeImportExportTests
         byte[] Strings,
         byte[] Modules,
         byte[] ModuleRefs,
+        byte[] TypeSpecs,
         byte[] TypeDefs,
         byte[] Layouts,
         byte[] InterfaceDefs,
-        byte[] AssociatedTypeDefs);
+        byte[] AssociatedTypeDefs,
+        byte[] RelationBytes);
 }

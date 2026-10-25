@@ -252,16 +252,26 @@ The active C#
 and [writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmConstraintTableWriter.cs)
 now consume/emit the 12-byte row. The reader checks owner correspondence,
 zero flags and nonzero payload; kind 1 is bounded by the TypeSpec row count,
-kind 2 by property codes `1..3`, while kind 3 currently has **only the
-nonzero payload check**. It receives no AssociatedRelation table/count.
-The writer invokes that reader, so it inherits the same gap.
-This bounded prototype does not implement the candidate or establish
-accepted-contract conformance; kind 1's complete TypeSpecRef handling is
-also separate unfinished work.
+kind 2 by property codes `1..3`, while kind 3 still has **only the nonzero
+payload check**. It receives no AssociatedRelation table/count. The writer
+invokes that reader, so it inherits the same gap.
+
+The new standard AssociatedRelation reader/writer validates the assigned
+12-byte row extent, both complete TypeSpecRefs, and the direct `0x20` or
+Import-expected-`0x20` AssociatedTypeDef identity against its selected table.
+It rejects inline F2/F3 forms in the declaring-interface slot.
+The structural validator constructs this reader only for the standard schema
+after validating Imports. Direct/imported references and malformed relation
+rows are covered by active artifact tests. This structural slice does not
+bind the relation's exact declaring-interface instance, verify its
+constraint-subject Module/formal context, or implement the Constraint kind-3
+row bound; it does not establish the candidate or accepted-contract
+conformance. Kind 1's complete TypeSpecRef handling is also separate
+unfinished work.
 
 The [structural validator](../../sources/Terrum.CodeAnalysis/Modules/TrRmStructuralMetadataValidator.cs)
-currently constructs that reader from the formal and TypeSpec tables, not a
-decoded AssociatedRelation table. The existing
+still constructs the Constraint reader from the formal and TypeSpec tables,
+not the decoded AssociatedRelation table. The existing
 [reader fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmGenericParamTableReaderTests.cs)
 are not evidence of associated-relation binding or execution. Implementation
 and qualification remain under the separate

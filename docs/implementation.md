@@ -161,11 +161,17 @@ provisionally admit the proposed AssociatedTypeDef `0x20` identity, require
 explicit owner imports, and enforce public-owner and non-reexport rules.
 Provider-owner equality, exact default comparison, base-instance binding,
 ConstantSource payload/value semantics, relation/witness semantics and
-standard executable production remain incomplete. InterfaceConstDef and
-AssociatedConstDef rows validate their InterfaceDef ranges, owners, names and
-complete type references; initialized interface constants also require a
-bounded ConstantSource row reference. The associated-type identity proposal
-remains unapproved; implementation is provisional only.
+standard executable production remain incomplete. Standard AssociatedRelation
+rows now validate both complete TypeSpecRefs and direct AssociatedTypeDef or
+Import references expected to denote that definition kind. Exact
+declaring-interface references must use a TypeSpec row rather than inline
+F2/F3 forms; exact instance binding and the Constraint kind-3 row link remain
+incomplete. InterfaceConstDef and AssociatedConstDef rows validate their
+InterfaceDef ranges, owners, names and complete type references; initialized
+interface constants also require a bounded ConstantSource row reference. The
+associated-type identity and
+relation-payload proposals remain unapproved; their implementation directions
+are provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
