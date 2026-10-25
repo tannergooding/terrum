@@ -14,6 +14,7 @@ public static class TrRmStructuralMetadataValidator
     internal readonly ref struct ValidatedExecutionTables
     {
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
+            TrRmFeatureTableReader features,
             TrRmModuleTableReader modules, TrRmModuleRefTableReader moduleRefs,
             TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs,
@@ -56,6 +57,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmArtifactSchema schema)
         {
             Strings = strings;
+            Features = features;
             Modules = modules;
             ModuleRefs = moduleRefs;
             TypeDefs = typeDefs;
@@ -105,6 +107,7 @@ public static class TrRmStructuralMetadataValidator
         }
 
         internal TrRmStringTableReader Strings { get; }
+        internal TrRmFeatureTableReader Features { get; }
         internal TrRmModuleTableReader Modules { get; }
         internal TrRmModuleRefTableReader ModuleRefs { get; }
         internal TrRmTypeDefTableReader TypeDefs { get; }
@@ -168,9 +171,10 @@ public static class TrRmStructuralMetadataValidator
 
             var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
             TrRmRegisterBodyMapValidator.Validate(body,
-                methodDefRow, Methods.GetOwnerModule(methodDefRow), TypeDefs, TypeSpecs,
-                GenericParams, Methods, Signatures, Parameters, Fields,
-                FieldPaths, ConstantSources, Contracts, Imports, ModuleRefs);
+                methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
+                Modules, TypeDefs, TypeSpecs, GenericParams, Methods, Signatures,
+                Parameters, Fields, FieldPaths, ConstantSources, FrozenValueNodes,
+                Blobs, Contracts, Imports, ModuleRefs);
         }
     }
 
@@ -825,7 +829,8 @@ public static class TrRmStructuralMetadataValidator
         _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
-        return new ValidatedExecutionTables(strings, modules, moduleRefs, types, typeSpecs,
+        return new ValidatedExecutionTables(strings, features, modules, moduleRefs,
+            types, typeSpecs,
             generics,
             constraints,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,

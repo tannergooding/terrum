@@ -12,13 +12,16 @@ internal static class TrRmRegisterBodyMapValidator
     private const uint UnitTypeSpecRef = 0xF200_0000;
 
     internal static void Validate(TrRmRegisterBodyReader body, int methodDefRow,
-        int ownerModule,
+        int ownerModule, TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
         TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
         TrRmModuleRefTableReader moduleRefs)
     {
@@ -31,8 +34,9 @@ internal static class TrRmRegisterBodyMapValidator
             types, typeSpecs, genericParams, imports, moduleRefs, visitedTypeSpecRows);
         ValidateFieldMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, fields, fieldPaths, imports, moduleRefs, visitedTypeSpecRows);
-        ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
-            methods, imports, moduleRefs, constantSources, visitedTypeSpecRows);
+        ValidateConstantMap(body, ownerModule, features, modules, types, typeSpecs,
+            genericParams, methods, imports, moduleRefs, constantSources,
+            frozenValueNodes, blobs, visitedTypeSpecRows);
         ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
             contracts, imports);
     }
@@ -472,16 +476,28 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void ValidateConstantMap(TrRmRegisterBodyReader body, int ownerModule,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams, TrRmMethodDefTableReader methods,
         TrRmImportTableReader imports, TrRmModuleRefTableReader moduleRefs,
         TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs,
         HashSet<int> visitedTypeSpecRows)
     {
+        if (body.ConstantCount != 0
+            && !TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule, TrRmFeatureTableReader.TypedFrozenValuesFeatureId))
+        {
+            throw new NotSupportedException(
+                "A nonempty ConstantMap requires TypedFrozenValues revision 1.");
+        }
+
         for (var index = 0; index < body.ConstantCount; index++)
         {
             var data = body.ConstantMap.Slice(index * 8, 8);
-            ValidateTypeSpecModuleContext(ReadUInt32(data, 0), ownerModule,
+            var mapTypeSpecRef = ReadUInt32(data, 0);
+            ValidateTypeSpecModuleContext(mapTypeSpecRef, ownerModule,
                 types, typeSpecs, genericParams, methods, imports,
                 moduleRefs, visitedTypeSpecRows);
             var sourceRow = ReadUInt32(data, 4);
@@ -489,6 +505,38 @@ internal static class TrRmRegisterBodyMapValidator
             {
                 throw InvalidMap();
             }
+
+            if (constantSources.GetKind((int)sourceRow) != 1)
+            {
+                throw new NotSupportedException(
+                    "Register Body ConstantMap currently supports only frozen scalar values.");
+            }
+
+            var nodeRow = constantSources.GetPayloadReference((int)sourceRow);
+            if (frozenValueNodes.GetKind(checked((int)nodeRow)) != 1)
+            {
+                throw new NotSupportedException(
+                    "Register Body ConstantMap currently supports only frozen scalar values.");
+            }
+
+            var mapType = typeSpecs.GetTypeSpecRef(mapTypeSpecRef);
+            var nodeType = typeSpecs.GetTypeSpecRef(
+                frozenValueNodes.GetTypeSpecRef(checked((int)nodeRow)));
+            if (mapType.Form != 0x01 || mapType.Qualifiers != 0
+                || nodeType.Form != 0x01 || nodeType.Qualifiers != 0
+                || !TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(mapType.TypeCode)
+                || !TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(nodeType.TypeCode))
+            {
+                throw new NotSupportedException(
+                    "Register Body ConstantMap requires an unqualified registered scalar type.");
+            }
+            if (mapType.TypeCode != nodeType.TypeCode
+                || mapType.ArgumentCode != nodeType.ArgumentCode)
+            {
+                throw InvalidMap();
+            }
+
+            frozenValueNodes.ValidateScalarValue(checked((int)nodeRow), blobs);
         }
     }
 

@@ -167,6 +167,9 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
     public void ValidateScalarValue(int row, TrRmBlobTableReader blobs)
         => _ = GetScalarPayload(row, blobs);
 
+    internal static bool IsRegisteredScalarTypeCode(byte typeCode)
+        => IsRegisteredScalar(typeCode);
+
     private ReadOnlySpan<byte> GetRow(int row)
     {
         if (row <= 0 || row > _recordCount)
@@ -204,20 +207,20 @@ public readonly ref struct TrRmFrozenValueNodeTableReader
         => new("Invalid TRRM FrozenValueNode table or scalar value.");
 }
 
-/// <summary>Encodes fixed FrozenValueNode rows with reserved fields set to zero.</summary>
+/// <summary>Encodes fixed FrozenValueNode rows and validates scalar kind-1 values.</summary>
 public static class TrRmFrozenValueNodeTableWriter
 {
     private const int RowSize = 24;
 
-    /// <summary>Encodes one-based FrozenValueNode rows and validates their table references.</summary>
+    /// <summary>Encodes one-based FrozenValueNode rows and validates scalar payloads.</summary>
     /// <param name="rows">The rows in one-based table order.</param>
     /// <param name="typeSpecs">The validated complete-type reference table.</param>
-    /// <param name="blobCount">The number of Blob rows.</param>
+    /// <param name="blobs">The validated Blob table selected with these rows.</param>
     /// <param name="childCount">The number of FrozenValueChild rows.</param>
     /// <param name="unionCaseDefCount">The number of UnionCaseDef rows.</param>
     /// <returns>The encoded 24-byte fixed rows.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmFrozenValueNodeRow> rows,
-        TrRmTypeSpecTableReader typeSpecs, int blobCount, int childCount,
+        TrRmTypeSpecTableReader typeSpecs, TrRmBlobTableReader blobs, int childCount,
         int unionCaseDefCount)
     {
         ArgumentNullException.ThrowIfNull(rows);
@@ -226,6 +229,24 @@ public static class TrRmFrozenValueNodeTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        var result = EncodeRows(rows, typeSpecs, blobs.Count, childCount,
+            unionCaseDefCount);
+        var reader = new TrRmFrozenValueNodeTableReader(result, rows.Count,
+            typeSpecs, blobs.Count, childCount, unionCaseDefCount);
+        for (var row = 1; row <= rows.Count; row++)
+        {
+            if (reader.GetKind(row) == 1)
+            {
+                reader.ValidateScalarValue(row, blobs);
+            }
+        }
+        return result;
+    }
+
+    private static byte[] EncodeRows(IReadOnlyList<TrRmFrozenValueNodeRow> rows,
+        TrRmTypeSpecTableReader typeSpecs, int blobCount, int childCount,
+        int unionCaseDefCount)
+    {
         var result = new byte[checked(rows.Count * RowSize)];
         for (var index = 0; index < rows.Count; index++)
         {
