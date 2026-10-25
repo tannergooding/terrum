@@ -371,10 +371,10 @@ public sealed class SourceArithmeticProfileTests
 
         var invalidMode = (byte[])producer.Clone();
         invalidMode[modeOffset] = 2;
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalidMode));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(invalidMode));
         var unknownRevision = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(unknownRevision.AsSpan(sizeof(int), sizeof(int)), 90);
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(unknownRevision));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(unknownRevision));
 
         // Revision 88 predates the mode byte, so its arithmetic records are checked-only.
         var legacy = new byte[producer.Length - 1];
@@ -409,7 +409,7 @@ public sealed class SourceArithmeticProfileTests
         var comparisonProducer = ModuleCompiler.CreateProducer(comparisonProgram, ["Less"]);
         var comparisonModeOffset = FindBinaryOverflowModeOffset(comparisonProducer, comparison);
         comparisonProducer[comparisonModeOffset] = 1;
-        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(comparisonProducer));
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(comparisonProducer));
     }
 
     [TestCase(NativeRuntimePolicy.FailFast)]
