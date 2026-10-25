@@ -926,6 +926,27 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void BindsConstructedConstantArgumentsInTheUsingModule()
+    {
+        var counts = new uint[5];
+        counts[1] = 1;
+        var body = CreateBody(0x02, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(21), 0x1100_0005);
+
+        ValidateSelectedConstructedTypeMap(body,
+            constantFormal: true, includeFeature11: true);
+
+        Assert.Throws<NotSupportedException>(
+            () => ValidateSelectedConstructedTypeMap(body,
+                constantFormal: true));
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedConstructedTypeMap(body,
+            constantFormal: true, includeFeature11: true,
+            constantTypeSpecRef: 0xF200_000D));
+    }
+
+    [Test]
     public void MatchesHomeTypesThroughNestedConstructedTypeArguments()
     {
         var counts = new uint[5];
@@ -1150,10 +1171,14 @@ public sealed class TrRmRegisterBodyReaderTests
 
     private static void ValidateSelectedConstructedTypeMap(byte[] body,
         bool importedTypeOwnerIsDifferentModule = false,
-        uint methodParameterTypeSpecRef = 0)
+        uint methodParameterTypeSpecRef = 0,
+        bool constantFormal = false,
+        bool includeFeature11 = false,
+        uint constantTypeSpecRef = 0xF200_0008)
     {
         var artifact = CreateStandardArtifactWithConstructedTypeMap(
-            body, importedTypeOwnerIsDifferentModule, methodParameterTypeSpecRef);
+            body, importedTypeOwnerIsDifferentModule, methodParameterTypeSpecRef,
+            constantFormal, includeFeature11, constantTypeSpecRef);
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
@@ -1236,10 +1261,18 @@ public sealed class TrRmRegisterBodyReaderTests
         var constantSourcesBytes = TrRmConstantSourceTableWriter.Encode([
             new TrRmConstantSourceRow(1, 1),
         ], 1, 0, 0);
+        var blobBytes = TrRmVariableTableWriter.EncodeBlobs([
+            new byte[] { 0, 0, 0, 0 },
+        ]);
+        var frozenValueBytes = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(frozenValueBytes, 2);
+        frozenValueBytes[4] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(frozenValueBytes.AsSpan(8), 1);
 
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleBytes),
             new TrRmSection(0x0002, 0, 9, stringsBytes),
+            new TrRmSection(0x0003, 0, 1, blobBytes),
             new TrRmSection(0x0004, 0, 1, featuresBytes),
             new TrRmSection(0x0010, 0, 1, moduleRefBytes),
             new TrRmSection(0x0011, 0, 9, typeSpecBytes),
@@ -1253,14 +1286,17 @@ public sealed class TrRmRegisterBodyReaderTests
             new TrRmSection(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
             new TrRmSection(0x0030, 0, 1, constantSourcesBytes),
-            new TrRmSection(0x003F, 0, 1, new byte[24]),
+            new TrRmSection(0x003F, 0, 1, frozenValueBytes),
             new TrRmSection(0x004B, 0, 1, fieldPathsBytes),
         ]);
     }
 
     private static byte[] CreateStandardArtifactWithConstructedTypeMap(byte[] body,
         bool importedTypeOwnerIsDifferentModule = false,
-        uint methodParameterTypeSpecRef = 0)
+        uint methodParameterTypeSpecRef = 0,
+        bool constantFormal = false,
+        bool includeFeature11 = false,
+        uint constantTypeSpecRef = 0xF200_0008)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("main", 0), ("Example", 0),
@@ -1268,32 +1304,49 @@ public sealed class TrRmRegisterBodyReaderTests
             ("provider", 0), ("type-key", 0), ("consumer", 0),
         ]);
         var strings = new TrRmStringTableReader(stringsBytes, 10);
+        var featureFirst = constantFormal && includeFeature11 ? 1 : 0;
+        var featureCount = constantFormal && includeFeature11 ? 1 : 0;
         var moduleRows = importedTypeOwnerIsDifferentModule
             ? new[]
             {
-                new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1),
+                new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1,
+                    featureFirst, featureCount),
                 new TrRmModuleRow(10, 0, 0, 0, 1, 2, 2, 1),
             }
-            : new[] { new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1) };
+            : new[]
+            {
+                new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1,
+                    featureFirst, featureCount),
+            };
         var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
-            strings, 1, 2, 1, 0, 0);
+            strings, 1, 2, 1, 0, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleRows.Length,
-            strings, 1, 2, 1, 0, 0);
+            strings, 1, 2, 1, 0, featureCount);
         var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
             new TrRmModuleRefRow(8, 0, 0),
         ], strings, modules);
-        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
-            TrRmTypeSpecTableWriter.Builtin(0),
-            TrRmTypeSpecTableWriter.Builtin(8),
-            TrRmTypeSpecTableWriter.Reference(0x02, 1),
-            TrRmTypeSpecTableWriter.Constructed(3, [5]),
-            TrRmTypeSpecTableWriter.Reference(0x03, 1),
-            TrRmTypeSpecTableWriter.Builtin(0),
-            TrRmTypeSpecTableWriter.Constructed(3, [1]),
-            TrRmTypeSpecTableWriter.Constructed(3, [0xF200_0000]),
-            TrRmTypeSpecTableWriter.Constructed(3, [2]),
-        ], 2, 1, 1);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 9, 2, 1, 1);
+        ReadOnlyMemory<byte>[] typeSpecRows = constantFormal
+            ? [
+                TrRmTypeSpecTableWriter.Builtin(0),
+                TrRmTypeSpecTableWriter.Builtin(8),
+                TrRmTypeSpecTableWriter.Reference(0x02, 1),
+                TrRmTypeSpecTableWriter.Reference(0x03, 1),
+                TrRmTypeSpecTableWriter.Constructed(3, [1]),
+            ]
+            : [
+                TrRmTypeSpecTableWriter.Builtin(0),
+                TrRmTypeSpecTableWriter.Builtin(8),
+                TrRmTypeSpecTableWriter.Reference(0x02, 1),
+                TrRmTypeSpecTableWriter.Constructed(3, [5]),
+                TrRmTypeSpecTableWriter.Reference(0x03, 1),
+                TrRmTypeSpecTableWriter.Builtin(0),
+                TrRmTypeSpecTableWriter.Constructed(3, [1]),
+                TrRmTypeSpecTableWriter.Constructed(3, [0xF200_0000]),
+                TrRmTypeSpecTableWriter.Constructed(3, [2]),
+            ];
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows, 2, 1, 1);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Length, 2, 1, 1);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(4, 5, 6, 0, 0, 1, 1, 1, 1, 0, 0),
             new TrRmTypeDefRow(4, 7, 6, 0, 0, 0, 0, 2, 1, 0, 0),
@@ -1322,10 +1375,15 @@ public sealed class TrRmRegisterBodyReaderTests
                 new TrRmParamRow(1, 0, methodParameterTypeSpecRef, 0),
             ], signatures, typeSpecs)
             : Array.Empty<byte>();
+        var genericParam = constantFormal
+            ? new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
+                2, 0, 0, constantTypeSpecRef, 0)
+            : new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
+                1, 1, 1, 0, 0);
         var genericParamBytes = TrRmGenericParamTableWriter.Encode([
-            new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
-                1, 1, 1, 0, 0),
-        ], strings, typeDefs, methods, signatures, typeSpecs, 0);
+            genericParam,
+        ], strings, typeDefs, methods, signatures, typeSpecs, 0,
+            constantFormal ? 1 : 0);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
             strings, modules);
         var importBytes = TrRmImportTableWriter.Encode([
@@ -1337,7 +1395,7 @@ public sealed class TrRmRegisterBodyReaderTests
             new TrRmSection(0x0001, 0, (uint)moduleRows.Length, moduleBytes),
             new TrRmSection(0x0002, 0, 10, stringsBytes),
             new TrRmSection(0x0010, 0, 1, moduleRefBytes),
-            new TrRmSection(0x0011, 0, 9, typeSpecBytes),
+            new TrRmSection(0x0011, 0, (uint)typeSpecRows.Length, typeSpecBytes),
             new TrRmSection(0x0013, 0, 2, typeDefBytes),
             new TrRmSection(0x0015, 0, 2, layoutBytes),
             new TrRmSection(0x0016, 0, 1, methodBytes),
@@ -1347,12 +1405,34 @@ public sealed class TrRmRegisterBodyReaderTests
         {
             sections.Add(new TrRmSection(0x0018, 0, 1, paramBytes));
         }
+        if (constantFormal && includeFeature11)
+        {
+            sections.Add(new TrRmSection(0x0004, 0, 1,
+                TrRmFeatureTableWriter.Encode([TrRmFeatureRow.TypedFrozenValues])));
+        }
         sections.AddRange([
             new TrRmSection(0x0019, 0, 1, genericParamBytes),
             new TrRmSection(0x001C, 0, 1, importBytes),
             new TrRmSection(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
         ]);
+        if (constantFormal)
+        {
+            var blobBytes = TrRmVariableTableWriter.EncodeBlobs([
+                new byte[] { 42, 0, 0, 0 },
+            ]);
+            var node = new byte[24];
+            BinaryPrimitives.WriteUInt32LittleEndian(node, 0xF200_0008);
+            node[4] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(8), 1);
+            sections.Add(new TrRmSection(0x0003, 0, 1, blobBytes));
+            sections.Add(new TrRmSection(0x0030, 0, 1,
+                TrRmConstantSourceTableWriter.Encode([
+                    new TrRmConstantSourceRow(1, 1),
+                ], 1, 0, 0)));
+            sections.Add(new TrRmSection(0x003F, 0, 1, node));
+        }
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
     }
 

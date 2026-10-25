@@ -11,6 +11,20 @@ internal static class TrRmRegisterBodyMapValidator
 {
     private const uint UnitTypeSpecRef = 0xF200_0000;
 
+    private readonly ref struct ConstantSourceValueContext(
+        TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs)
+    {
+        internal TrRmFeatureTableReader Features { get; } = features;
+        internal TrRmModuleTableReader Modules { get; } = modules;
+        internal TrRmConstantSourceTableReader ConstantSources { get; } = constantSources;
+        internal TrRmFrozenValueNodeTableReader FrozenValueNodes { get; } = frozenValueNodes;
+        internal TrRmBlobTableReader Blobs { get; } = blobs;
+    }
+
     internal static void Validate(TrRmRegisterBodyReader body, int methodDefRow,
         int ownerModule, TrRmFeatureTableReader features,
         TrRmModuleTableReader modules,
@@ -26,17 +40,20 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmModuleRefTableReader moduleRefs)
     {
         var visitedTypeSpecRows = new HashSet<int>();
+        var constantValues = new ConstantSourceValueContext(features, modules,
+            constantSources, frozenValueNodes, blobs);
         ValidateHomeMap(body, methodDefRow, types, methods, signatures, parameters,
             typeSpecs, genericParams, imports);
         ValidateTypeMap(body, ownerModule, types, typeSpecs, genericParams,
-            methods, imports, moduleRefs, visitedTypeSpecRows);
+            methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateMethodMap(body, ownerModule, methods, signatures, parameters,
-            types, typeSpecs, genericParams, imports, moduleRefs, visitedTypeSpecRows);
+            types, typeSpecs, genericParams, imports, moduleRefs, constantValues,
+            visitedTypeSpecRows);
         ValidateFieldMap(body, ownerModule, types, typeSpecs, genericParams,
-            methods, fields, fieldPaths, imports, moduleRefs, visitedTypeSpecRows);
-        ValidateConstantMap(body, ownerModule, features, modules, types, typeSpecs,
-            genericParams, methods, imports, moduleRefs, constantSources,
-            frozenValueNodes, blobs, visitedTypeSpecRows);
+            methods, fields, fieldPaths, imports, moduleRefs, constantValues,
+            visitedTypeSpecRows);
+        ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
+            methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
             contracts, imports);
     }
@@ -317,7 +334,9 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams,
         TrRmMethodDefTableReader methods, TrRmImportTableReader imports,
-        TrRmModuleRefTableReader moduleRefs, HashSet<int> visitedTypeSpecRows)
+        TrRmModuleRefTableReader moduleRefs,
+        ConstantSourceValueContext constantValues,
+        HashSet<int> visitedTypeSpecRows)
     {
         for (var index = 0; index < body.TypeCount; index++)
         {
@@ -328,7 +347,7 @@ internal static class TrRmRegisterBodyMapValidator
                 case 0x11:
                     ValidateTypeSpecModuleContext((uint)row, ownerModule,
                         types, typeSpecs, genericParams, methods, imports,
-                        moduleRefs, visitedTypeSpecRows);
+                        moduleRefs, constantValues, visitedTypeSpecRows);
                     break;
                 case 0x13:
                     if (row <= 0 || row > types.Count
@@ -347,7 +366,7 @@ internal static class TrRmRegisterBodyMapValidator
                 case 0xF3:
                     ValidateTypeSpecModuleContext(token, ownerModule,
                         types, typeSpecs, genericParams, methods, imports,
-                        moduleRefs, visitedTypeSpecRows);
+                        moduleRefs, constantValues, visitedTypeSpecRows);
                     break;
                 default:
                     throw InvalidMap();
@@ -360,6 +379,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmParamTableReader parameters, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
         TrRmImportTableReader imports, TrRmModuleRefTableReader moduleRefs,
+        ConstantSourceValueContext constantValues,
         HashSet<int> visitedTypeSpecRows)
     {
         for (var index = 0; index < body.MethodCount; index++)
@@ -376,7 +396,8 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                     ValidateMethodSignatureTypeContexts(row, ownerModule,
                         methods, signatures, parameters, types, typeSpecs,
-                        genericParams, imports, moduleRefs, visitedTypeSpecRows);
+                        genericParams, imports, moduleRefs, constantValues,
+                        visitedTypeSpecRows);
                     break;
                 case 0x1C:
                     ValidateImport(row, 0x16, ownerModule, imports, moduleRefs);
@@ -384,7 +405,8 @@ internal static class TrRmRegisterBodyMapValidator
                     ValidateMethodSignatureTypeContexts(
                         (int)(expectedMethod & 0x00FF_FFFF), ownerModule,
                         methods, signatures, parameters, types, typeSpecs,
-                        genericParams, imports, moduleRefs, visitedTypeSpecRows);
+                        genericParams, imports, moduleRefs, constantValues,
+                        visitedTypeSpecRows);
                     break;
                 default:
                     throw InvalidMap();
@@ -397,6 +419,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmGenericParamTableReader genericParams, TrRmMethodDefTableReader methods,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
         TrRmImportTableReader imports, TrRmModuleRefTableReader moduleRefs,
+        ConstantSourceValueContext constantValues,
         HashSet<int> visitedTypeSpecRows)
     {
         for (var index = 0; index < body.FieldCount; index++)
@@ -413,7 +436,7 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                     ValidateTypeSpecModuleContext(fields.GetTypeSpecRef(row),
                         ownerModule, types, typeSpecs, genericParams, methods,
-                        imports, moduleRefs, visitedTypeSpecRows);
+                        imports, moduleRefs, constantValues, visitedTypeSpecRows);
                     break;
                 case 0x1C:
                     ValidateImport(row, 0x14, ownerModule, imports, moduleRefs);
@@ -421,7 +444,7 @@ internal static class TrRmRegisterBodyMapValidator
                     var expectedFieldRow = (int)(expectedField & 0x00FF_FFFF);
                     ValidateTypeSpecModuleContext(fields.GetTypeSpecRef(expectedFieldRow),
                         ownerModule, types, typeSpecs, genericParams, methods, imports,
-                        moduleRefs, visitedTypeSpecRows);
+                        moduleRefs, constantValues, visitedTypeSpecRows);
                     break;
                 case 0x1D:
                     if (row <= 0 || row > fieldPaths.Count)
@@ -430,7 +453,7 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                     ValidateFieldPathReferences(row, ownerModule, types, typeSpecs,
                         genericParams, methods, fields, fieldPaths, imports,
-                        moduleRefs, visitedTypeSpecRows);
+                        moduleRefs, constantValues, visitedTypeSpecRows);
                     break;
                 default:
                     throw InvalidMap();
@@ -443,11 +466,12 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmGenericParamTableReader genericParams, TrRmMethodDefTableReader methods,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
         TrRmImportTableReader imports, TrRmModuleRefTableReader moduleRefs,
+        ConstantSourceValueContext constantValues,
         HashSet<int> visitedTypeSpecRows)
     {
         ValidateTypeSpecModuleContext(fieldPaths.GetRootTypeSpecRef(row), ownerModule,
             types, typeSpecs, genericParams, methods, imports,
-            moduleRefs, visitedTypeSpecRows);
+            moduleRefs, constantValues, visitedTypeSpecRows);
         var fieldCount = fieldPaths.GetFieldCount(row);
         for (var ordinal = 0; ordinal < fieldCount; ordinal++)
         {
@@ -461,7 +485,7 @@ internal static class TrRmRegisterBodyMapValidator
                 }
                 ValidateTypeSpecModuleContext(fields.GetTypeSpecRef(fieldRow),
                     ownerModule, types, typeSpecs, genericParams, methods,
-                    imports, moduleRefs, visitedTypeSpecRows);
+                    imports, moduleRefs, constantValues, visitedTypeSpecRows);
             }
             else
             {
@@ -470,19 +494,16 @@ internal static class TrRmRegisterBodyMapValidator
                 var expectedFieldRow = (int)(expectedField & 0x00FF_FFFF);
                 ValidateTypeSpecModuleContext(fields.GetTypeSpecRef(expectedFieldRow),
                     ownerModule, types, typeSpecs, genericParams, methods, imports,
-                    moduleRefs, visitedTypeSpecRows);
+                    moduleRefs, constantValues, visitedTypeSpecRows);
             }
         }
     }
 
     private static void ValidateConstantMap(TrRmRegisterBodyReader body, int ownerModule,
-        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams, TrRmMethodDefTableReader methods,
         TrRmImportTableReader imports, TrRmModuleRefTableReader moduleRefs,
-        TrRmConstantSourceTableReader constantSources,
-        TrRmFrozenValueNodeTableReader frozenValueNodes,
-        TrRmBlobTableReader blobs,
+        ConstantSourceValueContext constantValues,
         HashSet<int> visitedTypeSpecRows)
     {
         for (var index = 0; index < body.ConstantCount; index++)
@@ -491,16 +512,19 @@ internal static class TrRmRegisterBodyMapValidator
             var mapTypeSpecRef = ReadUInt32(data, 0);
             ValidateTypeSpecModuleContext(mapTypeSpecRef, ownerModule,
                 types, typeSpecs, genericParams, methods, imports,
-                moduleRefs, visitedTypeSpecRows);
+                moduleRefs, constantValues, visitedTypeSpecRows);
             var sourceRow = ReadUInt32(data, 4);
-            if (sourceRow == 0 || sourceRow > (uint)constantSources.Count)
+            if (sourceRow == 0
+                || sourceRow > (uint)constantValues.ConstantSources.Count)
             {
                 throw InvalidMap();
             }
 
             TrRmConstantSourceValueValidator.ValidateFrozenScalar(
-                checked((int)sourceRow), mapTypeSpecRef, ownerModule, constantSources,
-                frozenValueNodes, blobs, typeSpecs, features, modules);
+                checked((int)sourceRow), mapTypeSpecRef, ownerModule,
+                constantValues.ConstantSources, constantValues.FrozenValueNodes,
+                constantValues.Blobs, typeSpecs, constantValues.Features,
+                constantValues.Modules);
         }
     }
 
@@ -509,18 +533,20 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
         TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports,
-        TrRmModuleRefTableReader moduleRefs, HashSet<int> visitedTypeSpecRows)
+        TrRmModuleRefTableReader moduleRefs,
+        ConstantSourceValueContext constantValues,
+        HashSet<int> visitedTypeSpecRows)
     {
         var signature = methods.GetSignature(methodRow);
         ValidateTypeSpecModuleContext(signatures.GetResultTypeSpec(signature),
             ownerModule, types, typeSpecs, genericParams, methods,
-            imports, moduleRefs, visitedTypeSpecRows);
+            imports, moduleRefs, constantValues, visitedTypeSpecRows);
         var receiver = signatures.GetReceiverTypeSpec(signature);
         if (receiver != 0)
         {
             ValidateTypeSpecModuleContext(receiver, ownerModule,
                 types, typeSpecs, genericParams, methods,
-                imports, moduleRefs, visitedTypeSpecRows);
+                imports, moduleRefs, constantValues, visitedTypeSpecRows);
         }
 
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
@@ -528,7 +554,7 @@ internal static class TrRmRegisterBodyMapValidator
         {
             ValidateTypeSpecModuleContext(parameters.GetTypeSpec(firstParameter + ordinal),
                 ownerModule, types, typeSpecs, genericParams, methods,
-                imports, moduleRefs, visitedTypeSpecRows);
+                imports, moduleRefs, constantValues, visitedTypeSpecRows);
         }
     }
 
@@ -536,7 +562,9 @@ internal static class TrRmRegisterBodyMapValidator
         int ownerModule, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
         TrRmMethodDefTableReader methods, TrRmImportTableReader imports,
-        TrRmModuleRefTableReader moduleRefs, HashSet<int> visitedTypeSpecRows)
+        TrRmModuleRefTableReader moduleRefs,
+        ConstantSourceValueContext constantValues,
+        HashSet<int> visitedTypeSpecRows)
     {
         var typeSpec = typeSpecs.GetTypeSpecRef(typeSpecRef);
         if (!typeSpec.IsRow)
@@ -575,7 +603,8 @@ internal static class TrRmRegisterBodyMapValidator
                     break;
                 case 0x05:
                     AddConstructedTypeReferences(row, data, types,
-                        typeSpecs, genericParams, imports, pendingRows);
+                        typeSpecs, genericParams, imports, ownerModule,
+                        constantValues, pendingRows);
                     break;
                 case >= 0x06 and <= 0x0B:
                     AddNestedTypeSpecReference(ReadUInt32(data, 2), false,
@@ -726,7 +755,8 @@ internal static class TrRmRegisterBodyMapValidator
     private static void AddConstructedTypeReferences(int row,
         ReadOnlySpan<byte> data, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
-        TrRmImportTableReader imports, Stack<int> pendingRows)
+        TrRmImportTableReader imports, int ownerModule,
+        ConstantSourceValueContext constantValues, Stack<int> pendingRows)
     {
         var genericTypeSpecRow = checked((int)ReadUInt32(data, 2));
         var genericTypeSpec = typeSpecs.GetRow(genericTypeSpecRow);
@@ -770,6 +800,12 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                     break;
                 case 2:
+                    TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+                        checked((int)typeSpecs.GetConstructedArgument(row, ordinal)),
+                        genericParams.GetConstantTypeSpecRef(formalRow), ownerModule,
+                        constantValues.ConstantSources,
+                        constantValues.FrozenValueNodes, constantValues.Blobs,
+                        typeSpecs, constantValues.Features, constantValues.Modules);
                     break;
                 default:
                     throw InvalidMap();
