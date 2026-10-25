@@ -31,12 +31,14 @@ public readonly ref struct TrRmImportTableReader
     /// <param name="properties">The validated PropertyDef table.</param>
     /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
     /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
+    /// <param name="fields">The validated FieldDef table, or default when unsupported.</param>
     public TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmPropertyDefTableReader properties,
         TrRmInterfaceDefTableReader interfaces = default,
-        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default)
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
+        TrRmFieldDefTableReader fields = default)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -63,7 +65,7 @@ public readonly ref struct TrRmImportTableReader
             }
 
             var (module, _, _, body) = TrRmDefinitionResolver.Resolve(expected,
-                types, methods, properties, interfaces, associatedTypeDefs);
+                types, fields, methods, properties, interfaces, associatedTypeDefs);
             var moduleRefRow = (int)moduleRef;
             if (moduleRefRow != lastModuleRefRow)
             {
@@ -96,11 +98,17 @@ public readonly ref struct TrRmImportTableReader
         for (var row = 0; row < recordCount; row++)
         {
             var expected = Read(section.Slice(row * RowSize, RowSize), 8);
-            if ((expected >> 24) == 0x20)
+            var kind = expected >> 24;
+            if (kind is 0x14 or 0x20)
             {
-                var associatedType = (int)(expected & 0xFF_FFFF);
-                var ownerInterface = associatedTypeDefs.GetOwnerInterfaceDef(associatedType);
-                var ownerType = interfaces.GetOwnerTypeDef(ownerInterface);
+                var referenceRow = (int)(expected & 0xFF_FFFF);
+                var ownerType = kind switch
+                {
+                    0x14 => fields.GetOwnerTypeDef(referenceRow),
+                    0x20 => interfaces.GetOwnerTypeDef(
+                        associatedTypeDefs.GetOwnerInterfaceDef(referenceRow)),
+                    _ => throw InvalidImport(),
+                };
                 if (!_expected.ContainsKey(0x1300_0000u | (uint)ownerType))
                 {
                     throw InvalidImport();

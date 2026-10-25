@@ -21,13 +21,15 @@ public static class TrRmImportTableWriter
     /// <param name="properties">The validated PropertyDef table.</param>
     /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
     /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
+    /// <param name="fields">The validated FieldDef table, or default when unsupported.</param>
     /// <returns>The encoded Import section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmImportRow> rows,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmPropertyDefTableReader properties,
         TrRmInterfaceDefTableReader interfaces = default,
-        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default)
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
+        TrRmFieldDefTableReader fields = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -46,7 +48,8 @@ public static class TrRmImportTableWriter
         }
 
         _ = new TrRmImportTableReader(result, rows.Count,
-            strings, references, types, methods, properties, interfaces, associatedTypeDefs);
+            strings, references, types, methods, properties, interfaces,
+            associatedTypeDefs, fields);
         return result;
     }
 

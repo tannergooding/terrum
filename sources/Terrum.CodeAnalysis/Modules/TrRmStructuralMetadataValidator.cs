@@ -277,12 +277,12 @@ public static class TrRmStructuralMetadataValidator
             types, methods, signatures, parameters, typeSpecs, developmentProfile);
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties,
-            interfaces, associatedTypeDefs);
+            interfaces, associatedTypeDefs, fields);
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
             generics, imports, selectedConstantSourceCount);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports,
-            interfaces, associatedTypeDefs);
+            interfaces, associatedTypeDefs, fields);
         var nativeImports = developmentProfile
             ? new TrRmNativeImportTableReader(nativeImportBytes,
                 nativeImportCount, strings, methods, signatures, parameters,

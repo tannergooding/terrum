@@ -54,6 +54,11 @@ default comparison are not implemented. InterfaceConstDef
 and AssociatedConstDef rows validate their declaration ranges, owners, names
 and complete type references; InterfaceConstDef also checks its bounded
 ConstantSource row reference.
+FieldDef Import/Export rows now resolve through the typed C# definition
+resolver, require owner TypeDef Imports for expected fields, and reject
+republication of field or owner stubs; public owner/field visibility and key
+uniqueness are checked. Complete field type, access, substitution and
+Layout/TargetProfile compatibility remain in query/layout work.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute

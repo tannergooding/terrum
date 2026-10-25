@@ -470,9 +470,12 @@ rows, and GenericParam/Constraint rows of 32/12 bytes. The bounded
 source-free loader reconstructs supported Windows x64 Blittable
 Sequential/Transparent layouts from their complete ordered field lists; size,
 offset and final alignment remain target-derived, not serialized. This
-metadata integration does not migrate compact-linear/indexed Bodies, complete
-type-valued fields to TypeSpecRef, or the assigned `DE` query/TypeIdentity,
-FieldMap/FieldPath and binding/dependency contracts. The executable path still
+metadata integration does not migrate compact-linear/indexed Bodies, every
+registered complete-type field, or the assigned `DE` query/TypeIdentity,
+FieldMap/FieldPath and complete binding/dependency contracts. FieldDef
+DefId/Import/Export rows now have structural C# support for owner imports and
+public local publication; exact field-contract and retained-layout comparison
+remain incomplete. The executable path still
 uses separate development Feature assignments and does not claim current
 schema conformance.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed

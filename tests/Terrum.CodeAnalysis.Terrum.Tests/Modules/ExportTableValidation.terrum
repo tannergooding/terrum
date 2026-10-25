@@ -2,8 +2,8 @@ namespace Terrum.CodeAnalysis;
 
 public static bool TryValidateExportTable(int32 recordCount,
     int32 moduleCount, int32 stringCount, int32 moduleRefCount,
-    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
-    int32 importRecordCount, int32 interfaceDefCount,
+    int32 typeDefCount, int32 fieldDefCount, int32 methodDefCount,
+    int32 propertyDefCount, int32 importRecordCount, int32 interfaceDefCount,
     int32 associatedTypeDefCount)
 {
     if (recordCount < 0 || recordCount > 0xFF_FFFF
@@ -11,6 +11,7 @@ public static bool TryValidateExportTable(int32 recordCount,
         || stringCount < 0 || stringCount > 0xFF_FFFF
         || moduleRefCount < 0 || moduleRefCount > 0xFF_FFFF
         || typeDefCount < 0 || typeDefCount > 0xFF_FFFF
+        || fieldDefCount < 0 || fieldDefCount > 0xFF_FFFF
         || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
         || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
         || importRecordCount < 0 || importRecordCount > 0xFF_FFFF
@@ -20,6 +21,7 @@ public static bool TryValidateExportTable(int32 recordCount,
         || moduleCount * 48 != Host.Modules.Length
         || moduleRefCount * 12 != Host.ModuleRefs.Length
         || typeDefCount * 44 != Host.TypeDefs.Length
+        || fieldDefCount * 16 != Host.FieldDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
         || propertyDefCount * 20 != Host.Properties.Length
         || interfaceDefCount * 48 != Host.InterfaceDefs.Length
@@ -61,11 +63,11 @@ public static bool TryValidateExportTable(int32 recordCount,
             return false;
         }
         if (!TryGetImportDefinitionModule(definition, moduleCount,
-            typeDefCount, methodDefCount, propertyDefCount,
+            typeDefCount, fieldDefCount, methodDefCount, propertyDefCount,
             interfaceDefCount, associatedTypeDefCount,
             init var ownerModule, init var unusedBody)
             || !TryGetExportVisibilityOwner(definition,
-                typeDefCount, methodDefCount, propertyDefCount,
+                typeDefCount, fieldDefCount, methodDefCount, propertyDefCount,
                 interfaceDefCount, associatedTypeDefCount,
                 init var visibility, init var ownerType)
             || visibility != 2
@@ -75,9 +77,10 @@ public static bool TryValidateExportTable(int32 recordCount,
         }
         if (ownerType != 0)
         {
+            uint32 definitionKind = definition >> 24;
             if (!TryReadTypeDefTableWord((ownerType - 1) * 44, 8, init var ownerFlags)
                 || (ownerFlags & 3) != 2
-                || ((definition >> 24 == 0x20)
+                || ((definitionKind == 0x14 || definitionKind == 0x20)
                     && IsExpectedImportDefinition(
                         0x1300_0000 | uint32(ownerType), importRecordCount)))
             {
@@ -108,7 +111,8 @@ public static bool TryValidateExportTable(int32 recordCount,
 }
 
 bool TryGetExportVisibilityOwner(uint32 definition,
-    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
+    int32 typeDefCount, int32 fieldDefCount, int32 methodDefCount,
+    int32 propertyDefCount,
     int32 interfaceDefCount, int32 associatedTypeDefCount,
     init ref<uint32> visibility, init ref<int32> ownerType)
 {
@@ -144,6 +148,20 @@ bool TryGetExportVisibilityOwner(uint32 definition,
         }
         visibility = flags & 3;
         ownerType = int32(owner);
+        return true;
+    }
+
+    if (table == 0x14)
+    {
+        if (!TryGetFieldOwnerType(int32(row), typeDefCount, fieldDefCount,
+            init ownerType)
+            || !TryReadFieldDefTableWord((int32(row) - 1) * 16, 12,
+                init var flags))
+        {
+            return false;
+        }
+
+        visibility = flags & 3;
         return true;
     }
 

@@ -27,29 +27,30 @@ public sealed partial class ImportTableValidationComponentTests
                 Host.Expected[3], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
                 Host.Expected[14], Host.Expected[15]);
-            mut bool validDefinitions = false;
+            bool validTypeDefs = TryValidateTypeDefTable(
+                Host.Expected[4], Host.Expected[1], Host.Expected[2],
+                Host.Expected[3], Host.Expected[4], Host.Expected[5],
+                Host.Expected[14], Host.Expected[15], Host.Expected[8],
+                Host.Expected[9], Host.Expected[10], Host.Expected[11]);
+            mut bool validMethodDefs = true;
             if (Host.Expected[5] > 0) {
-                validDefinitions = TryValidateMethodDefTable(
+                validMethodDefs = TryValidateMethodDefTable(
                     Host.Expected[5], Host.Expected[1], Host.Expected[2],
                     Host.Expected[3], Host.Expected[4], Host.Expected[5],
                     Host.Expected[14], Host.Expected[15], Host.Expected[8],
                     Host.Expected[9], Host.Expected[10], Host.Expected[11],
                     Host.Expected[12], Host.Expected[13]);
-            } else {
-                validDefinitions = TryValidateTypeDefTable(
-                    Host.Expected[4], Host.Expected[1], Host.Expected[2],
-                    Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                    Host.Expected[14], Host.Expected[15], Host.Expected[8],
-                    Host.Expected[9], Host.Expected[10], Host.Expected[11]);
             }
+            bool validDefinitions = validTypeDefs && validMethodDefs;
             bool validProperties = Host.Expected[6] == 0
                 || TryValidatePropertyDefTable(
                     Host.Expected[6], Host.Expected[2], Host.Expected[4],
                     Host.Expected[7], Host.Expected[5], Host.Expected[12]);
             bool validImports = TryValidateImportTable(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
-                Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                Host.Expected[6], Host.Expected[21], Host.Expected[22]);
+                Host.Expected[3], Host.Expected[4], Host.Expected[8],
+                Host.Expected[5], Host.Expected[6],
+                Host.Expected[21], Host.Expected[22]);
             if (Host.Expected[16] != 0) {
                 if (!validModuleRefs) { return 10; }
                 if (!validDefinitions) { return 11; }
@@ -106,10 +107,17 @@ public sealed partial class ImportTableValidationComponentTests
         var externalRequirements = CreateExternalRequirementsCase(valid);
         var property = CreatePropertyCase(valid);
         var associated = CreateAssociatedTypeCase(valid);
+        var fieldDefinitions = CreateFieldDefCase(valid);
         var associatedMember = associated with {
             Imports = Join(Import(0x1300_0002, 5), Import(0x2000_0002, 7)),
             ImportCount = 2,
             QueryReference = 0x2000_0002,
+            ExpectedFound = true,
+        };
+        var fieldMember = fieldDefinitions with {
+            Imports = Join(Import(0x1300_0002, 5), Import(0x1400_0002, 7)),
+            ImportCount = 2,
+            QueryReference = 0x1400_0002,
             ExpectedFound = true,
         };
         var twoDefinitions = valid with {
@@ -142,6 +150,20 @@ public sealed partial class ImportTableValidationComponentTests
             associatedMember with {
                 Modules = [.. Modules(producerOwnsReference: true)
                     .Select(static value => (int)value)],
+                ExpectedValid = false,
+            },
+            fieldMember,
+            fieldMember with {
+                Imports = Import(0x1400_0002, 7),
+                ImportCount = 1,
+                ExpectedValid = false,
+            },
+            fieldMember with {
+                Imports = Join(Import(0x1300_0002, 5), Import(0x1400_0001, 7)),
+                ExpectedValid = false,
+            },
+            fieldMember with {
+                Imports = Join(Import(0x1300_0002, 5), Import(0x1400_0003, 7)),
                 ExpectedValid = false,
             },
             empty,
@@ -283,6 +305,8 @@ public sealed partial class ImportTableValidationComponentTests
                 new HostBuffer("Modules", PrimitiveType.Int32, [.. testCase.Modules], false),
                 new HostBuffer("ModuleRefs", PrimitiveType.Int32, [.. testCase.ModuleRefs], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
+                new HostBuffer("FieldDefs", PrimitiveType.Int32,
+                    [.. (testCase.FieldDefs ?? [])], false),
                 new HostBuffer("InterfaceDefs", PrimitiveType.Int32,
                     [.. (testCase.InterfaceDefs ?? [])], false),
                 new HostBuffer("AssociatedTypeDefs", PrimitiveType.Int32,
@@ -292,7 +316,8 @@ public sealed partial class ImportTableValidationComponentTests
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
                 new HostBuffer("Imports", PrimitiveType.Int32, [.. testCase.Imports], false),
                 new HostBuffer("IdentitySlots", PrimitiveType.Int32, [0, 0, 0], true),
-                new HostBuffer("FieldOwners", PrimitiveType.Int32, [0], true),
+                new HostBuffer("FieldOwners", PrimitiveType.Int32,
+                    [.. new int[testCase.FieldDefCount + 1]], true),
                 new HostBuffer("BodyOwners", PrimitiveType.Int32, [.. testCase.BodyOwners], true),
                 new HostBuffer("GenericSignatureOwners", PrimitiveType.Int32, [0, 0], true),
                 new HostBuffer("ImportExpectedDefinitions", PrimitiveType.Int32,
@@ -313,7 +338,7 @@ public sealed partial class ImportTableValidationComponentTests
                     2,
                     testCase.PropertyCount,
                     1,
-                    0,
+                    testCase.FieldDefCount,
                     0,
                     0,
                     0,
@@ -432,6 +457,26 @@ public sealed partial class ImportTableValidationComponentTests
         };
     }
 
+    private static TableCase CreateFieldDefCase(TableCase testCase)
+    {
+        var fields = new byte[2 * 16];
+        WriteWord(fields, 0, 1);
+        WriteWord(fields, 4, 7);
+        WriteWord(fields, 8, 1);
+        WriteWord(fields, 12, 10);
+        WriteWord(fields, 16, 2);
+        WriteWord(fields, 20, 7);
+        WriteWord(fields, 24, 1);
+        WriteWord(fields, 28, 10);
+        var typeDefs = SetWord(SetWord(SetWord(SetWord(
+            testCase.TypeDefs, 12, 1), 16, 1), 56, 2), 60, 1);
+        return testCase with {
+            TypeDefs = typeDefs,
+            FieldDefs = [.. fields.Select(static value => (int)value)],
+            FieldDefCount = 2,
+        };
+    }
+
     private static TableCase CreateExternalRequirementsCase(TableCase testCase)
     {
         byte[] strings = TrRmStringTableWriter.EncodeTextRows([
@@ -467,7 +512,7 @@ public sealed partial class ImportTableValidationComponentTests
             var modules = new TrRmModuleTableReader(ToBytes(testCase.Modules), 2,
                 strings, testCase.ModuleRefCount, 2, 2, 0);
             var types = new TrRmTypeDefTableReader(ToBytes(testCase.TypeDefs), 2,
-                strings, modules, 0, 0, 0, 0);
+                strings, modules, testCase.FieldDefCount, 0, 0, 0);
             var typeSpecs = new TrRmTypeSpecTableReader(ToBytes(testCase.TypeSpecs),
                 1, 2, 0, 0, 0);
             var signatures = new TrRmMethodSigTableReader(ToBytes(testCase.Signatures),
@@ -480,6 +525,10 @@ public sealed partial class ImportTableValidationComponentTests
                     testCase.PropertyCount, strings, types, typeSpecs, methods, signatures);
             var references = new TrRmModuleRefTableReader(ToBytes(testCase.ModuleRefs),
                 testCase.ModuleRefCount, strings, modules);
+            var fields = testCase.FieldDefCount == 0
+                ? default
+                : new TrRmFieldDefTableReader(ToBytes(testCase.FieldDefs ?? []),
+                    testCase.FieldDefCount, strings, types, typeSpecs);
             var generics = new TrRmGenericParamTableReader([], 0,
                 strings, types, methods, signatures, typeSpecs, 0);
             var interfaces = new TrRmInterfaceDefTableReader(
@@ -493,7 +542,7 @@ public sealed partial class ImportTableValidationComponentTests
                     ? testCase.ImportCount
                     : testCase.DeclaredImportCount,
                 strings, references, types, methods, properties,
-                interfaces, associatedTypeDefs);
+                interfaces, associatedTypeDefs, fields);
             bool found = imports.TryGetExpectedRequirements(testCase.QueryReference,
                 out var requirements);
             return (true, found, requirements.TargetRequirement, requirements.RuntimePolicy);
@@ -619,5 +668,7 @@ public sealed partial class ImportTableValidationComponentTests
         int[]? InterfaceDefs = null,
         int[]? AssociatedTypeDefs = null,
         int InterfaceDefCount = 0,
-        int AssociatedTypeDefCount = 0);
+        int AssociatedTypeDefCount = 0,
+        int[]? FieldDefs = null,
+        int FieldDefCount = 0);
 }

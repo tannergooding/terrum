@@ -7,7 +7,8 @@ namespace Terrum.CodeAnalysis.Modules;
 internal static class TrRmDefinitionResolver
 {
     public static (int Module, uint Visibility, int OwnerType, int Body) Resolve(
-        uint reference, TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        uint reference, TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
+        TrRmMethodDefTableReader methods,
         TrRmPropertyDefTableReader properties, TrRmInterfaceDefTableReader interfaces,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs)
     {
@@ -16,6 +17,8 @@ internal static class TrRmDefinitionResolver
         {
             0x13 when row > 0 && row <= types.Count
                 => (types.GetOwnerModule(row), types.GetFlags(row) & 3, 0, 0),
+            0x14 when row > 0 && row <= fields.Count
+                => ResolveField(row, types, fields),
             0x20 when row > 0 && row <= associatedTypeDefs.Count
                 => ResolveAssociatedType(row, types, interfaces, associatedTypeDefs),
             0x16 when row > 0 && row <= methods.Count
@@ -27,6 +30,15 @@ internal static class TrRmDefinitionResolver
                     methods.GetBodyRow(properties.GetGetterMethod(row))),
             _ => throw new InvalidDataException("Invalid TRRM definition reference."),
         };
+    }
+
+    private static (int Module, uint Visibility, int OwnerType, int Body)
+        ResolveField(int row, TrRmTypeDefTableReader types,
+            TrRmFieldDefTableReader fields)
+    {
+        var ownerType = fields.GetOwnerTypeDef(row);
+        return (types.GetOwnerModule(ownerType), fields.GetFlags(row) & 3,
+            ownerType, 0);
     }
 
     private static (int Module, uint Visibility, int OwnerType, int Body)

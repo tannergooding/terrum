@@ -328,6 +328,13 @@ and `Binder`'s layout-attribute path exercise that bounded support.
 Neither compact ValueLayout limits nor native-pointer staging limits are
 Windows ABI size ceilings.
 
+The standard C# and Terrum-authored Import/Export validators now recognize
+FieldDef DefIds and Import expectations. They check the consumer's owner/field
+stub rows, explicit owner imports, same-consumer ModuleRef ownership, public
+provider fields/owners, expected-stub non-reexport and unique keys. They do
+not compare complete field types, static/mutable access, owner substitutions
+or retained Layout/TargetProfile membership.
+
 **Routes/gate:** implement/qualify the
 [target cases](../specs/conformance/target-windows-x64.md), including all
 scalar representations, combined packing/alignment, nested propagation,
