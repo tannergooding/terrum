@@ -731,6 +731,8 @@ public static partial class SemanticVerifier
         var hasSpanDependencies = VerifySpanContracts(program);
         var hasNativeOutputContracts = program.Functions.Any(static function =>
             function is not null && !NativeOutputs(function).IsDefaultOrEmpty);
+        var hasDoesNotReturnFunctions = program.Functions.Any(
+            static function => function.DoesNotReturn);
         var nativePointerWriteEffects = CreateNativePointerWriteEffects(program);
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
@@ -759,7 +761,7 @@ public static partial class SemanticVerifier
                 throw;
             }
             var initialized = new InitializationState(program, function.Variables.Length,
-                hasNativeOutputContracts) {
+                hasNativeOutputContracts, hasDoesNotReturnFunctions) {
                 StatementInputs = function.Variables.Any(variable => variable.Type is
                     PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
@@ -3449,33 +3451,45 @@ public static partial class SemanticVerifier
         private readonly byte[] _possibilities;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
+        private readonly Dictionary<BoundExpression, byte> _completionShapeFacts;
+        private readonly Dictionary<BoundExpression, bool> _completionFacts;
         private readonly Dictionary<BoundExpression, byte> _nativeOutputFlowFacts;
         private readonly NativeOutputDestinationState?[] _nativeOutputDestinations;
         private readonly NativeOutputCallFact?[] _nativeOutputResults;
         private int _nativeOutputStateCount;
         internal bool MayHaveNativeOutputState => _nativeOutputStateCount != 0;
         internal bool HasNativeOutputContracts { get; }
+        internal bool HasDoesNotReturnFunctions { get; }
         internal BoundProgram Program { get; }
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
         internal BackingDependencies? Dependencies { get; init; }
 
-        internal InitializationState(BoundProgram program, int length, bool hasNativeOutputContracts)
+        internal InitializationState(BoundProgram program, int length,
+            bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions)
             : this(program, length, new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
                 new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
                 new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
-                hasNativeOutputContracts)
+                new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance),
+                new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
+                hasNativeOutputContracts, hasDoesNotReturnFunctions)
         {
         }
 
         private InitializationState(BoundProgram program, int length,
             Dictionary<BoundExpression, byte> canBeFacts, Dictionary<BoundExpression, byte> flowFacts,
-            Dictionary<BoundExpression, byte> nativeOutputFlowFacts, bool hasNativeOutputContracts)
+            Dictionary<BoundExpression, byte> completionShapeFacts,
+            Dictionary<BoundExpression, bool> completionFacts,
+            Dictionary<BoundExpression, byte> nativeOutputFlowFacts,
+            bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions)
         {
             Program = program;
             HasNativeOutputContracts = hasNativeOutputContracts;
+            HasDoesNotReturnFunctions = hasDoesNotReturnFunctions;
             _possibilities = new byte[length];
             _canBeFacts = canBeFacts;
             _flowFacts = flowFacts;
+            _completionShapeFacts = completionShapeFacts;
+            _completionFacts = completionFacts;
             _nativeOutputFlowFacts = nativeOutputFlowFacts;
             _nativeOutputDestinations = new NativeOutputDestinationState?[length];
             _nativeOutputResults = new NativeOutputCallFact?[length];
@@ -3485,6 +3499,9 @@ public static partial class SemanticVerifier
         internal int Length => _possibilities.Length;
         internal Dictionary<BoundExpression, byte> CanBeFacts => _canBeFacts;
         internal Dictionary<BoundExpression, byte> FlowFacts => _flowFacts;
+        internal Dictionary<BoundExpression, byte> CompletionShapeFacts
+            => _completionShapeFacts;
+        internal Dictionary<BoundExpression, bool> CompletionFacts => _completionFacts;
 
         internal bool TryGetNativeOutputFlowEffect(BoundExpression expression, out bool hasEffect)
         {
@@ -3566,8 +3583,8 @@ public static partial class SemanticVerifier
         internal InitializationState Clone()
         {
             var result = new InitializationState(Program, Length, _canBeFacts, _flowFacts,
-                _nativeOutputFlowFacts,
-                HasNativeOutputContracts) {
+                _completionShapeFacts, _completionFacts, _nativeOutputFlowFacts,
+                HasNativeOutputContracts, HasDoesNotReturnFunctions) {
                 StatementInputs = StatementInputs,
                 Dependencies = Dependencies,
             };
@@ -6089,14 +6106,82 @@ public static partial class SemanticVerifier
         Dictionary<BoundExpression, byte> flowFacts, ref int remaining) =>
         facts == AllFlowFacts ? facts : (byte)(facts | FlowFacts(expression, flowFacts, ref remaining));
 
-    // A false result means no evaluated path produces a normal value.
-    private static bool CanCompleteNormally(BoundExpression expression,
+    private const byte MayNotCompleteNormallyFact = 1;
+    private const byte CompletionDependsOnFlowStateFact = 2;
+
+    private static byte CompletionShape(BoundExpression expression,
         InitializationState initialized, BoundProgram program, ref int remaining, int depth)
     {
         if (expression is null)
         {
+            return 0;
+        }
+
+        var facts = initialized.CompletionShapeFacts;
+        if (facts.TryGetValue(expression, out var shape))
+        {
+            return shape;
+        }
+
+        Count(ref remaining, depth);
+        shape = expression switch {
+            BoundCall call when (uint)call.Function < (uint)program.Functions.Length
+                && program.Functions[call.Function].DoesNotReturn
+                => MayNotCompleteNormallyFact,
+            BoundNominalUpdate update when (uint)update.Function < (uint)program.Functions.Length
+                && program.Functions[update.Function].DoesNotReturn
+                => MayNotCompleteNormallyFact,
+            BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe }
+                or BoundConditional or BoundCoalesce
+                => CompletionDependsOnFlowStateFact,
+            _ => 0,
+        };
+        if ((shape & MayNotCompleteNormallyFact) == 0)
+        {
+            foreach (var nested in expression.NestedExpressions)
+            {
+                shape |= CompletionShape(nested, initialized, program,
+                    ref remaining, depth + 1);
+            }
+        }
+
+        facts.Add(expression, shape);
+        return shape;
+    }
+
+    // A false result means no evaluated path produces a normal value.
+    private static bool CanCompleteNormally(BoundExpression expression,
+        InitializationState initialized, BoundProgram program, ref int remaining, int depth)
+    {
+        if (expression is null || !initialized.HasDoesNotReturnFunctions)
+        {
             return true;
         }
+        var shape = CompletionShape(expression, initialized, program, ref remaining, depth + 1);
+        if ((shape & MayNotCompleteNormallyFact) == 0)
+        {
+            return true;
+        }
+
+        var cacheable = (shape & CompletionDependsOnFlowStateFact) == 0;
+        if (cacheable
+            && initialized.CompletionFacts.TryGetValue(expression, out var completesNormally))
+        {
+            return completesNormally;
+        }
+
+        completesNormally = CanCompleteNormallyCore(expression, initialized,
+            program, ref remaining, depth);
+        if (cacheable)
+        {
+            initialized.CompletionFacts.Add(expression, completesNormally);
+        }
+        return completesNormally;
+    }
+
+    private static bool CanCompleteNormallyCore(BoundExpression expression,
+        InitializationState initialized, BoundProgram program, ref int remaining, int depth)
+    {
         Count(ref remaining, depth);
         switch (expression)
         {
@@ -6248,18 +6333,18 @@ public static partial class SemanticVerifier
         BoundBinary? cleanupCounterStep = null)
     {
         var completesNormally = CanCompleteNormally(expression, initialized, program,
-            ref remaining, depth + 1);
+            ref remaining, depth);
         if (completesNormally)
         {
             Expression(expression, initialized, fieldMasks, declarations, function, program,
-                ref remaining, depth + 1, failures, statementCompound, cleanupCounterStep);
+                ref remaining, depth, failures, statementCompound, cleanupCounterStep);
             return true;
         }
 
         var beforeExpression = initialized.Clone();
         var beforeMasks = (uint[])fieldMasks.Clone();
         Expression(expression, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, failures, statementCompound, cleanupCounterStep);
+            ref remaining, depth, failures, statementCompound, cleanupCounterStep);
         beforeExpression.CopyTo(initialized);
         beforeMasks.CopyTo(fieldMasks, 0);
         return false;
@@ -6272,7 +6357,7 @@ public static partial class SemanticVerifier
         var unreachableState = initialized.Clone();
         var unreachableMasks = (uint[])fieldMasks.Clone();
         Expression(expression, unreachableState, unreachableMasks, declarations,
-            function, program, ref remaining, depth + 1, null);
+            function, program, ref remaining, depth, null);
     }
 
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
