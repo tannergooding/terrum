@@ -12,10 +12,22 @@ public readonly record struct TrRmImportRow(
 /// <summary>Emits retained import expectations without binding a producer or its contract.</summary>
 public static class TrRmImportTableWriter
 {
+    /// <summary>Encodes retained imports and validates their expected definitions.</summary>
+    /// <param name="rows">The ordered Import rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="references">The validated ModuleRef table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="properties">The validated PropertyDef table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
+    /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
+    /// <returns>The encoded Import section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmImportRow> rows,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
-        TrRmPropertyDefTableReader properties)
+        TrRmPropertyDefTableReader properties,
+        TrRmInterfaceDefTableReader interfaces = default,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -34,7 +46,7 @@ public static class TrRmImportTableWriter
         }
 
         _ = new TrRmImportTableReader(result, rows.Count,
-            strings, references, types, methods, properties);
+            strings, references, types, methods, properties, interfaces, associatedTypeDefs);
         return result;
     }
 

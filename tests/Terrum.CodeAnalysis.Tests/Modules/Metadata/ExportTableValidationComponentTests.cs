@@ -24,11 +24,12 @@ public sealed partial class ImportTableValidationComponentTests
             bool importsValid = TryValidateImportTable(
                 Host.Expected[7], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                Host.Expected[6]);
+                Host.Expected[6], Host.Expected[9], Host.Expected[10]);
             bool exportsValid = TryValidateExportTable(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                Host.Expected[6], Host.Expected[7]);
+                Host.Expected[6], Host.Expected[7],
+                Host.Expected[9], Host.Expected[10]);
             if (!importsValid || exportsValid != (Host.Expected[8] != 0)) {
                 return 1;
             }
@@ -42,6 +43,13 @@ public sealed partial class ImportTableValidationComponentTests
         var valid = CreateValidCase();
         valid = valid with { Methods = SetWord(valid.Methods, 12, 2) };
         var property = CreatePropertyExportCase(valid);
+        var associated = CreateAssociatedTypeCase(valid);
+        var associatedImports = Join(
+            Import(0x1300_0002, 5), Import(0x2000_0002, 7));
+        associated = associated with {
+            Imports = associatedImports,
+            ImportCount = 2,
+        };
         var cases = new List<ExportCase> {
             NewCase(valid, ExportRows()),
             NewCase(valid, ExportRows((0x1300_0001, 5))),
@@ -64,6 +72,17 @@ public sealed partial class ImportTableValidationComponentTests
                 Methods = SetWord(SetWord(valid.Methods, 0, 1), 12, 2),
             }, ExportRows((0x1600_0001, 5)), false),
             NewCase(property, ExportRows((0x1E00_0001, 5))),
+            NewCase(associated, ExportRows((0x2000_0001, 7))),
+            NewCase(associated, ExportRows((0x2000_0002, 7)), false),
+            NewCase(associated with {
+                Imports = Import(0x1300_0002, 5),
+                ImportCount = 1,
+            }, ExportRows((0x2000_0002, 7)), false),
+            NewCase(associated with {
+                TypeDefs = SetWord(associated.TypeDefs, 8, 13),
+                Imports = [],
+                ImportCount = 0,
+            }, ExportRows((0x2000_0001, 7)), false),
             NewCase(property with {
                 Properties = SetWord(property.Properties, 16, 0),
             }, ExportRows((0x1E00_0001, 5)), false),
@@ -115,6 +134,10 @@ public sealed partial class ImportTableValidationComponentTests
                 new HostBuffer("ModuleRefs", PrimitiveType.Int32,
                     [.. testCase.Tables.ModuleRefs], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.Tables.TypeDefs], false),
+                new HostBuffer("InterfaceDefs", PrimitiveType.Int32,
+                    [.. (testCase.Tables.InterfaceDefs ?? [])], false),
+                new HostBuffer("AssociatedTypeDefs", PrimitiveType.Int32,
+                    [.. (testCase.Tables.AssociatedTypeDefs ?? [])], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Tables.Methods], false),
                 new HostBuffer("Properties", PrimitiveType.Int32,
                     [.. testCase.Tables.Properties], false),
@@ -152,6 +175,8 @@ public sealed partial class ImportTableValidationComponentTests
                     testCase.Tables.PropertyCount,
                     testCase.Tables.ImportCount,
                     testCase.ExpectedValid ? 1 : 0,
+                    testCase.Tables.InterfaceDefCount,
+                    testCase.Tables.AssociatedTypeDefCount,
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -189,10 +214,20 @@ public sealed partial class ImportTableValidationComponentTests
                     tables.PropertyCount, strings, types, typeSpecs, methods, signatures);
             var references = new TrRmModuleRefTableReader(ToBytes(tables.ModuleRefs),
                 tables.ModuleRefCount, strings, modules);
+            var generics = new TrRmGenericParamTableReader([], 0,
+                strings, types, methods, signatures, typeSpecs, 0);
+            var interfaces = new TrRmInterfaceDefTableReader(
+                ToBytes(tables.InterfaceDefs ?? []), tables.InterfaceDefCount,
+                types, generics, 0, 0, tables.AssociatedTypeDefCount, 0, 0);
+            var associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
+                ToBytes(tables.AssociatedTypeDefs ?? []),
+                tables.AssociatedTypeDefCount, strings, typeSpecs, interfaces);
             var imports = new TrRmImportTableReader(ToBytes(tables.Imports),
-                tables.ImportCount, strings, references, types, methods, properties);
+                tables.ImportCount, strings, references, types, methods, properties,
+                interfaces, associatedTypeDefs);
             _ = new TrRmExportTableReader(ToBytes(testCase.Exports),
-                testCase.ExportCount, strings, types, methods, properties, imports);
+                testCase.ExportCount, strings, types, methods, properties, imports,
+                interfaces, associatedTypeDefs);
             return true;
         }
         catch (InvalidDataException) when (!testCase.ExpectedValid)

@@ -2,7 +2,8 @@ namespace Terrum.CodeAnalysis;
 
 public static bool TryValidateImportTable(int32 recordCount,
     int32 moduleCount, int32 stringCount, int32 moduleRefCount,
-    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount)
+    int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
+    int32 interfaceDefCount, int32 associatedTypeDefCount)
 {
     if (recordCount < 0 || recordCount > 0xFF_FFFF
         || moduleCount <= 0 || moduleCount > 0xFF_FFFF
@@ -10,12 +11,16 @@ public static bool TryValidateImportTable(int32 recordCount,
         || moduleRefCount < 0 || moduleRefCount > 0xFF_FFFF
         || typeDefCount < 0 || typeDefCount > 0xFF_FFFF
         || methodDefCount < 0 || methodDefCount > 0xFF_FFFF
+        || interfaceDefCount < 0 || interfaceDefCount > 0xFF_FFFF
+        || associatedTypeDefCount < 0 || associatedTypeDefCount > 0xFF_FFFF
         || recordCount * 12 != Host.Imports.Length
         || propertyDefCount < 0 || propertyDefCount > 0xFF_FFFF
         || moduleCount * 48 != Host.Modules.Length
         || moduleRefCount * 12 != Host.ModuleRefs.Length
         || typeDefCount * 44 != Host.TypeDefs.Length
         || methodDefCount * 28 != Host.Methods.Length
+        || interfaceDefCount * 48 != Host.InterfaceDefs.Length
+        || associatedTypeDefCount * 12 != Host.AssociatedTypeDefs.Length
         || Host.Properties.Length != propertyDefCount * 20
         || Host.ImportExpectedDefinitions.Length != recordCount + 1
         || Host.ImportExpectedTargets.Length != recordCount + 1
@@ -62,6 +67,7 @@ public static bool TryValidateImportTable(int32 recordCount,
         }
         if (!TryGetImportDefinitionModule(expected, moduleCount,
             typeDefCount, methodDefCount, propertyDefCount,
+            interfaceDefCount, associatedTypeDefCount,
             init var expectedModule, init var body))
         {
             return false;
@@ -86,7 +92,32 @@ public static bool TryValidateImportTable(int32 recordCount,
         Host.ImportExpectedPolicies[row] = int32(policy);
     }
 
-    return TrySortAndCheckImportExpectations(recordCount);
+    if (!TrySortAndCheckImportExpectations(recordCount))
+    {
+        return false;
+    }
+
+    for (mut int32 row = 1; row <= recordCount; row = row + 1)
+    {
+        if (!TryReadImportTableWord((row - 1) * 12, 8, init var expected))
+        {
+            return false;
+        }
+        if (expected >> 24 == 0x20)
+        {
+            if (!TryGetAssociatedTypeOwnerType(
+                int32(expected & 0xFF_FFFF), typeDefCount,
+                interfaceDefCount, associatedTypeDefCount,
+                init var ownerType)
+                || !IsExpectedImportDefinition(
+                    0x1300_0000 | uint32(ownerType), recordCount))
+            {
+                return false;
+            }
+        }
+    }
+
+    return true;
 }
 
 public static bool IsExpectedImportDefinition(uint32 reference, int32 recordCount)
@@ -158,6 +189,7 @@ public static bool TryGetExpectedImportRequirements(uint32 reference,
 
 bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
     int32 typeDefCount, int32 methodDefCount, int32 propertyDefCount,
+    int32 interfaceDefCount, int32 associatedTypeDefCount,
     init ref<int32> ownerModule, init ref<uint32> body)
 {
     uint32 table = reference >> 24;
@@ -205,7 +237,53 @@ bool TryGetImportDefinitionModule(uint32 reference, int32 moduleCount,
         return true;
     }
 
+    if (table == 0x20)
+    {
+        if (!TryGetAssociatedTypeOwnerType(int32(row), typeDefCount,
+            interfaceDefCount, associatedTypeDefCount, init var ownerType)
+            || !TryGetImportTableOwnerModule(ownerType, moduleCount,
+                typeDefCount, 36, init ownerModule))
+        {
+            return false;
+        }
+
+        body = 0;
+        return true;
+    }
+
     return false;
+}
+
+bool TryGetAssociatedTypeOwnerType(int32 row, int32 typeDefCount,
+    int32 interfaceDefCount, int32 associatedTypeDefCount,
+    init ref<int32> ownerType)
+{
+    if (row <= 0 || row > associatedTypeDefCount
+        || interfaceDefCount <= 0
+        || !TryReadAssociatedTypeDefTableWord((row - 1) * 12, 0,
+            init var ownerInterface)
+        || ownerInterface == 0 || ownerInterface > uint32(interfaceDefCount)
+        || !TryReadInterfaceDefTableWord(
+            (int32(ownerInterface) - 1) * 48, 0, init var declaredOwner)
+        || declaredOwner == 0 || declaredOwner > uint32(typeDefCount)
+        || !TryReadInterfaceDefTableWord(
+            (int32(ownerInterface) - 1) * 48, 24, init var associatedFirst)
+        || !TryReadInterfaceDefTableWord(
+            (int32(ownerInterface) - 1) * 48, 28, init var associatedCount)
+        || associatedFirst == 0 || associatedCount == 0
+        || associatedFirst > uint32(associatedTypeDefCount)
+        || associatedCount > uint32(associatedTypeDefCount) - associatedFirst + 1
+        || uint32(row) < associatedFirst
+        || uint32(row) - associatedFirst >= associatedCount
+        || !TryReadTypeDefTableWord(
+            (int32(declaredOwner) - 1) * 44, 8, init var flags)
+        || ((flags >> 2) & 3) != 3)
+    {
+        return false;
+    }
+
+    ownerType = int32(declaredOwner);
+    return true;
 }
 
 bool TryGetImportTableOwnerModule(int32 row, int32 moduleCount,
@@ -345,6 +423,75 @@ bool TryReadImportTableByte(int32 offset, init ref<int32> value)
     }
 
     int32 part = Host.Imports[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadInterfaceDefTableWord(int32 rowStart, int32 offset, init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.InterfaceDefs.Length - 48
+        || offset < 0 || offset > 44
+        || !TryReadInterfaceDefTableByte(rowStart + offset, init var first)
+        || !TryReadInterfaceDefTableByte(rowStart + offset + 1, init var second)
+        || !TryReadInterfaceDefTableByte(rowStart + offset + 2, init var third)
+        || !TryReadInterfaceDefTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadInterfaceDefTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.InterfaceDefs.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.InterfaceDefs[offset];
+    if (part < 0 || part > 255)
+    {
+        return false;
+    }
+
+    value = part;
+    return true;
+}
+
+bool TryReadAssociatedTypeDefTableWord(int32 rowStart, int32 offset,
+    init ref<uint32> value)
+{
+    if (rowStart < 0 || rowStart > Host.AssociatedTypeDefs.Length - 12
+        || offset < 0 || offset > 8
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset, init var first)
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 1, init var second)
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 2, init var third)
+        || !TryReadAssociatedTypeDefTableByte(rowStart + offset + 3, init var fourth))
+    {
+        return false;
+    }
+
+    value = uint32(first) | (uint32(second) << 8)
+        | (uint32(third) << 16) | (uint32(fourth) << 24);
+    return true;
+}
+
+bool TryReadAssociatedTypeDefTableByte(int32 offset, init ref<int32> value)
+{
+    if (offset < 0 || offset >= Host.AssociatedTypeDefs.Length)
+    {
+        return false;
+    }
+
+    int32 part = Host.AssociatedTypeDefs[offset];
     if (part < 0 || part > 255)
     {
         return false;

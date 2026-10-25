@@ -153,14 +153,16 @@ ownership, declaration-range extents, exclusive associated-type ownership,
 nonempty names and optional complete default TypeSpecRefs. InterfaceBase and
 InterfaceMethod rows additionally validate range ownership and ordinals,
 complete base TypeSpecRefs, and directly declared instance MethodDefs owned
-by the interface TypeDef. Resolving base instances as interfaces across
-imports, ConstantSource payload/value semantics, associated-type Import/Export
-identity, exact provider/default binding, relation/witness semantics and
+by the interface TypeDef. The C# resolver and standard Import/Export readers
+provisionally admit the proposed AssociatedTypeDef `0x20` identity, require
+explicit owner imports, and enforce public-owner and non-reexport rules.
+Provider-owner equality, exact default comparison, base-instance binding,
+ConstantSource payload/value semantics, relation/witness semantics and
 standard executable production remain incomplete. InterfaceConstDef and
 AssociatedConstDef rows validate their InterfaceDef ranges, owners, names and
 complete type references; initialized interface constants also require a
 bounded ConstantSource row reference. The associated-type identity proposal
-is still unapproved and guides implementation only as provisional direction.
+remains unapproved; implementation is provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar

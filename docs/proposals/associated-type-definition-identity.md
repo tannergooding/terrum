@@ -402,25 +402,29 @@ synthetic providers, not only one writer/reader round trip.
 ## Current implementation boundary
 
 The C# [definition resolver](../../sources/Terrum.CodeAnalysis/Modules/TrRmDefinitionResolver.cs)
-currently handles only TypeDef, MethodDef and PropertyDef. The
-[Import reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmImportTableReader.cs)
-and [Export reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExportTableReader.cs)
-use that resolver and receive no InterfaceDef/AssociatedTypeDef tables.
-They cannot validate this candidate's kind, inherited owner or default
-contract. Their bounded behavior is not the accepted registry's complete
-Import/Export target set either; it does not define the proposal's scope.
+now has a **provisional** AssociatedTypeDef kind `0x20` path through
+AssociatedTypeDef -> InterfaceDef -> TypeDef. The
+[Import reader/writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmImportTableReader.cs)
+and [Export reader/writer](../../sources/Terrum.CodeAnalysis/Modules/TrRmExportTableReader.cs)
+receive those validated tables in standard structural validation. They
+validate explicit member expectations, the consumer-owned owner stub and
+same-consumer ModuleRef ownership, public provider owners, expected-stub
+non-reexport and Module-wide export-key uniqueness. This implements only the
+candidate row identity and Import/Export gates; it does not bind the selected
+provider owner/member or compare defaults.
 
 The [structural validator](../../sources/Terrum.CodeAnalysis/Modules/TrRmStructuralMetadataValidator.cs)
-does not compose associated declaration/relation/witness validation. Its
-[Constraint reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmConstraintTableReader.cs)
-now validates kind 1 through TypeSpecRef, but kind 3 still only receives a
+composes InterfaceDef, AssociatedTypeDef, base/method/constant declaration
+tables and Import/Export readers. Relation and witness declaration references
+are not yet admitted. The [Constraint reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmConstraintTableReader.cs)
+validates kind 1 through TypeSpecRef, but kind 3 still only receives a
 nonzero-payload check, not an AssociatedRelation table/count.
 
-A future implementation must add the typed readers/resolver/binding paths
-and propagation described here together with the separate payload and
-TypeSpecRef prerequisites, then qualify the final relevant inputs.
-[CG-001](../implementation/conformance-gaps.md#cg-001) and
-[CG-006](../implementation/conformance-gaps.md#cg-006) retain their existing
-acceptance gates. This documentation-only proposal approves no allocation,
-source/library/runtime/ABI policy, implementation, test result or milestone
-completion.
+Exact selected-owner/default comparison, AssociatedRelation and witness
+binding, dependency/replacement propagation and remapping remain unimplemented.
+They must be added with the separate payload, TypeSpecRef and runtime
+prerequisites before affected use is admitted. [CG-001](../implementation/conformance-gaps.md#cg-001)
+and [CG-006](../implementation/conformance-gaps.md#cg-006) retain their
+existing acceptance gates. This proposal remains unapproved: the provisional
+implementation does not approve its allocation or any source, library,
+runtime or ABI policy, and establishes no milestone completion.

@@ -390,8 +390,9 @@ Import/Export identity, provider/default binding, relations, witnesses and
 execution remain incomplete. The focused
 [associated-relation payload proposal](../proposals/constraint-associated-relation-payload.md)
 is unapproved, provisionally guides implementation only under explicit user
-authorization, and does not resolve the separate AssociatedTypeDef identity
-and Import/Export codec gap.
+authorization, and does not itself approve or implement the separate
+AssociatedTypeDef identity candidate. Its C# Import/Export identity path is
+also provisional; exact provider-owner/default comparison remains open.
 
 **Routes/gate:** preserve complete declaring/implementing/selected instances,
 type and constant arguments, associated/generated identities, method formals,

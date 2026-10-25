@@ -19,10 +19,22 @@ public readonly ref struct TrRmImportTableReader
 
     internal int Count => _expected is null ? 0 : _expected.Count;
 
+    /// <summary>Validates retained imports and their local expected definitions.</summary>
+    /// <param name="section">The borrowed 12-byte Import rows.</param>
+    /// <param name="recordCount">The number of Import rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="references">The validated ModuleRef table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="properties">The validated PropertyDef table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
+    /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
     public TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
-        TrRmPropertyDefTableReader properties)
+        TrRmPropertyDefTableReader properties,
+        TrRmInterfaceDefTableReader interfaces = default,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -47,7 +59,7 @@ public readonly ref struct TrRmImportTableReader
             }
 
             var (module, _, _, body) = TrRmDefinitionResolver.Resolve(expected,
-                types, methods, properties);
+                types, methods, properties, interfaces, associatedTypeDefs);
             var moduleRefRow = (int)moduleRef;
             if (moduleRefRow != lastModuleRefRow)
             {
@@ -74,6 +86,21 @@ public readonly ref struct TrRmImportTableReader
                 lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy)))
             {
                 throw InvalidImport();
+            }
+        }
+
+        for (var row = 0; row < recordCount; row++)
+        {
+            var expected = Read(section.Slice(row * RowSize, RowSize), 8);
+            if ((expected >> 24) == 0x20)
+            {
+                var associatedType = (int)(expected & 0xFF_FFFF);
+                var ownerInterface = associatedTypeDefs.GetOwnerInterfaceDef(associatedType);
+                var ownerType = interfaces.GetOwnerTypeDef(ownerInterface);
+                if (!_expected.ContainsKey(0x1300_0000u | (uint)ownerType))
+                {
+                    throw InvalidImport();
+                }
             }
         }
     }

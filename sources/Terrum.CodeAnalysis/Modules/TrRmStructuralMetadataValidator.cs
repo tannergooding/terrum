@@ -263,9 +263,11 @@ public static class TrRmStructuralMetadataValidator
         var contracts = new TrRmContractTableReader(contractBytes, contractCount,
             types, methods, signatures, parameters, typeSpecs, developmentProfile);
         var imports = new TrRmImportTableReader(importBytes, importCount,
-            strings, moduleRefs, types, methods, properties);
+            strings, moduleRefs, types, methods, properties,
+            interfaces, associatedTypeDefs);
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
-            strings, types, methods, properties, imports);
+            strings, types, methods, properties, imports,
+            interfaces, associatedTypeDefs);
         var nativeImports = developmentProfile
             ? new TrRmNativeImportTableReader(nativeImportBytes,
                 nativeImportCount, strings, methods, signatures, parameters,

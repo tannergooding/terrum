@@ -13,10 +13,21 @@ public readonly ref struct TrRmExportTableReader
 {
     private const int RowSize = 8;
 
+    /// <summary>Validates exported local definitions, visibility and key uniqueness.</summary>
+    /// <param name="section">The borrowed 8-byte Export rows.</param>
+    /// <param name="recordCount">The number of Export rows.</param>
+    /// <param name="strings">The validated String table.</param>
+    /// <param name="types">The validated TypeDef table.</param>
+    /// <param name="methods">The validated MethodDef table.</param>
+    /// <param name="properties">The validated PropertyDef table.</param>
+    /// <param name="imports">The validated Import table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
+    /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
     public TrRmExportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmMethodDefTableReader methods, TrRmPropertyDefTableReader properties,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports, TrRmInterfaceDefTableReader interfaces = default,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs = default)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -36,10 +47,13 @@ public readonly ref struct TrRmExportTableReader
             }
 
             var (module, visibility, owner, _) = TrRmDefinitionResolver.Resolve(
-                definition, types, methods, properties);
+                definition, types, methods, properties, interfaces, associatedTypeDefs);
             var text = strings.DecodeName((int)key);
             if (visibility != 2 || (owner != 0 && (types.GetFlags(owner) & 3) != 2)
-                || imports.IsExpectedDefinition(definition) || !keys.Add((module, text)))
+                || imports.IsExpectedDefinition(definition)
+                || ((definition >> 24) == 0x20
+                    && imports.IsExpectedDefinition(0x1300_0000u | (uint)owner))
+                || !keys.Add((module, text)))
             {
                 throw InvalidExport();
             }

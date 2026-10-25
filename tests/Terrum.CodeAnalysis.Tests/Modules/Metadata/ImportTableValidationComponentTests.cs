@@ -49,7 +49,7 @@ public sealed partial class ImportTableValidationComponentTests
             bool validImports = TryValidateImportTable(
                 Host.Expected[0], Host.Expected[1], Host.Expected[2],
                 Host.Expected[3], Host.Expected[4], Host.Expected[5],
-                Host.Expected[6]);
+                Host.Expected[6], Host.Expected[21], Host.Expected[22]);
             if (Host.Expected[16] != 0) {
                 if (!validModuleRefs) { return 10; }
                 if (!validDefinitions) { return 11; }
@@ -105,6 +105,13 @@ public sealed partial class ImportTableValidationComponentTests
         };
         var externalRequirements = CreateExternalRequirementsCase(valid);
         var property = CreatePropertyCase(valid);
+        var associated = CreateAssociatedTypeCase(valid);
+        var associatedMember = associated with {
+            Imports = Join(Import(0x1300_0002, 5), Import(0x2000_0002, 7)),
+            ImportCount = 2,
+            QueryReference = 0x2000_0002,
+            ExpectedFound = true,
+        };
         var twoDefinitions = valid with {
             Imports = Join(Import(0x1600_0002, 6), Import(0x1300_0002, 8)),
             ImportCount = 2,
@@ -118,6 +125,25 @@ public sealed partial class ImportTableValidationComponentTests
                 QueryReference = 0x1300_0002,
             },
             property,
+            associatedMember,
+            associatedMember with {
+                Imports = Import(0x2000_0002, 7),
+                ImportCount = 1,
+                ExpectedValid = false,
+            },
+            associatedMember with {
+                Imports = Join(Import(0x1300_0002, 5), Import(0x2000_0001, 7)),
+                ExpectedValid = false,
+            },
+            associatedMember with {
+                Imports = Join(Import(0x1300_0002, 5), Import(0x2000_0003, 7)),
+                ExpectedValid = false,
+            },
+            associatedMember with {
+                Modules = [.. Modules(producerOwnsReference: true)
+                    .Select(static value => (int)value)],
+                ExpectedValid = false,
+            },
             empty,
             requirements,
             externalRequirements with {
@@ -257,6 +283,10 @@ public sealed partial class ImportTableValidationComponentTests
                 new HostBuffer("Modules", PrimitiveType.Int32, [.. testCase.Modules], false),
                 new HostBuffer("ModuleRefs", PrimitiveType.Int32, [.. testCase.ModuleRefs], false),
                 new HostBuffer("TypeDefs", PrimitiveType.Int32, [.. testCase.TypeDefs], false),
+                new HostBuffer("InterfaceDefs", PrimitiveType.Int32,
+                    [.. (testCase.InterfaceDefs ?? [])], false),
+                new HostBuffer("AssociatedTypeDefs", PrimitiveType.Int32,
+                    [.. (testCase.AssociatedTypeDefs ?? [])], false),
                 new HostBuffer("Methods", PrimitiveType.Int32, [.. testCase.Methods], false),
                 new HostBuffer("Properties", PrimitiveType.Int32, [.. testCase.Properties], false),
                 new HostBuffer("Signatures", PrimitiveType.Int32, [.. testCase.Signatures], false),
@@ -296,6 +326,8 @@ public sealed partial class ImportTableValidationComponentTests
                     checked((int)testCase.ExpectedTarget),
                     checked((int)testCase.ExpectedPolicy),
                     testCase.ExpectedFound ? 1 : 0,
+                    testCase.InterfaceDefCount,
+                    testCase.AssociatedTypeDefCount,
                 ], false),
             ], policy);
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -376,6 +408,30 @@ public sealed partial class ImportTableValidationComponentTests
         };
     }
 
+    private static TableCase CreateAssociatedTypeCase(TableCase testCase)
+    {
+        var interfaceDefs = new byte[2 * 48];
+        WriteWord(interfaceDefs, 0, 1);
+        WriteWord(interfaceDefs, 24, 1);
+        WriteWord(interfaceDefs, 28, 1);
+        WriteWord(interfaceDefs, 48, 2);
+        WriteWord(interfaceDefs, 72, 2);
+        WriteWord(interfaceDefs, 76, 1);
+        var associatedTypeDefs = new byte[2 * 12];
+        WriteWord(associatedTypeDefs, 0, 1);
+        WriteWord(associatedTypeDefs, 4, 7);
+        WriteWord(associatedTypeDefs, 12, 2);
+        WriteWord(associatedTypeDefs, 16, 7);
+
+        return testCase with {
+            TypeDefs = SetWord(SetWord(testCase.TypeDefs, 8, 14), 52, 14),
+            InterfaceDefs = [.. interfaceDefs.Select(static value => (int)value)],
+            AssociatedTypeDefs = [.. associatedTypeDefs.Select(static value => (int)value)],
+            InterfaceDefCount = 2,
+            AssociatedTypeDefCount = 2,
+        };
+    }
+
     private static TableCase CreateExternalRequirementsCase(TableCase testCase)
     {
         byte[] strings = TrRmStringTableWriter.EncodeTextRows([
@@ -424,11 +480,20 @@ public sealed partial class ImportTableValidationComponentTests
                     testCase.PropertyCount, strings, types, typeSpecs, methods, signatures);
             var references = new TrRmModuleRefTableReader(ToBytes(testCase.ModuleRefs),
                 testCase.ModuleRefCount, strings, modules);
+            var generics = new TrRmGenericParamTableReader([], 0,
+                strings, types, methods, signatures, typeSpecs, 0);
+            var interfaces = new TrRmInterfaceDefTableReader(
+                ToBytes(testCase.InterfaceDefs ?? []), testCase.InterfaceDefCount,
+                types, generics, 0, 0, testCase.AssociatedTypeDefCount, 0, 0);
+            var associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
+                ToBytes(testCase.AssociatedTypeDefs ?? []),
+                testCase.AssociatedTypeDefCount, strings, typeSpecs, interfaces);
             var imports = new TrRmImportTableReader(ToBytes(testCase.Imports),
                 testCase.DeclaredImportCount < 0
                     ? testCase.ImportCount
                     : testCase.DeclaredImportCount,
-                strings, references, types, methods, properties);
+                strings, references, types, methods, properties,
+                interfaces, associatedTypeDefs);
             bool found = imports.TryGetExpectedRequirements(testCase.QueryReference,
                 out var requirements);
             return (true, found, requirements.TargetRequirement, requirements.RuntimePolicy);
@@ -550,5 +615,9 @@ public sealed partial class ImportTableValidationComponentTests
         int OutputCapacity = -1,
         bool HasHostedOracle = true,
         int StringCount = 8,
-        int ModuleRefCount = 1);
+        int ModuleRefCount = 1,
+        int[]? InterfaceDefs = null,
+        int[]? AssociatedTypeDefs = null,
+        int InterfaceDefCount = 0,
+        int AssociatedTypeDefCount = 0);
 }
