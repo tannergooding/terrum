@@ -235,7 +235,11 @@ public sealed class TrRmRegisterBodyReaderTests
         counts[1] = 2;
         var pseudoType = CreateBody(0x07, counts);
         BinaryPrimitives.WriteUInt32LittleEndian(pseudoType.AsSpan(41), 0xF000_0000);
-        ValidateSelectedBodyMaps(pseudoType);
+        AssertInvalidSelectedBodyMaps(pseudoType);
+
+        var reversedPseudoType = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(reversedPseudoType.AsSpan(41), 0xF100_0000);
+        AssertInvalidSelectedBodyMaps(reversedPseudoType);
 
         var typeSpecRow = CreateBody(0x07, counts);
         BinaryPrimitives.WriteUInt32LittleEndian(typeSpecRow.AsSpan(37), 0x1100_0002);
@@ -368,13 +372,13 @@ public sealed class TrRmRegisterBodyReaderTests
         BinaryPrimitives.WriteUInt16LittleEndian(invalidHomeType.AsSpan(31), 1);
         AssertInvalidSelectedBodyMaps(invalidHomeType);
 
-        var invalidPseudoCycle = (byte[])body.Clone();
-        BinaryPrimitives.WriteUInt32LittleEndian(invalidPseudoCycle.AsSpan(37), 0xF000_0000);
-        AssertInvalidSelectedBodyMaps(invalidPseudoCycle);
+        var retiredWrapperPseudo = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(retiredWrapperPseudo.AsSpan(37), 0xF000_0000);
+        AssertInvalidSelectedBodyMaps(retiredWrapperPseudo);
 
-        var invalidPseudoFamily = (byte[])body.Clone();
-        BinaryPrimitives.WriteUInt32LittleEndian(invalidPseudoFamily.AsSpan(37), 0xF000_0600);
-        AssertInvalidSelectedBodyMaps(invalidPseudoFamily);
+        var retiredGenericPseudo = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(retiredGenericPseudo.AsSpan(37), 0xF100_0000);
+        AssertInvalidSelectedBodyMaps(retiredGenericPseudo);
 
         var fieldCounts = new uint[5];
         fieldCounts[0] = 1;

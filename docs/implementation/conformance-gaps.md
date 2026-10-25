@@ -122,7 +122,9 @@ This remains selective access rather than artifact-wide Body-content
 preflight. The C# structural validator indexes Body table ranges, and callers
 must use `TrRmBodyTableReader` to validate a selected implementation. A
 method-aware selected-Body map validator now checks HomeMap structure and
-signature ordinal bounds, TypeMap token forms and pseudo-base acyclicity,
+signature ordinal bounds, TypeMap references, and provisionally rejects F0/F1
+at selected use under the unapproved
+[TypeMap pseudo-retirement proposal](../proposals/body-typemap-pseudo-type-retirement.md).
 MethodMap/FieldMap row kinds and bounds, top-level direct/Import module
 ownership, selected FieldPath step ownership, and ConstantMap TypeSpecRef/
 ConstantSource row bounds. Map-reachable TypeSpec references are traversed
@@ -167,14 +169,17 @@ zero-based `u16` with `u32` counts through 65,536; global tokens remain
 fixed-width. Implement `DE` kinds 1..5; FieldMap tokens; global FieldPath
 section `004B`; target-layout field references in `004A`; TypeIdentity
 carrier/comparison/conditional flow; and Feature 13 admission. Preserve exact
-TypeSpec/Import/MethodDef identity, F0/F1/F2/F3 TypeMap tokens, the
-TypeSpecRef row/F2/F3 union in every complete type-valued field, and the
-source operation/type, effect, failure and ownership contracts.
+TypeSpec/Import/MethodDef identity, the TypeSpecRef row/F2/F3 union in every
+complete type-valued field, and the source operation/type, effect, failure and
+ownership contracts. The accepted registry still assigns F0/F1; their
+provisional rejection is an explicitly unapproved schema divergence, not
+current-schema conformance.
 
 Independently decode the revised vectors; exercise every tiny tuple, short
 and long control domain, register-role/reserved-field rejection, `0xFFFF`/
 65,536/65,537 boundaries, Block/record extents, SourceMap recipe steps,
-compact descriptors, pseudo-type cycles/modifiers, place-handle BlockEntryState
+compact descriptors, the provisional F0/F1 selected-use rejection and its
+unapproved schema boundary, place-handle BlockEntryState
 carrier/access rows and their verified edge flow, RequirementFailure Boolean/
 uint8-mask condition selectors and constructor bindings, terminal
 DoesNotReturn CallSites, all map masks/empty-present framing, every `DE`
@@ -471,8 +476,11 @@ ownership/nullability domains and typed defaults; use the approved 12-byte
 `2=intrinsic property`, `3=associated relation`, and property codes
 `1=Unique`, `2=Write`, `3=Blittable`. Preserve constructed arguments in the
 existing variable-length TypeSpec prefix/payload scheme, using the assigned
-well-known and referenced-type argument forms; the Body TypeMap also has
-well-known and pseudo-type token forms. These assignments replace the TypeArg
+well-known and referenced-type argument forms. The accepted registry also
+assigns Body TypeMap pseudo-type forms; the unapproved retirement proposal is
+provisionally rejecting them at selected use because their complete qualifier
+and role elaboration is unsettled. The registry remains unchanged. These
+assignments replace the TypeArg
 child range and separate existential-marker TypeSpec; section `0x0012`
 remains unassigned. Do not revive the older fixed 8-byte tagged-slot
 candidate. A first-class existential-value owner is keyed
@@ -1187,11 +1195,14 @@ with `u32` counts, `DE` query/TypeIdentity controls, BlockEntryState carrier
 fields, plus the accepted integer, binary-floating and decimal type matrices.
 
 **Current/evidence:** development fixture/reader behavior is not independent
-proof of the selected schema. The standard selected-Body validator checks
-map token kinds, row bounds, direct/Import ownership and pseudo-base cycles,
-and traverses map-reachable TypeSpec references under the using Module. It
-does not establish exact substitution, HomeMap-to-signature equivalence,
-ConstantSource value-type equality, canonical writing or runtime execution.
+proof of the selected schema. The selected-Body validator checks map token
+kinds, row bounds and direct/Import ownership; its provisional path rejects
+examined F0/F1 tokens under the unapproved retirement proposal while accepted
+registry assignments remain unchanged. It traverses map-reachable TypeSpec
+references under the using Module. It does not establish exact substitution,
+HomeMap-to-signature equivalence, ConstantSource value-type equality,
+canonical writing or runtime execution, and is not current-schema
+conformance.
 Numerical portable resource minima remain unassigned, not invented defaults.
 A lower fixed-width ID is not smaller on disk.
 

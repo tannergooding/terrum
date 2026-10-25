@@ -44,6 +44,7 @@ numbers do not save bytes.
 
 | Proposal | Review boundary |
 |---|---|
+| [Body TypeMap complete types](body-typemap-pseudo-type-retirement.md) | Unapproved retirement of F0/F1 in favor of existing complete TypeSpec forms; distinguishes assigned numeric fields from missing elaboration, preserves identity/qualification and defines canonical writing/remapping without compatibility aliases. |
 | [TextFragmentShape reference forms](text-fragment-reference-forms.md) | Unapproved namespaces and conditional references for captured values, formatter evidence and writer requirements; preserves the assigned 40-byte row and literal/formatted tags. |
 | [Text-construction profile identities](text-construction-profile-identities.md) | Unapproved out-of-band per-using-Module Core identity context for exact formatter/writer role and signature validation; preserves existing declaration binding and fragment rows. |
 | [Witness associated-type binding origin](witness-associated-type-binding-origin.md) | Unapproved closed `bindingOrigin` enum and materialized inherited selections for the assigned WitnessAssociatedType row; does not allocate associated-declaration identities or witness runtime carriers. |

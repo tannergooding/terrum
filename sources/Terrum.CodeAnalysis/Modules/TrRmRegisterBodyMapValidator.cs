@@ -107,8 +107,7 @@ internal static class TrRmRegisterBodyMapValidator
                     break;
                 case 0xF0:
                 case 0xF1:
-                    ValidatePseudoType(token, body.TypeCount);
-                    break;
+                    throw InvalidMap();
                 case 0xF2:
                 case 0xF3:
                     ValidateTypeSpecModuleContext(token, ownerModule,
@@ -119,8 +118,6 @@ internal static class TrRmRegisterBodyMapValidator
                     throw InvalidMap();
             }
         }
-
-        ValidatePseudoTypeAcyclic(body);
     }
 
     private static void ValidateMethodMap(TrRmRegisterBodyReader body, int ownerModule,
@@ -444,54 +441,6 @@ internal static class TrRmRegisterBodyMapValidator
         if (reference.IsRow)
         {
             pendingRows.Push(reference.Row);
-        }
-    }
-
-    private static void ValidatePseudoType(uint token, int typeCount)
-    {
-        var baseTypeMapIndex = (byte)token;
-        var genericFamily = (byte)(token >> 8);
-        var wrapperModifier = (byte)(token >> 16);
-        var wrapperCode = wrapperModifier & 0x07;
-        if (baseTypeMapIndex >= typeCount
-            || genericFamily is not (<= 5 or 8 or 9 or 10)
-            || wrapperCode > 5)
-        {
-            throw InvalidMap();
-        }
-    }
-
-    private static void ValidatePseudoTypeAcyclic(TrRmRegisterBodyReader body)
-    {
-        var states = new byte[body.TypeCount];
-        var path = new int[body.TypeCount];
-        for (var start = 0; start < body.TypeCount; start++)
-        {
-            if (states[start] != 0)
-            {
-                continue;
-            }
-
-            var pathCount = 0;
-            var current = start;
-            while (current >= 0 && states[current] == 0)
-            {
-                states[current] = 1;
-                path[pathCount++] = current;
-                var token = ReadUInt32(body.TypeMap, current * sizeof(uint));
-                current = (token >> 24) is 0xF0 or 0xF1
-                    ? (byte)token : -1;
-            }
-
-            if (current >= 0 && states[current] == 1)
-            {
-                throw InvalidMap();
-            }
-
-            for (var index = 0; index < pathCount; index++)
-            {
-                states[path[index]] = 2;
-            }
         }
     }
 
