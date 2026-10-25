@@ -32,6 +32,15 @@ reservation amendments in the prerequisite proposal. Private records below
 are a bounded projection of those meanings, not another standard clause,
 Feature, Body codec or registry allocation.
 
+**Composition with NoThrow retirement.** This document remains the standalone
+candidate revision 90 on the revision-89 layout; it does not remove the
+NoThrow fields or promises. The separate
+[private NoThrow persistence proposal](no-throw-private-persistence.md)
+recommends revision 91 for that retirement on 89, followed by revision 92 for
+the exact aggregate-output delta from this proposal composed with retirement.
+When both candidates are implemented together, use that proposed revision 92;
+this paragraph does not amend or approve revision 90.
+
 The accepted [persistence taxonomy](../specs/representation/persistence.md),
 [exact-schema policy](../specs/representation/format-versioning.md),
 [consumer obligations](../specs/representation/reader-trust.md) and
