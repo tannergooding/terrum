@@ -1393,7 +1393,7 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifySpanOperand(BoundExpression view, InitializationState initialized, uint[] masks,
+    private static bool VerifySpanOperand(BoundExpression view, InitializationState initialized, uint[] masks,
         HashSet<int> declarations, BoundFunction function, BoundProgram program, ref int remaining, int depth,
         FailureEdges? failures)
     {
@@ -1401,11 +1401,16 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(function.Span, "Ownership");
         }
-        Expression(view, initialized, masks, declarations, function, program, ref remaining, depth + 1, failures);
+        if (!EvaluateExpression(view, initialized, masks, declarations, function, program,
+            ref remaining, depth + 1, failures))
+        {
+            return false;
+        }
         if (BackingOf(view, initialized.Dependencies, program, ref remaining, depth + 1).Count == 0)
         {
             throw InvalidEffect(view.Span, "Ownership");
         }
+        return true;
     }
 
     private static void VerifySpanFieldWrite(BoundFieldAssignment write, BoundFunction function,

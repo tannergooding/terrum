@@ -1329,7 +1329,7 @@ public static partial class TrRmExecutableCompiler
             {
                 TrRmCompactIndexedBodyReader.ValidateOnly(bodies, row, modules, defs, sigs,
                     parameters, types, featureTable, nativeCallables, nativeImports,
-                    nativeFunctionPointerSignatureTable, nativeVTables);
+                    nativeFunctionPointerSignatureTable, nativeVTables, declaration.DoesNotReturn);
                 indexed = IndexedBuilder.DecodeIndexedBody(body, count,
                     declaration.ReturnType, noThrow, declaration.DoesNotReturn, types, functions,
                     functionIndexByMethodRow,

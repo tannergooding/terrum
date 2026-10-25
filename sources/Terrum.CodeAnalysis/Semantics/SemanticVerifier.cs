@@ -423,7 +423,6 @@ public static partial class SemanticVerifier
             var function = program.Functions[i];
             if (function is null || string.IsNullOrEmpty(function.Name) || !names.Add(function.Name)
                 || (function.IsPrivate && function.IsInternal)
-                || (function.DoesNotReturn && function.ReturnType != PrimitiveType.Void)
                 || function.ReturnType is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 || (function.ReturnType == PrimitiveType.NativeRawPointer
                     && !function.RequiresUnsafeCaller)
@@ -2205,6 +2204,29 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                if (!CanCompleteNormally(local.Initializer, initialized, program,
+                    ref remaining, depth + 1))
+                {
+                    var beforeCall = initialized.Clone();
+                    var beforeMasks = (uint[])fieldMasks.Clone();
+                    if (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
+                    {
+                        VerifyNativeFixedArrayInitialization(local.Initializer, local.Variable, initialized,
+                            fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                    }
+                    else
+                    {
+                        Expression(local.Initializer, initialized, fieldMasks, declarations, function, program,
+                            ref remaining, depth + 1, failures);
+                    }
+                    if (local.Initializer.Type != function.Variables[local.Variable].Type)
+                    {
+                        throw Invalid();
+                    }
+                    beforeCall.CopyTo(initialized);
+                    beforeMasks.CopyTo(fieldMasks, 0);
+                    return true;
+                }
                 if (NativeFixedArrayContract.IsCarrier(function.Variables[local.Variable].Type))
                 {
                     VerifyNativeFixedArrayInitialization(local.Initializer, local.Variable, initialized,
@@ -2315,7 +2337,6 @@ public static partial class SemanticVerifier
                 }
                 return false;
             case BoundAssignment assignment:
-                CheckBackingInvalidation(assignment.Variable, initialized, assignment.Span);
                 if (assignment.Variable < 0 || assignment.Variable >= initialized.Length
                     || (assignment.Variable < function.ParameterCount && !function.Variables[assignment.Variable].IsOut)
                     || (function.IsConstructor && assignment.Variable == 0)
@@ -2332,11 +2353,22 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(assignment.Span, "Ownership");
                 }
-                Expression(assignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures,
+                var assignmentCouldComplete = CanCompleteNormally(assignment.Value,
+                    initialized, program, ref remaining, depth + 1);
+                if (assignmentCouldComplete)
+                {
+                    CheckBackingInvalidation(assignment.Variable, initialized, assignment.Span);
+                }
+                var assignmentCompletes = EvaluateExpression(assignment.Value, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth + 1, failures,
                     cleanupCounterStep: cleanupCounterStep);
                 if (assignment.Value.Type != function.Variables[assignment.Variable].Type)
                 {
                     throw Invalid();
+                }
+                if (!assignmentCompletes)
+                {
+                    return true;
                 }
                 var nativeOutputAssignmentResult = NativeOutputResultForValue(
                     assignment.Value, initialized, assignment.Variable);
@@ -2381,14 +2413,24 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid(optionalAssignment.Span);
                 }
-                Expression(optionalAssignment.Place, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(optionalAssignment.Place, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(optionalAssignment.Value, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    return true;
+                }
                 var assignedState = initialized.Clone();
                 var assignedMasks = (uint[])fieldMasks.Clone();
                 var assignedDeclarations = new HashSet<int>(declarations);
-                Expression(optionalAssignment.Value, assignedState, assignedMasks, assignedDeclarations, function, program,
-                    ref remaining, depth + 1, failures);
+                var valueCompletes = EvaluateExpression(optionalAssignment.Value, assignedState,
+                    assignedMasks, assignedDeclarations, function, program, ref remaining,
+                    depth + 1, failures);
                 declarations.UnionWith(assignedDeclarations);
+                if (!valueCompletes)
+                {
+                    return true;
+                }
                 for (var index = 0; index < initialized.Length; index++)
                 {
                     initialized.Merge(index, assignedState);
@@ -2396,7 +2438,6 @@ public static partial class SemanticVerifier
                 }
                 return false;
             case BoundFieldAssignment fieldAssignment:
-                CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
                 if (fieldAssignment.Variable < 0 || fieldAssignment.Variable >= initialized.Length
                     || (!function.Variables[fieldAssignment.Variable].IsMutable
                         && !ManagedClassTypes.IsClass(function.Variables[fieldAssignment.Variable].Type))
@@ -2481,7 +2522,6 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(fieldAssignment.Span, "UnsafeCaller");
                 }
-                Expression(fieldAssignment.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (IsUnique(program, targetField.Type)
                     && fieldAssignment.Value is not (BoundMove or BoundCall))
                 {
@@ -2491,6 +2531,17 @@ public static partial class SemanticVerifier
                     || (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0))
                 {
                     throw Invalid();
+                }
+                var fieldValueCouldComplete = CanCompleteNormally(fieldAssignment.Value,
+                    initialized, program, ref remaining, depth + 1);
+                if (fieldValueCouldComplete)
+                {
+                    CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
+                }
+                if (!EvaluateExpression(fieldAssignment.Value, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    return true;
                 }
                 if (targetField.Type == PrimitiveType.TokenSpan)
                 {
@@ -2510,14 +2561,24 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                Expression(bufferWrite.Index, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                failures?.Add(initialized, fieldMasks);
-                Expression(bufferWrite.Value, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (bufferWrite.Index.Type != PrimitiveType.Int32
                     || bufferWrite.Value.Type != program.Buffers[bufferWrite.Buffer].ElementType)
                 {
                     throw Invalid();
                 }
+                if (!EvaluateExpression(bufferWrite.Index, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(bufferWrite.Value, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    return true;
+                }
+                if (!EvaluateExpression(bufferWrite.Value, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    return true;
+                }
+                failures?.Add(initialized, fieldMasks);
                 return false;
             case BoundViewSet viewSet:
                 if (viewSet.Variable < 0 || viewSet.Variable >= initialized.Length
@@ -2526,10 +2587,6 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(viewSet.Span, "Ownership");
                 }
-                Expression(viewSet.Index, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
-                Expression(viewSet.Value, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
                 if (viewSet.Index.Type != PrimitiveType.Int32 || viewSet.Value.Type != PrimitiveType.Int32)
                 {
                     throw Invalid();
@@ -2537,6 +2594,18 @@ public static partial class SemanticVerifier
                 if (function.IsNoThrow)
                 {
                     throw InvalidEffect(viewSet.Span);
+                }
+                if (!EvaluateExpression(viewSet.Index, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(viewSet.Value, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    return true;
+                }
+                if (!EvaluateExpression(viewSet.Value, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    return true;
                 }
                 failures?.Add(initialized, fieldMasks);
                 return false;
@@ -2548,15 +2617,55 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (IsUnique(program, effect.Type))
+                var expressionCompletes = CanCompleteNormally(expressionStatement.Expression,
+                    initialized, program, ref remaining, depth + 1);
+                if (IsUnique(program, effect.Type) && expressionCompletes)
                 {
                     throw InvalidEffect(expressionStatement.Span, "Ownership");
                 }
+                if (!expressionCompletes)
+                {
+                    var beforeExpression = initialized.Clone();
+                    var beforeMasks = (uint[])fieldMasks.Clone();
+                    Expression(expressionStatement.Expression, initialized, fieldMasks, declarations,
+                        function, program, ref remaining, depth + 1, failures,
+                        statementCompound: effect is BoundCompoundAssignment);
+                    beforeExpression.CopyTo(initialized);
+                    beforeMasks.CopyTo(fieldMasks, 0);
+                    return true;
+                }
                 Expression(expressionStatement.Expression, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures, statementCompound: effect is BoundCompoundAssignment);
-                return effect is BoundCall statementCall
-                    && program.Functions[statementCall.Function].DoesNotReturn;
+                return false;
             case BoundIf conditional:
+                if (!CanCompleteNormally(conditional.Condition, initialized, program,
+                    ref remaining, depth + 1))
+                {
+                    if (conditional.Condition.Type != PrimitiveType.Bool || conditional.Then is null)
+                    {
+                        throw Invalid();
+                    }
+                    var beforeNonCompletingCondition = initialized.Clone();
+                    var beforeMasks = (uint[])fieldMasks.Clone();
+                    Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                    beforeNonCompletingCondition.CopyTo(initialized);
+                    beforeMasks.CopyTo(fieldMasks, 0);
+                    var unreachableThenState = initialized.Clone();
+                    var unreachableThenMasks = (uint[])fieldMasks.Clone();
+                    _ = Statement(conditional.Then, unreachableThenState, unreachableThenMasks,
+                        declarations, function, program, ref remaining, depth + 1,
+                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                    if (conditional.Else is not null)
+                    {
+                        var unreachableElseState = initialized.Clone();
+                        var unreachableElseMasks = (uint[])fieldMasks.Clone();
+                        _ = Statement(conditional.Else, unreachableElseState, unreachableElseMasks,
+                            declarations, function, program, ref remaining, depth + 1,
+                            false, cleanups, inCleanup, inUnsafe, failures, loops);
+                    }
+                    return true;
+                }
                 var beforeCondition = initialized.Clone();
                 Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (conditional.Condition.Type != PrimitiveType.Bool || conditional.Then is null)
@@ -2596,6 +2705,37 @@ public static partial class SemanticVerifier
                 }
                 var verifiedBody = countedLoop?.Body ?? loop.Body;
                 var verifiedIterator = countedLoop?.Iterator ?? loop.Iterator;
+                if (loop.Condition is null || loop.Body is null
+                    || loop.Condition.Type != PrimitiveType.Bool)
+                {
+                    throw Invalid();
+                }
+                if (!loop.IsPostTested && !CanCompleteNormally(loop.Condition, initialized,
+                    program, ref remaining, depth + 1))
+                {
+                    var beforeNonCompletingLoopCondition = initialized.Clone();
+                    var beforeMasks = (uint[])fieldMasks.Clone();
+                    Expression(loop.Condition, initialized, fieldMasks, declarations, function,
+                        program, ref remaining, depth + 1, failures);
+                    beforeNonCompletingLoopCondition.CopyTo(initialized);
+                    beforeMasks.CopyTo(fieldMasks, 0);
+
+                    var unreachableScope = new LoopScope(cleanups.Count) {
+                        IsCleanupSwitch = inCleanup && loop.SwitchArmVariable >= 0,
+                    };
+                    loops.Add(unreachableScope);
+                    _ = Statement(verifiedBody, initialized.Clone(), (uint[])fieldMasks.Clone(),
+                        declarations, function, program, ref remaining, depth + 1,
+                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                    if (verifiedIterator is not null)
+                    {
+                        _ = Statement(verifiedIterator, initialized.Clone(), (uint[])fieldMasks.Clone(),
+                            declarations, function, program, ref remaining, depth + 1,
+                            false, cleanups, inCleanup, inUnsafe, failures, loops);
+                    }
+                    loops.RemoveAt(loops.Count - 1);
+                    return true;
+                }
                 var entryState = initialized.Clone();
                 var entryMasks = (uint[])fieldMasks.Clone();
                 var headState = entryState.Clone();
@@ -2620,8 +2760,10 @@ public static partial class SemanticVerifier
                         : Outcome(loop.Condition, conditionInput, true, ref remaining);
                     var bodyMasks = (uint[])conditionMasks.Clone();
                     MarkOutMasks(bodyState, bodyMasks, function, program);
-                    var bodyReachable = loop.IsPostTested || CanBe(loop.Condition, true, ref remaining, initialized);
-                    var exitReachable = CanBe(loop.Condition, false, ref remaining, initialized);
+                    var bodyReachable = loop.IsPostTested || CanCompleteAs(
+                        loop.Condition, true, conditionInput, program, ref remaining, depth + 1);
+                    var exitReachable = CanCompleteAs(
+                        loop.Condition, false, conditionInput, program, ref remaining, depth + 1);
                     var iteratorDeclarations = new HashSet<int>(iterationDeclarations);
                     var loopScope = new LoopScope(cleanups.Count) {
                         IsCleanupSwitch = inCleanup && loop.SwitchArmVariable >= 0,
@@ -2684,6 +2826,10 @@ public static partial class SemanticVerifier
                         var evaluatedMasks = (uint[])conditionInputMasks.Clone();
                         Expression(loop.Condition, evaluatedState, evaluatedMasks, conditionDeclarations,
                             function, program, ref remaining, depth + 1, failures);
+                        var conditionContinuesTrue = CanCompleteAs(loop.Condition, true,
+                            conditionInputState, program, ref remaining, depth + 1);
+                        var conditionContinuesFalse = CanCompleteAs(loop.Condition, false,
+                            conditionInputState, program, ref remaining, depth + 1);
                         var falseState = Outcome(loop.Condition, conditionInputState, false, ref remaining);
                         var trueState = Outcome(loop.Condition, conditionInputState, true, ref remaining);
                         var trueMasks = (uint[])evaluatedMasks.Clone();
@@ -2693,11 +2839,12 @@ public static partial class SemanticVerifier
                         exitMasks = evaluatedMasks;
                         backEdges = new FailureEdges();
                         if (bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns)
-                            && CanBe(loop.Condition, true, ref remaining, initialized))
+                            && conditionContinuesTrue)
                         {
                             backEdges.Add(trueState, trueMasks);
                         }
-                        exitReachable &= bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns);
+                        exitReachable = conditionContinuesFalse
+                            && bodyReachable && (loopScope.Continues.HasEdges || !bodyReturns);
                         iterationDeclarations.UnionWith(conditionDeclarations);
                     }
                     var exits = new FailureEdges();
@@ -2829,9 +2976,7 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(view.Owner.Span, "Ownership");
                 }
-                Expression(view.Start, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 var rangeBound = view.RangeEnd ?? view.Length;
-                Expression(rangeBound, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 var invalidRangeShape = view.RangeEnd is null
                     ? view.IsStartEndRelative || view.IsRangeEndRelative
                     : view.IsMutable || view.Length is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 };
@@ -2839,6 +2984,32 @@ public static partial class SemanticVerifier
                     || invalidRangeShape)
                 {
                     throw Invalid();
+                }
+                var beforeView = initialized.Clone();
+                var beforeViewMasks = (uint[])fieldMasks.Clone();
+                if (!EvaluateExpression(view.Start, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(rangeBound, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    var unreachableBodyState = beforeView.Clone();
+                    unreachableBodyState[view.Variable] = true;
+                    _ = Statement(view.Body, unreachableBodyState, (uint[])beforeViewMasks.Clone(),
+                        declarations, function, program, ref remaining, depth + 1,
+                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                    return true;
+                }
+                if (!EvaluateExpression(rangeBound, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    beforeView.CopyTo(initialized);
+                    beforeViewMasks.CopyTo(fieldMasks, 0);
+                    var unreachableBodyState = beforeView.Clone();
+                    unreachableBodyState[view.Variable] = true;
+                    _ = Statement(view.Body, unreachableBodyState, (uint[])beforeViewMasks.Clone(),
+                        declarations, function, program, ref remaining, depth + 1,
+                        false, cleanups, inCleanup, inUnsafe, failures, loops);
+                    return true;
                 }
                 if (function.IsNoThrow)
                 {
@@ -2861,6 +3032,21 @@ public static partial class SemanticVerifier
                 return TryCatchStatement(recovery, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth, reachable, cleanups, inCleanup, inUnsafe, failures, loops);
             case BoundRequire requirement:
+                if (!CanCompleteNormally(requirement.Condition, initialized, program,
+                    ref remaining, depth + 1))
+                {
+                    var beforeNonCompletingCondition = initialized.Clone();
+                    var beforeMasks = (uint[])fieldMasks.Clone();
+                    Expression(requirement.Condition, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                    beforeNonCompletingCondition.CopyTo(initialized);
+                    beforeMasks.CopyTo(fieldMasks, 0);
+                    if (requirement.Condition.Type != PrimitiveType.Bool)
+                    {
+                        throw Invalid();
+                    }
+                    return true;
+                }
                 var beforeRequirement = initialized.Clone();
                 Expression(requirement.Condition, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (requirement.Condition.Type != PrimitiveType.Bool)
@@ -2886,6 +3072,22 @@ public static partial class SemanticVerifier
                 if (inCleanup)
                 {
                     throw InvalidEffect(result.Span, "FinallyReturn");
+                }
+                if (result.Value is not null
+                    && !CanCompleteNormally(result.Value, initialized, program,
+                        ref remaining, depth + 1))
+                {
+                    if (result.Value.Type != function.ReturnType)
+                    {
+                        throw Invalid();
+                    }
+                    var beforeValue = initialized.Clone();
+                    var beforeMasks = (uint[])fieldMasks.Clone();
+                    Expression(result.Value, initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                    beforeValue.CopyTo(initialized);
+                    beforeMasks.CopyTo(fieldMasks, 0);
+                    return true;
                 }
                 if (function.DoesNotReturn && reachable)
                 {
@@ -3806,10 +4008,18 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(pointerWrite.Span, "NativePointer");
                 }
-                Expression(pointerWrite.Address, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
-                Expression(pointerWrite.Value, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(pointerWrite.Address, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(pointerWrite.Value, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    break;
+                }
+                if (!EvaluateExpression(pointerWrite.Value, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    break;
+                }
                 initialized.InvalidateNativeOutputCorrelations();
                 break;
             case BoundNativeFixedArrayInitialization:
@@ -3860,26 +4070,53 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                Expression(coalesce.Optional, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(coalesce.Optional, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(coalesce.Fallback, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    break;
+                }
+                var optionalPresence = KnownOptionalPresence(coalesce.Optional, initialized, ref remaining);
+                var presentPossible = optionalPresence != false;
+                var absentPossible = optionalPresence != true;
+                var presentState = initialized.Clone();
+                var presentMasks = (uint[])fieldMasks.Clone();
                 var absentState = initialized.Clone();
                 var absentMasks = (uint[])fieldMasks.Clone();
                 var absentDeclarations = new HashSet<int>(declarations);
-                Expression(coalesce.Fallback, absentState, absentMasks, absentDeclarations, function, program,
-                    ref remaining, depth + 1, coalesce.Optional is BoundOptionalLift ? null : failures);
+                var absentCompletes = absentPossible && EvaluateExpression(coalesce.Fallback,
+                    absentState, absentMasks, absentDeclarations, function, program, ref remaining,
+                    depth + 1, coalesce.Optional is BoundOptionalLift ? null : failures);
+                if (!absentPossible)
+                {
+                    ValidateUnreachableExpression(coalesce.Fallback, absentState, absentMasks,
+                        absentDeclarations, function, program, ref remaining, depth + 1);
+                }
                 declarations.UnionWith(absentDeclarations);
-                if (coalesce.Optional is BoundNull)
+                if (presentPossible && absentCompletes)
+                {
+                    for (var index = 0; index < initialized.Length; index++)
+                    {
+                        initialized.Merge(index, absentState);
+                        fieldMasks[index] = presentMasks[index] & absentMasks[index];
+                    }
+                    _ = initialized.MergeNativeOutputState(
+                        presentState, true, absentState, true);
+                }
+                else if (presentPossible)
+                {
+                    presentState.CopyTo(initialized);
+                    Array.Copy(presentMasks, fieldMasks, fieldMasks.Length);
+                    _ = initialized.MergeNativeOutputState(
+                        presentState, true, absentState, false);
+                }
+                else if (absentCompletes)
                 {
                     absentState.CopyTo(initialized);
                     Array.Copy(absentMasks, fieldMasks, fieldMasks.Length);
-                }
-                else if (coalesce.Optional is not BoundOptionalLift)
-                {
-                    for (var i = 0; i < initialized.Length; i++)
-                    {
-                        initialized.Merge(i, absentState);
-                        fieldMasks[i] &= absentMasks[i];
-                    }
+                    _ = initialized.MergeNativeOutputState(
+                        presentState, false, absentState, true);
                 }
                 break;
             case BoundReadonlyProjection projection:
@@ -3955,7 +4192,8 @@ public static partial class SemanticVerifier
                 _ = declarations.Add(pattern.Variable);
                 break;
             case BoundCast cast:
-                Expression(cast.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                var castOperandCompletes = EvaluateExpression(cast.Operand, initialized,
+                    fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 var integerConversion = (cast.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                     or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
                     && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -3972,6 +4210,10 @@ public static partial class SemanticVerifier
                     && !floatingToIntegerConversion && !floatingConversion)
                 {
                     throw Invalid();
+                }
+                if (!castOperandCompletes)
+                {
+                    break;
                 }
                 if (function.IsNoThrow && !IsTotalConversion(cast.Operand.Type, cast.Type))
                 {
@@ -4072,25 +4314,35 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(length.Span, "Ownership");
                 }
-                VerifySpanOperand(length.View, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, failures);
+                if (!VerifySpanOperand(length.View, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth, failures))
+                {
+                    break;
+                }
                 break;
             case BoundSpanRead spanRead:
-                VerifySpanOperand(spanRead.View, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, failures);
                 if (spanRead.Index is null || spanRead.Index.Type != TokenSpanContract.IndexCarrier
                     || !TokenSpanContract.ValidTokenLayout(program.Structures)
-                    || spanRead.Type != (PrimitiveType)(100 + TokenSpanContract.Find(program.Structures, TokenSpanContract.TokenName))
-                    || function.IsNoThrow)
+                    || spanRead.Type != (PrimitiveType)(100 + TokenSpanContract.Find(program.Structures, TokenSpanContract.TokenName)))
                 {
                     throw InvalidEffect(spanRead.Span, "Ownership");
+                }
+                if (!VerifySpanOperand(spanRead.View, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth, failures))
+                {
+                    ValidateUnreachableExpression(spanRead.Index, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    break;
                 }
                 var readBacking = BackingOf(spanRead.View, initialized.Dependencies, program, ref remaining, depth + 1);
                 initialized.Dependencies?.Staged.Add(readBacking);
                 try
                 {
-                    Expression(spanRead.Index, initialized, fieldMasks, declarations, function, program,
-                        ref remaining, depth + 1, failures);
+                    if (!EvaluateExpression(spanRead.Index, initialized, fieldMasks, declarations,
+                        function, program, ref remaining, depth + 1, failures))
+                    {
+                        break;
+                    }
                 }
                 finally
                 {
@@ -4098,6 +4350,10 @@ public static partial class SemanticVerifier
                     {
                         dependencies.Staged.RemoveAt(dependencies.Staged.Count - 1);
                     }
+                }
+                if (function.IsNoThrow)
+                {
+                    throw InvalidEffect(spanRead.Span, "Ownership");
                 }
                 failures?.Add(initialized, fieldMasks);
                 break;
@@ -4109,8 +4365,11 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(advance.Span, "Ownership");
                 }
-                VerifySpanOperand(advance.View, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth, failures);
+                if (!VerifySpanOperand(advance.View, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth, failures))
+                {
+                    break;
+                }
                 failures?.Add(initialized, fieldMasks);
                 break;
             case BoundViewLength length:
@@ -4137,10 +4396,14 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(viewRead.Span, "Ownership");
                 }
-                Expression(viewRead.Index, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
                 if (viewRead.Index.Type != PrimitiveType.Int32)
                 {
                     throw Invalid();
+                }
+                if (!EvaluateExpression(viewRead.Index, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    break;
                 }
                 if (function.IsNoThrow)
                 {
@@ -4192,11 +4455,18 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(update.Span);
                 }
                 VerifyUpdatePlace(update.Place, function, program, ref remaining, depth + 1);
-                Expression(update.Place, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(update.Place, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    break;
+                }
                 if (!updateTarget.IsNoThrow)
                 {
                     failures?.Add(initialized, fieldMasks);
+                }
+                if (updateTarget.DoesNotReturn)
+                {
+                    break;
                 }
                 var nominalUpdateRoot = UpdateRoot(update.Place, ref remaining, depth + 1);
                 if (nominalUpdateRoot >= 0)
@@ -4228,24 +4498,29 @@ public static partial class SemanticVerifier
             case BoundOutArgument:
                 throw Invalid();
             case BoundBufferRead bufferRead:
-                if (function.IsNoThrow && !IsProvenBufferIndex(bufferRead.Buffer, bufferRead.Index, program))
-                {
-                    throw InvalidEffect(bufferRead.Span);
-                }
                 if (bufferRead.Buffer < 0 || bufferRead.Buffer >= program.Buffers.Length
                     || bufferRead.Type != program.Buffers[bufferRead.Buffer].ElementType)
                 {
                     throw Invalid();
                 }
-                Expression(bufferRead.Index, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                failures?.Add(initialized, fieldMasks);
                 if (bufferRead.Index.Type != PrimitiveType.Int32)
                 {
                     throw Invalid();
                 }
+                if (!EvaluateExpression(bufferRead.Index, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    break;
+                }
+                if (function.IsNoThrow && !IsProvenBufferIndex(bufferRead.Buffer, bufferRead.Index, program))
+                {
+                    throw InvalidEffect(bufferRead.Span);
+                }
+                failures?.Add(initialized, fieldMasks);
                 break;
             case BoundUnary unary:
-                Expression(unary.Operand, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                var operandCompletes = EvaluateExpression(unary.Operand, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth + 1, failures);
                 var unaryValid = unary.Operator switch {
                     TokenKind.Plus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
                         or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
@@ -4259,6 +4534,10 @@ public static partial class SemanticVerifier
                 if (!unaryValid)
                 {
                     throw Invalid();
+                }
+                if (!operandCompletes)
+                {
+                    break;
                 }
                 if (function.IsNoThrow && unary.Operator == TokenKind.Minus
                     && unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64
@@ -4276,15 +4555,22 @@ public static partial class SemanticVerifier
                 if (update.Place is null || update.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
                     || update.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
                         or PrimitiveType.Int64 or PrimitiveType.UInt64)
-                    || update.Place.Type != update.Type || function.IsNoThrow
+                    || update.Place.Type != update.Type
                     || (update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
                         && !function.IsStatic))
                 {
                     throw InvalidEffect(update.Span);
                 }
                 VerifyUpdatePlace(update.Place, function, program, ref remaining, depth + 1);
-                Expression(update.Place, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(update.Place, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    break;
+                }
+                if (function.IsNoThrow)
+                {
+                    throw InvalidEffect(update.Span);
+                }
                 failures?.Add(initialized, fieldMasks);
                 var updateRoot = UpdateRoot(update.Place, ref remaining, depth + 1);
                 if (updateRoot >= 0)
@@ -4306,16 +4592,24 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(compound.Span);
                 }
                 VerifyUpdatePlace(compound.Place, function, program, ref remaining, depth + 1);
-                Expression(compound.Place, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(compound.Place, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(compound.Right, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    break;
+                }
                 var root = UpdateRoot(compound.Place, ref remaining, depth + 1);
                 if (root >= 0 && IsUnique(program, function.Variables[root].Type)
                     && InvalidatesReservedOwner(compound.Right, root, ref remaining, depth + 1))
                 {
                     throw InvalidEffect(compound.Right.Span, "Ownership");
                 }
-                Expression(compound.Right, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(compound.Right, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    break;
+                }
                 if (root >= 0 && !initialized[root])
                 {
                     throw InvalidEffect(compound.Right.Span, "Ownership");
@@ -4336,34 +4630,57 @@ public static partial class SemanticVerifier
                 break;
             case BoundBinary binary:
                 var beforeLeft = initialized.Clone();
-                Expression(binary.Left, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                var leftCompletes = EvaluateExpression(binary.Left, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth + 1, failures);
+                var binaryCompletes = false;
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {
                     var evaluateWhenTrue = binary.Operator == TokenKind.AmpersandAmpersand;
                     var rightState = Outcome(binary.Left, beforeLeft, evaluateWhenTrue, ref remaining);
                     var rightMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(rightState, rightMasks, function, program);
-                    var evaluates = CanBe(binary.Left, evaluateWhenTrue, ref remaining, initialized);
-                    Expression(binary.Right, rightState, rightMasks, declarations, function, program, ref remaining, depth + 1,
-                        evaluates ? failures : null);
+                    var evaluates = leftCompletes
+                        && CanCompleteAs(binary.Left, evaluateWhenTrue, beforeLeft,
+                            program, ref remaining, depth + 1);
+                    var rightCompletes = evaluates && EvaluateExpression(binary.Right,
+                        rightState, rightMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                    if (!evaluates)
+                    {
+                        ValidateUnreachableExpression(binary.Right, rightState, rightMasks,
+                            declarations, function, program, ref remaining, depth + 1);
+                    }
                     var skippedState = Outcome(binary.Left, beforeLeft, !evaluateWhenTrue, ref remaining);
                     var skippedMasks = (uint[])fieldMasks.Clone();
                     MarkOutMasks(skippedState, skippedMasks, function, program);
-                    var skips = CanBe(binary.Left, !evaluateWhenTrue, ref remaining, initialized);
-                    for (var i = 0; i < initialized.Length; i++)
+                    var skips = leftCompletes
+                        && CanCompleteAs(binary.Left, !evaluateWhenTrue, beforeLeft,
+                            program, ref remaining, depth + 1);
+                    if (rightCompletes || skips)
                     {
-                        initialized.SetPossibilities(i, !evaluates ? skippedState.Possibilities(i)
-                            : !skips ? rightState.Possibilities(i)
-                            : (byte)(rightState.Possibilities(i) | skippedState.Possibilities(i)));
-                        fieldMasks[i] = !evaluates ? skippedMasks[i] : !skips ? rightMasks[i]
-                            : rightMasks[i] & skippedMasks[i];
+                        for (var i = 0; i < initialized.Length; i++)
+                        {
+                            initialized.SetPossibilities(i, !rightCompletes ? skippedState.Possibilities(i)
+                                : !skips ? rightState.Possibilities(i)
+                                : (byte)(rightState.Possibilities(i) | skippedState.Possibilities(i)));
+                            fieldMasks[i] = !rightCompletes ? skippedMasks[i] : !skips ? rightMasks[i]
+                                : rightMasks[i] & skippedMasks[i];
+                        }
+                        _ = initialized.MergeNativeOutputState(
+                            rightState, rightCompletes, skippedState, skips);
                     }
-                    _ = initialized.MergeNativeOutputState(
-                        rightState, evaluates, skippedState, skips);
                 }
                 else
                 {
-                    Expression(binary.Right, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
+                    var rightCompletes = leftCompletes && EvaluateExpression(binary.Right,
+                        initialized, fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                    if (!leftCompletes)
+                    {
+                        ValidateUnreachableExpression(binary.Right, initialized, fieldMasks,
+                            declarations, function, program, ref remaining, depth + 1);
+                    }
+                    binaryCompletes = leftCompletes && rightCompletes;
                 }
                 var operands = binary.Left.Type == binary.Right.Type && binary.Left.Type != PrimitiveType.Void;
                 var integerOperands = binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
@@ -4402,11 +4719,12 @@ public static partial class SemanticVerifier
                 }
                 var verifiedNoThrowArithmetic = function.IsNoThrow && checkedIntegerOperation
                     && ReferenceEquals(binary, cleanupCounterStep);
-                if (function.IsNoThrow && checkedIntegerOperation && !verifiedNoThrowArithmetic)
+                if (function.IsNoThrow && checkedIntegerOperation
+                    && binaryCompletes && !verifiedNoThrowArithmetic)
                 {
                     throw InvalidEffect(binary.Span);
                 }
-                if (checkedIntegerOperation && !verifiedNoThrowArithmetic)
+                if (checkedIntegerOperation && binaryCompletes && !verifiedNoThrowArithmetic)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -4420,16 +4738,29 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var beforeCondition = initialized.Clone();
-                Expression(conditional.Condition, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
-                var trueFeasible = CanBe(conditional.Condition, true, ref remaining, initialized);
-                var falseFeasible = CanBe(conditional.Condition, false, ref remaining, initialized);
+                if (!EvaluateExpression(conditional.Condition, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    ValidateUnreachableExpression(conditional.WhenTrue, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    ValidateUnreachableExpression(conditional.WhenFalse, initialized, fieldMasks,
+                        declarations, function, program, ref remaining, depth + 1);
+                    break;
+                }
+                var trueFeasible = CanCompleteAs(conditional.Condition, true, beforeCondition,
+                    program, ref remaining, depth + 1);
+                var falseFeasible = CanCompleteAs(conditional.Condition, false, beforeCondition,
+                    program, ref remaining, depth + 1);
                 var trueState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
                 var falseState = Outcome(conditional.Condition, beforeCondition, false, ref remaining);
                 var trueMasks = (uint[])fieldMasks.Clone();
                 var falseMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(trueState, trueMasks, function, program);
                 MarkOutMasks(falseState, falseMasks, function, program);
+                var trueCompletes = trueFeasible && CanCompleteNormally(
+                    conditional.WhenTrue, trueState, program, ref remaining, depth + 1);
+                var falseCompletes = falseFeasible && CanCompleteNormally(
+                    conditional.WhenFalse, falseState, program, ref remaining, depth + 1);
                 var trueDeclarations = new HashSet<int>(declarations);
                 var falseDeclarations = new HashSet<int>(declarations);
                 Expression(conditional.WhenTrue, trueState, trueMasks, trueDeclarations, function, program,
@@ -4438,26 +4769,51 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, falseFeasible ? failures : null);
                 declarations.UnionWith(trueDeclarations);
                 declarations.UnionWith(falseDeclarations);
-                for (var i = 0; i < initialized.Length; i++)
+                if (trueCompletes || falseCompletes)
                 {
-                    initialized.SetPossibilities(i, !trueFeasible ? falseState.Possibilities(i)
-                        : !falseFeasible ? trueState.Possibilities(i)
-                        : (byte)(trueState.Possibilities(i) | falseState.Possibilities(i)));
-                    fieldMasks[i] = !trueFeasible ? falseMasks[i] : !falseFeasible ? trueMasks[i]
-                        : trueMasks[i] & falseMasks[i];
+                    for (var i = 0; i < initialized.Length; i++)
+                    {
+                        initialized.SetPossibilities(i, !trueCompletes ? falseState.Possibilities(i)
+                            : !falseCompletes ? trueState.Possibilities(i)
+                            : (byte)(trueState.Possibilities(i) | falseState.Possibilities(i)));
+                        fieldMasks[i] = !trueCompletes ? falseMasks[i] : !falseCompletes ? trueMasks[i]
+                            : trueMasks[i] & falseMasks[i];
+                    }
+                    _ = initialized.MergeNativeOutputState(trueState, trueCompletes,
+                        falseState, falseCompletes);
                 }
-                _ = initialized.MergeNativeOutputState(trueState, trueFeasible, falseState, falseFeasible);
                 break;
             case BoundIndirectCall call:
                 VerifyIndirectCall(call, function, program);
-                Expression(call.Target, initialized, fieldMasks, declarations, function, program,
-                    ref remaining, depth + 1, failures);
+                if (!EvaluateExpression(call.Target, initialized, fieldMasks, declarations,
+                    function, program, ref remaining, depth + 1, failures))
+                {
+                    foreach (var argument in call.Arguments)
+                    {
+                        ValidateUnreachableExpression(argument, initialized, fieldMasks,
+                            declarations, function, program, ref remaining, depth + 1);
+                    }
+                    break;
+                }
+                var indirectCallCompletes = true;
                 foreach (var argument in call.Arguments)
                 {
-                    Expression(argument, initialized, fieldMasks, declarations, function, program,
-                        ref remaining, depth + 1, failures);
+                    if (indirectCallCompletes)
+                    {
+                        indirectCallCompletes = EvaluateExpression(argument, initialized,
+                            fieldMasks, declarations, function, program, ref remaining,
+                            depth + 1, failures);
+                    }
+                    else
+                    {
+                        ValidateUnreachableExpression(argument, initialized, fieldMasks,
+                            declarations, function, program, ref remaining, depth + 1);
+                    }
                 }
-                initialized.InvalidateNativeOutputCorrelations();
+                if (indirectCallCompletes)
+                {
+                    initialized.InvalidateNativeOutputCorrelations();
+                }
                 break;
             case BoundCall call:
                 if (call.Function < 0 || call.Function >= program.Functions.Length || call.Arguments.IsDefault)
@@ -4520,10 +4876,21 @@ public static partial class SemanticVerifier
                 var loanOfInitializedField = false;
                 var reservedReceiver = -1;
                 var stagedDependencyCount = initialized.Dependencies?.Staged.Count ?? 0;
+                var argumentsComplete = true;
+                InitializationState? nonCompletingArgumentState = null;
+                uint[]? nonCompletingArgumentMasks = null;
                 try
                 {
                     for (var i = 0; i < call.Arguments.Length; i++)
                     {
+                        if (!argumentsComplete)
+                        {
+                            initialized = (nonCompletingArgumentState
+                                ?? throw Invalid()).Clone();
+                            fieldMasks = (uint[])(nonCompletingArgumentMasks
+                                ?? throw Invalid()).Clone();
+                            failures = null;
+                        }
                         var argument = call.Arguments[i];
                         var parameterIndex = call.ParameterIndex(i);
                         if (argumentParameters is not null)
@@ -4824,8 +5191,13 @@ public static partial class SemanticVerifier
                                     {
                                         throw InvalidEffect(argument.Span, "Ownership");
                                     }
-                                    Expression(argument, initialized, fieldMasks, declarations, function, program,
-                                        ref remaining, depth + 1, failures);
+                                    if (!EvaluateExpression(argument, initialized, fieldMasks, declarations,
+                                        function, program, ref remaining, depth + 1, failures))
+                                    {
+                                        argumentsComplete = false;
+                                        nonCompletingArgumentState = initialized.Clone();
+                                        nonCompletingArgumentMasks = (uint[])fieldMasks.Clone();
+                                    }
                                 }
                             }
                         }
@@ -4858,6 +5230,10 @@ public static partial class SemanticVerifier
                         {
                             dependencies.Staged.Add(BackingOf(argument, dependencies, program, ref remaining, depth + 1));
                         }
+                    }
+                    if (!argumentsComplete)
+                    {
+                        break;
                     }
                     if (loanRoot >= 0 && !initialized[loanRoot]
                         && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
@@ -5713,8 +6089,192 @@ public static partial class SemanticVerifier
         Dictionary<BoundExpression, byte> flowFacts, ref int remaining) =>
         facts == AllFlowFacts ? facts : (byte)(facts | FlowFacts(expression, flowFacts, ref remaining));
 
-    // Ordinary expression feasibility is shared across flow-state clones; initialization-sensitive
-    // compound expressions are handled above. Charge every lookup to the existing visit budget.
+    // A false result means no evaluated path produces a normal value.
+    private static bool CanCompleteNormally(BoundExpression expression,
+        InitializationState initialized, BoundProgram program, ref int remaining, int depth)
+    {
+        if (expression is null)
+        {
+            return true;
+        }
+        Count(ref remaining, depth);
+        switch (expression)
+        {
+            case BoundCall call:
+                if ((uint)call.Function >= (uint)program.Functions.Length || call.Arguments.IsDefault)
+                {
+                    return true;
+                }
+                foreach (var argument in call.Arguments)
+                {
+                    if (!CanCompleteNormally(argument, initialized, program,
+                        ref remaining, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+                return !program.Functions[call.Function].DoesNotReturn;
+            case BoundIndirectCall call:
+                if (call.Target is null || call.Arguments.IsDefault
+                    || !CanCompleteNormally(call.Target, initialized, program,
+                    ref remaining, depth + 1))
+                {
+                    return false;
+                }
+                foreach (var argument in call.Arguments)
+                {
+                    if (!CanCompleteNormally(argument, initialized, program,
+                        ref remaining, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            case BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe } logical:
+                return CanCompleteAs(logical, true, initialized, program, ref remaining, depth + 1)
+                    || CanCompleteAs(logical, false, initialized, program, ref remaining, depth + 1);
+            case BoundConditional conditional:
+                if (conditional.Condition is null || conditional.WhenTrue is null
+                    || conditional.WhenFalse is null)
+                {
+                    return true;
+                }
+                return (CanCompleteAs(conditional.Condition, true, initialized, program,
+                            ref remaining, depth + 1)
+                        && CanCompleteNormally(conditional.WhenTrue,
+                            Outcome(conditional.Condition, initialized, true, ref remaining),
+                            program, ref remaining, depth + 1))
+                    || (CanCompleteAs(conditional.Condition, false, initialized, program,
+                            ref remaining, depth + 1)
+                        && CanCompleteNormally(conditional.WhenFalse,
+                            Outcome(conditional.Condition, initialized, false, ref remaining),
+                            program, ref remaining, depth + 1));
+            case BoundCoalesce coalesce:
+                if (coalesce.Optional is null || coalesce.Fallback is null)
+                {
+                    return true;
+                }
+                if (!CanCompleteNormally(coalesce.Optional, initialized, program,
+                    ref remaining, depth + 1))
+                {
+                    return false;
+                }
+                return KnownOptionalPresence(coalesce.Optional, initialized, ref remaining) != false
+                    || CanCompleteNormally(coalesce.Fallback, initialized, program,
+                        ref remaining, depth + 1);
+            case BoundNominalUpdate update:
+                return CanCompleteNormally(update.Place, initialized, program,
+                    ref remaining, depth + 1)
+                    && ((uint)update.Function >= (uint)program.Functions.Length
+                        || !program.Functions[update.Function].DoesNotReturn);
+            default:
+                foreach (var nested in expression.NestedExpressions)
+                {
+                    if (!CanCompleteNormally(nested, initialized, program,
+                        ref remaining, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+        }
+    }
+
+    private static bool CanCompleteAs(BoundExpression expression, bool result,
+        InitializationState initialized, BoundProgram program, ref int remaining, int depth)
+    {
+        if (expression is null)
+        {
+            return true;
+        }
+        Count(ref remaining, depth);
+        switch (expression)
+        {
+            case BoundUnsafeExpression unsafeExpression:
+                return CanCompleteAs(unsafeExpression.Expression, result, initialized,
+                    program, ref remaining, depth + 1);
+            case BoundUnary { Operator: TokenKind.Bang } unary:
+                return CanCompleteAs(unary.Operand, !result, initialized,
+                    program, ref remaining, depth + 1);
+            case BoundBinary { Operator: TokenKind.AmpersandAmpersand } and:
+                return result
+                    ? (CanCompleteAs(and.Left, true, initialized, program, ref remaining, depth + 1)
+                        && CanCompleteAs(and.Right, true,
+                            Outcome(and.Left, initialized, true, ref remaining),
+                            program, ref remaining, depth + 1))
+                    : (CanCompleteAs(and.Left, false, initialized, program, ref remaining, depth + 1)
+                        || (CanCompleteAs(and.Left, true, initialized, program, ref remaining, depth + 1)
+                            && CanCompleteAs(and.Right, false,
+                                Outcome(and.Left, initialized, true, ref remaining),
+                                program, ref remaining, depth + 1)));
+            case BoundBinary { Operator: TokenKind.PipePipe } or:
+                return result
+                    ? (CanCompleteAs(or.Left, true, initialized, program, ref remaining, depth + 1)
+                        || (CanCompleteAs(or.Left, false, initialized, program, ref remaining, depth + 1)
+                            && CanCompleteAs(or.Right, true,
+                                Outcome(or.Left, initialized, false, ref remaining),
+                                program, ref remaining, depth + 1)))
+                    : (CanCompleteAs(or.Left, false, initialized, program, ref remaining, depth + 1)
+                        && CanCompleteAs(or.Right, false,
+                            Outcome(or.Left, initialized, false, ref remaining),
+                            program, ref remaining, depth + 1));
+            case BoundConditional conditional when conditional.Type == PrimitiveType.Bool:
+                if (conditional.Condition is null || conditional.WhenTrue is null
+                    || conditional.WhenFalse is null)
+                {
+                    return true;
+                }
+                return (CanCompleteAs(conditional.Condition, true, initialized, program,
+                            ref remaining, depth + 1)
+                        && CanCompleteAs(conditional.WhenTrue, result,
+                            Outcome(conditional.Condition, initialized, true, ref remaining),
+                            program, ref remaining, depth + 1))
+                    || (CanCompleteAs(conditional.Condition, false, initialized, program,
+                            ref remaining, depth + 1)
+                        && CanCompleteAs(conditional.WhenFalse, result,
+                            Outcome(conditional.Condition, initialized, false, ref remaining),
+                            program, ref remaining, depth + 1));
+            default:
+                return CanCompleteNormally(expression, initialized, program,
+                    ref remaining, depth + 1)
+                    && CanBe(expression, result, ref remaining, initialized);
+        }
+    }
+
+    private static bool EvaluateExpression(BoundExpression expression,
+        InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth,
+        FailureEdges? failures, bool statementCompound = false,
+        BoundBinary? cleanupCounterStep = null)
+    {
+        var completesNormally = CanCompleteNormally(expression, initialized, program,
+            ref remaining, depth + 1);
+        if (completesNormally)
+        {
+            Expression(expression, initialized, fieldMasks, declarations, function, program,
+                ref remaining, depth + 1, failures, statementCompound, cleanupCounterStep);
+            return true;
+        }
+
+        var beforeExpression = initialized.Clone();
+        var beforeMasks = (uint[])fieldMasks.Clone();
+        Expression(expression, initialized, fieldMasks, declarations, function, program,
+            ref remaining, depth + 1, failures, statementCompound, cleanupCounterStep);
+        beforeExpression.CopyTo(initialized);
+        beforeMasks.CopyTo(fieldMasks, 0);
+        return false;
+    }
+
+    private static void ValidateUnreachableExpression(BoundExpression expression,
+        InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        var unreachableState = initialized.Clone();
+        var unreachableMasks = (uint[])fieldMasks.Clone();
+        Expression(expression, unreachableState, unreachableMasks, declarations,
+            function, program, ref remaining, depth + 1, null);
+    }
+
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         InitializationState initialized)
     {

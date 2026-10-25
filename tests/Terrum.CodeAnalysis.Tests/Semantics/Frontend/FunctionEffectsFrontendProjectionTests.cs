@@ -18,6 +18,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
     [TestCase("[NoThrow]","void","=> require true;",true,2)]
     [TestCase("[DoesNotReturn]","void","{ require false; }",false,4)]
     [TestCase("[DoesNotReturn]","void","=> require false;",true,4)]
+    [TestCase("[DoesNotReturn]","int32","{ require false; }",false,4)]
     [TestCase("[NoThrow]","int32","{ return 42; }",false,2)]
     [TestCase("[NoThrow]","int32","=> 42;",true,2)]
     public void IndependentFunctionEffectsPreserveHostedFlagsCompletionSpansAndPe(

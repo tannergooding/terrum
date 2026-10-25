@@ -66,6 +66,25 @@ public sealed class NoReturnModuleTests
     }
 
     [Test]
+    public async Task IndependentConsumerPreservesImportedNonUnitNoReturnPromiseAsync()
+    {
+        const string source = "[DoesNotReturn] public int32 Stop() { require false; }";
+        var producer = Producer(source);
+        var declaration = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions);
+        Assert.That(declaration.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(declaration.DoesNotReturn, Is.True);
+        var consumer = CompileConsumer("int32 Main() { return Stop(); }", producer);
+        var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
+        Assert.That(ModuleCompiler.Link(artifact, producer).Functions
+            .Single(static function => function.Name == "Stop").DoesNotReturn, Is.True);
+
+        var nativeProducer = NativeProducer(source);
+        var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, nativeProducer, NativeRuntimePolicy.FailFast);
+        Assert.That(await NativeModuleCompiler.RunAsync(nativeConsumer, nativeProducer,
+            TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
+    }
+
+    [Test]
     public async Task SameNativeConsumerCallsDifferentVerifiedNonReturningBodiesAsync()
     {
         var first = NativeProducer(Terminating);

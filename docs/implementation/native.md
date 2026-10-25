@@ -312,9 +312,9 @@ and [publication contracts](../specs/language-contracts.md#22-declared-outcome-r
 | Standalone lexical blocks | Kind 14 records an exclusive body-end slot, root `-1`, brace span and preorder children; extents and scope are audited before `BoundBlock` lowering. |
 | Non-void `_ = expression;` | Kind 15 uses an audited hidden readonly local, counted against the eight-identity limit. The discard supplies no contextual target type: `_ = 1;` rejects while `_ = int32(1);` is valid. |
 | Boolean requirements | Kind 21 retains checked-require behavior under either runtime policy without a hidden local or new source scope. |
-| Structured returns and void completion | Tree/statement scalar returns use kind 8 with a typed root and keyword-through-semicolon span; their terminal header words 38–40 are `-1`. Terminal-expression envelopes remain a separate current form. All roots are consumed and reachable non-void fallthrough rejects. Void bodies permit empty/implicit completion and bare or grouped unit returns; a parameterless void entry exits zero. |
+| Structured returns and void completion | Tree/statement scalar returns use kind 8 with a typed root and keyword-through-semicolon span; their terminal header words 38–40 are `-1`. Terminal-expression envelopes remain a separate current form. All roots are consumed; reachable non-void fallthrough rejects unless a verified DoesNotReturn contract removes that normal edge. Void bodies permit empty/implicit completion and bare or grouped unit returns; a parameterless void entry exits zero. |
 | Else-if chains | False arms lower to nested conditionals without synthetic lexical blocks, retaining source coverage, local scopes and structural limits. |
-| `[NoThrow]` and `[DoesNotReturn]` | Exact declaration flags/spellings and body effects are audited. Shared verification owns failure/completion proofs; DoesNotReturn requires void and removes implicit normal completion. General attributes are not enabled. |
+| `[NoThrow]` and `[DoesNotReturn]` | Exact declaration flags/spellings and body effects are audited. Shared verification owns failure/completion proofs; DoesNotReturn preserves any declared result type and removes implicit normal completion. General attributes are not enabled. |
 | Named local lifetime ending | Kind 24 retains the slot, root `-1` and statement span. Parameters, unknown/inactive names and non-local places reject; shared verification owns definite liveness and reinitialization. |
 | Typed/inferred vacant locals | Kind 25 carries explicit `init T`; kind 26 carries `init var`; flag `0x2` records initialization authority. Inferred type comes from the first already-typed assignment expression, not an untyped literal. Unresolved, incompatible or optional storage rejects. |
 | Typed scalar constants | Kind 27 carries a direct literal; kind 28 carries an initializer reducible to `BoundConstant`; flag `0x4` records constant authority. Selected constant branches follow source evaluation. Inferred constants, runtime-dependent evaluated work and for-initializer constants reject. |
@@ -936,23 +936,29 @@ after a failed replacement while preserving the updated, still-live owner.
 
 ## Checked normal-continuation contracts
 
-`[DoesNotReturn]` is a separate declaration guarantee on a `void` function,
-including a void instance/static method. It does not introduce a public bottom
-type or apply to a value-returning constructor or an asynchronously completed
-operation. The verifier rejects reachable returns and possible fallthrough;
-constant-true loops, statically false requirements and calls to other declared
-nonreturning functions can prove the bound. Unreachable statements still receive
-ordinary type/initialization checks, but an unreachable return does not violate
-the guarantee. Caller analysis uses the declaration, never the callee's current
-body.
+`[DoesNotReturn]` preserves any declared logical result type and removes only
+the invocation's normal edge. The hosted binder/verifier and scalar frontend
+retain the complete signature, type-check arguments and unreachable source,
+and reject reachable normal returns or fallthrough. No public bottom type,
+void-to-value conversion or normal result is introduced. Source JIT and private
+native-module tests cover non-unit failure calls. The instance-struct-constructor
+JIT slice is implemented provisionally under the unapproved
+[constructor-applicability proposal](../proposals/constructor-no-return-applicability.md).
 
-Such a call removes only its normal continuation. For example, a bool/out
-failure branch ending in a nonreturning call leaves only the successful,
-initialized output path at the join. It neither manufactures a false-path
-value nor removes potential failure effects. `[NoThrow]` and `[DoesNotReturn]`
-may be combined for an infallible nonterminating body, while `require false`
-satisfies only the no-normal-return guarantee. Both promises persist in module
-contracts and may independently strengthen, but not weaken, during replacement.
+This does not establish current-schema TRRM execution: the development indexed
+Body retains non-unit no-return declaration/body facts but not terminal
+non-unit CallSites. Standard register CallSite decoding, canonical writing,
+dependency remapping and execution remain unfinished. Constructor AOT/module,
+managed-class and static-initialization execution remain gated by their actual
+ownership, initialization and representation contracts.
+
+For supported calls, a bool/out failure branch ending in a nonreturning call
+leaves only the successful, initialized output path at the join. It neither
+manufactures a false-path value nor removes potential failure effects.
+`[NoThrow]` and `[DoesNotReturn]` may be combined for an infallible
+nonterminating body, while `require false` satisfies only the no-normal-return
+guarantee. Both promises persist in private module contracts and may
+independently strengthen, but not weaken, during replacement.
 
 The [no-return sample](../../samples/LanguageFeatures/Contracts/no-return.terrum) returns 42 on success.
 Changing its entry to `Select(false)` reaches the nonreturning failure helper

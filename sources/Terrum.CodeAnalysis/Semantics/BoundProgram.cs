@@ -352,7 +352,7 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether calling this declaration requires an explicit unsafe caller context.</summary>
     public bool RequiresUnsafeCaller { get; init; }
 
-    /// <summary>Whether this void declaration guarantees no normal continuation; exceptional or fatal failure remains possible.</summary>
+    /// <summary>Whether this declaration guarantees no normal continuation; exceptional or fatal failure remains possible.</summary>
     public bool DoesNotReturn { get; init; }
 
     /// <summary>Whether this is an imported declaration with no implementation. Native emission requires it to be resolved.</summary>

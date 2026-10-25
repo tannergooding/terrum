@@ -2303,7 +2303,7 @@ public static partial class TrRmExecutableCompiler
             }
             if (_current is not null)
             {
-                if (!_function.DoesNotReturn || _function.ReturnType != PrimitiveType.Void)
+                if (!_function.DoesNotReturn)
                 {
                     throw Unsupported("Indexed scalar Body requires a terminal return.");
                 }

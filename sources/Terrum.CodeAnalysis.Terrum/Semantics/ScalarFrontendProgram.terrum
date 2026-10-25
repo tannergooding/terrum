@@ -1097,11 +1097,6 @@ bool TryPublishScalarFrontendProgram(Span<Token> tokenView, int32 count,
         int32 header = 8 + index * 780;
         require SourceRange.TryCreate(Host.FrontendProgram[header + 9],
             Host.FrontendProgram[header + 10], init var name);
-        if ((Host.FrontendProgram[header + 2] & 4) != 0
-                && Host.FrontendProgram[header + 5] != 0)
-        {
-            return ScalarProgramError(1, name, init handled);
-        }
         if (CacheScalarProgramFunctionName(index, name) >= 0)
         {
             return ScalarProgramError(4, name, init handled);

@@ -1759,11 +1759,6 @@ mut class ScalarFrontendState
             }
             selected = selectedType;
         }
-        if ((Host.Frontend[2] & 4) != 0 && selected != 0)
-        {
-            FailAt(2, typeToken.Range);
-            return false;
-        }
         if (!Take(2, init var function, tokenView) || !Take(46, init var openParameters, tokenView))
         {
             return false;
@@ -2842,7 +2837,7 @@ mut class ScalarFrontendState
 
     private bool HasStructuredCompletion(int32 returnType, bool hasTerminatingStatement)
     {
-        if (returnType == 0 || Host.Frontend[2] != 0) { return true; }
+        if (returnType == 0 || (Host.Frontend[2] & 4) != 0) { return true; }
         if (_structuredReturnCount == 0 && !hasTerminatingStatement) { return false; }
         return TreeBodyReturns(0, _statementCount);
     }

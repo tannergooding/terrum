@@ -568,7 +568,7 @@ internal sealed partial class Binder
                     _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
                 }
             }
-            if (signature.IsConstructor)
+            if (signature.IsConstructor && !signature.DoesNotReturn)
             {
                 var end = new TextSpan(syntaxBody.Span.End, 0);
                 body = body with {
@@ -2186,10 +2186,6 @@ internal sealed partial class Binder
                     CleanupMethod = structure.Name + "." + nameText,
                 };
             }
-        }
-        if (doesNotReturn && returnType != PrimitiveType.Void)
-        {
-            Report("TRM3018", "DoesNotReturn requires a void function.", declaration.Span);
         }
         if (isConstEval && (containingType is not null || !isInternal || constructor || isCleanup
             || doesNotReturn || !ConstEvalScalar(returnType)))
@@ -3812,12 +3808,18 @@ internal sealed partial class Binder
                     isDirectCall = ((SyntaxNode)expressionNode.Children[2]).Kind
                         is SyntaxKind.InvocationExpression or SyntaxKind.UpdateExpression;
                 }
-                if (!isDirectCall)
+                var boundExpression = BindExpression(expressionNode, null);
+                var isNonReturningConstruction = !isDirectCall
+                    && boundExpression is BoundCall call
+                    && (uint)call.Function < (uint)_signatures.Count
+                    && _signatures[call.Function].IsConstructor
+                    && _signatures[call.Function].DoesNotReturn;
+                if (!isDirectCall && !isNonReturningConstruction)
                 {
                     Report("TRM3009", "Only direct calls and updates may be used as expression statements.", expressionNode.Span);
                 }
 
-                return new BoundExpressionStatement(BindExpression(expressionNode, null), node.Span);
+                return new BoundExpressionStatement(boundExpression, node.Span);
             }
 
             case SyntaxKind.DiscardStatement:

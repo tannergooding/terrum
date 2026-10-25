@@ -27,14 +27,25 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(expression.Span, "NativeImport");
         }
+        var evaluationContinues = true;
         foreach (var element in initialization.Elements)
         {
             if (element is null || element.Type != initialization.Layout.ElementType)
             {
                 throw InvalidEffect(initialization.Span, "NativeImport");
             }
-            Expression(element, initialized, fieldMasks, declarations, function, program,
-                ref remaining, depth + 1, failures);
+            if (evaluationContinues)
+            {
+                evaluationContinues = EvaluateExpression(element, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth + 1, failures);
+            }
+            else
+            {
+                var unreachableState = initialized.Clone();
+                var unreachableMasks = (uint[])fieldMasks.Clone();
+                _ = EvaluateExpression(element, unreachableState, unreachableMasks,
+                    declarations, function, program, ref remaining, depth + 1, null);
+            }
         }
     }
 
@@ -66,8 +77,8 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(element.Span, "NativeImport");
         }
-        Expression(element.Index, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, failures);
+        _ = EvaluateExpression(element.Index, initialized, fieldMasks, declarations, function,
+            program, ref remaining, depth + 1, failures);
     }
 
     private static void VerifyNativeFixedArrayPointerAddress(BoundNativeFixedArrayPointerAddress address,
@@ -108,8 +119,8 @@ public static partial class SemanticVerifier
             throw InvalidEffect(address.Span, "NativePointer");
         }
 
-        Expression(address.Index, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, failures);
+        _ = EvaluateExpression(address.Index, initialized, fieldMasks, declarations, function,
+            program, ref remaining, depth + 1, failures);
     }
 
     private static void VerifyNativeFixedArrayWrite(BoundNativeFixedArrayWrite write,
@@ -140,9 +151,14 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(write.Span, "NativeImport");
         }
-        Expression(write.Index, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, failures);
-        Expression(write.Value, initialized, fieldMasks, declarations, function, program,
-            ref remaining, depth + 1, failures);
+        if (!EvaluateExpression(write.Index, initialized, fieldMasks, declarations, function,
+            program, ref remaining, depth + 1, failures))
+        {
+            ValidateUnreachableExpression(write.Value, initialized, fieldMasks, declarations,
+                function, program, ref remaining, depth + 1);
+            return;
+        }
+        _ = EvaluateExpression(write.Value, initialized, fieldMasks, declarations, function,
+            program, ref remaining, depth + 1, failures);
     }
 }

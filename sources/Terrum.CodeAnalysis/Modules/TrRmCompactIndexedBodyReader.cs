@@ -89,10 +89,10 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
-        TrRmNativeVTableTableReader nativeVTables)
+        TrRmNativeVTableTableReader nativeVTables, bool doesNotReturn = false)
         : this(bodies, methodRow, modules, methods, signatures, parameters, types,
             nominalTypes, imports, features, nativeCallables, nativeImports,
-            nativeFunctionPointerSignatures, nativeVTables, true)
+            nativeFunctionPointerSignatures, nativeVTables, true, doesNotReturn)
     {
     }
 
@@ -123,11 +123,11 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
-        TrRmNativeVTableTableReader nativeVTables)
+        TrRmNativeVTableTableReader nativeVTables, bool doesNotReturn = false)
     {
         _ = new TrRmCompactIndexedBodyReader(bodies, methodRow, modules, methods, signatures,
             parameters, types, default, default, features, nativeCallables, nativeImports,
-            nativeFunctionPointerSignatures, nativeVTables, false);
+            nativeFunctionPointerSignatures, nativeVTables, false, doesNotReturn);
     }
 
     private TrRmCompactIndexedBodyReader(TrRmBodyTableReader bodies, int methodRow,
@@ -138,7 +138,8 @@ public readonly ref struct TrRmCompactIndexedBodyReader
         TrRmNativeCallableTableReader nativeCallables,
         TrRmNativeImportTableReader nativeImports,
         TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
-        TrRmNativeVTableTableReader nativeVTables, bool captureOperationCounts)
+        TrRmNativeVTableTableReader nativeVTables, bool captureOperationCounts,
+        bool doesNotReturn = false)
     {
         HasNativeFunctionPointerOperations = false;
         var bodyRow = methods.GetBodyRow(methodRow);
@@ -1045,7 +1046,7 @@ public readonly ref struct TrRmCompactIndexedBodyReader
             else if (terminator == 0x83)
             {
                 var value = ReadCount(extent, ref cursor, terminatorWidth);
-                if (value == 0 ? !voidResult
+                if (value == 0 ? !voidResult && !doesNotReturn
                     : voidResult || value > ValueCount || valueTypes[value] != resultType)
                 {
                     throw InvalidBody();

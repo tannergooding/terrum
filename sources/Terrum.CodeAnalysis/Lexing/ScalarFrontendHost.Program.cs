@@ -521,10 +521,6 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                if ((effects & 4) != 0 && returnType != 0)
-                {
-                    throw InvalidResult();
-                }
                 TextSpan bodySpan;
                 if (Take(TokenKind.Arrow))
                 {

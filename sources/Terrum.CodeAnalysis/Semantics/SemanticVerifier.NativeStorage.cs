@@ -28,14 +28,25 @@ public static partial class SemanticVerifier
             throw InvalidEffect(initialization.Span, "NativeImport");
         }
 
+        var evaluationContinues = true;
         foreach (var element in initialization.Elements)
         {
             if (element is null || element.Type != layout.ElementType)
             {
                 throw InvalidEffect(element?.Span ?? initialization.Span, "NativeImport");
             }
-            Expression(element, initialized, fieldMasks, declarations, function, program,
-                ref remaining, depth + 1, failures);
+            if (evaluationContinues)
+            {
+                evaluationContinues = EvaluateExpression(element, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth + 1, failures);
+            }
+            else
+            {
+                var unreachableState = initialized.Clone();
+                var unreachableMasks = (uint[])fieldMasks.Clone();
+                _ = EvaluateExpression(element, unreachableState, unreachableMasks,
+                    declarations, function, program, ref remaining, depth + 1, null);
+            }
         }
     }
 
@@ -70,7 +81,7 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(index?.Span ?? default, "NativeImport");
         }
-        Expression(index, initialized, fieldMasks, declarations, function, program,
+        _ = EvaluateExpression(index, initialized, fieldMasks, declarations, function, program,
             ref remaining, depth + 1, failures);
     }
 }

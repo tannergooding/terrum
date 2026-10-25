@@ -872,6 +872,30 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task ScalarFrontendNonUnitNoReturnCallUsesCurrentProjectionAsync()
+    {
+        const string text = "[DoesNotReturn] int32 Halt() { require false; } public int32 Main() { return Halt(); }";
+        var directory = TerrumProjectPaths.SourceDirectory(RepositoryRoot());
+        var input = Encoding.UTF8.GetBytes(text);
+        var (exit, output, error) = await RunAsync(input, "frontend-component",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.That(exit, Is.EqualTo(0), output + error);
+        using (var document = JsonDocument.Parse(output))
+        {
+            var result = document.RootElement.GetProperty("result");
+            AssertCurrentScalarFrontendVersion(result);
+            var functions = result.GetProperty("functions");
+            Assert.That(functions.GetArrayLength(), Is.EqualTo(2));
+            Assert.That(functions[0].GetProperty("returnType").GetInt32(), Is.EqualTo(1));
+        }
+        var (runExit, runOutput, runError) = await RunAsync(input, "frontend-run",
+            directory, "-", "--runtime", "fail-fast", "--json");
+        Assert.That(runExit, Is.EqualTo(unchecked((int)0xE0540003)), runOutput + runError);
+        Assert.That(runOutput, Is.Empty);
+        Assert.That(runError, Is.Empty);
+    }
+
+    [Test]
     public async Task ScalarFrontendCrossFunctionOutputArgumentsCliUsesCurrentProjectionAsync()
     {
         const string text = "public int32 Main() { if (Set(40, out var value, out var extra)) { return value + extra; } return 0; } bool Set(int32 seed, out int32 value, out int32 extra) { value = seed + 1; extra = 1; return true; }";

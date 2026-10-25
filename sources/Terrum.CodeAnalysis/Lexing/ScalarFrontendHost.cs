@@ -130,7 +130,6 @@ public static partial class ScalarFrontendHost
         if (words[2] < 0 || words[2] > (isTree ? 15 : 1)
             || !AllZero(3, 5)
             || words[5] != 0 && !ScalarType(words[5])
-            || (effects & 4) != 0 && words[5] != 0
             || count is < 0 or > 4
             || context is null && count > 3
             || !isTree && !AllZero(37, wordCount)
@@ -602,6 +601,7 @@ public static partial class ScalarFrontendHost
             }
             if (structuredBody && words[5] != 0
                 && !orderedStatements.Any(static entry => entry.Kind is 8 or 11 or 12 or 17 or 18 or 21 or 40)
+                && (effects & 4) == 0
                 && !hasDoesNotReturnCallStatement)
             {
                 throw InvalidResult();

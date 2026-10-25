@@ -872,27 +872,38 @@ alone does not establish this requirement.
 <a id="cg-013"></a>
 ## CG-013: Non-unit DoesNotReturn
 
-**Ready; accepted applicability mismatch.** The
+**In progress.** The
 [source no-return rule](../specs/language/expressions-and-statements.md#no-return-contracts)
 and [clause contract](../specs/representation/contract-clauses.md#4-doesnotreturn-and-actual-completion)
 permit any admitted declared result type, retaining ordinary typing.
 
-**Current/evidence:** `Binder` reports TRM3018 for non-void DoesNotReturn;
-`SemanticVerifier` independently rejects the same combination.
-[NoThrowTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NoThrowTests.cs)
-and [module cases](../../tests/Terrum.CodeAnalysis.Tests/Semantics/NoThrowModuleTests.cs)
-exercise the bounded declaration/flow machinery, not the complete rule.
+**Current/evidence:** The hosted binder/verifier and scalar frontend accept
+non-unit declarations without erasing their signature, reject reachable
+normal return/fallthrough, and preserve ordinary type checking. No-normal
+flow is carried through direct calls, return expressions, initializers,
+arguments, conditionals and pre-test conditions. Private module
+replacement, native module execution and both scalar frontend routes have
+active regressions. The Release fast build and focused no-return/effect/
+control-flow/frontend selection passed 131 tests with zero skipped; this is
+not current-schema TRRM CallSite evidence.
 
-**Routes/gate:** remove the void-only restriction consistently in binding,
-reconstructed verification, signatures/contracts, imports/replacement and
-source/TRRM/native flow. Test typed non-unit divergence/escaping failure,
-false claims with a normal return, independent NoThrow, unreachable ill-typed
-source and absence of a bottom/discard conversion. For a normal-returning
-non-unit call, retain the typed result selector. A verified DoesNotReturn
-CallSite instead uses result selector None for any declared result type and
-terminates its Block without publishing a normal result or successor; its
-complete signature remains in metadata. Compact call windows remain
-normal-returning forms. Unsupported result representations remain unsupported.
+**Routes/gate:** implement the accepted register CallSite rule through decode,
+canonical writing, map/record validation, dependency binding/remapping and
+JIT/AOT execution: a verified no-return target uses result selector `None`
+and terminates its Block without publishing a normal result or successor;
+the complete target signature remains in metadata. A normal non-unit call
+retains its typed result selector, and compact call windows remain
+normal-returning forms. The development indexed Body currently round-trips
+non-unit no-return declaration/body facts, not terminal non-unit callsites.
+The source/private/native/frontend slice now preserves evaluation order and
+no-normal state across supported expression-bearing statements, including
+assignments, coalescing, native buffers and later arguments. The remaining
+accepted register CallSite gate above is independent of that source slice.
+The constructor applicability recommendation in
+[`constructor-no-return-applicability.md`](../proposals/constructor-no-return-applicability.md)
+remains unapproved and provisional; its source/JIT slice is tracked
+separately. Standard constructor/static execution and unsupported result
+representations remain gated by their actual codecs.
 
 <a id="cg-014"></a>
 ## CG-014: Signed-minimum bootstrap remainder

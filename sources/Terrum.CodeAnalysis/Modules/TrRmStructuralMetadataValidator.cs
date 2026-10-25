@@ -509,7 +509,7 @@ public static class TrRmStructuralMetadataValidator
                                 methods, signatures, parameters, typeSpecs, types, imports,
                                 developmentFeatures, nativeCallables, nativeImports,
                                 nativeFunctionPointerSignatures,
-                                nativeVTables);
+                                nativeVTables, (contracts.GetEffectsMask(method) & 2) != 0);
                             if (sourceMapCount != 0)
                             {
                                 var counts = new int[body.BlockCount + 1];

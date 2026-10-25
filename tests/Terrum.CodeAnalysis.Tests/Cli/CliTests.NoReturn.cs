@@ -35,7 +35,43 @@ public sealed partial class CliTests
         var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
             "[DoesNotReturn] void Stop() { require false; } int32 Main() { Stop(); }"),
             "jit", "-", "--runtime", "fail-fast", "--json");
+        Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)), output + error);
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
+    }
+
+    [Test]
+    public async Task NonUnitNoReturnCallDoesNotPublishAResultAsync()
+    {
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
+            "[DoesNotReturn] int32 Stop() { require false; } int32 Main() { return Stop(); }"),
+            "jit", "-", "--runtime", "fail-fast", "--json");
         Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)));
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
+    }
+
+    [Test]
+    public async Task NonReturningConstructorDoesNotPublishAReceiverAsync()
+    {
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
+            "struct S { public int32 Value; [DoesNotReturn] public S() { Value = 0; require false; } } "
+            + "public int32 Main() { new S(); return 42; }"),
+            "jit", "-", "--runtime", "fail-fast", "--json");
+        Assert.That(exit, Is.EqualTo(unchecked((int)0xE0540003)), output + error);
+        Assert.That(output, Is.Empty);
+        Assert.That(error, Is.Empty);
+    }
+
+    [TestCase("true",unchecked((int)0xE0540003))]
+    [TestCase("false",42)]
+    public async Task NonReturningConditionalResultPreservesOnlyNormalAlternativesAsync(
+        string condition, int expected)
+    {
+        var (exit, output, error) = await RunAsync(Encoding.UTF8.GetBytes(
+            $"[DoesNotReturn] int32 Stop() {{ require false; }} public int32 Main() {{ return {condition} ? Stop() : 42; }}"),
+            "jit", "-", "--runtime", "fail-fast", "--json");
+        Assert.That(exit, Is.EqualTo(expected), output + error);
         Assert.That(output, Is.Empty);
         Assert.That(error, Is.Empty);
     }
