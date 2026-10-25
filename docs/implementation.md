@@ -198,10 +198,15 @@ reference forms remain an unapproved
 [design candidate](proposals/text-fragment-reference-forms.md), provisionally
 implemented by a standard structural reader/writer that checks
 literal/formatted field presence, shape-local captures, MethodDef row/module
-bounds and open kind-1 constraints owned by the generated type. It does not
-bind formatter/witness semantics or remap these identities, and does not
-implement source recipe checking, generated text operations or runtime
-construction. PredicateGraph rows now validate required PredicateNode and
+bounds and open kind-1 constraints owned by the generated type. Selected-use
+validation also requires both methods to be InterfaceMethod rows, keeps the
+writer interface and formatter requirement consistent per shape, matches
+closed witness implementing types to value captures and their exact
+WitnessMember requirement, and checks open formal captures against the
+constraint's formatter-interface closure. It still does not compare these
+requirements with the profile-selected Core identities or their complete
+signatures, remap/rebind them, or implement source recipe checking, generated
+text operations or runtime construction. PredicateGraph rows now validate required PredicateNode and
 PredicateReadFootprint row bounds; PredicateCapture validates graph-local
 ordinals, assigned roles/flags and complete captured TypeSpecRefs. Other
 predicate nodes, footprints, operands, edges and evaluation remain

@@ -253,6 +253,42 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
     }
 
+    internal int GetNominalTypeDefRow(uint typeSpecRef,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports)
+    {
+        var typeSpec = GetTypeSpecRef(typeSpecRef);
+        if (!typeSpec.IsRow)
+        {
+            throw InvalidType();
+        }
+
+        var data = _rows.GetRow(typeSpec.Row);
+        if (typeSpec.Form == 0x05)
+        {
+            var genericTypeSpec = GetTypeSpecRef(Read(data, 2));
+            if (!genericTypeSpec.IsRow || genericTypeSpec.Form is not (0x02 or 0x03))
+            {
+                throw InvalidType();
+            }
+
+            data = _rows.GetRow(genericTypeSpec.Row);
+        }
+
+        var definition = data[0] switch
+        {
+            0x02 => 0x1300_0000u | Read(data, 2),
+            0x03 => imports.GetExpectedDefinitionForImportRow(checked((int)Read(data, 2))),
+            _ => throw InvalidType(),
+        };
+        var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+        if ((definition >> 24) != 0x13 || typeDefRow <= 0 || typeDefRow > typeDefs.Count)
+        {
+            throw InvalidType();
+        }
+
+        return typeDefRow;
+    }
+
     public int Count => _recordCount;
     /// <summary>The number of native function-pointer signatures in the table.</summary>
     public int NativeFunctionPointerSignatureCount => _nativeFunctionPointerSignatureCount;

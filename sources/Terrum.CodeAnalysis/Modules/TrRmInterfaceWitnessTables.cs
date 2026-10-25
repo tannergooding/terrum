@@ -446,7 +446,7 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
                 var declaringType = types.GetTypeSpecRef(declaringInterface);
                 if (!declaringType.IsRow
                     || declaringType.Form is not (0x02 or 0x03 or 0x05)
-                    || GetNominalTypeDefRow(declaringInterface, types, typeDefs, imports)
+                    || types.GetNominalTypeDefRow(declaringInterface, typeDefs, imports)
                         != interfaces.GetOwnerTypeDef(
                             associatedTypeDefs.GetOwnerInterfaceDef(associatedTypeDefRow)))
                 {
@@ -491,45 +491,6 @@ public readonly ref struct TrRmWitnessAssociatedTypeTableReader
         }
 
         return _rows.Slice((row - 1) * RowSize, RowSize);
-    }
-
-    private static int GetNominalTypeDefRow(uint typeSpecRef,
-        TrRmTypeSpecTableReader types, TrRmTypeDefTableReader typeDefs,
-        TrRmImportTableReader imports)
-    {
-        var typeSpec = types.GetTypeSpecRef(typeSpecRef);
-        if (!typeSpec.IsRow)
-        {
-            throw InvalidWitnessAssociatedType();
-        }
-
-        var data = types.GetRow(typeSpec.Row);
-        if (typeSpec.Form == 0x05)
-        {
-            var genericTypeSpecRow = checked((int)Read(data, 2));
-            var genericTypeSpec = types.GetTypeSpecRef((uint)genericTypeSpecRow);
-            if (!genericTypeSpec.IsRow || genericTypeSpec.Form is not (0x02 or 0x03))
-            {
-                throw InvalidWitnessAssociatedType();
-            }
-
-            data = types.GetRow(genericTypeSpec.Row);
-        }
-
-        var definition = data[0] switch
-        {
-            0x02 => 0x1300_0000u | Read(data, 2),
-            0x03 => imports.GetExpectedDefinitionForImportRow(
-                checked((int)Read(data, 2))),
-            _ => throw InvalidWitnessAssociatedType(),
-        };
-        var typeDefRow = (int)(definition & 0x00FF_FFFF);
-        if ((definition >> 24) != 0x13 || typeDefRow <= 0 || typeDefRow > typeDefs.Count)
-        {
-            throw InvalidWitnessAssociatedType();
-        }
-
-        return typeDefRow;
     }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)

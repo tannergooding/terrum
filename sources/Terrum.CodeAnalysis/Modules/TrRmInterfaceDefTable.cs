@@ -34,6 +34,7 @@ public readonly ref struct TrRmInterfaceDefTableReader
     private const int RowSize = 48;
 
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly int[] _interfaceOwners;
     private readonly int[] _associatedTypeOwners;
     private readonly int _recordCount;
     private readonly int _baseCount;
@@ -89,7 +90,7 @@ public readonly ref struct TrRmInterfaceDefTableReader
         _associatedConstCount = associatedConstCount;
         _interfaceConstCount = interfaceConstCount;
         _associatedTypeOwners = new int[associatedTypeCount + 1];
-        var interfaceOwners = new int[types.Count + 1];
+        _interfaceOwners = new int[types.Count + 1];
 
         for (var row = 1; row <= recordCount; row++)
         {
@@ -98,12 +99,12 @@ public readonly ref struct TrRmInterfaceDefTableReader
             var selfFormal = Read(data, 4);
             if (ownerTypeDef is 0 or > 0xFF_FFFF || ownerTypeDef > types.Count
                 || ((types.GetFlags((int)ownerTypeDef) >> 2) & 3) != 3
-                || interfaceOwners[ownerTypeDef] != 0)
+                || _interfaceOwners[ownerTypeDef] != 0)
             {
                 throw InvalidInterfaceDef();
             }
 
-            interfaceOwners[ownerTypeDef] = row;
+            _interfaceOwners[ownerTypeDef] = row;
             if (selfFormal != 0)
             {
                 var (firstFormal, formalCount) = types.GetGenericRange((int)ownerTypeDef);
@@ -156,7 +157,7 @@ public readonly ref struct TrRmInterfaceDefTableReader
         for (var typeDef = 1; typeDef <= types.Count; typeDef++)
         {
             var isInterface = ((types.GetFlags(typeDef) >> 2) & 3) == 3;
-            if (isInterface != (interfaceOwners[typeDef] != 0))
+            if (isInterface != (_interfaceOwners[typeDef] != 0))
             {
                 throw InvalidInterfaceDef();
             }
@@ -174,6 +175,16 @@ public readonly ref struct TrRmInterfaceDefTableReader
     /// <summary>Gets the one-based owning TypeDef row.</summary>
     public int GetOwnerTypeDef(int row)
         => checked((int)ReadRow(row, 0));
+
+    internal int GetInterfaceDefForTypeDef(int typeDef)
+    {
+        if (typeDef <= 0 || typeDef >= _interfaceOwners.Length)
+        {
+            throw InvalidInterfaceDef();
+        }
+
+        return _interfaceOwners[typeDef];
+    }
 
     /// <summary>Gets the optional one-based self GenericParam row.</summary>
     public int GetSelfGenericParam(int row)

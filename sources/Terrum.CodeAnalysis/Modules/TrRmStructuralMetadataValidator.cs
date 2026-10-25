@@ -437,7 +437,8 @@ public static class TrRmStructuralMetadataValidator
             textFragmentShapes = new TrRmTextFragmentShapeTableReader(
                 textFragmentShapeBytes, textFragmentShapeCount, textContentShapes,
                 textCaptureShapes, types, methods, generics, constraints,
-                interfaceWitnessCount);
+                typeSpecs, interfaces, interfaceBases, interfaceMethods,
+                interfaceWitnesses, witnessMembers, imports);
         }
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
             generics, imports, selectedConstantSourceCount);

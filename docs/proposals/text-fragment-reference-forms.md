@@ -312,23 +312,32 @@ Its structural checks cover:
 * Kind `0` literal versus kind `1` formatted field presence.
 * Distinct, same-shape TextCaptureShape row references and their bounds.
 * MethodDef row bounds and locality to the generated TypeDef's Module.
-* Direct InterfaceWitness row bounds.
-* Kind-1 Constraint evidence owned by a type formal of the generated TypeDef.
+* Formatter and writer MethodDef rows are direct InterfaceMethod requirements;
+  their interface identities are consistent within the shape and distinct
+  across the formatter/writer roles.
+* Closed evidence matches the value capture's complete type, includes the
+  formatter interface in the witness's nominal interface closure, and has one
+  WitnessMember selecting the exact requirement from its declaring interface.
+* Open evidence belongs to the generated TypeDef's own type formal, the capture
+  names that same unqualified formal, and its kind-1 interface constraint
+  supplies the formatter interface through nominal inheritance.
 
 The raw MethodDef rows may name imported expected stubs, whose Import
 structures are separately validated.
 
-Focused Release tests passed **4/4**; the combined active TRRM/metadata/CLI
-tests passed **1,729/1,729**. The normal analyzer build still reports
-**758 repository-wide diagnostics**, with none in the new TextFragmentShape files.
-These results do not establish a clean repository-wide analyzer checkpoint.
+The focused Release selection passed **6/6**, and the combined active
+TRRM/metadata/CLI selection passed **1,744/1,744** with zero skipped. The
+normal Release analyzer build still reports **1,514 repository-wide
+diagnostics**; line mapping found none on the changed C# lines. These results
+do not establish a clean repository-wide analyzer checkpoint.
 
-Exact formatter/witness/interface compatibility, semantic import/replacement
-binding, remapping/packing, producer equivalence, runtime/source construction
-and complete capability closure remain incomplete. General generic evidence
-and WitnessProjection remain separately gated. The structural implementation does not
-establish generated text-graph reconstruction, source-free execution or
-runtime support. The [current inventory](../implementation.md#persistent-and-self-hosted-components)
+The implementation does not compare the selected methods with the profile's
+exact Core requirement identities or complete signatures. Semantic
+import/replacement binding, remapping/packing, producer equivalence,
+runtime/source construction and complete capability closure remain
+incomplete. General generic evidence and WitnessProjection remain separately
+gated. These checks do not establish generated text-graph reconstruction,
+source-free execution or runtime support. The [current inventory](../implementation.md#persistent-and-self-hosted-components)
 and [construction gate](../implementation/conformance-gaps.md#cg-007) retain
 their separate roles. This proposal remains unapproved; normative owners
 are unchanged, and no milestone completion is claimed.

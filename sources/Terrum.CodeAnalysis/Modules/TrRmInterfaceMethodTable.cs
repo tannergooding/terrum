@@ -20,6 +20,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
     private const int RowSize = 12;
 
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly int[] _methodOwners;
     private readonly int[] _rowOwners;
     private readonly int _recordCount;
 
@@ -45,6 +46,7 @@ public readonly ref struct TrRmInterfaceMethodTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _methodOwners = new int[methods.Count + 1];
         _rowOwners = new int[recordCount + 1];
         for (var interfaceDef = 1; interfaceDef <= interfaces.Count; interfaceDef++)
         {
@@ -66,10 +68,13 @@ public readonly ref struct TrRmInterfaceMethodTableReader
                 if (owner != (uint)interfaceDef || rowOrdinal != (uint)ordinal
                     || methodDef is 0 or > 0xFF_FFFF || methodDef > methods.Count
                     || methods.GetOwnerType((int)methodDef) != ownerTypeDef
-                    || signatures.GetReceiverTypeSpec(methods.GetSignature((int)methodDef)) == 0)
+                    || signatures.GetReceiverTypeSpec(methods.GetSignature((int)methodDef)) == 0
+                    || _methodOwners[methodDef] != 0)
                 {
                     throw InvalidInterfaceMethod();
                 }
+
+                _methodOwners[methodDef] = interfaceDef;
             }
         }
 
@@ -93,6 +98,16 @@ public readonly ref struct TrRmInterfaceMethodTableReader
     /// <summary>Gets the one-based directly-declared MethodDef row.</summary>
     public int GetMethodDefRow(int row)
         => checked((int)ReadRow(row, 8));
+
+    internal int GetOwnerInterfaceDefForMethod(int methodDef)
+    {
+        if (methodDef <= 0 || methodDef >= _methodOwners.Length)
+        {
+            throw InvalidInterfaceMethod();
+        }
+
+        return _methodOwners[methodDef];
+    }
 
     private ReadOnlySpan<byte> GetRow(int row)
     {

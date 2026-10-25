@@ -560,12 +560,16 @@ capture TypeSpecRefs. The unapproved
 [TextFragmentShape reference-form proposal](../proposals/text-fragment-reference-forms.md)
 is provisionally implemented by structural checks for literal/formatted field
 presence, shape-local capture rows, MethodDef row/module bounds and
-generated-type-owned kind-1 Constraints. It does not verify selected
-formatter/witness identity or remap these obligations. These checks do not
-prove source recipe meaning, establish builder protocol conformance,
-implement runtime construction or provide retained constant programs. A
-self-hosted method or candidate API sketch supplies no registered identity,
-retained constant program or frozen value codec.
+generated-type-owned kind-1 Constraints. Selected-use validation binds methods
+to InterfaceMethod rows, checks formatter/writer interface separation and
+per-shape consistency, matches closed witness implementing types to captured
+types and exact WitnessMember requirements, and checks open type-formal capture
+and interface-constraint closure. It still does not bind those requirements to
+the profile-selected Core identities/signatures or remap/rebind the obligations.
+These checks do not prove source recipe meaning, establish builder protocol
+conformance, implement runtime construction or provide retained constant
+programs. A self-hosted method or candidate API sketch supplies no registered
+identity, retained constant program or frozen value codec.
 
 **Routes/gate:** retain exact role/member/witness identities and contextual
 result, once-only source-ordered captures, after-capture acquisition, ordered

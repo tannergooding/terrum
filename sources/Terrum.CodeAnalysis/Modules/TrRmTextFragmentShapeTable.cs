@@ -44,15 +44,27 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
     /// <param name="methods">The validated MethodDef table.</param>
     /// <param name="formals">The validated GenericParam table.</param>
     /// <param name="constraints">The validated Constraint table.</param>
-    /// <param name="interfaceWitnessCount">The number of InterfaceWitness rows.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table.</param>
+    /// <param name="interfaceBases">The validated InterfaceBase table.</param>
+    /// <param name="interfaceMethods">The validated InterfaceMethod table.</param>
+    /// <param name="witnesses">The validated InterfaceWitness table.</param>
+    /// <param name="witnessMembers">The validated WitnessMember table.</param>
+    /// <param name="imports">The validated Import table.</param>
     public TrRmTextFragmentShapeTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmTextContentShapeTableReader shapes,
         TrRmTextCaptureShapeTableReader captures,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmGenericParamTableReader formals, TrRmConstraintTableReader constraints,
-        int interfaceWitnessCount)
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmInterfaceWitnessTableReader witnesses,
+        TrRmWitnessMemberTableReader witnessMembers,
+        TrRmImportTableReader imports)
     {
-        if (!ValidCount(recordCount) || !ValidCount(interfaceWitnessCount)
+        if (!ValidCount(recordCount)
             || recordCount != shapes.FragmentCount
             || (long)recordCount * RowSize != section.Length)
         {
@@ -66,6 +78,10 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
             var (first, count) = shapes.GetFragmentRange(shape);
             var generatedTypeDef = shapes.GetGeneratedTypeDef(shape);
             var generatedModule = types.GetOwnerModule(generatedTypeDef);
+            var writerInterfaceTypeDef = 0;
+            var formatterInterfaceTypeDef = 0;
+            uint formatterMethodDef = 0;
+            var formatterInterfaceClosure = new Dictionary<int, bool>();
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
                 var row = first + ordinal;
@@ -90,13 +106,27 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
                     throw InvalidTextFragmentShape();
                 }
 
+                if (!ValidMethodReference(writerRequirement, methods, generatedModule))
+                {
+                    throw InvalidTextFragmentShape();
+                }
+
+                var writerInterface = GetRequirementInterface(writerRequirement,
+                    interfaces, interfaceMethods, methods);
+                var currentWriterInterfaceTypeDef = interfaces.GetOwnerTypeDef(writerInterface);
+                if (types.GetGenericRange(currentWriterInterfaceTypeDef).Count != 0
+                    || (writerInterfaceTypeDef != 0
+                        && writerInterfaceTypeDef != currentWriterInterfaceTypeDef))
+                {
+                    throw InvalidTextFragmentShape();
+                }
+                writerInterfaceTypeDef = currentWriterInterfaceTypeDef;
+
                 if (kind == 0)
                 {
                     if (valueCapture != 0 || alignmentCapture != 0 || formatCapture != 0
                         || formatterWitness != 0 || formatterConstraint != 0
-                        || formatterMethod != 0
-                        || !ValidMethodReference(writerRequirement,
-                            methods, generatedModule))
+                        || formatterMethod != 0)
                     {
                         throw InvalidTextFragmentShape();
                     }
@@ -110,25 +140,42 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
                     || hasFormatterWitness == hasFormatterConstraint
                     || formatterMethod == 0
                     || !ValidMethodReference(formatterMethod, methods, generatedModule)
-                    || !ValidMethodReference(writerRequirement, methods, generatedModule))
+                    || (formatterMethodDef != 0 && formatterMethodDef != formatterMethod))
                 {
                     throw InvalidTextFragmentShape();
                 }
+
+                var formatterInterface = GetRequirementInterface(formatterMethod,
+                    interfaces, interfaceMethods, methods);
+                var currentFormatterInterfaceTypeDef = interfaces.GetOwnerTypeDef(formatterInterface);
+                if (types.GetGenericRange(currentFormatterInterfaceTypeDef).Count != 0
+                    || currentFormatterInterfaceTypeDef == writerInterfaceTypeDef
+                    || (formatterInterfaceTypeDef != 0
+                        && formatterInterfaceTypeDef != currentFormatterInterfaceTypeDef))
+                {
+                    throw InvalidTextFragmentShape();
+                }
+                formatterInterfaceTypeDef = currentFormatterInterfaceTypeDef;
+                formatterMethodDef = formatterMethod;
 
                 ValidateCapture(valueCapture, shape, captures);
                 ValidateCapture(alignmentCapture, shape, captures);
                 ValidateCapture(formatCapture, shape, captures);
                 if (formatterWitness != 0)
                 {
-                    if (!ValidRowReference(formatterWitness, interfaceWitnessCount))
-                    {
-                        throw InvalidTextFragmentShape();
-                    }
+                    ValidateFormatterWitness(formatterWitness, valueCapture,
+                        formatterMethod, formatterInterface, formatterInterfaceTypeDef,
+                        captures, typeSpecs, types, interfaces, interfaceBases,
+                        witnesses, witnessMembers, imports, formatterInterfaceClosure);
                 }
                 else
                 {
-                    ValidateFormatterConstraint(formatterConstraint, generatedTypeDef,
-                        formals, constraints);
+                    var formal = ValidateFormatterConstraint(formatterConstraint,
+                        generatedTypeDef, formals, constraints);
+                    ValidateOpenFormatterEvidence(valueCapture, formal,
+                        formatterInterfaceTypeDef, captures, typeSpecs, types,
+                        interfaces, interfaceBases, imports, constraints,
+                        formatterConstraint, formatterInterfaceClosure);
                 }
             }
         }
@@ -184,7 +231,7 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         }
     }
 
-    private static void ValidateFormatterConstraint(uint constraint,
+    private static int ValidateFormatterConstraint(uint constraint,
         int generatedTypeDef, TrRmGenericParamTableReader formals,
         TrRmConstraintTableReader constraints)
     {
@@ -200,6 +247,138 @@ public readonly ref struct TrRmTextFragmentShapeTableReader
         {
             throw InvalidTextFragmentShape();
         }
+
+        return formal;
+    }
+
+    private static void ValidateFormatterWitness(uint witness, uint valueCapture,
+        uint formatterMethod, int formatterInterface, int formatterInterfaceTypeDef,
+        TrRmTextCaptureShapeTableReader captures, TrRmTypeSpecTableReader typeSpecs,
+        TrRmTypeDefTableReader types, TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmInterfaceWitnessTableReader witnesses,
+        TrRmWitnessMemberTableReader witnessMembers,
+        TrRmImportTableReader imports, Dictionary<int, bool> formatterInterfaceClosure)
+    {
+        if (!ValidRowReference(witness, witnesses.Count)
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                captures.GetTypeSpecRef(checked((int)valueCapture)),
+                witnesses.GetImplementingTypeSpecRef(checked((int)witness)))
+            || !SuppliesInterface(witnesses.GetInterfaceTypeSpecRef(checked((int)witness)),
+                formatterInterfaceTypeDef, typeSpecs, types, interfaces,
+                interfaceBases, imports, formatterInterfaceClosure))
+        {
+            throw InvalidTextFragmentShape();
+        }
+
+        var matchingMemberCount = 0;
+        var (first, count) = witnesses.GetMemberRange(checked((int)witness));
+        for (var ordinal = 0; ordinal < count; ordinal++)
+        {
+            var member = first + ordinal;
+            if (witnessMembers.GetRequirementMethodDef(member) != formatterMethod)
+            {
+                continue;
+            }
+
+            if (typeSpecs.GetNominalTypeDefRow(
+                    witnessMembers.GetDeclaringInterfaceTypeSpecRef(member), types, imports)
+                != interfaces.GetOwnerTypeDef(formatterInterface))
+            {
+                throw InvalidTextFragmentShape();
+            }
+
+            matchingMemberCount++;
+        }
+
+        if (matchingMemberCount != 1)
+        {
+            throw InvalidTextFragmentShape();
+        }
+    }
+
+    private static void ValidateOpenFormatterEvidence(uint valueCapture, int formal,
+        int formatterInterfaceTypeDef, TrRmTextCaptureShapeTableReader captures,
+        TrRmTypeSpecTableReader typeSpecs, TrRmTypeDefTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmImportTableReader imports, TrRmConstraintTableReader constraints,
+        uint formatterConstraint, Dictionary<int, bool> formatterInterfaceClosure)
+    {
+        var captureType = typeSpecs.GetTypeSpecRef(
+            captures.GetTypeSpecRef(checked((int)valueCapture)));
+        if (!captureType.IsRow || captureType.Form != 0x04
+            || captureType.Qualifiers != 0
+            || Read(typeSpecs.GetRow(captureType.Row), 2) != (uint)formal
+            || !SuppliesInterface(
+                constraints.GetPayload(checked((int)formatterConstraint)),
+                formatterInterfaceTypeDef, typeSpecs, types, interfaces,
+                interfaceBases, imports, formatterInterfaceClosure))
+        {
+            throw InvalidTextFragmentShape();
+        }
+    }
+
+    private static int GetRequirementInterface(uint method,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmMethodDefTableReader methods)
+    {
+        var result = interfaceMethods.GetOwnerInterfaceDefForMethod(checked((int)method));
+        if (result == 0 || methods.GetOwnerType(checked((int)method))
+            != interfaces.GetOwnerTypeDef(result))
+        {
+            throw InvalidTextFragmentShape();
+        }
+
+        return result;
+    }
+
+    private static bool SuppliesInterface(uint interfaceTypeSpecRef,
+        int requiredInterfaceTypeDef, TrRmTypeSpecTableReader typeSpecs,
+        TrRmTypeDefTableReader types, TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmImportTableReader imports, Dictionary<int, bool> cache)
+    {
+        var rootTypeDef = typeSpecs.GetNominalTypeDefRow(
+            interfaceTypeSpecRef, types, imports);
+        if (cache.TryGetValue(rootTypeDef, out var cachedResult))
+        {
+            return cachedResult;
+        }
+
+        var pending = new Stack<int>();
+        var visited = new HashSet<int>();
+        pending.Push(rootTypeDef);
+        while (pending.TryPop(out var typeDef))
+        {
+            if (!visited.Add(typeDef))
+            {
+                continue;
+            }
+
+            if (typeDef == requiredInterfaceTypeDef)
+            {
+                cache[rootTypeDef] = true;
+                return true;
+            }
+
+            var interfaceDef = interfaces.GetInterfaceDefForTypeDef(typeDef);
+            if (interfaceDef == 0)
+            {
+                throw InvalidTextFragmentShape();
+            }
+
+            var (first, count) = interfaces.GetBaseRange(interfaceDef);
+            for (var ordinal = 0; ordinal < count; ordinal++)
+            {
+                pending.Push(typeSpecs.GetNominalTypeDefRow(
+                    interfaceBases.GetBaseTypeSpecRef(first + ordinal), types, imports));
+            }
+        }
+
+        cache[rootTypeDef] = false;
+        return false;
     }
 
     private static bool ValidMethodReference(uint method, TrRmMethodDefTableReader methods,
@@ -243,13 +422,25 @@ public static class TrRmTextFragmentShapeTableWriter
     /// <param name="methods">The validated MethodDef table.</param>
     /// <param name="formals">The validated GenericParam table.</param>
     /// <param name="constraints">The validated Constraint table.</param>
-    /// <param name="interfaceWitnessCount">The number of InterfaceWitness rows.</param>
+    /// <param name="typeSpecs">The validated TypeSpec table.</param>
+    /// <param name="interfaces">The validated InterfaceDef table.</param>
+    /// <param name="interfaceBases">The validated InterfaceBase table.</param>
+    /// <param name="interfaceMethods">The validated InterfaceMethod table.</param>
+    /// <param name="witnesses">The validated InterfaceWitness table.</param>
+    /// <param name="witnessMembers">The validated WitnessMember table.</param>
+    /// <param name="imports">The validated Import table.</param>
     /// <returns>The encoded TextFragmentShape section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmTextFragmentShapeRow> rows,
         TrRmTextContentShapeTableReader shapes, TrRmTextCaptureShapeTableReader captures,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmGenericParamTableReader formals, TrRmConstraintTableReader constraints,
-        int interfaceWitnessCount)
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmInterfaceBaseTableReader interfaceBases,
+        TrRmInterfaceMethodTableReader interfaceMethods,
+        TrRmInterfaceWitnessTableReader witnesses,
+        TrRmWitnessMemberTableReader witnessMembers,
+        TrRmImportTableReader imports)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count > 0xFF_FFFF)
@@ -275,7 +466,8 @@ public static class TrRmTextFragmentShapeTableWriter
         }
 
         _ = new TrRmTextFragmentShapeTableReader(result, rows.Count, shapes,
-            captures, types, methods, formals, constraints, interfaceWitnessCount);
+            captures, types, methods, formals, constraints, typeSpecs, interfaces,
+            interfaceBases, interfaceMethods, witnesses, witnessMembers, imports);
         return result;
     }
 
