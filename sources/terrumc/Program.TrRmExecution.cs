@@ -30,6 +30,8 @@ internal static partial class Program
         string? identity = null;
         var library = false;
         var runtime = false;
+        var hasArithmeticProfile = false;
+        var sourceArithmeticProfile = SourceArithmeticProfile.Development;
         var paths = new List<string> { args[1] };
         var exports = new List<string>();
         var uniqueExports = new HashSet<string>(StringComparer.Ordinal);
@@ -71,6 +73,11 @@ internal static partial class Program
                         WriteInputError(json, "TRM5001",
                             "TRRM (1, 0) execution supports only fail-fast; checked-exceptions requires an exceptional-edge contract.");
                         return 1;
+                    case "--arithmetic-profile" when command == "compile-trrm"
+                        && !hasArithmeticProfile
+                        && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
+                        hasArithmeticProfile = true;
+                        break;
                     default:
                         WriteInputError(json, "TRM2000", Usage);
                         return 2;
@@ -101,11 +108,15 @@ internal static partial class Program
                     trees.Add(SyntaxTree.Parse(ReadSource(path), path == "-" ? "<stdin>" : path));
                 }
                 var snapshots = trees.MoveToImmutable();
+                var options = new CompilationOptions {
+                    SourceArithmeticProfile = sourceArithmeticProfile,
+                    RuntimePolicy = BoundRuntimePolicy.FailFast,
+                };
                 var compilation = library
-                    ? snapshots.Length == 1 ? Compilation.CreateLibrary(snapshots[0])
-                        : Compilation.CreateLibrary(snapshots)
-                    : snapshots.Length == 1 ? Compilation.Create(snapshots[0])
-                        : Compilation.Create(snapshots);
+                    ? snapshots.Length == 1 ? Compilation.CreateLibrary(snapshots[0], options)
+                        : Compilation.CreateLibrary(snapshots, options)
+                    : snapshots.Length == 1 ? Compilation.Create(snapshots[0], options)
+                        : Compilation.Create(snapshots, options);
                 if (compilation.HasErrors)
                 {
                     WriteCompilationResult(command, compilation, compilation.SourceDiagnostics,

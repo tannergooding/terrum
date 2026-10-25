@@ -194,6 +194,59 @@ public sealed partial class ScalarFrontendInvocationProfileTests
                 linked, SourceText.From(text), (NativeRuntimePolicy)policy));
         }
     }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task FrontendOptionsReachScalarInvocationBindingAsync(BoundRuntimePolicy policy)
+    {
+        var trees = await ReadComponentsAsync(s_frontendComponents, FrontendProvider).ConfigureAwait(true);
+        var seed = SourceText.From("seed");
+        var providerCompilation = Compilation.Create(trees,
+            ScalarFrontendHost.CreateInvocationProfileBuffers(seed), policy);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = ModuleCompiler.CreateProducer(providerCompilation.Program!,
+            ["Terrum.CodeAnalysis.PublishAndSummarize"]);
+        var reference = ModuleCompiler.CreateReference(provider);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() { return PublishAndSummarize(); }
+            """), reference, policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, provider);
+        var linked = ModuleCompiler.Link(consumer, provider);
+        var source = SourceText.From("""
+            namespace Demo.Tools { int32 Main() { return Add(20, 22); } }
+            namespace Demo.Tools {
+                int32 Add(int32 left, int32 right) { return left + right; }
+            }
+            """);
+        var options = new CompilationOptions {
+            SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            RuntimePolicy = policy,
+        };
+        var invocation = NativeJit.ExecuteWithScalarFrontendProfile(linked, source, options);
+        var subject = invocation.Frontend.Program
+            ?? throw new InvalidOperationException("Successful frontend audit has no bound subject program.");
+        var releaseFunction = subject.Functions.Single(static function => function.Name == "Demo.Tools.Add");
+        var releaseReturn = releaseFunction.Body.Statements.Single() as BoundReturn
+            ?? throw new InvalidOperationException("Scalar frontend did not retain the Add return.");
+        var releaseAddition = releaseReturn.Value as BoundBinary
+            ?? throw new InvalidOperationException("Scalar frontend did not retain the Add expression.");
+        Assert.That(releaseAddition.OverflowBehavior, Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+        var defaultInvocation = NativeJit.ExecuteWithScalarFrontendProfile(
+            linked, source, (NativeRuntimePolicy)policy);
+        var defaultSubject = defaultInvocation.Frontend.Program
+            ?? throw new InvalidOperationException("Successful frontend audit has no bound subject program.");
+        var defaultFunction = defaultSubject.Functions.Single(static function => function.Name == "Demo.Tools.Add");
+        var defaultReturn = defaultFunction.Body.Statements.Single() as BoundReturn
+            ?? throw new InvalidOperationException("Scalar frontend did not retain the Add return.");
+        var defaultAddition = defaultReturn.Value as BoundBinary
+            ?? throw new InvalidOperationException("Scalar frontend did not retain the Add expression.");
+        Assert.That(defaultAddition.OverflowBehavior, Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+    }
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ExpandedFrontendProfileAuditsMoreThanSixtyFourTokensAsync(BoundRuntimePolicy policy)

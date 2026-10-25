@@ -15,8 +15,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string NativeGraphUsage = "Usage: terrumc compile-native-graph producer <source> <identity> --provider <dependency.trmn|dependency.trng> --export <name> -o <producer.trng> --runtime <fail-fast|checked-exceptions> [--source <source>] [--json]; "
-        + "terrumc compile-native-graph consumer <source> --provider <dependency.trmn|dependency.trng> -o <consumer.trng> --runtime <fail-fast|checked-exceptions> [--source <source>] [--json]; "
+    private const string NativeGraphUsage = "Usage: terrumc compile-native-graph producer <source> <identity> --provider <dependency.trmn|dependency.trng> --export <name> -o <producer.trng> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--source <source>] [--json]; "
+        + "terrumc compile-native-graph consumer <source> --provider <dependency.trmn|dependency.trng> -o <consumer.trng> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--source <source>] [--json]; "
         + "terrumc validate-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] [--json]; "
         + "terrumc run-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -40,6 +40,8 @@ internal static partial class Program
         var exports = new List<string>();
         string? output = null;
         NativeRuntimePolicy? policy = null;
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development;
+        var hasArithmeticProfile = false;
         var firstOption = producer ? 4 : compile ? 3 : 2;
         if (((count - firstOption) & 1) != 0)
         {
@@ -68,6 +70,10 @@ internal static partial class Program
                     policy = value == "fail-fast"
                         ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
                     break;
+                case "--arithmetic-profile" when compile && !hasArithmeticProfile
+                    && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
+                    hasArithmeticProfile = true;
+                    break;
                 default:
                     WriteInputError(json, "TRM2000", NativeGraphUsage);
                     return 2;
@@ -93,9 +99,13 @@ internal static partial class Program
             {
                 var reference = NativeModuleCompiler.CreateGraphReference(packages);
                 var snapshots = ReadModuleSources(sources);
+                var options = new CompilationOptions {
+                    SourceArithmeticProfile = sourceArithmeticProfile,
+                    RuntimePolicy = (BoundRuntimePolicy)policy!.Value,
+                };
                 var compilation = producer
-                    ? Compilation.CreateLibrary(snapshots, reference, (BoundRuntimePolicy)policy!.Value)
-                    : Compilation.Create(snapshots, reference, (BoundRuntimePolicy)policy!.Value);
+                    ? Compilation.CreateLibrary(snapshots, reference, options)
+                    : Compilation.Create(snapshots, reference, options);
                 if (compilation.HasErrors)
                 {
                     WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics, false, null, null,

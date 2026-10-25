@@ -50,10 +50,19 @@ public static partial class ScalarFrontendHost
 
     public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
         BoundRuntimePolicy policy)
-        => ReadResultCore(source, bytes, policy, null);
+        => ReadResultCore(source, bytes, policy, null, SourceArithmeticProfile.Development);
+
+    /// <summary>Reads and validates a scalar frontend result using the selected compilation options.</summary>
+    public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
+        CompilationOptions options)
+    {
+        Compilation.ValidateOptions(options);
+        return ReadResultCore(source, bytes, options.RuntimePolicy, null, options.SourceArithmeticProfile);
+    }
 
     private static ScalarFrontendResult ReadResultCore(SourceText source, ReadOnlySpan<byte> bytes,
-        BoundRuntimePolicy policy, ProgramReadContext? context)
+        BoundRuntimePolicy policy, ProgramReadContext? context,
+        SourceArithmeticProfile sourceArithmeticProfile)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (policy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions))
@@ -767,7 +776,7 @@ public static partial class ScalarFrontendHost
             if (context is null)
             {
                 // Structured returns have no terminal envelope: check every path before publishing.
-                BindLibraryCore(source, projection, policy);
+                _ = BindLibraryCore(source, projection, policy, sourceArithmeticProfile);
             }
             return projection;
 
@@ -3013,6 +3022,20 @@ public static partial class ScalarFrontendHost
         return BindLibraryCore(source, result, policy);
     }
 
+    /// <summary>Binds and verifies a scalar library using the selected compilation options.</summary>
+    public static BoundProgram BindLibrary(SourceText source, ReadOnlySpan<byte> bytes,
+        CompilationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        Compilation.ValidateOptions(options);
+        var result = ReadResult(source, bytes, options.RuntimePolicy);
+        if (!result.IsValid)
+        {
+            throw InvalidResult();
+        }
+        return BindLibraryCore(source, result, options.RuntimePolicy, options.SourceArithmeticProfile);
+    }
+
     private static BoundExpression FoldBoundedConstantExpression(BoundExpression expression,
         BoundConstant?[] constantLocals)
     {
@@ -3063,7 +3086,8 @@ public static partial class ScalarFrontendHost
     }
 
     private static BoundProgram BindLibraryCore(SourceText source, ScalarFrontendResult result,
-        BoundRuntimePolicy policy, bool verify = true, bool omitImplicitReturn = false)
+        BoundRuntimePolicy policy, SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
+        bool verify = true, bool omitImplicitReturn = false)
     {
         var variables = ImmutableArray.CreateBuilder<BoundVariable>(result.ParameterCount);
         if (result.ParameterCount > 0)
@@ -3239,12 +3263,18 @@ public static partial class ScalarFrontendHost
                 else if (node.Operation is 86 or 87)
                 {
                     bound = new BoundUpdate((TokenKind)node.Operation,
-                        treeExpressions[node.Left], node.Low == 1, type, node.Span);
+                        treeExpressions[node.Left], node.Low == 1, type, node.Span) {
+                        OverflowBehavior = Binder.ResolveSourceOverflowBehavior(
+                            sourceArithmeticProfile, (TokenKind)node.Operation, type),
+                    };
                 }
                 else if (node.Operation is >= 91 and <= 101)
                 {
                     bound = new BoundCompoundAssignment((TokenKind)node.Operation,
-                        treeExpressions[node.Left], treeExpressions[node.Right], type, node.Span);
+                        treeExpressions[node.Left], treeExpressions[node.Right], type, node.Span) {
+                        OverflowBehavior = Binder.ResolveSourceOverflowBehavior(
+                            sourceArithmeticProfile, CompoundOperators.Binary((TokenKind)node.Operation), type),
+                    };
                 }
                 else if (node.Right == -1)
                 {
@@ -3263,14 +3293,20 @@ public static partial class ScalarFrontendHost
                     else
                     {
                         bound = Binder.FoldScalarConstant(new BoundUnary(
-                            (TokenKind)node.Operation, operand, type, node.Span));
+                            (TokenKind)node.Operation, operand, type, node.Span) {
+                            OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                                (TokenKind)node.Operation, type, unary: true),
+                        });
                     }
                 }
                 else
                 {
                     bound = Binder.FoldScalarConstant(new BoundBinary(
                         (TokenKind)node.Operation, treeExpressions[node.Left],
-                        treeExpressions[node.Right], type, node.Span));
+                        treeExpressions[node.Right], type, node.Span) {
+                        OverflowBehavior = Binder.ResolveSourceOverflowBehavior(
+                            sourceArithmeticProfile, (TokenKind)node.Operation, type),
+                    });
                 }
                 treeExpressions[i] = bound;
                 if (constantDeclarations.TryGetValue(i, out var localIndex))
@@ -3773,7 +3809,10 @@ public static partial class ScalarFrontendHost
                 var type = Type(expression.Type);
                 return new BoundUnary((TokenKind)operation,
                     new BoundRead(expression.LeftParameter - 1, type, operandSpan),
-                    type, expression.Span);
+                    type, expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        (TokenKind)operation, type, unary: true),
+                };
             }
             if (operation is 657 or 658)
             {
@@ -3791,7 +3830,10 @@ public static partial class ScalarFrontendHost
                             | (uint)expression.LeftParameter));
                 return Binder.FoldScalarConstant(new BoundUnary(operation == 658
                     ? TokenKind.Minus : TokenKind.Plus,
-                    new BoundConstant(value, type, operandSpan), type, expression.Span));
+                    new BoundConstant(value, type, operandSpan), type, expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        operation == 658 ? TokenKind.Minus : TokenKind.Plus, type, unary: true),
+                });
             }
             if (IsNegatedBooleanBinary(operation))
             {
@@ -3834,7 +3876,10 @@ public static partial class ScalarFrontendHost
                 var type = Type(expression.Type);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
-                    type, expression.Span));
+                    type, expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        minus ? TokenKind.Minus : TokenKind.Plus, type, unary: true),
+                });
             }
             if (IsSignedIntegerBinary(operation - 16000))
             {
@@ -3892,7 +3937,10 @@ public static partial class ScalarFrontendHost
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus,
-                    Expression(nested), type, expression.Span));
+                    Expression(nested), type, expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        minus ? TokenKind.Minus : TokenKind.Plus, type, unary: true),
+                });
             }
             if (operation is >= 30000 and < 34000)
             {
@@ -3908,7 +3956,10 @@ public static partial class ScalarFrontendHost
                     expression.LeftParameter, expression.RightParameter, nestedSpan);
                 return Binder.FoldScalarConstant(new BoundUnary(minus
                     ? TokenKind.Minus : TokenKind.Plus, Expression(nested),
-                    type, expression.Span));
+                    type, expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        minus ? TokenKind.Minus : TokenKind.Plus, type, unary: true),
+                });
             }
             if (operation == 16062
                 || operation is >= 18000 and < 20000
@@ -4039,11 +4090,17 @@ public static partial class ScalarFrontendHost
                             ? int.MinValue : long.MinValue, literalType, signedSpan)
                         : Binder.FoldScalarConstant(new BoundUnary(
                             negativeLiteral ? TokenKind.Minus : TokenKind.Plus, literal,
-                            literalType, signedSpan));
+                            literalType, signedSpan) {
+                            OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                                negativeLiteral ? TokenKind.Minus : TokenKind.Plus, literalType, unary: true),
+                        });
                 }
                 return new BoundBinary((TokenKind)(binaryOperation % 100),
                     literalFirst ? literal : leftOperand, literalFirst ? leftOperand : literal,
-                    Type(expression.Type), expression.Span);
+                    Type(expression.Type), expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        (TokenKind)(binaryOperation % 100), Type(expression.Type)),
+                };
             }
             if (operation == 3)
             {
@@ -4074,7 +4131,10 @@ public static partial class ScalarFrontendHost
                 }
                 return Binder.FoldScalarConstant(new BoundUnary(TokenKind.Minus,
                     new BoundConstant(value, Type(expression.Type), operandSpan),
-                    Type(expression.Type), expression.Span));
+                    Type(expression.Type), expression.Span) {
+                    OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                        TokenKind.Minus, Type(expression.Type), unary: true),
+                });
             }
             if (operation is 20 or 21)
             {
@@ -4097,7 +4157,10 @@ public static partial class ScalarFrontendHost
                 types[expression.RightParameter - 1].Type,
                 new TextSpan(expression.Span.Start + secondOperand.Start, secondOperand.Length));
             return new BoundBinary((TokenKind)operation, left, right,
-                Type(expression.Type), expression.Span);
+                Type(expression.Type), expression.Span) {
+                OverflowBehavior = Binder.ResolveSourceOverflowBehavior(sourceArithmeticProfile,
+                    (TokenKind)operation, Type(expression.Type)),
+            };
         }
     }
 

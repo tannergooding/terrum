@@ -10,6 +10,7 @@ using System.Text.Json;
 using Terrum.CodeAnalysis.Diagnostics;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
@@ -18,38 +19,38 @@ namespace Terrum.Tools;
 internal static partial class Program
 {
     private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\n"
-        + "       terrumc analyze <path|-> [--source <path>] [--runtime <fail-fast|checked-exceptions>] [--corelib] [--json]\n"
-        + "       terrumc build <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc build-native-import <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc build-library <path|-> [--source <path>] --export <name> [--export <name>] -o <output.dll> --runtime <fail-fast|checked-exceptions> [--corelib | --source-grant --abi-output <output.json>] [--json]\n"
-        + "       terrumc jit <path|-> [--source <path>] --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc analyze <path|-> [--source <path>] [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--corelib] [--json]\n"
+        + "       terrumc build <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc build-native-import <path|-> [--source <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc build-library <path|-> [--source <path>] --export <name> [--export <name>] -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--corelib | --source-grant --abi-output <output.json>] [--json]\n"
+        + "       terrumc jit <path|-> [--source <path>] --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc scan-component <scanner.terrum|terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc build-component <scanner.terrum|terrum-project-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc frontend-component <terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc frontend-build-library <terrum-project-directory> <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc frontend-build <terrum-project-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc frontend-run <terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc build-component <scanner.terrum|terrum-project-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc frontend-component <terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc frontend-build-library <terrum-project-directory> <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc frontend-build <terrum-project-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc frontend-run <terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc validate-trrm-structure <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact-linear <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact-indexed <artifact> [--json]\n"
         + "       terrumc validate-trrm-compact <artifact> [--json]\n"
-        + "       terrumc compile-trrm <source|-> --identity <name> -o <artifact.trrm> --runtime fail-fast [--library] [--source <path>] [--json]\n"
+        + "       terrumc compile-trrm <source|-> --identity <name> -o <artifact.trrm> --runtime fail-fast [--arithmetic-profile <development|release>] [--library] [--source <path>] [--json]\n"
         + "       terrumc build-trrm <artifact.trrm> -o <output.exe> --runtime fail-fast [--json]\n"
         + "       terrumc build-trrm-library <artifact.trrm> --export <name> [--export <name>] -o <output.dll> --runtime fail-fast [--json]\n"
         + "       terrumc run-trrm <artifact.trrm> --runtime fail-fast [--json]\n"
-        + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
-        + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--json]\n"
+        + "       terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <output.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc compile-native producer <source> <identity> --export <name> [--export <name>] [--source <source>] -o <producer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc compile-native consumer <source> <producer.trmn> [--source <source>] -o <consumer.trmn> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc validate-native <consumer.trmn> <producer.trmn> [--json]\n"
         + "       terrumc run-native <consumer.trmn> <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc compile-native-set <source> --provider <producer.trmn> --provider <producer.trmn> -o <consumer.tnset> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc compile-native-set <source> --provider <producer.trmn> --provider <producer.trmn> -o <consumer.tnset> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--source <source>] [--json]\n"
         + "       terrumc validate-native-set <consumer.tnset> --provider <producer.trmn> --provider <producer.trmn> [--json]\n"
         + "       terrumc run-native-set <consumer.tnset> --provider <producer.trmn> --provider <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc compile-native-graph producer <source> <identity> --provider <dependency.trmn|dependency.trng> --export <name> -o <producer.trng> --runtime <fail-fast|checked-exceptions> [--json]\n"
-        + "       terrumc compile-native-graph consumer <source> --provider <dependency.trmn|dependency.trng> -o <consumer.trng> --runtime <fail-fast|checked-exceptions> [--json]\n"
+        + "       terrumc compile-native-graph producer <source> <identity> --provider <dependency.trmn|dependency.trng> --export <name> -o <producer.trng> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--source <source>] [--json]\n"
+        + "       terrumc compile-native-graph consumer <source> --provider <dependency.trmn|dependency.trng> -o <consumer.trng> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--source <source>] [--json]\n"
         + "       terrumc validate-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] [--json]\n"
         + "       terrumc resolve-native-graph <consumer.trng> --candidate <local.trmn|local.trng> [--candidate <local>] [--json]\n"
         + "       terrumc run-native-graph <consumer.trng> --provider <selected.trmn|selected.trng> [--provider <selected>] --runtime <fail-fast|checked-exceptions> [--json]\n"
@@ -58,6 +59,7 @@ internal static partial class Program
         + "build-native-import opts into the Windows x64 native source profile; ordinary build does not enable native imports.\n"
         + "fail-fast explicitly selects process termination for runtime failures, not catchable exceptions.\n"
         + "checked-exceptions enables recovery and unwinding for four compiler-generated failure reasons.\n"
+        + "--arithmetic-profile selects subject-source arithmetic defaults independently of --runtime; omission selects development.\n"
         + "jit/run-module/run-trrm execute in this process and return the program's status; supervise them with a deadline.\n"
         + "compile-trrm/build-trrm/build-trrm-library/run-trrm use audited fail-fast scalar metadata and compact Bodies, not the development semantic-module encoding.\n"
         + "run-trrm returns Main's raw exit status; --json applies to diagnostics only. Checked-exception TRRM execution is unsupported.\n"
@@ -68,6 +70,16 @@ internal static partial class Program
         + "validate-trrm-compact-indexed checks the bounded forward-branching scalar indexed Body shape, not effects or execution.\n"
         + "validate-trrm-compact checks both bounded compact forms per Body row, not general Bodies, effects or execution.\n"
         + "'-' reads strict UTF-8 from stdin. Exit: 0 success, 1 source/compile diagnostics, 2 usage/input/output error.";
+
+    private static bool TryParseSourceArithmeticProfile(string value, out SourceArithmeticProfile profile)
+    {
+        profile = value switch {
+            "development" => SourceArithmeticProfile.Development,
+            "release" => SourceArithmeticProfile.Release,
+            _ => default,
+        };
+        return value is "development" or "release";
+    }
 
     private static int Main(string[] args)
     {

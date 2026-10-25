@@ -15,7 +15,7 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string NativeSetUsage = "Usage: terrumc compile-native-set <source> --provider <producer.trmn> --provider <producer.trmn> -o <consumer.tnset> --runtime <fail-fast|checked-exceptions> [--source <source>] [--json]; "
+    private const string NativeSetUsage = "Usage: terrumc compile-native-set <source> --provider <producer.trmn> --provider <producer.trmn> -o <consumer.tnset> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--source <source>] [--json]; "
         + "terrumc validate-native-set <consumer.tnset> --provider <producer.trmn> --provider <producer.trmn> [--json]; "
         + "terrumc run-native-set <consumer.tnset> --provider <producer.trmn> --provider <producer.trmn> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -33,6 +33,8 @@ internal static partial class Program
         var providers = new List<string>();
         string? output = null;
         NativeRuntimePolicy? policy = null;
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development;
+        var hasArithmeticProfile = false;
         for (var i = 2; i < count - 1; i += 2)
         {
             switch (args[i])
@@ -50,6 +52,10 @@ internal static partial class Program
                     && args[i + 1] is "fail-fast" or "checked-exceptions":
                     policy = args[i + 1] == "fail-fast"
                         ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+                    break;
+                case "--arithmetic-profile" when compile && !hasArithmeticProfile
+                    && TryParseSourceArithmeticProfile(args[i + 1], out sourceArithmeticProfile):
+                    hasArithmeticProfile = true;
                     break;
                 default:
                     WriteInputError(json, "TRM2000", NativeSetUsage);
@@ -74,8 +80,12 @@ internal static partial class Program
             if (compile)
             {
                 var snapshots = ReadModuleSources(sources);
+                var options = new CompilationOptions {
+                    SourceArithmeticProfile = sourceArithmeticProfile,
+                    RuntimePolicy = (BoundRuntimePolicy)policy!.Value,
+                };
                 var compilation = Compilation.Create(snapshots, NativeModuleCompiler.CreateReferenceSet(providerBytes),
-                    (BoundRuntimePolicy)policy!.Value);
+                    options);
                 if (compilation.HasErrors)
                 {
                     WriteCompilationResult(args[0], compilation, compilation.SourceDiagnostics, false, null, null,

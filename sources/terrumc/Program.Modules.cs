@@ -17,8 +17,8 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
-    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--corelib] [--json]; "
-        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--json]; "
+    private const string ModuleUsage = "Usage: terrumc compile-module producer <source> <export> [--source <source>] [--export <export>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--corelib] [--json]; "
+        + "terrumc compile-module consumer <source> <producer.trm> [--source <source>] -o <artifact.trm> [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--json]; "
         + "terrumc link-module <consumer.trm> <producer.trm> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--json]; "
         + "terrumc run-module <consumer.trm> <producer.trm> --runtime <fail-fast|checked-exceptions> [--json]";
 
@@ -40,11 +40,12 @@ internal static partial class Program
             string output;
             string profile;
             var selectedPolicy = NativeRuntimePolicy.FailFast;
+            var sourceArithmeticProfile = SourceArithmeticProfile.Development;
             if (count >= 6 && args[0] == "compile-module"
                 && (args[1] is "producer" or "consumer"))
             {
                 if (!TryReadModuleOptions(args, count, out var paths, out var exports, out output,
-                    out selectedPolicy, out var coreLibrary))
+                    out selectedPolicy, out sourceArithmeticProfile, out var coreLibrary))
                 {
                     WriteInputError(json, "TRM2000", ModuleUsage);
                     return 2;
@@ -59,13 +60,16 @@ internal static partial class Program
                 var snapshots = ReadModuleSources(paths);
                 var reference = args[1] == "consumer" ? ReadModuleFile(args[3]) : null;
                 var declarations = reference is null ? null : ModuleCompiler.CreateReference(reference);
-                var runtimePolicy = (BoundRuntimePolicy)selectedPolicy;
-                var compilation = coreLibrary ? Compilation.CreateCoreLibrary(snapshots, runtimePolicy)
+                var options = new CompilationOptions {
+                    SourceArithmeticProfile = sourceArithmeticProfile,
+                    RuntimePolicy = (BoundRuntimePolicy)selectedPolicy,
+                };
+                var compilation = coreLibrary ? Compilation.CreateCoreLibrary(snapshots, options)
                     : snapshots.Length == 1
-                    ? declarations is null ? Compilation.CreateLibrary(snapshots[0], runtimePolicy)
-                        : Compilation.Create(snapshots[0], declarations, runtimePolicy)
-                    : declarations is null ? Compilation.CreateLibrary(snapshots, runtimePolicy)
-                        : Compilation.Create(snapshots, declarations, runtimePolicy);
+                    ? declarations is null ? Compilation.CreateLibrary(snapshots[0], options)
+                        : Compilation.Create(snapshots[0], declarations, options)
+                    : declarations is null ? Compilation.CreateLibrary(snapshots, options)
+                        : Compilation.Create(snapshots, declarations, options);
                 if (compilation.HasErrors)
                 {
                     WriteModuleSourceDiagnostics(compilation, json, selectedPolicy);
@@ -140,16 +144,19 @@ internal static partial class Program
     }
 
     private static bool TryReadModuleOptions(string[] args, int count, out List<string> sources,
-        out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy, out bool coreLibrary)
+        out List<string> exports, out string output, out NativeRuntimePolicy runtimePolicy,
+        out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary)
     {
         sources = [args[2]];
         var native = args[0] == "compile-native";
         exports = args[1] == "producer" && !native ? [args[3]] : [];
         output = "";
         runtimePolicy = NativeRuntimePolicy.FailFast;
+        sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
         var hasOutput = false;
         var hasRuntime = false;
+        var hasArithmeticProfile = false;
         var sourcePaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { Path.GetFullPath(args[2]) };
         var exportNames = new HashSet<string>(exports, StringComparer.Ordinal);
         for (var index = 4; index < count;)
@@ -185,6 +192,10 @@ internal static partial class Program
                     hasRuntime = true;
                     runtimePolicy = value == "fail-fast"
                         ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+                    break;
+                case "--arithmetic-profile" when !hasArithmeticProfile
+                    && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
+                    hasArithmeticProfile = true;
                     break;
                 default:
                     return false;

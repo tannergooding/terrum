@@ -34,13 +34,14 @@ integer arithmetic, compact values and unique owners, conditional outputs, bound
 generics, managed roots/classes, and deterministic cleanup. Hosted
 `CompilationOptions` currently defaults arithmetic selection to Development,
 offers Release explicitly, and keeps runtime-failure policy independent. The
-arithmetic selection currently applies to hosted source binding and direct
-native/JIT lowering. The
+arithmetic selection currently applies to hosted source binding, direct
+native/JIT lowering, eligible CLI source compilation and scalar frontend
+subject binding; compiler/scanner component compilation remains Development.
+The
 [unapproved private-persistence proposal](proposals/source-arithmetic-private-persistence.md) is
 provisionally implemented for structured semantic modules and their native
-package, set, and graph embeddings; CLI/Terrum-authored frontends, development
-executable persistence, and standard register-Body persistence remain
-unfinished. Hosted calls also
+package, set, and graph embeddings. Development executable persistence and
+standard register-Body persistence remain unfinished. Hosted calls also
 support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 `void` functions across semantic modules, native libraries and native graphs;
 compilation-local `[Copy]` templates support the bounded generic `out T` and

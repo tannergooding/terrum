@@ -135,8 +135,12 @@ internal sealed partial class Binder
 
     private BoundIntegerOverflowBehavior SourceOverflowBehavior(TokenKind operation, PrimitiveType type,
         bool unary = false)
+        => ResolveSourceOverflowBehavior(_sourceArithmeticProfile, operation, type, unary);
+
+    internal static BoundIntegerOverflowBehavior ResolveSourceOverflowBehavior(
+        SourceArithmeticProfile sourceArithmeticProfile, TokenKind operation, PrimitiveType type, bool unary = false)
     {
-        if (_sourceArithmeticProfile != SourceArithmeticProfile.Release
+        if (sourceArithmeticProfile != SourceArithmeticProfile.Release
             || type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
         {
             return BoundIntegerOverflowBehavior.Checked;

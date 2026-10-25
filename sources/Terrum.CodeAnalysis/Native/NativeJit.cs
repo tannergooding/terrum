@@ -132,17 +132,35 @@ public static unsafe class NativeJit
     /// <returns>Owned scanner results, host-audited complete program and validated summary.</returns>
     public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
         SourceText source, NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
+        => ExecuteWithScalarFrontendProfileCore(program, source,
+            (BoundRuntimePolicy)runtimePolicy, SourceArithmeticProfile.Development, registrarAssembly);
+
+    /// <summary>Executes the complete frontend component and binds subject source with the selected options.</summary>
+    public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
+        SourceText source, CompilationOptions options, string? registrarAssembly = null)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(source);
+        Compilation.ValidateOptions(options);
+        return ExecuteWithScalarFrontendProfileCore(program, source, options.RuntimePolicy,
+            options.SourceArithmeticProfile, registrarAssembly);
+    }
+
+    private static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfileCore(BoundProgram program,
+        SourceText source, BoundRuntimePolicy boundPolicy, SourceArithmeticProfile sourceArithmeticProfile,
+        string? registrarAssembly)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(source);
         var profileIdentity = program.InvocationProfileId;
         if (!program.RequiresSourceGrant || !ScalarFrontendHost.IsInvocationProfileIdentity(profileIdentity)
             || !ScalarFrontendHost.IsInvocationProfileBufferSet(program.Buffers, profileIdentity)
-            || program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
+            || program.RuntimePolicy != boundPolicy)
         {
             throw new ArgumentException("The program does not retain the matching scalar frontend profile.",
                 nameof(program));
         }
+        var runtimePolicy = (NativeRuntimePolicy)boundPolicy;
         var buffers = ScalarFrontendHost.CreateInvocationProfileBuffers(source, profileIdentity);
         var invocationProgram = program with { Buffers = buffers, IsInvocationSourceBound = true };
         var code = EmitCode(invocationProgram, runtimePolicy);
@@ -153,7 +171,10 @@ public static unsafe class NativeJit
             BufferOffsets = [.. code.BufferOffsets.Select(offset => checked(offset - literalPrefixLength))],
         };
         return ScalarFrontendHost.ReadInvocationResult(source, tokenCount, execution, buffers,
-            (BoundRuntimePolicy)runtimePolicy);
+            new CompilationOptions {
+                SourceArithmeticProfile = sourceArithmeticProfile,
+                RuntimePolicy = boundPolicy,
+            });
     }
 
     /// <summary>Executes the entry point and copies compiler-supplied buffers before releasing native memory.</summary>

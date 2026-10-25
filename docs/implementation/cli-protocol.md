@@ -17,6 +17,22 @@ diagnostics and 2 for usage/input/output failures. Execution workers instead
 return raw program status. Run-native currently supervises its native child
 with a 30-second deadline and reports TRM5004 on deadline failure.
 
+## Provisional source arithmetic selection
+
+Source-compiling commands accept the provisional
+`--arithmetic-profile development|release` selector. Values are exact and
+case-sensitive; omission selects Development. It applies to eligible source
+compilation commands, including hosted builds and analysis, module/TRRM/native
+artifact producers, and scalar frontend build/run commands. It is rejected by
+syntax-only, scanner-only, source-free and artifact-only commands. For
+frontend/component commands, the selected profile applies to subject source;
+the compiler/scanner component is compiled with Development. Arithmetic
+selection is independent of `--runtime`, and invalid or ineligible uses follow
+the existing usage-error path before output replacement. This implementation
+follows the unapproved
+[source arithmetic selection proposal](../proposals/source-arithmetic-profile-selection.md);
+it does not adopt or amend the selected `terrum.cli/1` protocol.
+
 Use the built terrumc.dll/executable for stdout isolation; dotnet run may print
 build messages. The `-` input path reads stdin. Human diagnostics use stderr;
 --json writes the implemented response on diagnostic/inspection paths.

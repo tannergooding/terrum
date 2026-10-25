@@ -25,12 +25,47 @@ internal static partial class Program
         var buildExecutable = args[0] == "frontend-build";
         var runExecutable = args[0] == "frontend-run";
         var build = buildLibrary || buildExecutable;
-        var count = build ? 7 : 5;
-        var runtime = build ? 5 : 3;
-        if ((args.Length != count && args.Length != count + 1) || args[1] == "-"
-            || (build && args[3] != "-o") || args[runtime] != "--runtime"
-            || args[runtime + 1] is not ("fail-fast" or "checked-exceptions")
-            || (args.Length == count + 1 && args[count] != "--json"))
+        var trailingJson = args.Length != 0 && args[^1] == "--json";
+        var count = args.Length - (trailingJson ? 1 : 0);
+        if (count < 3 || args[1] == "-" || (json && !trailingJson))
+        {
+            WriteInputError(json, "TRM2000", Usage);
+            return 2;
+        }
+
+        string? outputArgument = null;
+        NativeRuntimePolicy? selectedPolicy = null;
+        var sourceArithmeticProfile = SourceArithmeticProfile.Development;
+        var hasArithmeticProfile = false;
+        for (var index = 3; index < count;)
+        {
+            if (index + 1 >= count)
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            var value = args[index + 1];
+            switch (args[index])
+            {
+                case "-o" when build && outputArgument is null:
+                    outputArgument = value;
+                    break;
+                case "--runtime" when selectedPolicy is null
+                    && value is "fail-fast" or "checked-exceptions":
+                    selectedPolicy = value == "fail-fast"
+                        ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+                    break;
+                case "--arithmetic-profile" when !hasArithmeticProfile
+                    && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
+                    hasArithmeticProfile = true;
+                    break;
+                default:
+                    WriteInputError(json, "TRM2000", Usage);
+                    return 2;
+            }
+            index += 2;
+        }
+        if (selectedPolicy is not NativeRuntimePolicy policy || build && outputArgument is null)
         {
             WriteInputError(json, "TRM2000", Usage);
             return 2;
@@ -72,7 +107,7 @@ internal static partial class Program
         {
             if (build)
             {
-                outputPath = Path.GetFullPath(args[4]);
+                outputPath = Path.GetFullPath(outputArgument!);
                 var extension = buildExecutable ? ".exe" : ".dll";
                 if (!string.Equals(Path.GetExtension(outputPath), extension, StringComparison.OrdinalIgnoreCase)
                     || (args[2] != "-" && string.Equals(outputPath, Path.GetFullPath(args[2]),
@@ -101,11 +136,13 @@ internal static partial class Program
             return 2;
         }
 
+        var sourceOptions = new CompilationOptions {
+            SourceArithmeticProfile = sourceArithmeticProfile,
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+        };
         trees.Add(SyntaxTree.Parse(
             "using Terrum.CodeAnalysis; int32 Main() { if (!TryPublishScalarFrontend()) { return 1; } return 0; }",
             "<frontend-component>"));
-        var policy = args[runtime + 1] == "fail-fast"
-            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var compilation = Compilation.Create(trees, ScalarFrontendHost.CreateBuffers(source),
             (BoundRuntimePolicy)policy);
         if (compilation.HasErrors)
@@ -152,11 +189,11 @@ internal static partial class Program
             ScalarFrontendReadResult read;
             try
             {
-                read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+                read = ScalarFrontendHost.ReadProgram(source, bytes, programBytes, sourceOptions);
             }
             catch (ArgumentException exception)
             {
-                if (TryWriteUnsafeCallerDiagnostic(args[0], source, policy, json, exception))
+                if (TryWriteUnsafeCallerDiagnostic(args[0], source, sourceOptions, json, exception))
                 {
                     return 1;
                 }
@@ -196,11 +233,11 @@ internal static partial class Program
                 try
                 {
                     library = read.Program ?? ScalarFrontendHost.BindLibrary(source, bytes, programBytes,
-                        (BoundRuntimePolicy)policy);
+                        sourceOptions);
                 }
                 catch (ArgumentException exception)
                 {
-                    if (TryWriteUnsafeCallerDiagnostic(args[0], source, policy, json, exception))
+                    if (TryWriteUnsafeCallerDiagnostic(args[0], source, sourceOptions, json, exception))
                     {
                         return 1;
                     }
@@ -260,7 +297,7 @@ internal static partial class Program
     }
 
     private static bool TryWriteUnsafeCallerDiagnostic(string command, SourceText source,
-        NativeRuntimePolicy policy, bool json, ArgumentException exception)
+        CompilationOptions options, bool json, ArgumentException exception)
     {
         if (exception.Data["Terrum.InvalidEffect"] is not "UnsafeCaller"
             || exception.Data["Terrum.SourceSpan"] is not TextSpan verifierSpan
@@ -275,7 +312,7 @@ internal static partial class Program
             return false;
         }
 
-        var compilation = Compilation.CreateLibrary(syntaxTree, (BoundRuntimePolicy)policy);
+        var compilation = Compilation.CreateLibrary(syntaxTree, options);
         var hasMatchingDiagnostic = compilation.SourceDiagnostics.Any(diagnostic =>
             diagnostic.SyntaxTree.Source.Path == source.Path
             && diagnostic.Diagnostic.Code == "TRM3028"
@@ -287,7 +324,7 @@ internal static partial class Program
         }
 
         WriteCompilationResult(command, compilation, compilation.SourceDiagnostics,
-            false, null, null, json, policy);
+            false, null, null, json, (NativeRuntimePolicy)options.RuntimePolicy);
         return true;
     }
 

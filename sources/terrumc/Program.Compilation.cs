@@ -25,12 +25,14 @@ internal static partial class Program
         string? outputPath;
         string? abiOutputPath;
         NativeRuntimePolicy runtimePolicy;
+        SourceArithmeticProfile sourceArithmeticProfile;
         bool coreLibrary;
         bool sourceGrant;
         try
         {
             if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath,
-                out runtimePolicy, out coreLibrary, out sourceGrant, out abiOutputPath))
+                out runtimePolicy, out sourceArithmeticProfile, out coreLibrary, out sourceGrant,
+                out abiOutputPath))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
@@ -73,11 +75,12 @@ internal static partial class Program
         }
 
         return CompileTrees(args[0], snapshots, outputPath, json, [.. exports],
-            runtimePolicy, coreLibrary, sourceGrant, abiOutputPath);
+            runtimePolicy, coreLibrary, sourceGrant, abiOutputPath, sourceArithmeticProfile);
     }
 
     private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports,
-        out string? outputPath, out NativeRuntimePolicy runtimePolicy, out bool coreLibrary,
+        out string? outputPath, out NativeRuntimePolicy runtimePolicy,
+        out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary,
         out bool sourceGrant, out string? abiOutputPath)
     {
         paths = [];
@@ -85,6 +88,7 @@ internal static partial class Program
         outputPath = null;
         abiOutputPath = null;
         runtimePolicy = NativeRuntimePolicy.FailFast;
+        sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
         sourceGrant = false;
         var count = args.Length - (args.Length != 0 && args[^1] == "--json" ? 1 : 0);
@@ -100,6 +104,7 @@ internal static partial class Program
             _ = knownPaths.Add(Path.GetFullPath(args[1]));
         }
         var hasRuntime = false;
+        var hasArithmeticProfile = false;
         var exportNames = new HashSet<string>(StringComparer.Ordinal);
         for (var index = 2; index < count;)
         {
@@ -146,6 +151,10 @@ internal static partial class Program
                     runtimePolicy = value == "fail-fast"
                         ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
                     break;
+                case "--arithmetic-profile" when !hasArithmeticProfile
+                    && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
+                    hasArithmeticProfile = true;
+                    break;
                 default:
                     return false;
             }
@@ -161,7 +170,8 @@ internal static partial class Program
 
     private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json,
         ImmutableArray<string> exports = default, NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast,
-        bool coreLibrary = false, bool sourceGrant = false, string? abiOutputPath = null)
+        bool coreLibrary = false, bool sourceGrant = false, string? abiOutputPath = null,
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development)
     {
         var build = outputPath is not null;
         var library = command == "build-library" || coreLibrary;
@@ -170,17 +180,21 @@ internal static partial class Program
                 { IsInvocationScoped = true })
             : ImmutableArray<HostBuffer>.Empty;
         var nativeImports = command == "build-native-import";
+        var options = new CompilationOptions {
+            SourceArithmeticProfile = sourceArithmeticProfile,
+            RuntimePolicy = (BoundRuntimePolicy)runtimePolicy,
+        };
         var compilation = nativeImports
-            ? Compilation.CreateWithNativeImports(trees, (BoundRuntimePolicy)runtimePolicy)
+            ? Compilation.CreateWithNativeImports(trees, options)
             : coreLibrary
-            ? Compilation.CreateCoreLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
+            ? Compilation.CreateCoreLibrary(trees, options)
             : library
             ? sourceGrant
-                ? Compilation.CreateLibrary(trees, buffers, (BoundRuntimePolicy)runtimePolicy)
-                : trees.Length == 1 ? Compilation.CreateLibrary(trees[0], (BoundRuntimePolicy)runtimePolicy)
-                    : Compilation.CreateLibrary(trees, (BoundRuntimePolicy)runtimePolicy)
-            : trees.Length == 1 ? Compilation.Create(trees[0], (BoundRuntimePolicy)runtimePolicy)
-                : Compilation.Create(trees, (BoundRuntimePolicy)runtimePolicy);
+                ? Compilation.CreateLibrary(trees, buffers, options)
+                : trees.Length == 1 ? Compilation.CreateLibrary(trees[0], options)
+                    : Compilation.CreateLibrary(trees, options)
+            : trees.Length == 1 ? Compilation.Create(trees[0], options)
+                : Compilation.Create(trees, options);
         var diagnostics = compilation.SourceDiagnostics;
         byte[]? image = null;
         byte[]? abiManifest = null;

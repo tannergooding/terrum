@@ -19,12 +19,47 @@ internal static partial class Program
     private static int RunScannerComponent(string[] args, bool json)
     {
         var build = args[0] == "build-component";
-        var count = build ? 7 : 5;
-        var runtime = build ? 5 : 3;
-        if ((args.Length != count && args.Length != count + 1) || args[1] == "-"
-            || (build && args[3] != "-o") || args[runtime] != "--runtime"
-            || args[runtime + 1] is not ("fail-fast" or "checked-exceptions")
-            || (args.Length == count + 1 && args[count] != "--json"))
+        var trailingJson = args.Length != 0 && args[^1] == "--json";
+        var count = args.Length - (trailingJson ? 1 : 0);
+        if (count < 3 || args[1] == "-" || (json && !trailingJson))
+        {
+            WriteInputError(json, "TRM2000", Usage);
+            return 2;
+        }
+
+        string? outputArgument = null;
+        NativeRuntimePolicy? selectedPolicy = null;
+        var sourceArithmeticProfile = SourceArithmeticProfile.Development;
+        var hasArithmeticProfile = false;
+        for (var index = 3; index < count;)
+        {
+            if (index + 1 >= count)
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            var value = args[index + 1];
+            switch (args[index])
+            {
+                case "-o" when build && outputArgument is null:
+                    outputArgument = value;
+                    break;
+                case "--runtime" when selectedPolicy is null
+                    && value is "fail-fast" or "checked-exceptions":
+                    selectedPolicy = value == "fail-fast"
+                        ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+                    break;
+                case "--arithmetic-profile" when build && !hasArithmeticProfile
+                    && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
+                    hasArithmeticProfile = true;
+                    break;
+                default:
+                    WriteInputError(json, "TRM2000", Usage);
+                    return 2;
+            }
+            index += 2;
+        }
+        if (selectedPolicy is not NativeRuntimePolicy policy || build && outputArgument is null)
         {
             WriteInputError(json, "TRM2000", Usage);
             return 2;
@@ -39,7 +74,7 @@ internal static partial class Program
             scannerPath = Path.GetFullPath(args[1]);
             if (build)
             {
-                outputPath = Path.GetFullPath(args[4]);
+                outputPath = Path.GetFullPath(outputArgument!);
                 if (!string.Equals(Path.GetExtension(outputPath), ".exe", StringComparison.OrdinalIgnoreCase)
                     || string.Equals(outputPath, scannerPath, StringComparison.OrdinalIgnoreCase)
                     || (args[2] != "-" && string.Equals(outputPath, Path.GetFullPath(args[2]), StringComparison.OrdinalIgnoreCase)))
@@ -63,8 +98,6 @@ internal static partial class Program
             return 2;
         }
 
-        var policy = args[runtime + 1] == "fail-fast"
-            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         var compilation = Compilation.Create(scannerTrees, ScannerHost.CreateBuffers(source), (BoundRuntimePolicy)policy);
         if (compilation.HasErrors)
         {
@@ -139,7 +172,7 @@ internal static partial class Program
                 throw new InvalidOperationException("A successful component build must contain its parsed source.");
             }
             return CompileTrees(args[0], [scannedTree], outputPath, json,
-                runtimePolicy: policy);
+                runtimePolicy: policy, sourceArithmeticProfile: sourceArithmeticProfile);
         }
         var tokens = lexResult.Tokens;
         var diagnostics = lexResult.Diagnostics;

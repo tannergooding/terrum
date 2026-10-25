@@ -625,7 +625,7 @@ public sealed class Compilation
             options.RuntimePolicy, options.SourceArithmeticProfile);
     }
 
-    private static void ValidateOptions(CompilationOptions options)
+    internal static void ValidateOptions(CompilationOptions options)
     {
         if (options.SourceArithmeticProfile is not (SourceArithmeticProfile.Development or SourceArithmeticProfile.Release)
             || options.RuntimePolicy is not (BoundRuntimePolicy.FailFast or BoundRuntimePolicy.CheckedExceptions))

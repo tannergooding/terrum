@@ -518,7 +518,7 @@ the official host parser, binder and native emitter; the binder also consumes
 its decoded integer magnitudes. It does not re-lex or decode integer magnitudes
 from the target input again. The scanner's own compilation and the later compiler phases
 remain hosted in C#.
-`frontend-component self-host <input|-> --runtime <fail-fast|checked-exceptions> --json`
+`frontend-component self-host <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 executes the bounded native scalar frontend with explicit source buffers and
 projects its typed result for inspection. Invalid shapes produce a code and
 source span; lexical failures retain scanner diagnostics and publish no typed
@@ -526,17 +526,20 @@ result. This command does not use the typed result to bind or emit a program;
 it needs supervision like the other in-process component commands.
 Compilation errors in the bundled frontend sources report their own source
 locations (including source indexes in the multi-source JSON schema).
-`frontend-build-library self-host <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> --json`
+`frontend-build-library self-host <input|-> -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 instead lowers the same validated
 native facts into verified IR and emits a Windows x64 DLL for an explicitly
 `public` scalar function. The output is replaced only on success.
-`frontend-build self-host <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> --json`
+`frontend-build self-host <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 command emits a Windows x64 executable from native facts for a zero-parameter
 `int32 Main()` through the hosted emitter, retaining the output on failure.
-`frontend-run self-host <input|-> --runtime <fail-fast|checked-exceptions> --json`
+`frontend-run self-host <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] --json`
 JIT-executes the same bounded entry without writing an image. Like hosted
 `jit`, it returns the raw `Main` exit status and only uses JSON for diagnostics;
 supervise this in-process native command with a deadline.
+These commands apply the provisional arithmetic selector only while binding
+subject source; compilation of the frontend/scanner component itself remains
+Development. The selector is independent of runtime failure policy.
 The bounded input and source directory remain required, and general source
 binding, broader libraries and compiler self-build remain outstanding.
 Shared scalar/conditional/Boolean/integer-literal fixtures compare DLL output from

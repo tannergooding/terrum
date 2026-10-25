@@ -63,9 +63,28 @@ public static partial class ScalarFrontendHost
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
         => ReadProgram(source, bytes, programBytes, policy).Projection;
 
+    /// <summary>Reads a complete scalar frontend result using the selected compilation options.</summary>
+    public static ScalarFrontendResult ReadResult(SourceText source, ReadOnlySpan<byte> bytes,
+        ReadOnlySpan<byte> programBytes, CompilationOptions options)
+        => ReadProgram(source, bytes, programBytes, options).Projection;
+
     /// <summary>Reads and verifies a projection, retaining the bound multi-function program for its consumer.</summary>
     public static ScalarFrontendReadResult ReadProgram(SourceText source, ReadOnlySpan<byte> bytes,
         ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy)
+        => ReadProgramCore(source, bytes, programBytes, policy, SourceArithmeticProfile.Development);
+
+    /// <summary>Reads and binds a complete scalar frontend program using the selected compilation options.</summary>
+    public static ScalarFrontendReadResult ReadProgram(SourceText source, ReadOnlySpan<byte> bytes,
+        ReadOnlySpan<byte> programBytes, CompilationOptions options)
+    {
+        Compilation.ValidateOptions(options);
+        return ReadProgramCore(source, bytes, programBytes, options.RuntimePolicy,
+            options.SourceArithmeticProfile);
+    }
+
+    private static ScalarFrontendReadResult ReadProgramCore(SourceText source, ReadOnlySpan<byte> bytes,
+        ReadOnlySpan<byte> programBytes, BoundRuntimePolicy policy,
+        SourceArithmeticProfile sourceArithmeticProfile)
     {
         ArgumentNullException.ThrowIfNull(source);
         if (programBytes.Length != ProgramWordCount * sizeof(int))
@@ -74,7 +93,8 @@ public static partial class ScalarFrontendHost
         }
         if (programBytes.IndexOfAnyExcept((byte)0) < 0)
         {
-            return new ScalarFrontendReadResult(ReadResult(source, bytes, policy), null);
+            return new ScalarFrontendReadResult(ReadResultCore(source, bytes, policy, null,
+                sourceArithmeticProfile), null);
         }
         if (bytes.Length != WordCount * sizeof(int) || bytes.IndexOfAnyExcept((byte)0) >= 0)
         {
@@ -136,7 +156,8 @@ public static partial class ScalarFrontendHost
                 inventory.Aliases);
             var functionSource = FunctionSource(source, declaration.Span);
             functionSources.Add(functionSource);
-            var function = ReadResultCore(functionSource, payload, policy, context);
+            var function = ReadResultCore(functionSource, payload, policy, context,
+                sourceArithmeticProfile);
             if (!function.IsValid || function.ReturnType != declaration.ReturnType
                 || function.ParameterCount != declaration.ParameterTypes.Length
                 || function.OutParameterMask != declaration.OutParameterMask
@@ -170,7 +191,8 @@ public static partial class ScalarFrontendHost
         {
             throw InvalidResult();
         }
-        var program = BindProgramCore(results, declarations, functionSources.MoveToImmutable(), policy);
+        var program = BindProgramCore(results, declarations, functionSources.MoveToImmutable(), policy,
+            sourceArithmeticProfile);
         return new ScalarFrontendReadResult(results[0] with { Functions = results }, program);
     }
 
@@ -186,9 +208,24 @@ public static partial class ScalarFrontendHost
         return read.Program ?? BindLibraryCore(source, read.Projection, policy);
     }
 
+    /// <summary>Binds and verifies a complete scalar library using the selected compilation options.</summary>
+    public static BoundProgram BindLibrary(SourceText source, ReadOnlySpan<byte> bytes,
+        ReadOnlySpan<byte> programBytes, CompilationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        Compilation.ValidateOptions(options);
+        var read = ReadProgram(source, bytes, programBytes, options);
+        if (!read.Projection.IsValid)
+        {
+            throw InvalidResult();
+        }
+        return read.Program ?? BindLibraryCore(source, read.Projection, options.RuntimePolicy,
+            options.SourceArithmeticProfile);
+    }
+
     private static BoundProgram BindProgramCore(ImmutableArray<ScalarFrontendResult> results,
         ImmutableArray<ProgramDeclaration> declarations, ImmutableArray<SourceText> functionSources,
-        BoundRuntimePolicy policy)
+        BoundRuntimePolicy policy, SourceArithmeticProfile sourceArithmeticProfile)
     {
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(results.Length);
         for (var i = 0; i < results.Length; i++)
@@ -206,7 +243,7 @@ public static partial class ScalarFrontendHost
             }
             var omitImplicitReturn = hasDoesNotReturnCallStatement && results[i].TrueRoot < 0;
             var function = BindLibraryCore(functionSources[i],
-                results[i], policy, verify: false,
+                results[i], policy, sourceArithmeticProfile, verify: false,
                 omitImplicitReturn: omitImplicitReturn).Functions[0];
             functions.Add(function with {
                 Name = declarations[i].QualifiedName,

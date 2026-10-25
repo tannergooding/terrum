@@ -85,7 +85,14 @@ public static partial class ScalarFrontendHost
 
     internal static ScalarFrontendInvocationResult ReadInvocationResult(SourceText source, int tokenCount,
         NativeExecutionResult execution, ImmutableArray<HostBuffer> buffers, BoundRuntimePolicy policy)
+        => ReadInvocationResult(source, tokenCount, execution, buffers, new CompilationOptions {
+            RuntimePolicy = policy,
+        });
+
+    internal static ScalarFrontendInvocationResult ReadInvocationResult(SourceText source, int tokenCount,
+        NativeExecutionResult execution, ImmutableArray<HostBuffer> buffers, CompilationOptions options)
     {
+        Compilation.ValidateOptions(options);
         var identity = buffers.IsDefaultOrEmpty ? null : buffers[0]?.InvocationProfileId;
         var maximumTokens = identity == ExpandedInvocationProfileIdentity
             ? MaximumExpandedInvocationTokens : MaximumInvocationTokens;
@@ -118,7 +125,7 @@ public static partial class ScalarFrontendHost
             throw new ArgumentException("A completed v88 program is required.", nameof(execution));
         }
         // Complete v88 publication requires zero scratch; the decoder replaces it with its summary.
-        var frontend = ReadProgram(source, new byte[WordCount * sizeof(int)], programBytes, policy);
+        var frontend = ReadProgram(source, new byte[WordCount * sizeof(int)], programBytes, options);
         if (!frontend.Projection.IsValid || frontend.Program is null)
         {
             throw new ArgumentException("The frontend program did not pass the host audit.", nameof(execution));
