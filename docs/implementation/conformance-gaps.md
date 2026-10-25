@@ -383,9 +383,11 @@ also checks InterfaceDef/AssociatedTypeDef ownership, self-formal identity,
 range extents, associated-row partitioning, names and optional default
 TypeSpecRefs. InterfaceBase/InterfaceMethod ownership, ordinals, complete
 base TypeSpecRefs and direct instance MethodDef ownership are now checked;
-base-instance binding, constant payloads, associated-type Import/Export
-identity, provider/default binding, relations, witnesses and execution remain
-incomplete. The focused
+InterfaceConstDef/AssociatedConstDef ownership, names, complete type
+references and bounded ConstantSource row references are also checked.
+Base-instance binding, ConstantSource payload/value semantics, associated-type
+Import/Export identity, provider/default binding, relations, witnesses and
+execution remain incomplete. The focused
 [associated-relation payload proposal](../proposals/constraint-associated-relation-payload.md)
 is unapproved, provisionally guides implementation only under explicit user
 authorization, and does not resolve the separate AssociatedTypeDef identity

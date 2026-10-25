@@ -154,11 +154,13 @@ nonempty names and optional complete default TypeSpecRefs. InterfaceBase and
 InterfaceMethod rows additionally validate range ownership and ordinals,
 complete base TypeSpecRefs, and directly declared instance MethodDefs owned
 by the interface TypeDef. Resolving base instances as interfaces across
-imports, constant declarations, associated-type Import/Export identity,
-exact provider/default binding, relation/witness semantics and standard
-executable production remain incomplete. The associated-type identity
-proposal is still unapproved and guides implementation only as provisional
-direction.
+imports, ConstantSource payload/value semantics, associated-type Import/Export
+identity, exact provider/default binding, relation/witness semantics and
+standard executable production remain incomplete. InterfaceConstDef and
+AssociatedConstDef rows validate their InterfaceDef ranges, owners, names and
+complete type references; initialized interface constants also require a
+bounded ConstantSource row reference. The associated-type identity proposal
+is still unapproved and guides implementation only as provisional direction.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
