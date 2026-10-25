@@ -1940,10 +1940,11 @@ installation cannot expose an incomplete receiver to callbacks, reentrancy
 or escaping failure. A naive unconstrained `drop old; store new` does not
 establish that invariant.
 
-Automatic authored Cleanup is checked NoThrow and nonsuspending, but may
-have observable effects and reentrancy. Its complete/partial retirement
-order and the surrounding checks still matter. Ending a reference
-descriptor does not destroy its referent.
+Automatic authored Cleanup is checked nonsuspending, but may have observable
+effects, reentrancy and ordinary throwing behavior. If it throws, that failure
+propagates and remaining generated owner/field cleanup does not resume during
+that unwind. Its complete/partial retirement order and the surrounding checks
+still matter. Ending a reference descriptor does not destroy its referent.
 
 No dedicated `init.*` or hot `drop.*` allocation is selected here. Their
 required semantic facts cannot disappear merely because the earlier names

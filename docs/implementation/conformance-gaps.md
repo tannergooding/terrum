@@ -304,8 +304,13 @@ physical contracts and capability closure are assigned and implemented.
 the complete accepted typed-handler, filter, ParentException and output/
 ownership contract.
 The current prototype still exposes a `checked-exceptions` runtime-policy
-switch and the retired `NoThrow` effect; those paths do not conform to the
-accepted explicit-unsafe-catch and no-`NoThrow` contract.
+switch and source/private `NoThrow` declarations. The standard Effects
+reader/writer now rejects retired bit `0x01`, and standard Cleanup no longer
+depends on that bit. The unapproved
+[`no-throw-retirement-and-proof-boundaries.md`](../proposals/no-throw-retirement-and-proof-boundaries.md)
+proposal provisionally recommends retiring the general source/published
+promise; this is distinct from the accepted standard wire-mask correction.
+The checked-exceptions path remains a separate runtime-policy gap.
 [Provider output/failure cases](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeProviderOutputFailureTests.cs)
 cover a bounded separate-compilation surface.
 

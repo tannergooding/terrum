@@ -16,13 +16,14 @@ GC backing-specific Cleanup triggers and thread constraints are covered by
 | OREG-03 | Inline Copy aggregate declares owning Cleanup | Reject; ordinary handle copies do not duplicate the aliased object's obligation |
 | OREG-04 | Cleanup returns non-void or has parameters | Reject automatic cleanup eligibility |
 | OREG-05 | Cleanup is static, async, extern or caller-unsafe | Reject automatic cleanup eligibility |
-| OREG-06 | Cleanup body or automatic child cleanup may throw/suspend | Reject the transitive retirement contract |
+| OREG-06 | Cleanup body or automatic child cleanup throws during normal retirement | Propagate the failure; do not resume remaining generated owner/field cleanup during that unwind |
 | OREG-07 | Same type selects two Cleanup methods/repeated attributes | Reject |
 | OREG-08 | Secondary partial declaration changes Cleanup selection | Reject primary-contract change |
 | OREG-09 | User calls the selected Cleanup method directly | Reject a second destruction path |
 | OREG-10 | Type has no authored Cleanup | Derive field retirement; do not discover Close/Dispose by name |
 | OREG-11 | Cleanup or field types are substituted generically | Preserve complete type, field and selected operation identity |
 | OREG-12 | Cleanup member is not publicly accessible | Retirement uses its registered identity without exposing ordinary access |
+| OREG-13 | Cleanup body or automatic child cleanup may suspend | Reject automatic cleanup eligibility |
 
 ## Construction and acquired state
 

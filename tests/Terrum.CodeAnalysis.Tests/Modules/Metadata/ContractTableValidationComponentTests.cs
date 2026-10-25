@@ -39,7 +39,7 @@ public sealed class ContractTableValidationComponentTests
         var empty = CreateFixture([]);
         var cleanupThenEffect = CreateFixture([
             new Clause(0x1300_0001, 5, Word(1)),
-            new Clause(0x1600_0001, 1, Word(1)),
+            new Clause(0x1600_0001, 1, Word(0)),
         ]);
         var largeSingletons = CreateLargeSingletonFixture(512);
         var outputState = CreateFixture([
@@ -48,12 +48,15 @@ public sealed class ContractTableValidationComponentTests
         var cases = new List<TestCase> {
             empty,
             cleanupThenEffect,
+            CreateFixture([
+                new Clause(0x1300_0001, 5, Word(1)),
+            ]),
             outputState,
             CreateFixture([
                 new Clause(0x1600_0001, 2, OutputState()),
             ], hasOutputParam: true, paramMode: 2),
             CreateFixture([
-                new Clause(0x1600_0001, 1, Word(7)),
+                new Clause(0x1600_0001, 1, Word(6)),
             ]),
             CreateFixture([
                 new Clause(0x1600_0001, 3, new byte[8]),
@@ -69,7 +72,10 @@ public sealed class ContractTableValidationComponentTests
             ])),
             Invalid(CreateFixture([
                 new Clause(0x1600_0001, 1, Word(1)),
+            ])),
+            Invalid(CreateFixture([
                 new Clause(0x1600_0001, 1, Word(2)),
+                new Clause(0x1600_0001, 1, Word(4)),
             ])),
             Invalid(CreateFixture([
                 new Clause(0x1300_0001, 5, Word(1)),
@@ -82,7 +88,7 @@ public sealed class ContractTableValidationComponentTests
                 new Clause(0x1600_0001, 1, new byte[8]),
             ])),
             Invalid(WithContractByte(CreateFixture([
-                new Clause(0x1600_0001, 1, Word(1)),
+                new Clause(0x1600_0001, 1, Word(2)),
             ]), 1, 6, 1)),
             Invalid(CreateFixture([
                 new Clause(0x1600_0001, 2, OutputState()),
@@ -112,11 +118,8 @@ public sealed class ContractTableValidationComponentTests
                 new Clause(0x1600_0001, 4, new byte[8]),
             ])),
             Invalid(CreateFixture([
-                new Clause(0x1300_0001, 5, Word(1)),
-            ])),
-            Invalid(CreateFixture([
                 new Clause(0x1300_0001, 5, Word(2)),
-                new Clause(0x1600_0001, 1, Word(1)),
+                new Clause(0x1600_0001, 1, Word(0)),
             ])),
             Invalid(cleanupThenEffect with {
                 Tables = cleanupThenEffect.Tables with {
@@ -203,10 +206,6 @@ public sealed class ContractTableValidationComponentTests
                     [.. new int[tables.RecordCount + 1]], true),
                 new HostBuffer("SingletonKeys", PrimitiveType.Int32,
                     [.. new int[tables.RecordCount + 1]], true),
-                new HostBuffer("CleanupMethods", PrimitiveType.Int32,
-                    [.. new int[tables.RecordCount + 1]], true),
-                new HostBuffer("NoThrowMethods", PrimitiveType.Int32,
-                    [.. new int[tables.MethodDefCount + 1]], true),
                 new HostBuffer("Expected", PrimitiveType.Int32,
                 [
                     tables.RecordCount,
@@ -293,7 +292,7 @@ public sealed class ContractTableValidationComponentTests
             WriteWord(methods, methodOffset + 20, (uint)contractCount);
             for (var index = 0; index < contractCount; index++)
             {
-                rows.Add(Contract(0x1600_0000u | (uint)(method + 1), 1, Word(1)));
+                rows.Add(Contract(0x1600_0000u | (uint)(method + 1), 1, Word(2)));
             }
             firstContract += (uint)contractCount;
         }

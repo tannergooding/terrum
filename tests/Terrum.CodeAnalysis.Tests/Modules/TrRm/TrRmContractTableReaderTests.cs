@@ -44,7 +44,7 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void CleanupRequiresDeclaredNoThrowEffectOnItsTargetMethod()
+    public void DevelopmentProfileCleanupRequiresNoThrowEffectBit()
     {
         var withoutNoThrow = Effects();
         withoutNoThrow[8] = 2;
@@ -54,6 +54,37 @@ public sealed class TrRmContractTableReaderTests
             Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
                 methodFirst: 0, methodCount: 0));
         Create(Section(Effects(), Cleanup()), typeFirst: 2, methodFirst: 1);
+    }
+
+    [Test]
+    public void StandardEffectsRetireNoThrowAndAllowExplicitZero()
+    {
+        foreach (var mask in new uint[] { 2, 4, 6 })
+        {
+            Create(Section(Effects(mask)), recordCount: 1, declaredCount: 1,
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+                writeRows: true, developmentProfile: false);
+        }
+
+        Create(Section(Effects(0)), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false);
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Effects(1)), recordCount: 1, declaredCount: 1,
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+                writeRows: true, developmentProfile: false));
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(Effects(8)), recordCount: 1, declaredCount: 1,
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+                writeRows: true, developmentProfile: false));
+    }
+
+    [Test]
+    public void StandardCleanupClauseDoesNotRequireRetiredNoThrowEffectBit()
+    {
+        Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
+            typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
+            writeRows: true, frameArtifact: true, developmentProfile: false);
     }
 
     [Test]
@@ -171,19 +202,17 @@ public sealed class TrRmContractTableReaderTests
     [Test]
     public void WrittenClausesComposeAcrossTypeAndMethodInFramedArtifact()
     {
-        Create(Section(Cleanup(), Effects()), writeRows: true, frameArtifact: true);
-        var missingNoThrow = Effects();
-        missingNoThrow[8] = 2;
-        Assert.Throws<InvalidDataException>(() =>
-            Create(Section(Cleanup(), missingNoThrow), writeRows: true));
-        var invalidKind = Effects();
+        Create(Section(Cleanup(), Effects(0)), writeRows: true,
+            frameArtifact: true, developmentProfile: false);
+        var invalidKind = Effects(2);
         invalidKind[4] = 6;
         Assert.Throws<InvalidDataException>(() =>
-            Create(Section(Cleanup(), invalidKind), writeRows: true));
+            Create(Section(Cleanup(), invalidKind), writeRows: true,
+                developmentProfile: false));
         Assert.Throws<InvalidDataException>(() =>
-            Create(Section(Effects(), Effects()),
+            Create(Section(Effects(2), Effects(2)),
                 typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
-                writeRows: true));
+                writeRows: true, developmentProfile: false));
     }
 
     private static void Create(byte[] section, int recordCount = 2, int declaredCount = 2,
@@ -191,7 +220,8 @@ public sealed class TrRmContractTableReaderTests
         bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false,
         bool writeRows = false, bool frameArtifact = false,
         bool pointerParameter = false, int methodOwnerType = 1, uint typeFlags = 4,
-        int typeRows = 1, uint secondTypeFirst = 0, uint secondTypeCount = 0)
+        int typeRows = 1, uint secondTypeFirst = 0, uint secondTypeCount = 0,
+        bool developmentProfile = true)
     {
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0), ("Owner", 0)]);
@@ -280,13 +310,13 @@ public sealed class TrRmContractTableReaderTests
 
             var emitted = TrRmContractTableWriter.Encode(
                 rows, types, methods, signatures, parameters, typeSpecs,
-                developmentProfile: true);
+                developmentProfile);
             Assert.That(emitted, Is.EqualTo(section));
             section = emitted;
         }
         _ = new TrRmContractTableReader(section, recordCount,
             types, methods, signatures, parameters, typeSpecs,
-            developmentProfile: true);
+            developmentProfile);
         if (frameArtifact)
         {
             var artifact = TrRmArtifactWriter.Encode([

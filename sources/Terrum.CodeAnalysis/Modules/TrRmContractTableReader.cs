@@ -91,12 +91,13 @@ public readonly ref struct TrRmContractTableReader
             switch (kind)
             {
                 case 1:
-                    if (data.Length != 12 || (Read(data, 8) & ~7u) != 0)
+                    var allowedEffects = developmentProfile ? 7u : 6u;
+                    if (data.Length != 12 || (Read(data, 8) & ~allowedEffects) != 0)
                     {
                         throw InvalidContract();
                     }
 
-                    if (owner >> 24 == 0x16)
+                    if (developmentProfile && owner >> 24 == 0x16)
                     {
                         var method = owner & 0xFF_FFFF;
                         if ((Read(data, 8) & 1) != 0)
@@ -234,11 +235,14 @@ public readonly ref struct TrRmContractTableReader
             }
         }
 
-        foreach (var method in cleanupMethods)
+        if (developmentProfile)
         {
-            if (!noThrowMethods.Contains(method))
+            foreach (var method in cleanupMethods)
             {
-                throw InvalidContract();
+                if (!noThrowMethods.Contains(method))
+                {
+                    throw InvalidContract();
+                }
             }
         }
 
@@ -249,7 +253,6 @@ public readonly ref struct TrRmContractTableReader
                 throw InvalidContract();
             }
         }
-
     }
 
     internal ReadOnlySpan<byte> GetRow(int row)

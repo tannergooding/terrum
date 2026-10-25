@@ -133,6 +133,11 @@ are also read from standard section `0x0030`; their payload/value semantics,
 exact substitution, remaining registered TypeSpecRef-bearing records,
 dependency/remapping, Body codecs and broader execution are still incomplete,
 so this does not establish current-schema conformance.
+The standard Contract reader/writer accepts only Effects bits `0x02` and
+`0x04`, rejects retired bit `0x01`, and permits an explicit zero mask.
+Standard Cleanup clauses no longer require that retired bit; the private
+development executable profile remains separately selected. Source-level
+NoThrow retirement is a separate provisional decision.
 Selected Body access now has a register-stream reader for kind-01 framing,
 all optional-map extents, fixed Blocks, typed-record offsets/payload shapes,
 instruction boundaries and block terminators, plus shape decoding for compact

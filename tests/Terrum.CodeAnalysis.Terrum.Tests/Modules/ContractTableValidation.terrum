@@ -15,9 +15,7 @@ public static bool TryValidateContractTable(int32 recordCount,
         || signatureCount * 24 != Host.Signatures.Length
         || paramCount * 16 != Host.Params.Length
         || Host.ContractOwners.Length != recordCount + 1
-        || Host.SingletonKeys.Length != recordCount + 1
-        || Host.CleanupMethods.Length != recordCount + 1
-        || Host.NoThrowMethods.Length != methodDefCount + 1)
+        || Host.SingletonKeys.Length != recordCount + 1)
     {
         return false;
     }
@@ -26,13 +24,7 @@ public static bool TryValidateContractTable(int32 recordCount,
     {
         Host.ContractOwners[slot] = 0;
         Host.SingletonKeys[slot] = 0;
-        Host.CleanupMethods[slot] = 0;
     }
-    for (mut int32 method = 0; method <= methodDefCount; method = method + 1)
-    {
-        Host.NoThrowMethods[method] = 0;
-    }
-
     if (recordCount == 0)
     {
         if (Host.Contracts.Length != 0)
@@ -108,14 +100,9 @@ public static bool TryValidateContractTable(int32 recordCount,
         {
             if (rowLength != 12
                 || !TryReadContractWord(rowStart, rowLength, 8, init var effects)
-                || effects > 7)
+                || effects > 6 || (effects & 1) != 0)
             {
                 return false;
-            }
-
-            if ((owner >> 24) == 0x16 && (effects & 1) != 0)
-            {
-                Host.NoThrowMethods[int32(owner & 0xFF_FFFF)] = 1;
             }
         }
         else if (kind == 2)
@@ -168,8 +155,6 @@ public static bool TryValidateContractTable(int32 recordCount,
             {
                 return false;
             }
-
-            Host.CleanupMethods[row] = int32(cleanupMethod);
         }
         else
         {
@@ -180,15 +165,6 @@ public static bool TryValidateContractTable(int32 recordCount,
     if (!TrySortAndCheckContractSingletons(singletonCount))
     {
         return false;
-    }
-
-    for (mut int32 row = 1; row <= recordCount; row = row + 1)
-    {
-        int32 cleanupMethod = Host.CleanupMethods[row];
-        if (cleanupMethod != 0 && Host.NoThrowMethods[cleanupMethod] == 0)
-        {
-            return false;
-        }
     }
 
     return true;
