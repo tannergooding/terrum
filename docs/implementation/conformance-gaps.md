@@ -134,7 +134,12 @@ now use target section kind zero and zero-based `u16` Body blocks, with their
 reserved word checked; the Terrum-authored directory and SourceMap validators
 match those rules. Standard interface/constant/witness/native semantic readers,
 all registry field binding, and executable current-schema production remain
-incomplete, so correct framing is not a conformance claim.
+incomplete, so correct framing is not a conformance claim. Standard
+FieldPath and retained target-layout readers/writers now validate complete
+root/subject TypeSpecRefs, direct FieldDef or expected-FieldDef Import
+references, exact TargetProfile row bounds, and exclusive offset-field ranges.
+They do not bind path steps through owner substitutions or compute/compare
+target layouts.
 
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,
@@ -334,6 +339,13 @@ stub rows, explicit owner imports, same-consumer ModuleRef ownership, public
 provider fields/owners, expected-stub non-reexport and unique keys. They do
 not compare complete field types, static/mutable access, owner substitutions
 or retained Layout/TargetProfile membership.
+
+Standard structural FieldPath and target-layout readers/writers validate
+complete root/subject TypeSpecRefs, FieldDef/Import FieldReferences, concrete
+TargetProfile rows and exclusive `004A` observation ranges. The active TRRM
+tests cover direct/imported references, malformed paths, query-specific ranges,
+profile bounds and overlapping/orphaned ranges. Exact owner-substitution and
+layout membership/computation remain in this gate.
 
 **Routes/gate:** implement/qualify the
 [target cases](../specs/conformance/target-windows-x64.md), including all

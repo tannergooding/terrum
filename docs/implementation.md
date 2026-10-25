@@ -471,13 +471,16 @@ source-free loader reconstructs supported Windows x64 Blittable
 Sequential/Transparent layouts from their complete ordered field lists; size,
 offset and final alignment remain target-derived, not serialized. This
 metadata integration does not migrate compact-linear/indexed Bodies, every
-registered complete-type field, or the assigned `DE` query/TypeIdentity,
-FieldMap/FieldPath and complete binding/dependency contracts. FieldDef
-DefId/Import/Export rows now have structural C# support for owner imports and
-public local publication; exact field-contract and retained-layout comparison
-remain incomplete. The executable path still
-uses separate development Feature assignments and does not claim current
-schema conformance.
+registered complete-type field, or the assigned `DE` query/TypeIdentity
+execution and binding/dependency contracts. Standard FieldPath and retained
+target-layout tables now have structural readers/writers that validate
+complete TypeSpecRefs, FieldDef/Import FieldReferences, TargetProfile rows and
+exclusive `004A` ranges. They do not bind path owners or compute target
+layouts; FieldMap token binding and query execution remain incomplete.
+FieldDef DefId/Import/Export rows also have structural C# support for owner
+imports and public local publication; exact field-contract and retained-layout
+comparison remain incomplete. The executable path still uses separate
+development Feature assignments and does not claim current schema conformance.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
 inputs, and invoke the shared mandatory verifier and backend; there is no
 producer-trust bypass. General imported-call linking and standard

@@ -21,6 +21,9 @@ public static class TrRmStructuralMetadataValidator
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
             TrRmAssociatedConstDefTableReader associatedConstDefs,
             TrRmConstantSourceTableReader constantSources,
+            TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
+            TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
+            TrRmFieldPathTableReader fieldPaths,
             TrRmFieldDefTableReader fields,
             TrRmLayoutTableReader layouts, TrRmLayoutFieldTableReader layoutFields,
             TrRmTargetProfileTableReader targetProfiles,
@@ -43,6 +46,9 @@ public static class TrRmStructuralMetadataValidator
             InterfaceConstDefs = interfaceConstDefs;
             AssociatedConstDefs = associatedConstDefs;
             ConstantSources = constantSources;
+            TargetLayoutDependencies = targetLayoutDependencies;
+            TargetLayoutDependencyFields = targetLayoutDependencyFields;
+            FieldPaths = fieldPaths;
             Fields = fields;
             Layouts = layouts;
             LayoutFields = layoutFields;
@@ -71,6 +77,9 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
         internal TrRmAssociatedConstDefTableReader AssociatedConstDefs { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
+        internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
+        internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
+        internal TrRmFieldPathTableReader FieldPaths { get; }
         internal TrRmFieldDefTableReader Fields { get; }
         internal TrRmLayoutTableReader Layouts { get; }
         internal TrRmLayoutFieldTableReader LayoutFields { get; }
@@ -162,6 +171,11 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x003F, out _, out var frozenValueNodeCount);
         _ = index.TryGetSection(0x0042, out _, out var constantExecutionCount);
         _ = index.TryGetSection(0x0049, out _, out var targetValueBindingCount);
+        _ = index.TryGetSection(0x0045, out var targetLayoutDependencyBytes,
+            out var targetLayoutDependencyCount);
+        _ = index.TryGetSection(0x004A, out var targetLayoutDependencyFieldBytes,
+            out var targetLayoutDependencyFieldCount);
+        _ = index.TryGetSection(0x004B, out var fieldPathBytes, out var fieldPathCount);
         _ = index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
         _ = index.TryGetSection(0x0023, out var layoutFieldBytes, out var layoutFieldCount);
         _ = index.TryGetSection(0x0048, out var targetProfileBytes, out var targetProfileCount);
@@ -249,6 +263,9 @@ public static class TrRmStructuralMetadataValidator
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
         var associatedConstDefs = default(TrRmAssociatedConstDefTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
+        var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
+        var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
+        var fieldPaths = default(TrRmFieldPathTableReader);
         if (!developmentProfile)
         {
             interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes,
@@ -280,6 +297,18 @@ public static class TrRmStructuralMetadataValidator
             interfaces, associatedTypeDefs, fields);
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
             generics, imports, selectedConstantSourceCount);
+        if (!developmentProfile)
+        {
+            targetLayoutDependencyFields = new TrRmTargetLayoutDependencyFieldTableReader(
+                targetLayoutDependencyFieldBytes, targetLayoutDependencyFieldCount,
+                fields, imports);
+            targetLayoutDependencies = new TrRmTargetLayoutDependencyTableReader(
+                targetLayoutDependencyBytes, targetLayoutDependencyCount, typeSpecs,
+                targetProfiles, targetLayoutDependencyFieldCount);
+            fieldPaths = fieldPathCount == 0 ? default
+                : new TrRmFieldPathTableReader(fieldPathBytes, fieldPathCount,
+                    typeSpecs, fields, imports);
+        }
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports,
             interfaces, associatedTypeDefs, fields);
@@ -409,6 +438,7 @@ public static class TrRmStructuralMetadataValidator
         return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
             interfaces, associatedTypeDefs, interfaceBases, interfaceMethods,
             interfaceConstDefs, associatedConstDefs, constantSources,
+            targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,
             nativeCallables, nativeFunctionPointerSignatures, nativeVTables, imports,
