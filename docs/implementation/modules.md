@@ -40,7 +40,12 @@ Artifact framing now selects the standard registry or the internal development
 executable profile explicitly before indexing/writing, without fallback between
 their section meanings. The standard index recognizes the current assignments
 through `0x004B`, including standard SourceMap Body slots; semantic table
-binding and standard execution remain incomplete.
+binding and standard execution remain incomplete. The structural validator
+currently reads standard `InterfaceDef` and `AssociatedTypeDef` rows and
+checks their owner, self-formal, range, name and complete default-type shape.
+It does not yet validate InterfaceBase/InterfaceMethod or constant row
+payloads, bind associated declarations across Import/Export, or execute
+associated relations and witnesses.
 Initialized six-primitive locals in lexical blocks, branches and loops use
 existing indexed values and target-visible edge arguments. Scope retirement
 does not discard outer writes or recycle identities; loop initializers execute

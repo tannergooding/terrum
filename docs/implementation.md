@@ -146,8 +146,16 @@ compiler and compact validators explicitly use the separate development
 profile, with no fallback between them. Standard SourceMap slots use section
 kind zero for Body-instruction targets and zero-based `u16` blocks; the
 development SourceMap layout remains isolated. This routes framing correctly
-but does not establish semantic readers or current-schema execution for every
-registered row.
+but does not establish current-schema execution for every registered row.
+Standard structural validation now reads `InterfaceDef` and
+`AssociatedTypeDef`, checking interface ownership, optional self-formal
+ownership, declaration-range extents, exclusive associated-type ownership,
+nonempty names and optional complete default TypeSpecRefs. Interface base and
+method payloads, constant declarations, associated-type Import/Export
+identity, exact provider/default binding, relation/witness semantics and
+standard executable production remain incomplete. The associated-type
+identity proposal is still unapproved and guides implementation only as
+provisional direction.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
