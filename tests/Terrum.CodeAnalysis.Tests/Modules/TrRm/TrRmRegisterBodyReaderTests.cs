@@ -223,6 +223,142 @@ public sealed class TrRmRegisterBodyReaderTests
         Assert.Throws<InvalidDataException>(() => GetSelectedRegisterBodyFirstOpcode(malformedArtifact));
     }
 
+    [Test]
+    public void BindsSelectedHomeTypeAndMethodMapsToTheOwningMethod()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        ValidateSelectedBodyMaps(CreateBody(0x07, counts));
+
+        counts[1] = 2;
+        var pseudoType = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(pseudoType.AsSpan(41), 0xF000_0000);
+        ValidateSelectedBodyMaps(pseudoType);
+
+        var typeSpecRow = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(typeSpecRow.AsSpan(37), 0x1100_0002);
+        ValidateSelectedBodyMaps(typeSpecRow);
+
+        var inlineFamily = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(inlineFamily.AsSpan(37), 0xF300_8B08);
+        ValidateSelectedBodyMaps(inlineFamily);
+    }
+
+    [Test]
+    public void BindsImportedMethodMapAndRejectsAnImportWithTheWrongTargetKind()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(41), 0x1C00_0001);
+        ValidateSelectedImportedMethodBodyMaps(body);
+
+        var wrongKind = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(wrongKind.AsSpan(37), 0x1C00_0001);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedImportedMethodBodyMaps(wrongKind));
+    }
+
+    [Test]
+    public void BindsTypeFieldPathAndConstantMapVariants()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 3;
+        counts[2] = 1;
+        counts[3] = 3;
+        counts[4] = 1;
+        var body = CreateBody(0x1F, counts);
+        var mapStart = 5 + (5 * sizeof(uint)) + (3 * sizeof(uint));
+        var typeMapStart = mapStart + 8;
+        var methodMapStart = typeMapStart + (3 * sizeof(uint));
+        var fieldMapStart = methodMapStart + sizeof(uint);
+        var constantMapStart = fieldMapStart + (3 * sizeof(uint));
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(typeMapStart + 4), 0x1300_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(typeMapStart + 8), 0x1C00_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(fieldMapStart), 0x1400_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(fieldMapStart + 4), 0x1C00_0002);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(fieldMapStart + 8), 0x1D00_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(constantMapStart), 2);
+
+        var artifact = CreateStandardArtifactWithFieldMaps(body);
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    [Test]
+    public void RejectsMethodMapReferencesOwnedByAnotherModule()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var directBody = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(directBody.AsSpan(41), 0x1600_0002);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedTwoModuleBodyMaps(directBody));
+
+        var importedBody = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(importedBody.AsSpan(41), 0x1C00_0001);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedTwoModuleBodyMaps(importedBody));
+    }
+
+    [Test]
+    public void RejectsSelectedBodyMapsWithInvalidRowsKindsOrLocalIndexes()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts);
+
+        var invalidTypeDef = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(invalidTypeDef.AsSpan(37), 0x1300_0001);
+        AssertInvalidSelectedBodyMaps(invalidTypeDef);
+
+        var invalidImport = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(invalidImport.AsSpan(37), 0x1C00_0001);
+        AssertInvalidSelectedBodyMaps(invalidImport);
+
+        var invalidMethod = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(invalidMethod.AsSpan(41), 0x1600_0002);
+        AssertInvalidSelectedBodyMaps(invalidMethod);
+
+        var invalidHomeType = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt16LittleEndian(invalidHomeType.AsSpan(31), 1);
+        AssertInvalidSelectedBodyMaps(invalidHomeType);
+
+        var invalidPseudoCycle = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(invalidPseudoCycle.AsSpan(37), 0xF000_0000);
+        AssertInvalidSelectedBodyMaps(invalidPseudoCycle);
+
+        var invalidPseudoFamily = (byte[])body.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(invalidPseudoFamily.AsSpan(37), 0xF000_0600);
+        AssertInvalidSelectedBodyMaps(invalidPseudoFamily);
+
+        var fieldCounts = new uint[5];
+        fieldCounts[0] = 1;
+        fieldCounts[1] = 1;
+        fieldCounts[2] = 1;
+        fieldCounts[3] = 1;
+        var invalidField = CreateBody(0x0F, fieldCounts);
+        AssertInvalidSelectedBodyMaps(invalidField);
+
+        var constantCounts = new uint[5];
+        constantCounts[0] = 1;
+        constantCounts[1] = 1;
+        constantCounts[2] = 1;
+        constantCounts[4] = 1;
+        var invalidConstant = CreateBody(0x17, constantCounts);
+        AssertInvalidSelectedBodyMaps(invalidConstant);
+    }
+
     private static void AssertBody(byte[] code)
     {
         var reader = new TrRmRegisterBodyReader(CreateBody(0, code: code));
@@ -259,6 +395,120 @@ public sealed class TrRmRegisterBodyReaderTests
         var bodies = new TrRmBodyTableReader(section, count);
         return bodies.GetRegisterBody(1).GetBlockCode(0)[0];
     }
+
+    private static void ValidateSelectedBodyMaps(byte[] body)
+    {
+        var artifact = CreateStandardArtifact(body);
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static void ValidateSelectedImportedMethodBodyMaps(byte[] body)
+    {
+        var artifact = CreateStandardArtifactWithImportedMethod(body);
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static void ValidateSelectedTwoModuleBodyMaps(byte[] body)
+    {
+        var artifact = CreateTwoModuleArtifactWithImportedMethod(body);
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static byte[] CreateStandardArtifactWithFieldMaps(byte[] body)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("main", 0), ("Example", 0),
+            ("Owner", 0), ("Value", 0), ("provider", 0),
+            ("type-key", 0), ("field-key", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 9);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1, 1, 1),
+        ], strings, 1, 1, 1, 0, 1);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            1, 1, 1, 0, 1);
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
+            new TrRmModuleRefRow(7, 0, 0),
+        ], strings, modules);
+        var featuresBytes = TrRmFeatureTableWriter.Encode([
+            new TrRmFeatureRow(11, 1),
+        ]);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.Builtin(8),
+            TrRmTypeSpecTableWriter.Reference(0x02, 1),
+        ], 1, 2, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 3, 1, 2, 0);
+        var typeDefBytes = TrRmTypeDefTableWriter.Encode([
+            new TrRmTypeDefRow(4, 5, 6, 1, 1, 0, 0, 1, 1, 0, 0),
+        ], strings, modules, 1, 0, 1, 0);
+        var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 1,
+            strings, modules, 1, 0, 1, 0);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layoutBytes = TrRmLayoutTableWriter.Encode([
+            new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
+        ], typeDefs, targetProfiles, 0);
+        var fieldBytes = TrRmFieldDefTableWriter.Encode([
+            new TrRmFieldDefRow(1, 6, 2, 10),
+        ], strings, typeDefs, typeSpecs);
+        var fields = new TrRmFieldDefTableReader(fieldBytes, 1,
+            strings, typeDefs, typeSpecs);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 1, typeSpecs, 0, 0);
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+        ], strings, modules, typeDefs, signatures, 0, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes, 1,
+            strings, modules, typeDefs, signatures, 0, 1);
+        var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
+            strings, modules);
+        var importRows = new[]
+        {
+            new TrRmImportRow(1, 8, 0x1300_0001),
+            new TrRmImportRow(1, 9, 0x1400_0001),
+        };
+        var importBytes = TrRmImportTableWriter.Encode(importRows, strings,
+            moduleRefs, typeDefs, methods, default, default, default, fields);
+        var imports = new TrRmImportTableReader(importBytes, importRows.Length,
+            strings, moduleRefs, typeDefs, methods, default, default, default, fields);
+        var fieldPathsBytes = TrRmFieldPathTableWriter.Encode([
+            new TrRmFieldPathRow(3, [0x1C00_0002]),
+        ], typeSpecs, fields, imports);
+        var constantSourcesBytes = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(1, 1),
+        ], 1, 0, 0);
+
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 9, stringsBytes),
+            new TrRmSection(0x0004, 0, 1, featuresBytes),
+            new TrRmSection(0x0010, 0, 1, moduleRefBytes),
+            new TrRmSection(0x0011, 0, 3, typeSpecBytes),
+            new TrRmSection(0x0013, 0, 1, typeDefBytes),
+            new TrRmSection(0x0014, 0, 1, fieldBytes),
+            new TrRmSection(0x0015, 0, 1, layoutBytes),
+            new TrRmSection(0x0016, 0, 1, methodBytes),
+            new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x001C, 0, 2, importBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+            new TrRmSection(0x0030, 0, 1, constantSourcesBytes),
+            new TrRmSection(0x003F, 0, 1, new byte[24]),
+            new TrRmSection(0x004B, 0, 1, fieldPathsBytes),
+        ]);
+    }
+
+    private static void AssertInvalidSelectedBodyMaps(byte[] body)
+        => Assert.Throws<InvalidDataException>(() => ValidateSelectedBodyMaps(body));
 
     private static void AssertInvalidImplementation(byte[] body, int contractCount)
         => Assert.Throws<InvalidDataException>(() =>
@@ -364,8 +614,9 @@ public sealed class TrRmRegisterBodyReaderTests
             0, 0, 1, 0, 0);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
             TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.Builtin(8),
         ], 0, 0, 0);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 1, 0, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 0, 0, 0);
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(0xF2000000, 0, 0, 0, 0, 0),
         ], typeSpecs, 0, 0);
@@ -379,9 +630,112 @@ public sealed class TrRmRegisterBodyReaderTests
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, moduleBytes),
             new TrRmSection(0x0002, 0, 3, stringBytes),
-            new TrRmSection(0x0011, 0, 1, typeSpecBytes),
+            new TrRmSection(0x0011, 0, 2, typeSpecBytes),
             new TrRmSection(0x0016, 0, 1, methodBytes),
             new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+        ]);
+    }
+
+    private static byte[] CreateStandardArtifactWithImportedMethod(byte[] body)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("main", 0), ("required", 0),
+            ("provider", 0), ("required-key", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 6);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1),
+        ], strings, 1, 0, 2, 0, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            1, 0, 2, 0, 0);
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
+            new TrRmModuleRefRow(5, 0, 0),
+        ], strings, modules);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 0, 1, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 0, 1, 0);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 1, typeSpecs, 0, 0);
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+            new TrRmMethodDefRow(0, 4, 1, 0, 0, 0, 0),
+        ], strings, modules, typeDefs, signatures, 0, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes, 2,
+            strings, modules, typeDefs, signatures, 0, 1);
+        var importBytes = TrRmImportTableWriter.Encode([
+            new TrRmImportRow(1, 6, 0x1600_0002),
+        ], strings, new TrRmModuleRefTableReader(moduleRefBytes, 1, strings, modules),
+            typeDefs, methods, default);
+
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 6, stringsBytes),
+            new TrRmSection(0x0010, 0, 1, moduleRefBytes),
+            new TrRmSection(0x0011, 0, 2, typeSpecBytes),
+            new TrRmSection(0x0016, 0, 2, methodBytes),
+            new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x001C, 0, 1, importBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+        ]);
+    }
+
+    private static byte[] CreateTwoModuleArtifactWithImportedMethod(byte[] body)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("main", 0), ("provider", 0),
+            ("consumer", 0), ("required", 0), ("required-key", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 7);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 1, 1, 1, 1, 1),
+            new TrRmModuleRow(5, 0, 0, 0, 1, 1, 2, 1),
+        ], strings, 1, 0, 2, 0, 0);
+        var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
+            1, 0, 2, 0, 0);
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
+            new TrRmModuleRefRow(4, 0, 0),
+        ], strings, modules);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 0, 1, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 0, 1, 0);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 1, typeSpecs, 0, 0);
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+            new TrRmMethodDefRow(0, 6, 1, 0, 0, 0, 0),
+        ], strings, modules, typeDefs, signatures, 0, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes, 2,
+            strings, modules, typeDefs, signatures, 0, 1);
+        var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1, strings, modules);
+        var importBytes = TrRmImportTableWriter.Encode([
+            new TrRmImportRow(1, 7, 0x1600_0002),
+        ], strings, moduleRefs, typeDefs, methods, default);
+
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 2, moduleBytes),
+            new TrRmSection(0x0002, 0, 7, stringsBytes),
+            new TrRmSection(0x0010, 0, 1, moduleRefBytes),
+            new TrRmSection(0x0011, 0, 2, typeSpecBytes),
+            new TrRmSection(0x0016, 0, 2, methodBytes),
+            new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x001C, 0, 1, importBytes),
             new TrRmSection(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
         ]);

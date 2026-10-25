@@ -138,9 +138,14 @@ all optional-map extents, fixed Blocks, typed-record offsets/payload shapes,
 instruction boundaries and block terminators, plus shape decoding for compact
 descriptor kinds. The standard metadata validator still indexes the Body
 table without pre-scanning unrelated Body rows; consumers validate a selected
-Body through `TrRmBodyTableReader`. Map-token binding, full instruction
-operands/control verification, descriptor eligibility, canonical writing,
-re-emission and execution remain incomplete.
+Body through `TrRmBodyTableReader`. The selected method-aware map validator
+checks HomeMap structure and local indexes, TypeMap token forms and pseudo-base
+acyclicity, MethodMap and FieldMap target kinds/ranges, top-level direct/Import
+module ownership, selected FieldPath step ownership, and ConstantMap
+TypeSpecRef/ConstantSource row bounds. Nested TypeSpec/FieldPath context,
+exact Home-to-signature type substitution, ConstantSource/value type equality,
+full instruction operands/control verification, canonical writing, re-emission
+and execution remain incomplete.
 Artifact framing now selects standard TRRM or the internal development
 executable schema before indexing and writing. The standard index follows the
 registry's assigned section kinds/strides, including `NativeImport`/

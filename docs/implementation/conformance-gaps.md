@@ -120,9 +120,16 @@ extents, fixed Blocks, assigned typed-record payload shapes, instruction
 boundaries and block terminators; compact descriptor shapes are also checked.
 This remains selective access rather than artifact-wide Body-content
 preflight. The C# structural validator indexes Body table ranges, and callers
-must use `TrRmBodyTableReader` to validate a selected implementation. Map
-token binding, full record and instruction semantics, descriptor eligibility,
-canonical writing, remapping, re-emission and execution remain unfinished.
+must use `TrRmBodyTableReader` to validate a selected implementation. A
+method-aware selected-Body map validator now checks HomeMap structure and
+signature ordinal bounds, TypeMap token forms and pseudo-base acyclicity,
+MethodMap/FieldMap row kinds and bounds, top-level direct/Import module
+ownership, selected FieldPath step ownership, and ConstantMap TypeSpecRef/
+ConstantSource row bounds. It does not yet bind nested TypeSpec or FieldPath
+roots in each using-module context, compare HomeMap types to substituted
+signature types, or prove ConstantMap source/value type equality. Full record
+and instruction semantics, descriptor eligibility, canonical writing,
+remapping, re-emission and execution remain unfinished.
 
 Artifact framing now takes an explicit standard or internal development
 schema before table indexing and writing. Standard `TrRmArtifactIndex` uses
@@ -1146,9 +1153,10 @@ successful supervisor response.
 ## CG-024: Representation extensions and resource accounting
 
 **Metadata/type-reference, masked Body-map and register query-schema
-decisions integrated; producer/consumer implementation and qualification
-remain blocked on CG-001. Numerical portable resource minima and
-exception-region physical carriers remain unassigned.**
+decisions integrated. Selected Body framing and partial map-reference
+validation are implemented, but complete producer/consumer routes and
+qualification remain blocked on CG-001. Numerical portable resource minima
+and exception-region physical carriers remain unassigned.**
 [Canonicality](../specs/representation/encoding-canonicality.md),
 [reader trust](../specs/representation/reader-trust.md) and
 [resource accounting](../specs/representation/resource-accounting.md),
@@ -1162,10 +1170,13 @@ with `u32` counts, `DE` query/TypeIdentity controls, BlockEntryState carrier
 fields, plus the accepted integer, binary-floating and decimal type matrices.
 
 **Current/evidence:** development fixture/reader behavior is not independent
-proof of the selected schema. The revised vectors are specification evidence,
-not compiler implementation or runtime qualification. Numerical portable
-resource minima remain unassigned, not invented defaults. A lower fixed-width
-ID is not smaller on disk.
+proof of the selected schema. The standard selected-Body validator checks
+top-level map token kinds, row bounds and direct/Import ownership, plus
+pseudo-base cycles and constant-source row bounds; it does not establish
+map-to-signature type equality, nested TypeSpec/FieldPath context, canonical
+writing or runtime execution. Numerical portable resource minima remain
+unassigned, not invented defaults. A lower fixed-width ID is not smaller on
+disk.
 
 **Routes/gate:** CG-001 must preserve ordinary equivalent noncanonical
 admission versus strict writers/scoped audits, retained root budgets,

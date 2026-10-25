@@ -160,6 +160,16 @@ public readonly ref struct TrRmImportTableReader
         return Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
     }
 
+    internal int GetModuleRefForImportRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidImport();
+        }
+
+        return checked((int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 0));
+    }
+
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
 

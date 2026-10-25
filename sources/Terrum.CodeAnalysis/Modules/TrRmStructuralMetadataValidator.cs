@@ -13,7 +13,8 @@ public static class TrRmStructuralMetadataValidator
     internal readonly ref struct ValidatedExecutionTables
     {
         internal ValidatedExecutionTables(TrRmStringTableReader strings,
-            TrRmModuleTableReader modules, TrRmTypeDefTableReader typeDefs,
+            TrRmModuleTableReader modules, TrRmModuleRefTableReader moduleRefs,
+            TrRmTypeDefTableReader typeDefs,
             TrRmTypeSpecTableReader typeSpecs, TrRmInterfaceDefTableReader interfaces,
             TrRmAssociatedTypeDefTableReader associatedTypeDefs,
             TrRmInterfaceWitnessTableReader interfaceWitnesses,
@@ -50,6 +51,7 @@ public static class TrRmStructuralMetadataValidator
         {
             Strings = strings;
             Modules = modules;
+            ModuleRefs = moduleRefs;
             TypeDefs = typeDefs;
             TypeSpecs = typeSpecs;
             Interfaces = interfaces;
@@ -94,6 +96,7 @@ public static class TrRmStructuralMetadataValidator
 
         internal TrRmStringTableReader Strings { get; }
         internal TrRmModuleTableReader Modules { get; }
+        internal TrRmModuleRefTableReader ModuleRefs { get; }
         internal TrRmTypeDefTableReader TypeDefs { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmInterfaceDefTableReader Interfaces { get; }
@@ -134,6 +137,27 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmNativeVTableTableReader NativeVTables { get; }
         internal TrRmImportTableReader Imports { get; }
         internal TrRmArtifactSchema Schema { get; }
+
+        internal void ValidateRegisterBodyMapsForMethod(int methodDefRow)
+        {
+            if (Schema != TrRmArtifactSchema.Standard
+                || methodDefRow <= 0 || methodDefRow > Methods.Count)
+            {
+                throw InvalidMetadata();
+            }
+
+            var bodyRow = Methods.GetBodyRow(methodDefRow);
+            if (bodyRow == 0)
+            {
+                throw InvalidMetadata();
+            }
+
+            var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
+            TrRmRegisterBodyMapValidator.Validate(body,
+                methodDefRow, Methods.GetOwnerModule(methodDefRow), TypeDefs, TypeSpecs,
+                Methods, Signatures, Fields, FieldPaths, ConstantSources,
+                Imports, ModuleRefs);
+        }
     }
 
     private enum BodyInspection
@@ -555,7 +579,7 @@ public static class TrRmStructuralMetadataValidator
         _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
-        return new ValidatedExecutionTables(strings, modules, types, typeSpecs,
+        return new ValidatedExecutionTables(strings, modules, moduleRefs, types, typeSpecs,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
             witnessAssociatedTypes,
             interfaceBases, interfaceMethods,

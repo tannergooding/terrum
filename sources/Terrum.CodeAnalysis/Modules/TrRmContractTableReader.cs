@@ -32,6 +32,8 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmNativeAbiContract[] _nativeAbis;
     private readonly bool[] _hasNativeAbis;
 
+    internal int Count => _rows.Count;
+
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
