@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Immutable;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
@@ -228,6 +229,62 @@ public sealed class TrRmFrozenScalarMaterializationTests
 
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void WideScalarConstantsExecuteAcrossNativeCallCarriers()
+    {
+        var values = new (byte TypeCode, PrimitiveType Type, byte[] Payload)[]
+        {
+            (0x0A, PrimitiveType.Int128,
+                [0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE,
+                    0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x81]),
+            (0x0F, PrimitiveType.UInt128,
+                [0x21, 0x43, 0x65, 0x87, 0xA9, 0xCB, 0xED, 0x0F,
+                    0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10]),
+            (0x12, PrimitiveType.Float16, [0x01, 0x7C]),
+            (0x13, PrimitiveType.BFloat16, [0x81, 0x7F]),
+            (0x16, PrimitiveType.Float128,
+                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0x7F]),
+            (0x17, PrimitiveType.Decimal32, [0x26, 0x02, 0x80, 0x31]),
+            (0x18, PrimitiveType.Decimal64,
+                [0x26, 0x02, 0x80, 0x31, 0x88, 0x77, 0x66, 0x55]),
+            (0x19, PrimitiveType.Decimal128,
+                [0x26, 0x02, 0x80, 0x31, 0x88, 0x77, 0x66, 0x55,
+                    0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE]),
+        };
+
+        foreach (var value in values)
+        {
+            var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
+                value.TypeCode, value.Payload, isEntryPoint: false, methodName: "Value");
+            var program = TrRmExecutableCompiler.LoadStandardScalarReturn(artifact);
+            var identity = new BoundFunction("Identity", value.Type,
+                [new BoundVariable("value", value.Type, false, default)], 1,
+                new BoundBlock(
+                    [new BoundReturn(new BoundRead(0, value.Type, default), default)],
+                    default),
+                default);
+            var valueCall = new BoundCall(0, [], value.Type, default);
+            var identityCall = new BoundCall(1, [valueCall], value.Type, default);
+            var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+                new BoundBlock(
+                    [
+                        new BoundExpressionStatement(identityCall, default),
+                        new BoundReturn(new BoundConstant(42, PrimitiveType.Int32, default), default),
+                    ],
+                    default),
+                default);
+            var executable = program with
+            {
+                Functions = program.Functions.Add(identity).Add(main),
+                EntryPoint = 2,
+            };
+
+            Assert.That(NativeJit.Execute(executable, NativeRuntimePolicy.FailFast),
+                Is.EqualTo(42), value.Type.ToString());
+            Assert.That(NativeEmitter.Emit(executable, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+        }
     }
 
     [Test]

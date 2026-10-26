@@ -962,7 +962,6 @@ internal sealed partial class PeCompiler
     }
     internal NativeCode Compile()
     {
-        RejectUnsupportedWideFloatingCallCarriers();
         PrepareFrames();
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
         EmitSourceFunctions();
@@ -1213,11 +1212,12 @@ internal sealed partial class PeCompiler
             var snapshotsOutputReturn = hasOutputParameters
                 && function.ReturnType is not (PrimitiveType.Bool or PrimitiveType.Void);
             // Publishing outputs uses the return registers, so preserve non-Boolean results first.
-            var required = _returnSlots[i] + (IsIndirect(function.ReturnType) || snapshotsOutputReturn ? 8L : 0L);
-            if (needsReturnSnapshot)
+            var required = _returnSlots[i]
+                + (IsIndirectResult(function.ReturnType) || snapshotsOutputReturn ? 8L : 0L);
+            if (needsReturnSnapshot || function.ReturnType == PrimitiveType.Float128)
             {
                 var returnSnapshot = AlignOffset(_returnSlots[i]
-                    + (IsIndirect(function.ReturnType) ? 8 : 0), 16);
+                    + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16);
                 required = Math.Max(required, returnSnapshot + (long)ScratchSize(function.ReturnType));
             }
             var live = new int[function.Variables.Length];
@@ -1346,7 +1346,7 @@ internal sealed partial class PeCompiler
                     _code.Clear(field);
                 }
             }
-            var hiddenReturn = IsIndirect(function.ReturnType) ? 1 : 0;
+            var hiddenReturn = IsIndirectResult(function.ReturnType) ? 1 : 0;
             var hidden = hiddenReturn + sourceHidden;
             if (hiddenReturn != 0)
             {
@@ -1354,7 +1354,7 @@ internal sealed partial class PeCompiler
             }
             if (function.IsConstructor)
             {
-                if (IsIndirect(function.ReturnType))
+                if (IsIndirectResult(function.ReturnType))
                 {
                     ZeroStruct(Slot(0), Size(function.ReturnType));
                 }
@@ -1369,13 +1369,18 @@ internal sealed partial class PeCompiler
                 var slot = argument + (function.IsConstructor ? 1 : 0);
                 var abiArgument = argument + hidden;
                 var type = function.Variables[slot].Type;
+                var isAddress = function.Variables[slot].IsOut || function.Variables[slot].IsImplicitRef;
                 if (abiArgument < 4)
                 {
-                    if (function.NativeFunctionPointerType is not null
-                        && type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                    if (!isAddress && IsFloatingCallCarrier(type))
                     {
                         _code.StoreFloatingRegister(abiArgument, Slot(slot),
                             type == PrimitiveType.Float64);
+                        if (type is PrimitiveType.Float16 or PrimitiveType.BFloat16)
+                        {
+                            _code.LoadUnsigned(Slot(slot), sizeof(ushort));
+                            _code.Store(Slot(slot));
+                        }
                     }
                     else
                     {
@@ -1629,7 +1634,8 @@ internal sealed partial class PeCompiler
 
     private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
 
-    private int PendingReturnSlot() => (_returnSlot + (IsIndirect(_program.Functions[_currentFunction].ReturnType) ? 8 : 0) + 15) & ~15;
+    private int PendingReturnSlot() => (_returnSlot
+        + (IsIndirectResult(_program.Functions[_currentFunction].ReturnType) ? 8 : 0) + 15) & ~15;
 
     private int StatementSpills(BoundStatement statement, ref int maximumArguments)
     {
@@ -1820,7 +1826,7 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(unsafeExpression.Expression, ref maximumArguments);
             case BoundCall call:
                 maximumArguments = Math.Max(maximumArguments,
-                    call.Arguments.Length + (IsIndirect(call.Type) ? 1 : 0)
+                    call.Arguments.Length + (IsIndirectResult(call.Type) ? 1 : 0)
                         + (_sourceDependent?[call.Function] == true ? 2 : 0));
                 var resultSpills = CallResultSpills(call);
                 var argumentSpills = CallArgumentSpills(call);
@@ -2261,24 +2267,14 @@ internal sealed partial class PeCompiler
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
-        || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Decimal128
+        || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
+            or PrimitiveType.Decimal128
         || IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
-
-    private void RejectUnsupportedWideFloatingCallCarriers()
-    {
-        static bool IsUnsupported(PrimitiveType type)
-        {
-            return type is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128;
-        }
-
-        if (_program.Functions.Any(function => IsUnsupported(function.ReturnType)
-            || function.Variables.Any(variable => IsUnsupported(variable.Type)))
-            || _program.Structures.Any(structure => structure.Fields.Any(field => IsUnsupported(field.Type))))
-        {
-            throw new NotSupportedException(
-                "The selected native emitter does not yet implement the Windows x64 wide-floating call carriers.");
-        }
-    }
+    private bool IsIndirectResult(PrimitiveType type) =>
+        type != PrimitiveType.Float128 && IsIndirect(type);
+    private static bool IsFloatingCallCarrier(PrimitiveType type) =>
+        type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+            or PrimitiveType.Float32 or PrimitiveType.Float64;
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || (IsStruct(type) && _program.Structures[(int)type - 100].IsUnique);
@@ -3420,7 +3416,7 @@ internal sealed partial class PeCompiler
                 if (result.Value is not null)
                 {
                     Expression(result.Value, 0);
-                    if (_cleanups.Count != 0)
+                    if (_cleanups.Count != 0 || result.Value.Type == PrimitiveType.Float128)
                     {
                         StoreValue(PendingReturnSlot(), result.Value.Type);
                         if (ManagedClassTypes.IsManaged(result.Value.Type))
@@ -3439,7 +3435,7 @@ internal sealed partial class PeCompiler
                     {
                         LoadValue(PendingReturnSlot(), result.Value.Type);
                     }
-                    if (IsIndirect(result.Value.Type))
+                    if (IsIndirectResult(result.Value.Type))
                     {
                         _code.Load64(_returnSlot, destinationRegister: true);
                         _code.CopyMemory(Size(result.Value.Type));
@@ -3458,14 +3454,14 @@ internal sealed partial class PeCompiler
                 {
                     var returnType = currentFunction.ReturnType;
                     if (returnType != PrimitiveType.Bool && returnType != PrimitiveType.Void
-                        && !IsIndirect(returnType))
+                        && !IsIndirectResult(returnType))
                     {
                         StoreValue(PendingReturnSlot(), returnType);
                     }
                     CommitOutParameters();
                     if (returnType is not (PrimitiveType.Bool or PrimitiveType.Void))
                     {
-                        if (IsIndirect(returnType))
+                        if (IsIndirectResult(returnType))
                         {
                             _code.Load64(_returnSlot);
                         }
@@ -3480,10 +3476,14 @@ internal sealed partial class PeCompiler
                     _code.Byte(0x90); // call-site continuation must not start at an unwind epilog
                 }
                 UnregisterManagedRoots(_currentFunction);
-                if (currentFunction.NativeFunctionPointerType is not null
-                    && currentFunction.ReturnType is PrimitiveType.Float32 or PrimitiveType.Float64)
+                if (IsFloatingCallCarrier(currentFunction.ReturnType))
                 {
                     _code.MoveFloatingReturnFromAccumulator(currentFunction.ReturnType == PrimitiveType.Float64);
+                }
+                else if (currentFunction.ReturnType == PrimitiveType.Float128)
+                {
+                    _code.Address(PendingReturnSlot());
+                    _code.LoadFloating128FromPointer();
                 }
                 Epilog();
                 break;
@@ -3812,7 +3812,8 @@ internal sealed partial class PeCompiler
                         _nativeUtf8ZOffsets[checked((int)constant.Value)]));
                     _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
                 }
-                else if (constant.Type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Decimal128)
+                else if (constant.Type is PrimitiveType.Int128 or PrimitiveType.UInt128
+                    or PrimitiveType.Float128 or PrimitiveType.Decimal128)
                 {
                     var storage = Spill(spill);
                     _code.Bytes(0x48, 0xB8);
@@ -3822,11 +3823,6 @@ internal sealed partial class PeCompiler
                     _code.Int64(unchecked((long)constant.Bits.High));
                     _code.Store64(storage + sizeof(ulong));
                     _code.Address(storage);
-                }
-                else if (constant.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128)
-                {
-                    throw new NotSupportedException(
-                        "The selected native emitter does not yet implement the Windows x64 wide-floating call carriers.");
                 }
                 else if (IsWide(constant.Type))
                 {
@@ -4534,7 +4530,7 @@ internal sealed partial class PeCompiler
                         SetManagedRoot(OwnerPlace(managedOutput.Variable), active: false);
                     }
                 }
-                var hiddenReturn = IsIndirect(call.Type) ? 1 : 0;
+                var hiddenReturn = IsIndirectResult(call.Type) ? 1 : 0;
                 var sourceHidden = _sourceDependent?[call.Function] == true ? 2 : 0;
                 var hidden = hiddenReturn + sourceHidden;
                 var targetFunction = _program.Functions[call.Function];
@@ -4573,8 +4569,7 @@ internal sealed partial class PeCompiler
                         || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan
                             or BoundMutableReceiverLoan or BoundFieldLoan or BoundMutableFieldLoan
                             or BoundNativeOutputReservation;
-                    if (nativeAbi && !isAddress
-                        && argumentType is PrimitiveType.Float32 or PrimitiveType.Float64)
+                    if (!isAddress && IsFloatingCallCarrier(argumentType))
                     {
                         _code.MoveFloatingArgument(i + hidden, argumentType == PrimitiveType.Float64);
                     }
@@ -4597,9 +4592,18 @@ internal sealed partial class PeCompiler
                     _code.MoveArgument(0, true);
                 }
                 EmitTargetCall(call.Function);
-                if (nativeAbi && call.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                if (IsFloatingCallCarrier(call.Type))
                 {
                     _code.MoveFloatingReturnToAccumulator(call.Type == PrimitiveType.Float64);
+                    if (call.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16)
+                    {
+                        _code.Bytes(0x0F, 0xB7, 0xC0); // retain only the typed sixteen-bit payload
+                    }
+                }
+                else if (call.Type == PrimitiveType.Float128)
+                {
+                    _code.StoreFloating128Return(Spill(spill));
+                    _code.Address(Spill(spill));
                 }
                 else if (nativeAbi)
                 {
@@ -6034,7 +6038,12 @@ internal sealed class MachineCode
         {
             Byte(0x48);
         }
-        Bytes(0x0F, wide ? (byte)0xD6 : (byte)0x7E, (byte)(0x85 + (argument << 3)));
+        Bytes(0x0F, wide ? (byte)0xD6 : (byte)0x7E,
+            (byte)((UseFramePointer ? 0x85 : 0x84) + (argument << 3)));
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
         Int32(offset);
     }
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Stack arguments are handled by the caller; only the first four use registers.")]
@@ -6096,5 +6105,15 @@ internal sealed class MachineCode
         }
         Bytes(0x0F, 0x6E, 0xC0);
     }
+    internal void StoreFloating128Return(int offset)
+    {
+        Bytes(0xF3, 0x0F, 0x7F, UseFramePointer ? (byte)0x85 : (byte)0x84);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
+        Int32(offset);
+    }
+    internal void LoadFloating128FromPointer() => Bytes(0xF3, 0x0F, 0x6F, 0x00);
     internal byte[] ToArray() => [.. _bytes];
 }
