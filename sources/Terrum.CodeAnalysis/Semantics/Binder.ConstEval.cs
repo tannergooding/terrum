@@ -18,7 +18,7 @@ internal sealed partial class Binder
     private bool _hasRequiredExpression;
     private bool _hasStaticProof;
     private ImmutableArray<BoundVariable> _staticProofVariables;
-    private HashSet<(PrimitiveType Type, long Value)> _staticProofJoinConstants = [];
+    private HashSet<(PrimitiveType Type, ScalarBits Bits)> _staticProofJoinConstants = [];
 
     private sealed record BoundRequiredConstant(BoundExpression Operand, TextSpan Span)
         : BoundExpression(Operand.Type, Span);
@@ -29,10 +29,12 @@ internal sealed partial class Binder
     private enum StaticProofPredicateKind {
         Boolean, Equal, Less, LessEquals, VariableEqual, VariableLess, ReflexiveEquality, FloatEqual,
         FloatNotEqual, FloatLess, FloatLessEquals, FloatGreater, FloatGreaterEquals,
+        FloatExact, FloatClassNaN, FloatReflexiveEquality,
     }
 
     private readonly record struct StaticProofPredicate(StaticProofPredicateKind Kind, int Variable,
-        int OtherVariable, PrimitiveType ValueType, PrimitiveType ConstantType, long Constant);
+        int OtherVariable, PrimitiveType ValueType, PrimitiveType ConstantType, ScalarBits Constant);
+    private readonly record struct StaticProofFloatingValue(ScalarBits Bits, bool IsClassNaN);
     private readonly record struct SavedStaticProofPredicate(
         StaticProofPredicate Predicate, bool TruthWhenPredicateTrue);
 
@@ -176,7 +178,7 @@ internal sealed partial class Binder
     }
 
     private static void CollectStaticProofJoinConstants(BoundStatement statement,
-        HashSet<(PrimitiveType Type, long Value)> constants)
+        HashSet<(PrimitiveType Type, ScalarBits Bits)> constants)
     {
         switch (statement)
         {
@@ -242,14 +244,15 @@ internal sealed partial class Binder
     }
 
     private static void CollectStaticProofJoinConstants(BoundExpression expression,
-        HashSet<(PrimitiveType Type, long Value)> constants)
+        HashSet<(PrimitiveType Type, ScalarBits Bits)> constants)
     {
         switch (expression)
         {
             case BoundConstant constant
-                when TryGetStaticProofIntegerRange(constant.Type, out _, out _)
-                    && TryGetStaticProofIntegerValue(constant.Type, constant.Value, out _):
-                constants.Add((constant.Type, constant.Value));
+                when TryGetStaticProofIntegerConstant(constant, out _)
+                    || (PrimitiveTypeFacts.IsFloating(constant.Type)
+                        && constant.Bits.IsCanonicalFor(constant.Type)):
+                _ = constants.Add((constant.Type, constant.Bits));
                 break;
             case BoundRequiredConstant required:
                 CollectStaticProofJoinConstants(required.Operand, constants);
@@ -373,13 +376,21 @@ internal sealed partial class Binder
                         if (TryGetStaticProofTruth(initializer, firstLocalVariable, facts, out var value))
                         {
                             facts[new StaticProofPredicate(StaticProofPredicateKind.Boolean, local.Variable,
-                                -1, PrimitiveType.Bool, PrimitiveType.Bool, 0)] = value;
+                                -1, PrimitiveType.Bool, PrimitiveType.Bool, default)] = value;
                         }
                         if (TryGetStaticProofSavedPredicate(initializer, firstLocalVariable,
                             savedPredicates, out var savedPredicate))
                         {
                             savedPredicates[local.Variable] = savedPredicate;
                         }
+                    }
+                    else if (canRefineLocalPredicates
+                        && CanUseStaticProofVariable(local.Variable, firstLocalVariable)
+                        && TryGetStaticProofFloatingValue(initializer, firstLocalVariable, facts,
+                            out var floatingValue))
+                    {
+                        AddStaticProofFloatingValueFact(local.Variable, initializer.Type,
+                            floatingValue, facts);
                     }
                     else if (canRefineLocalPredicates
                         && CanUseStaticProofVariable(local.Variable, firstLocalVariable)
@@ -616,13 +627,21 @@ internal sealed partial class Binder
                         if (TryGetStaticProofTruth(value, firstLocalVariable, previousFacts, out var knownValue))
                         {
                             facts[new StaticProofPredicate(StaticProofPredicateKind.Boolean, assignment.Variable,
-                                -1, PrimitiveType.Bool, PrimitiveType.Bool, 0)] = knownValue;
+                                -1, PrimitiveType.Bool, PrimitiveType.Bool, default)] = knownValue;
                         }
                         if (TryGetStaticProofSavedPredicate(value, firstLocalVariable, previousSavedPredicates,
                             out var savedPredicate))
                         {
                             savedPredicates[assignment.Variable] = savedPredicate;
                         }
+                    }
+                    else if (canRefineLocalPredicates
+                        && CanUseStaticProofVariable(assignment.Variable, firstLocalVariable)
+                        && TryGetStaticProofFloatingValue(value, firstLocalVariable, previousFacts,
+                            out var floatingValue))
+                    {
+                        AddStaticProofFloatingValueFact(assignment.Variable, value.Type,
+                            floatingValue, facts);
                     }
                     else if (canRefineLocalPredicates
                         && CanUseStaticProofVariable(assignment.Variable, firstLocalVariable)
@@ -866,7 +885,6 @@ internal sealed partial class Binder
         Dictionary<StaticProofPredicate, bool> left,
         Dictionary<StaticProofPredicate, bool> right)
     {
-        // Retain only candidate integer comparisons entailed by both reachable edge domains.
         List<StaticProofPredicate> candidates = [];
         HashSet<StaticProofPredicate> seenCandidates = [];
         foreach (var predicate in left.Keys)
@@ -884,70 +902,39 @@ internal sealed partial class Binder
             }
         }
         HashSet<(int Variable, PrimitiveType Type)> trackedIntegerVariables = [];
+        HashSet<(int Variable, PrimitiveType Type)> trackedFloatingVariables = [];
         foreach (var predicate in candidates)
         {
-            if (predicate.OtherVariable < 0 && predicate.ConstantType == predicate.ValueType
+            if (predicate.Variable >= 0 && predicate.OtherVariable < 0
+                && predicate.ConstantType == predicate.ValueType
                 && TryGetStaticProofIntegerValue(predicate.ValueType, predicate.Constant, out _))
             {
-                trackedIntegerVariables.Add((predicate.Variable, predicate.ValueType));
+                _ = trackedIntegerVariables.Add((predicate.Variable, predicate.ValueType));
+            }
+            else if (predicate.Variable >= 0 && PrimitiveTypeFacts.IsFloating(predicate.ValueType))
+            {
+                _ = trackedFloatingVariables.Add((predicate.Variable, predicate.ValueType));
             }
         }
         foreach (var (variable, type) in trackedIntegerVariables)
         {
-            switch (type)
-            {
-                case PrimitiveType.Int8:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, sbyte.MinValue, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, sbyte.MaxValue, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.Int16:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, short.MinValue, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, short.MaxValue, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.Int32:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, int.MinValue, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, int.MaxValue, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.UInt8:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, byte.MaxValue, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.UInt16:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, ushort.MaxValue, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.UInt32:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.Int64:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, long.MinValue, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, long.MaxValue, candidates, seenCandidates);
-                    break;
-                case PrimitiveType.UInt64:
-                case PrimitiveType.Char8:
-                case PrimitiveType.Char16:
-                case PrimitiveType.Char32:
-                case PrimitiveType.Rune:
-                    AddStaticProofIntegerPredicateCandidates(variable, type, 0, candidates, seenCandidates);
-                    AddStaticProofIntegerPredicateCandidates(variable, type, -1, candidates, seenCandidates);
-                    break;
-            }
+            AddStaticProofIntegerTypeCandidates(variable, type, candidates, seenCandidates);
             foreach (var (constantType, constant) in _staticProofJoinConstants)
             {
-                if (constantType == type)
+                if (constantType == type && TryGetStaticProofIntegerValue(type, constant, out _))
                 {
                     AddStaticProofIntegerPredicateCandidates(variable, type, constant,
+                        candidates, seenCandidates);
+                }
+            }
+        }
+        foreach (var (variable, type) in trackedFloatingVariables)
+        {
+            foreach (var (constantType, constant) in _staticProofJoinConstants)
+            {
+                if (constantType == type && PrimitiveTypeFacts.IsFloating(type))
+                {
+                    AddStaticProofFloatingPredicateCandidates(variable, type, constant,
                         candidates, seenCandidates);
                 }
             }
@@ -958,9 +945,9 @@ internal sealed partial class Binder
             var predicate = candidates[index];
             if (predicate.OtherVariable < 0 && predicate.ConstantType == predicate.ValueType
                 && TryGetStaticProofIntegerValue(predicate.ConstantType, predicate.Constant, out _)
-                && predicate.Kind is (StaticProofPredicateKind.Equal
+                && predicate.Kind is StaticProofPredicateKind.Equal
                     or StaticProofPredicateKind.Less
-                    or StaticProofPredicateKind.LessEquals))
+                    or StaticProofPredicateKind.LessEquals)
             {
                 var equal = predicate with { Kind = StaticProofPredicateKind.Equal };
                 var less = predicate with { Kind = StaticProofPredicateKind.Less };
@@ -997,65 +984,25 @@ internal sealed partial class Binder
     {
         foreach (var (constantType, constant) in _staticProofJoinConstants)
         {
-            if (constantType == type)
+            if (constantType == type && TryGetStaticProofIntegerValue(type, constant, out _))
             {
-                AddConstant(constant);
+                AddConstantBits(constant);
             }
         }
-        switch (type)
+        if (TryGetStaticProofIntegerRange(type, out var minimum, out var maximum))
         {
-            case PrimitiveType.Int8:
-                AddConstant(0);
-                AddConstant(-1);
-                AddConstant(sbyte.MinValue);
-                AddConstant(sbyte.MaxValue);
-                break;
-            case PrimitiveType.Int16:
-                AddConstant(0);
-                AddConstant(-1);
-                AddConstant(short.MinValue);
-                AddConstant(short.MaxValue);
-                break;
-            case PrimitiveType.Int32:
-                AddConstant(0);
-                AddConstant(-1);
-                AddConstant(int.MinValue);
-                AddConstant(int.MaxValue);
-                break;
-            case PrimitiveType.UInt8:
-                AddConstant(0);
-                AddConstant(-1);
-                AddConstant(byte.MaxValue);
-                break;
-            case PrimitiveType.UInt16:
-                AddConstant(0);
-                AddConstant(-1);
-                AddConstant(ushort.MaxValue);
-                break;
-            case PrimitiveType.UInt32:
-            case PrimitiveType.UInt64:
-            case PrimitiveType.Char8:
-            case PrimitiveType.Char16:
-            case PrimitiveType.Char32:
-            case PrimitiveType.Rune:
-                AddConstant(0);
-                AddConstant(-1);
-                break;
-            case PrimitiveType.Int64:
-                AddConstant(0);
-                AddConstant(-1);
-                AddConstant(long.MinValue);
-                AddConstant(long.MaxValue);
-                break;
+            AddConstantValue(BigInteger.Zero);
+            AddConstantValue(BigInteger.MinusOne);
+            AddConstantValue(minimum);
+            AddConstantValue(maximum);
         }
 
-        void AddConstant(long constant)
+        void AddConstantBits(ScalarBits constant)
         {
-            if (!TryGetStaticProofIntegerValue(type, constant, out var numericValue))
+            if (!TryGetStaticProofIntegerValue(type, constant, out var value))
             {
                 return;
             }
-            var value = new BigInteger(numericValue);
             bool? equal = lower == upper && lower == value ? true
                 : value < lower || value > upper ? false : null;
             bool? less = upper < value ? true : lower >= value ? false : null;
@@ -1065,7 +1012,15 @@ internal sealed partial class Binder
             AddFact(StaticProofPredicateKind.LessEquals, lessEquals, constant);
         }
 
-        void AddFact(StaticProofPredicateKind kind, bool? established, long constant)
+        void AddConstantValue(BigInteger value)
+        {
+            if (TryCreateStaticProofIntegerBits(value, type, out var bits))
+            {
+                AddConstantBits(bits);
+            }
+        }
+
+        void AddFact(StaticProofPredicateKind kind, bool? established, ScalarBits constant)
         {
             if (established is bool truth)
             {
@@ -1074,7 +1029,30 @@ internal sealed partial class Binder
         }
     }
 
-    private static void AddStaticProofIntegerPredicateCandidates(int variable, PrimitiveType type, long constant,
+    private static void AddStaticProofIntegerTypeCandidates(int variable, PrimitiveType type,
+        List<StaticProofPredicate> candidates, HashSet<StaticProofPredicate> seenCandidates)
+    {
+        if (!TryGetStaticProofIntegerRange(type, out var minimum, out var maximum))
+        {
+            return;
+        }
+
+        Add(BigInteger.Zero);
+        Add(BigInteger.MinusOne);
+        Add(minimum);
+        Add(maximum);
+
+        void Add(BigInteger value)
+        {
+            if (TryCreateStaticProofIntegerBits(value, type, out var bits))
+            {
+                AddStaticProofIntegerPredicateCandidates(variable, type, bits, candidates, seenCandidates);
+            }
+        }
+    }
+
+    private static void AddStaticProofIntegerPredicateCandidates(int variable, PrimitiveType type,
+        ScalarBits constant,
         List<StaticProofPredicate> candidates, HashSet<StaticProofPredicate> seenCandidates)
     {
         if (!TryGetStaticProofIntegerValue(type, constant, out _))
@@ -1095,6 +1073,27 @@ internal sealed partial class Binder
         }
     }
 
+    private static void AddStaticProofFloatingPredicateCandidates(int variable, PrimitiveType type,
+        ScalarBits constant, List<StaticProofPredicate> candidates,
+        HashSet<StaticProofPredicate> seenCandidates)
+    {
+        Add(StaticProofPredicateKind.FloatEqual);
+        Add(StaticProofPredicateKind.FloatNotEqual);
+        Add(StaticProofPredicateKind.FloatLess);
+        Add(StaticProofPredicateKind.FloatLessEquals);
+        Add(StaticProofPredicateKind.FloatGreater);
+        Add(StaticProofPredicateKind.FloatGreaterEquals);
+
+        void Add(StaticProofPredicateKind kind)
+        {
+            var predicate = new StaticProofPredicate(kind, variable, -1, type, type, constant);
+            if (seenCandidates.Add(predicate))
+            {
+                candidates.Add(predicate);
+            }
+        }
+    }
+
     private static bool TryGetStaticProofFact(StaticProofPredicate predicate,
         Dictionary<StaticProofPredicate, bool> facts, out bool established)
     {
@@ -1102,7 +1101,230 @@ internal sealed partial class Binder
         {
             return true;
         }
+        if (TryGetStaticProofFloatingPredicateTruth(predicate, facts, out established))
+        {
+            return true;
+        }
         return TryGetStaticProofIntegerPredicateTruth(predicate, facts, out established);
+    }
+
+    private static bool TryGetStaticProofFloatingPredicateTruth(StaticProofPredicate predicate,
+        Dictionary<StaticProofPredicate, bool> facts, out bool truth)
+    {
+        truth = false;
+        var type = predicate.ValueType;
+        if (!PrimitiveTypeFacts.IsFloating(type))
+        {
+            return false;
+        }
+
+        if (predicate.Kind == StaticProofPredicateKind.FloatReflexiveEquality)
+        {
+            foreach (var (fact, established) in facts)
+            {
+                if (!established || fact.Variable != predicate.Variable || fact.ValueType != type)
+                {
+                    continue;
+                }
+                if (fact.Kind == StaticProofPredicateKind.FloatClassNaN)
+                {
+                    truth = false;
+                    return true;
+                }
+                if (fact.Kind == StaticProofPredicateKind.FloatExact
+                    && FloatingLiteralParser.TryFoldBinary(TokenKind.EqualsEquals, type,
+                        fact.Constant, fact.Constant, out var equality))
+                {
+                    truth = equality.Low != 0;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        if (predicate.ConstantType != type
+            || !TryGetStaticProofFloatingOperator(predicate.Kind, out var operation))
+        {
+            return false;
+        }
+        if (IsStaticProofFloatingNaN(type, predicate.Constant))
+        {
+            truth = predicate.Kind == StaticProofPredicateKind.FloatNotEqual;
+            return true;
+        }
+
+        foreach (var (fact, established) in facts)
+        {
+            if (fact.Variable != predicate.Variable || fact.ValueType != type)
+            {
+                continue;
+            }
+            if (established && fact.Kind == StaticProofPredicateKind.FloatClassNaN)
+            {
+                truth = predicate.Kind == StaticProofPredicateKind.FloatNotEqual;
+                return true;
+            }
+            if (established && fact.Kind == StaticProofPredicateKind.FloatExact
+                && FloatingLiteralParser.TryFoldBinary(operation, type,
+                    fact.Constant, predicate.Constant, out var exactResult))
+            {
+                truth = exactResult.Low != 0;
+                return true;
+            }
+            if (fact.ConstantType != type
+                || !TryGetStaticProofFloatingOperator(fact.Kind, out _)
+                || !FloatingLiteralParser.TryFoldBinary(TokenKind.EqualsEquals, type,
+                    fact.Constant, predicate.Constant, out var sameValue)
+                || sameValue.Low == 0)
+            {
+                continue;
+            }
+            if (fact.Kind == predicate.Kind)
+            {
+                truth = established;
+                return true;
+            }
+            if ((fact.Kind == StaticProofPredicateKind.FloatEqual
+                    && predicate.Kind == StaticProofPredicateKind.FloatNotEqual)
+                || (fact.Kind == StaticProofPredicateKind.FloatNotEqual
+                    && predicate.Kind == StaticProofPredicateKind.FloatEqual))
+            {
+                truth = !established;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TryGetStaticProofFloatingOperator(StaticProofPredicateKind kind,
+        out TokenKind operation)
+    {
+        operation = kind switch {
+            StaticProofPredicateKind.FloatEqual => TokenKind.EqualsEquals,
+            StaticProofPredicateKind.FloatNotEqual => TokenKind.BangEquals,
+            StaticProofPredicateKind.FloatLess => TokenKind.Less,
+            StaticProofPredicateKind.FloatLessEquals => TokenKind.LessEquals,
+            StaticProofPredicateKind.FloatGreater => TokenKind.Greater,
+            StaticProofPredicateKind.FloatGreaterEquals => TokenKind.GreaterEquals,
+            _ => default,
+        };
+        return kind is StaticProofPredicateKind.FloatEqual or StaticProofPredicateKind.FloatNotEqual
+            or StaticProofPredicateKind.FloatLess or StaticProofPredicateKind.FloatLessEquals
+            or StaticProofPredicateKind.FloatGreater or StaticProofPredicateKind.FloatGreaterEquals;
+    }
+
+    private static bool IsStaticProofFloatingNaN(PrimitiveType type, ScalarBits bits) =>
+        FloatingLiteralParser.TryFoldBinary(TokenKind.BangEquals, type, bits, bits, out var result)
+            && result.Low != 0;
+
+    private bool TryGetStaticProofFloatingValue(BoundExpression expression, int firstLocalVariable,
+        Dictionary<StaticProofPredicate, bool> facts, out StaticProofFloatingValue value)
+    {
+        if (expression is BoundUnsafeExpression unsafeExpression)
+        {
+            return TryGetStaticProofFloatingValue(unsafeExpression.Expression, firstLocalVariable,
+                facts, out value);
+        }
+        if (expression is BoundRequiredConstant required)
+        {
+            return TryGetStaticProofFloatingValue(required.Operand, firstLocalVariable, facts, out value);
+        }
+        if (expression is BoundConstant constant && PrimitiveTypeFacts.IsFloating(constant.Type)
+            && constant.Bits.IsCanonicalFor(constant.Type))
+        {
+            value = new StaticProofFloatingValue(constant.Bits, false);
+            return true;
+        }
+        if (expression is BoundRead read && CanUseStaticProofVariable(read.Variable, firstLocalVariable))
+        {
+            foreach (var (fact, established) in facts)
+            {
+                if (!established || fact.Variable != read.Variable || fact.ValueType != read.Type)
+                {
+                    continue;
+                }
+                if (fact.Kind == StaticProofPredicateKind.FloatExact)
+                {
+                    value = new StaticProofFloatingValue(fact.Constant, false);
+                    return true;
+                }
+                if (fact.Kind == StaticProofPredicateKind.FloatClassNaN)
+                {
+                    value = new StaticProofFloatingValue(default, true);
+                    return true;
+                }
+            }
+            value = default;
+            return false;
+        }
+        if (expression is BoundUnary unary && PrimitiveTypeFacts.IsFloating(unary.Type)
+            && unary.Type == unary.Operand.Type
+            && unary.Operator is TokenKind.Plus or TokenKind.Minus
+            && TryGetStaticProofFloatingValue(unary.Operand, firstLocalVariable, facts,
+                out var operandValue))
+        {
+            value = operandValue.IsClassNaN || unary.Operator == TokenKind.Plus
+                ? operandValue
+                : new StaticProofFloatingValue(operandValue.Bits.ToggleSign(unary.Type), false);
+            return true;
+        }
+        if (expression is BoundBinary binary && PrimitiveTypeFacts.IsFloating(binary.Type)
+            && binary.Left.Type == binary.Type && binary.Right.Type == binary.Type
+            && binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                or TokenKind.Slash or TokenKind.Percent
+            && TryGetStaticProofFloatingValue(binary.Left, firstLocalVariable, facts, out var leftValue)
+            && TryGetStaticProofFloatingValue(binary.Right, firstLocalVariable, facts, out var rightValue))
+        {
+            if (leftValue.IsClassNaN || rightValue.IsClassNaN)
+            {
+                value = new StaticProofFloatingValue(default, true);
+                return true;
+            }
+            if (!FloatingLiteralParser.TryFoldBinary(binary.Operator, binary.Type,
+                leftValue.Bits, rightValue.Bits, out var result))
+            {
+                value = default;
+                return false;
+            }
+            value = IsStaticProofFloatingNaN(binary.Type, result)
+                ? new StaticProofFloatingValue(default, true)
+                : new StaticProofFloatingValue(result, false);
+            return true;
+        }
+        if (expression is BoundConditional conditional)
+        {
+            if (TryGetStaticProofTruth(conditional.Condition, firstLocalVariable, facts, out var condition))
+            {
+                return TryGetStaticProofFloatingValue(
+                    condition ? conditional.WhenTrue : conditional.WhenFalse,
+                    firstLocalVariable, facts, out value);
+            }
+            if (TryGetStaticProofFloatingValue(conditional.WhenTrue, firstLocalVariable, facts,
+                    out var whenTrue)
+                && TryGetStaticProofFloatingValue(conditional.WhenFalse, firstLocalVariable, facts,
+                    out var whenFalse)
+                && whenTrue == whenFalse)
+            {
+                value = whenTrue;
+                return true;
+            }
+        }
+        if (expression is BoundCast cast && cast.Type == cast.Operand.Type
+            && PrimitiveTypeFacts.IsFloating(cast.Type))
+        {
+            return TryGetStaticProofFloatingValue(cast.Operand, firstLocalVariable, facts, out value);
+        }
+        value = default;
+        return false;
+    }
+
+    private static void AddStaticProofFloatingValueFact(int variable, PrimitiveType type,
+        StaticProofFloatingValue value, Dictionary<StaticProofPredicate, bool> facts)
+    {
+        var kind = value.IsClassNaN
+            ? StaticProofPredicateKind.FloatClassNaN : StaticProofPredicateKind.FloatExact;
+        var bits = value.IsClassNaN ? default : value.Bits;
+        facts[new StaticProofPredicate(kind, variable, -1, type, type, bits)] = true;
     }
 
     private bool IsStaticProofStableExpression(BoundExpression expression)
@@ -1130,12 +1352,10 @@ internal sealed partial class Binder
     }
 
     private static bool IsStaticProofScalar(PrimitiveType type) =>
-        PrimitiveTypeFacts.ScalarWidth(type) is > 0 and <= sizeof(ulong)
-            && type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16
-                or PrimitiveType.Char32 or PrimitiveType.Rune or PrimitiveType.Int8
-                or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.Int64
-                or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-                or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+        type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16
+            or PrimitiveType.Char32 or PrimitiveType.Rune
+        || PrimitiveTypeFacts.IsIntegerOrWide(type)
+        || PrimitiveTypeFacts.IsFloating(type);
 
     private bool AreStaticProofStableArguments(ImmutableArray<BoundExpression> arguments)
     {
@@ -1385,7 +1605,7 @@ internal sealed partial class Binder
         else if (TryGetStaticProofPredicate(expression, firstLocalVariable,
             out var predicate, out var predicateTruth))
         {
-            if (facts.TryGetValue(predicate, out var established))
+            if (TryGetStaticProofFact(predicate, facts, out var established))
             {
                 truth = established == predicateTruth;
                 return true;
@@ -1393,11 +1613,6 @@ internal sealed partial class Binder
             if (predicate.Kind == StaticProofPredicateKind.ReflexiveEquality)
             {
                 truth = predicateTruth;
-                return true;
-            }
-            if (TryGetStaticProofIntegerPredicateTruth(predicate, facts, out established))
-            {
-                truth = established == predicateTruth;
                 return true;
             }
         }
@@ -1422,7 +1637,7 @@ internal sealed partial class Binder
             return false;
         }
 
-        var excludedValues = new HashSet<decimal>();
+        var excludedValues = new HashSet<BigInteger>();
         foreach (var (fact, established) in facts)
         {
             if (fact.Variable != predicate.Variable || fact.ValueType != predicate.ValueType
@@ -1435,30 +1650,30 @@ internal sealed partial class Binder
             switch (fact.Kind)
             {
                 case StaticProofPredicateKind.Equal when established:
-                    lower = Math.Max(lower, value);
-                    upper = Math.Min(upper, value);
+                    lower = BigInteger.Max(lower, value);
+                    upper = BigInteger.Min(upper, value);
                     break;
                 case StaticProofPredicateKind.Equal:
-                    excludedValues.Add(value);
+                    _ = excludedValues.Add(value);
                     break;
                 case StaticProofPredicateKind.Less:
                     if (established)
                     {
-                        upper = Math.Min(upper, value - 1);
+                        upper = BigInteger.Min(upper, value - BigInteger.One);
                     }
                     else
                     {
-                        lower = Math.Max(lower, value);
+                        lower = BigInteger.Max(lower, value);
                     }
                     break;
                 case StaticProofPredicateKind.LessEquals:
                     if (established)
                     {
-                        upper = Math.Min(upper, value);
+                        upper = BigInteger.Min(upper, value);
                     }
                     else
                     {
-                        lower = Math.Max(lower, value + 1);
+                        lower = BigInteger.Max(lower, value + BigInteger.One);
                     }
                     break;
             }
@@ -1525,6 +1740,20 @@ internal sealed partial class Binder
             case PrimitiveType.UInt64:
                 width = 64;
                 return true;
+            case PrimitiveType.Int128:
+            case PrimitiveType.UInt128:
+                width = 128;
+                return true;
+            case PrimitiveType.Rune:
+            case PrimitiveType.Char32:
+                width = 32;
+                return true;
+            case PrimitiveType.Char16:
+                width = 16;
+                return true;
+            case PrimitiveType.Char8:
+                width = 8;
+                return true;
             default:
                 width = 0;
                 return false;
@@ -1537,7 +1766,7 @@ internal sealed partial class Binder
     private static BigInteger InterpretStaticProofBitPattern(BigInteger value, PrimitiveType type, int width)
     {
         var modulus = BigInteger.One << width;
-        if (PrimitiveTypeFacts.IsSignedInteger(type)
+        if (PrimitiveTypeFacts.IsSignedIntegerOrWide(type)
             && value >= (BigInteger.One << (width - 1)))
         {
             value -= modulus;
@@ -1546,69 +1775,69 @@ internal sealed partial class Binder
     }
 
     private static bool TryGetStaticProofIntegerRange(PrimitiveType type,
-        out decimal lower, out decimal upper)
+        out BigInteger lower, out BigInteger upper)
     {
-        (lower, upper) = type switch
+        if (!TryGetStaticProofIntegerWidth(type, out var width))
         {
-            PrimitiveType.Int8 => ((decimal)sbyte.MinValue, (decimal)sbyte.MaxValue),
-            PrimitiveType.Int16 => ((decimal)short.MinValue, (decimal)short.MaxValue),
-            PrimitiveType.Int32 => ((decimal)int.MinValue, (decimal)int.MaxValue),
-            PrimitiveType.UInt8 => ((decimal)byte.MinValue, (decimal)byte.MaxValue),
-            PrimitiveType.UInt16 => ((decimal)ushort.MinValue, (decimal)ushort.MaxValue),
-            PrimitiveType.UInt32 => ((decimal)uint.MinValue, (decimal)uint.MaxValue),
-            PrimitiveType.Int64 => ((decimal)long.MinValue, (decimal)long.MaxValue),
-            PrimitiveType.UInt64 => ((decimal)ulong.MinValue, (decimal)ulong.MaxValue),
-            PrimitiveType.Char8 => ((decimal)byte.MinValue, (decimal)byte.MaxValue),
-            PrimitiveType.Char16 => ((decimal)ushort.MinValue, (decimal)ushort.MaxValue),
-            PrimitiveType.Char32 => ((decimal)uint.MinValue, (decimal)uint.MaxValue),
-            PrimitiveType.Rune => (decimal.Zero, 0x10_FFFF),
-            _ => (decimal.Zero, decimal.Zero),
-        };
-        return PrimitiveTypeFacts.IsInteger(type) || PrimitiveTypeFacts.IsCodeUnitOrRune(type);
+            lower = BigInteger.Zero;
+            upper = BigInteger.Zero;
+            return false;
+        }
+
+        lower = PrimitiveTypeFacts.IsSignedIntegerOrWide(type)
+            ? -(BigInteger.One << (width - 1)) : BigInteger.Zero;
+        upper = PrimitiveTypeFacts.IsSignedIntegerOrWide(type)
+            ? (BigInteger.One << (width - 1)) - BigInteger.One
+            : (BigInteger.One << width) - BigInteger.One;
+        if (type == PrimitiveType.Rune)
+        {
+            upper = 0x10_FFFF;
+        }
+        return true;
     }
 
-    private static bool TryGetStaticProofIntegerValue(PrimitiveType type, long value, out decimal result)
+    private static bool TryGetStaticProofIntegerValue(PrimitiveType type, ScalarBits bits,
+        out BigInteger result)
     {
-        switch (type)
+        if (!TryGetStaticProofIntegerWidth(type, out var width)
+            || !bits.IsCanonicalFor(type))
         {
-            case PrimitiveType.Int8:
-                result = unchecked((sbyte)value);
-                return true;
-            case PrimitiveType.Int16:
-                result = unchecked((short)value);
-                return true;
-            case PrimitiveType.Int32:
-                result = unchecked((int)value);
-                return true;
-            case PrimitiveType.UInt8:
-                result = unchecked((byte)value);
-                return true;
-            case PrimitiveType.UInt16:
-                result = unchecked((ushort)value);
-                return true;
-            case PrimitiveType.UInt32:
-                result = unchecked((uint)value);
-                return true;
-            case PrimitiveType.Int64:
-                result = value;
-                return true;
-            case PrimitiveType.UInt64:
-                result = unchecked((ulong)value);
-                return true;
-            case PrimitiveType.Char8:
-                result = unchecked((byte)value);
-                return true;
-            case PrimitiveType.Char16:
-                result = unchecked((ushort)value);
-                return true;
-            case PrimitiveType.Char32:
-            case PrimitiveType.Rune:
-                result = unchecked((uint)value);
-                return true;
-            default:
-                result = 0;
-                return false;
+            result = BigInteger.Zero;
+            return false;
         }
+
+        var raw = (new BigInteger(bits.High) << 64) | bits.Low;
+        if (PrimitiveTypeFacts.IsSignedIntegerOrWide(type)
+            && (raw & (BigInteger.One << (width - 1))) != BigInteger.Zero)
+        {
+            raw -= BigInteger.One << width;
+        }
+        if (!TryGetStaticProofIntegerRange(type, out var minimum, out var maximum)
+            || raw < minimum || raw > maximum)
+        {
+            result = BigInteger.Zero;
+            return false;
+        }
+
+        result = raw;
+        return true;
+    }
+
+    private static bool TryCreateStaticProofIntegerBits(BigInteger value, PrimitiveType type,
+        out ScalarBits bits)
+    {
+        if (!TryGetStaticProofIntegerRange(type, out var minimum, out var maximum)
+            || value < minimum || value > maximum
+            || !TryGetStaticProofIntegerWidth(type, out var width))
+        {
+            bits = default;
+            return false;
+        }
+
+        var raw = value.Sign < 0 ? value + (BigInteger.One << width) : value;
+        bits = new ScalarBits((ulong)(raw & ulong.MaxValue),
+            width > 64 ? (ulong)(raw >> 64) : 0);
+        return true;
     }
 
     private bool TryGetStaticProofIntegerComparisonTruth(BoundExpression expression,
@@ -1727,8 +1956,8 @@ internal sealed partial class Binder
             && CanUseStaticProofVariable(read.Variable, firstLocalVariable)
             && TryGetStaticProofIntegerRange(read.Type, out var lowerBound, out var upperBound))
         {
-            lower = new BigInteger(lowerBound);
-            upper = new BigInteger(upperBound);
+            lower = lowerBound;
+            upper = upperBound;
             HashSet<BigInteger> excludedValues = [];
             foreach (var (fact, established) in facts)
             {
@@ -1739,7 +1968,7 @@ internal sealed partial class Binder
                     continue;
                 }
 
-                var candidate = new BigInteger(value);
+                var candidate = value;
                 switch (fact.Kind)
                 {
                     case StaticProofPredicateKind.Equal when established:
@@ -1747,7 +1976,7 @@ internal sealed partial class Binder
                         upper = BigInteger.Min(upper, candidate);
                         break;
                     case StaticProofPredicateKind.Equal:
-                        excludedValues.Add(candidate);
+                        _ = excludedValues.Add(candidate);
                         break;
                     case StaticProofPredicateKind.Less when established:
                         upper = BigInteger.Min(upper, candidate - BigInteger.One);
@@ -1790,8 +2019,8 @@ internal sealed partial class Binder
                 upper = lower;
                 return true;
             }
-            lower = new BigInteger(bitwiseNotMinimum);
-            upper = new BigInteger(bitwiseNotMaximum);
+            lower = bitwiseNotMinimum;
+            upper = bitwiseNotMaximum;
             return true;
         }
         if (expression is BoundUnary unary
@@ -1819,7 +2048,7 @@ internal sealed partial class Binder
         if (expression is BoundBinary shift
             && (shift.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
             && TryGetStaticProofIntegerWidth(shift.Type, out var width)
-            && shift.Type == shift.Left.Type && PrimitiveTypeFacts.IsInteger(shift.Right.Type)
+            && shift.Type == shift.Left.Type && PrimitiveTypeFacts.IsIntegerOrWide(shift.Right.Type)
             && TryGetStaticProofIntegerInterval(shift.Left, firstLocalVariable, facts,
                 out var shiftedLower, out var shiftedUpper)
             && TryGetStaticProofIntegerInterval(shift.Right, firstLocalVariable, facts,
@@ -1838,7 +2067,7 @@ internal sealed partial class Binder
                 var bits = ToStaticProofBitPattern(shiftedLower, width);
                 var shifted = shift.Operator switch {
                     TokenKind.ShiftLeft => (bits << count) & ((BigInteger.One << width) - BigInteger.One),
-                    TokenKind.ShiftRight when PrimitiveTypeFacts.IsSignedInteger(shift.Type)
+                    TokenKind.ShiftRight when PrimitiveTypeFacts.IsSignedIntegerOrWide(shift.Type)
                         => shiftedLower >> count,
                     TokenKind.ShiftRight => bits >> count,
                     TokenKind.ShiftRightUnsigned => bits >> count,
@@ -1848,8 +2077,8 @@ internal sealed partial class Binder
                 upper = lower;
                 return true;
             }
-            lower = new BigInteger(shiftMinimum);
-            upper = new BigInteger(shiftMaximum);
+            lower = shiftMinimum;
+            upper = shiftMaximum;
             return true;
         }
         if (expression is BoundBinary bitwise
@@ -1876,8 +2105,8 @@ internal sealed partial class Binder
                 upper = lower;
                 return true;
             }
-            lower = new BigInteger(bitwiseMinimum);
-            upper = new BigInteger(bitwiseMaximum);
+            lower = bitwiseMinimum;
+            upper = bitwiseMaximum;
             return true;
         }
         if (expression is BoundBinary binary
@@ -1980,7 +2209,7 @@ internal sealed partial class Binder
         var minimumQuotient = BigInteger.Zero;
         var maximumQuotient = BigInteger.Zero;
         var hasQuotient = false;
-        var isSigned = PrimitiveTypeFacts.IsSignedInteger(type);
+        var isSigned = PrimitiveTypeFacts.IsSignedIntegerOrWide(type);
         var signedMinimum = isSigned
             ? -(BigInteger.One << (PrimitiveTypeFacts.IntegerWidth(type) - 1)) : BigInteger.Zero;
         foreach (var (numeratorLower, numeratorUpper) in dividendRanges)
@@ -2080,7 +2309,7 @@ internal sealed partial class Binder
                 && fact.OtherVariable < 0 && fact.ConstantType == fact.ValueType
                 && fact.Kind == StaticProofPredicateKind.Equal && !established
                 && TryGetStaticProofIntegerValue(fact.ConstantType, fact.Constant, out var value)
-                && value == decimal.Zero)
+                && value.IsZero)
             {
                 return true;
             }
@@ -2090,10 +2319,8 @@ internal sealed partial class Binder
 
     private static bool TryGetStaticProofIntegerConstant(BoundConstant constant, out BigInteger value)
     {
-        if (TryGetStaticProofIntegerRange(constant.Type, out _, out _)
-            && TryGetStaticProofIntegerValue(constant.Type, constant.Value, out var numericValue))
+        if (TryGetStaticProofIntegerValue(constant.Type, constant.Bits, out value))
         {
-            value = new BigInteger(numericValue);
             return true;
         }
         value = BigInteger.Zero;
@@ -2103,7 +2330,7 @@ internal sealed partial class Binder
     private static bool IsWithinStaticProofIntegerRange(PrimitiveType type,
         BigInteger lower, BigInteger upper) =>
         TryGetStaticProofIntegerRange(type, out var minimum, out var maximum)
-            && lower >= new BigInteger(minimum) && upper <= new BigInteger(maximum);
+            && lower >= minimum && upper <= maximum;
 
     private bool TryGetStaticProofPredicate(BoundExpression expression, int firstLocalVariable,
         out StaticProofPredicate predicate, out bool truth)
@@ -2125,7 +2352,7 @@ internal sealed partial class Binder
             && CanUseStaticProofVariable(booleanRead.Variable, firstLocalVariable))
         {
             predicate = new StaticProofPredicate(StaticProofPredicateKind.Boolean, booleanRead.Variable,
-                -1, PrimitiveType.Bool, PrimitiveType.Bool, 0);
+                -1, PrimitiveType.Bool, PrimitiveType.Bool, default);
             truth = true;
             return true;
         }
@@ -2164,12 +2391,15 @@ internal sealed partial class Binder
             {
                 if (leftVariable.Variable == rightVariable.Variable
                     && leftVariable.Type == rightVariable.Type
-                    && leftVariable.Type is not (PrimitiveType.Float32 or PrimitiveType.Float64)
                     && IsStaticProofScalar(leftVariable.Type)
                     && (operation is TokenKind.EqualsEquals or TokenKind.BangEquals))
                 {
-                    predicate = new StaticProofPredicate(StaticProofPredicateKind.ReflexiveEquality,
-                        -1, -1, leftVariable.Type, rightVariable.Type, 0);
+                    var isFloating = PrimitiveTypeFacts.IsFloating(leftVariable.Type);
+                    predicate = new StaticProofPredicate(
+                        isFloating ? StaticProofPredicateKind.FloatReflexiveEquality
+                            : StaticProofPredicateKind.ReflexiveEquality,
+                        isFloating ? leftVariable.Variable : -1, -1,
+                        leftVariable.Type, rightVariable.Type, default);
                     truth = operation == TokenKind.EqualsEquals;
                     return true;
                 }
@@ -2188,7 +2418,7 @@ internal sealed partial class Binder
                 truth = false;
                 return false;
             }
-            if (read.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+            if (PrimitiveTypeFacts.IsFloating(read.Type))
             {
                 if (constant.Type != read.Type)
                 {
@@ -2212,7 +2442,7 @@ internal sealed partial class Binder
                     return false;
                 }
                 predicate = new StaticProofPredicate(floatingPredicateKind, read.Variable, -1, read.Type,
-                    constant.Type, constant.Value);
+                    constant.Type, constant.Bits);
                 truth = true;
                 return true;
             }
@@ -2242,7 +2472,7 @@ internal sealed partial class Binder
                 return false;
             }
             predicate = new StaticProofPredicate(kind, read.Variable, -1, read.Type,
-                constant.Type, constant.Value);
+                constant.Type, constant.Bits);
             truth = operation is TokenKind.EqualsEquals or TokenKind.Less or TokenKind.LessEquals;
             return true;
         }
@@ -2292,7 +2522,7 @@ internal sealed partial class Binder
                 return false;
         }
 
-        predicate = new StaticProofPredicate(kind, variable, otherVariable, left.Type, right.Type, 0);
+        predicate = new StaticProofPredicate(kind, variable, otherVariable, left.Type, right.Type, default);
         return true;
     }
 
