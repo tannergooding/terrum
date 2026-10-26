@@ -58,6 +58,72 @@ public sealed class TrRmPredicateGraphTableTests
     }
 
     [Test]
+    public void ValidatesPredicateChildEdgesAndRootFirstDepthFirstOrder()
+    {
+        var bytes = EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(2, 0, 3),
+            new TrRmPredicateChildEdgeRow(1, 1, 4),
+            new TrRmPredicateChildEdgeRow(1, 0, 2),
+        ], nodeCount: 4, rootRows: [1]);
+        var graphs = ReadGraphs([new TrRmPredicateGraphRow(1, 1)], 4);
+        var edges = new TrRmPredicateChildEdgeTableReader(bytes, 3, 4, graphs);
+
+        Assert.That(edges.GetParentNodeRow(1), Is.EqualTo(1));
+        Assert.That(edges.GetChildOrdinal(1), Is.Zero);
+        Assert.That(edges.GetChildNodeRow(1), Is.EqualTo(2));
+        Assert.That(edges.GetParentNodeRow(2), Is.EqualTo(1));
+        Assert.That(edges.GetChildOrdinal(2), Is.EqualTo(1u));
+        Assert.That(edges.GetChildNodeRow(2), Is.EqualTo(4));
+        Assert.That(edges.GetParentNodeRow(3), Is.EqualTo(2));
+        Assert.That(edges.GetChildNodeRow(3), Is.EqualTo(3));
+
+        var reordered = new byte[bytes.Length];
+        bytes.AsSpan(24, 12).CopyTo(reordered);
+        bytes.AsSpan(12, 12).CopyTo(reordered.AsSpan(12));
+        bytes.AsSpan(0, 12).CopyTo(reordered.AsSpan(24));
+        var reorderedEdges = new TrRmPredicateChildEdgeTableReader(
+            reordered, 3, 4, graphs);
+        Assert.That(reorderedEdges.GetChildNodeRow(1), Is.EqualTo(3));
+        Assert.That(reorderedEdges.GetChildNodeRow(2), Is.EqualTo(4));
+        Assert.That(reorderedEdges.GetChildNodeRow(3), Is.EqualTo(2));
+    }
+
+    [Test]
+    public void RejectsMalformedPredicateChildOrdinalsAndGraphTopology()
+    {
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(0, 0, 1),
+        ], nodeCount: 2, rootRows: [1]));
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(1, 0, 0x0100_0000),
+        ], nodeCount: 2, rootRows: [1]));
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(1, 1, 2),
+        ], nodeCount: 2, rootRows: [1]));
+        Assert.Throws<InvalidDataException>(() =>
+            EncodeChildEdges([], nodeCount: 2, rootRows: [1, 1]));
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(1, 0, 2),
+            new TrRmPredicateChildEdgeRow(1, 1, 2),
+        ], nodeCount: 2, rootRows: [1]));
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(1, 0, 2),
+            new TrRmPredicateChildEdgeRow(1, 1, 3),
+            new TrRmPredicateChildEdgeRow(2, 0, 3),
+        ], nodeCount: 3, rootRows: [1]));
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(1, 0, 2),
+            new TrRmPredicateChildEdgeRow(2, 0, 3),
+            new TrRmPredicateChildEdgeRow(3, 0, 2),
+        ], nodeCount: 3, rootRows: [1]));
+        Assert.Throws<InvalidDataException>(() => EncodeChildEdges([
+            new TrRmPredicateChildEdgeRow(1, 0, 3),
+        ], nodeCount: 3, rootRows: [1, 3]));
+        Assert.Throws<InvalidDataException>(() =>
+            EncodeChildEdges([], nodeCount: 2, rootRows: [1]));
+    }
+
+    [Test]
     public void RejectsMalformedOrSharedReadFootprintRanges()
     {
         Assert.Throws<InvalidDataException>(() =>
@@ -173,6 +239,50 @@ public sealed class TrRmPredicateGraphTableTests
                     rootCount: 1)));
     }
 
+    [Test]
+    public void StructuralValidatorRejectsMalformedPredicateChildEdges()
+    {
+        var graphs = ReadGraphs([new TrRmPredicateGraphRow(1, 1)], 2);
+        var graphBytes = TrRmPredicateGraphTableWriter.Encode([
+            new TrRmPredicateGraphRow(1, 1),
+        ], nodeCount: 2, readFootprintCount: 1);
+        var edgeBytes = TrRmPredicateChildEdgeTableWriter.Encode([
+            new TrRmPredicateChildEdgeRow(1, 0, 2),
+        ], nodeCount: 2, graphs: graphs);
+        var captureBytes = TrRmPredicateCaptureTableWriter.Encode([
+            new TrRmPredicateCaptureRow(1, 0, 1, 0, 1),
+        ], graphCount: 1, types: CreateTypeSpecs());
+        BinaryPrimitives.WriteUInt32LittleEndian(edgeBytes.AsSpan(4), 1);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(
+                CreateArtifact(graphBytes, captureBytes, graphCount: 1,
+                    nodeCount: 2, footprintCount: 1,
+                    childEdgeBytes: edgeBytes, childEdgeCount: 1)));
+    }
+
+    private static TrRmPredicateGraphTableReader ReadGraphs(
+        TrRmPredicateGraphRow[] rows, int nodeCount)
+    {
+        var graphBytes = TrRmPredicateGraphTableWriter.Encode(rows,
+            nodeCount, readFootprintCount: rows.Length);
+        return new TrRmPredicateGraphTableReader(
+            graphBytes, rows.Length, nodeCount, rows.Length);
+    }
+
+    private static byte[] EncodeChildEdges(TrRmPredicateChildEdgeRow[] rows,
+        int nodeCount, params int[] rootRows)
+    {
+        var graphRows = new TrRmPredicateGraphRow[rootRows.Length];
+        for (var index = 0; index < rootRows.Length; index++)
+        {
+            graphRows[index] = new TrRmPredicateGraphRow(rootRows[index], index + 1);
+        }
+
+        var graphs = ReadGraphs(graphRows, nodeCount);
+        return TrRmPredicateChildEdgeTableWriter.Encode(rows, nodeCount, graphs);
+    }
+
     private static byte[] EncodeCaptures(TrRmPredicateCaptureRow[] rows)
         => TrRmPredicateCaptureTableWriter.Encode(rows,
             graphCount: 2, types: CreateTypeSpecs());
@@ -188,7 +298,8 @@ public sealed class TrRmPredicateGraphTableTests
     private static byte[] CreateArtifact(byte[] graphs, byte[] captures,
         int graphCount, int nodeCount, int footprintCount,
         byte[]? footprintBytes = null, int rootCount = 0,
-        int dependencyCount = 0)
+        int dependencyCount = 0, byte[]? childEdgeBytes = null,
+        int childEdgeCount = 0)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([("Module", 0)]);
         var strings = new TrRmStringTableReader(stringsBytes, 1);
@@ -213,11 +324,14 @@ public sealed class TrRmPredicateGraphTableTests
             sections.Add(new TrRmSection(0x003A, 0, (uint)dependencyCount,
                 new byte[dependencyCount * 8]));
         }
-        sections.AddRange([
-            new TrRmSection(0x003B, 0, (uint)nodeCount,
-                new byte[nodeCount * 16]),
-            new TrRmSection(0x003E, 0, (uint)(captures.Length / 16), captures),
-        ]);
+        sections.Add(new TrRmSection(0x003B, 0, (uint)nodeCount,
+            new byte[nodeCount * 16]));
+        if (childEdgeCount != 0)
+        {
+            sections.Add(new TrRmSection(0x003D, 0, (uint)childEdgeCount,
+                childEdgeBytes ?? throw new ArgumentNullException(nameof(childEdgeBytes))));
+        }
+        sections.Add(new TrRmSection(0x003E, 0, (uint)(captures.Length / 16), captures));
         return TrRmArtifactWriter.Encode(sections);
     }
 

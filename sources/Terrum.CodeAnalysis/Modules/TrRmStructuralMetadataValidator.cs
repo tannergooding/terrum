@@ -38,6 +38,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmTextCaptureShapeTableReader textCaptureShapes,
             TrRmTextFragmentShapeTableReader textFragmentShapes,
             TrRmPredicateGraphTableReader predicateGraphs,
+            TrRmPredicateChildEdgeTableReader predicateChildEdges,
             TrRmPredicateReadFootprintTableReader predicateReadFootprints,
             TrRmPredicateCaptureTableReader predicateCaptures,
             TrRmBlobTableReader blobs,
@@ -83,6 +84,7 @@ public static class TrRmStructuralMetadataValidator
             TextCaptureShapes = textCaptureShapes;
             TextFragmentShapes = textFragmentShapes;
             PredicateGraphs = predicateGraphs;
+            PredicateChildEdges = predicateChildEdges;
             PredicateReadFootprints = predicateReadFootprints;
             PredicateCaptures = predicateCaptures;
             Blobs = blobs;
@@ -134,6 +136,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTextCaptureShapeTableReader TextCaptureShapes { get; }
         internal TrRmTextFragmentShapeTableReader TextFragmentShapes { get; }
         internal TrRmPredicateGraphTableReader PredicateGraphs { get; }
+        internal TrRmPredicateChildEdgeTableReader PredicateChildEdges { get; }
         internal TrRmPredicateReadFootprintTableReader PredicateReadFootprints { get; }
         internal TrRmPredicateCaptureTableReader PredicateCaptures { get; }
         internal TrRmBlobTableReader Blobs { get; }
@@ -675,6 +678,8 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0039, out _, out var predicateReadRootCount);
         _ = index.TryGetSection(0x003A, out _, out var predicateReadDependencyCount);
         _ = index.TryGetSection(0x003B, out _, out var predicateNodeCount);
+        _ = index.TryGetSection(0x003D, out var predicateChildEdgeBytes,
+            out var predicateChildEdgeCount);
         _ = index.TryGetSection(0x003E, out var predicateCaptureBytes,
             out var predicateCaptureCount);
         _ = index.TryGetSection(0x0030, out var constantSourceBytes,
@@ -799,6 +804,7 @@ public static class TrRmStructuralMetadataValidator
         var textCaptureShapes = default(TrRmTextCaptureShapeTableReader);
         var textFragmentShapes = default(TrRmTextFragmentShapeTableReader);
         var predicateGraphs = default(TrRmPredicateGraphTableReader);
+        var predicateChildEdges = default(TrRmPredicateChildEdgeTableReader);
         var predicateReadFootprints = default(TrRmPredicateReadFootprintTableReader);
         var predicateCaptures = default(TrRmPredicateCaptureTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
@@ -820,6 +826,9 @@ public static class TrRmStructuralMetadataValidator
             predicateGraphs = new TrRmPredicateGraphTableReader(
                 predicateGraphBytes, predicateGraphCount, predicateNodeCount,
                 predicateReadFootprintCount);
+            predicateChildEdges = new TrRmPredicateChildEdgeTableReader(
+                predicateChildEdgeBytes, predicateChildEdgeCount,
+                predicateNodeCount, predicateGraphs);
             predicateReadFootprints = new TrRmPredicateReadFootprintTableReader(
                 predicateReadFootprintBytes, predicateReadFootprintCount,
                 predicateReadRootCount, predicateReadDependencyCount);
@@ -1062,7 +1071,8 @@ public static class TrRmStructuralMetadataValidator
             interfaceConstDefs, associatedConstDefs, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
             textContentShapes, textCaptureShapes, textFragmentShapes,
-            predicateGraphs, predicateReadFootprints, predicateCaptures,
+            predicateGraphs, predicateChildEdges, predicateReadFootprints,
+            predicateCaptures,
             blobs, frozenValueNodes,
             constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,

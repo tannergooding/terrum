@@ -13,6 +13,13 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly record struct TrRmPredicateGraphRow(
     int RootNodeRow, int ReadFootprintRow);
 
+/// <summary>An ordered child edge between two predicate-node occurrences.</summary>
+/// <param name="ParentNodeRow">The one-based PredicateNode parent row.</param>
+/// <param name="ChildOrdinal">The zero-based child ordinal.</param>
+/// <param name="ChildNodeRow">The one-based PredicateNode child row.</param>
+public readonly record struct TrRmPredicateChildEdgeRow(
+    int ParentNodeRow, uint ChildOrdinal, int ChildNodeRow);
+
 /// <summary>A graph's exclusively owned read-root and direct-dependency ranges.</summary>
 /// <param name="RootFirstRow">The one-based first PredicateReadRoot row, or zero when empty.</param>
 /// <param name="RootRowCount">The number of PredicateReadRoot rows.</param>
@@ -98,6 +105,189 @@ public readonly ref struct TrRmPredicateGraphTableReader
 
     private static InvalidDataException InvalidPredicateGraph()
         => new("Invalid TRRM PredicateGraph table.");
+}
+
+/// <summary>Validates child ordinals and PredicateGraph tree ownership.</summary>
+public readonly ref struct TrRmPredicateChildEdgeTableReader
+{
+    private const int RowSize = 12;
+
+    private readonly ReadOnlySpan<byte> _rows;
+    private readonly int _recordCount;
+
+    /// <summary>Gets the number of validated PredicateChildEdge rows.</summary>
+    public int Count => _recordCount;
+
+    /// <summary>Validates edge references, ordering, graph ownership and tree topology.</summary>
+    /// <param name="section">The borrowed 12-byte PredicateChildEdge rows.</param>
+    /// <param name="recordCount">The number of PredicateChildEdge rows.</param>
+    /// <param name="nodeCount">The number of PredicateNode rows.</param>
+    /// <param name="graphs">The validated PredicateGraph roots.</param>
+    public TrRmPredicateChildEdgeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int nodeCount, TrRmPredicateGraphTableReader graphs)
+    {
+        if (!ValidCount(recordCount) || !ValidCount(nodeCount)
+            || (long)recordCount * RowSize != section.Length)
+        {
+            throw InvalidPredicateChildEdge();
+        }
+
+        _rows = section;
+        _recordCount = recordCount;
+        var childOffsets = new int[nodeCount + 2];
+        for (var row = 1; row <= recordCount; row++)
+        {
+            var data = GetRow(row);
+            var parent = Read(data, 0);
+            var child = Read(data, 8);
+            if (parent is 0 or > 0xFF_FFFF || parent > (uint)nodeCount
+                || child is 0 or > 0xFF_FFFF || child > (uint)nodeCount
+                || child <= parent)
+            {
+                throw InvalidPredicateChildEdge();
+            }
+
+            childOffsets[checked((int)parent) + 1]++;
+        }
+        for (var index = 1; index < childOffsets.Length; index++)
+        {
+            childOffsets[index] = checked(childOffsets[index] + childOffsets[index - 1]);
+        }
+
+        var children = new int[recordCount];
+        var ordinalSet = new byte[(recordCount + 7) / 8];
+        for (var row = 1; row <= recordCount; row++)
+        {
+            var data = GetRow(row);
+            var parent = checked((int)Read(data, 0));
+            var ordinal = Read(data, 4);
+            var parentFirst = childOffsets[parent];
+            var parentCount = childOffsets[parent + 1] - parentFirst;
+            if (ordinal >= (uint)parentCount)
+            {
+                throw InvalidPredicateChildEdge();
+            }
+
+            var childIndex = checked(parentFirst + (int)ordinal);
+            if (IsSet(ordinalSet, childIndex))
+            {
+                throw InvalidPredicateChildEdge();
+            }
+
+            Set(ordinalSet, childIndex);
+            children[childIndex] = checked((int)Read(data, 8));
+        }
+
+        var rootFlags = new byte[(nodeCount + 7) / 8];
+        for (var graph = 1; graph <= graphs.Count; graph++)
+        {
+            var root = graphs.GetRootNodeRow(graph);
+            if (root > nodeCount || IsRoot(rootFlags, root))
+            {
+                throw InvalidPredicateChildEdge();
+            }
+
+            SetRoot(rootFlags, root);
+        }
+
+        var pending = new int[nodeCount];
+        var nextNodeRow = 1;
+        for (var root = 1; root <= nodeCount; root++)
+        {
+            if (!IsRoot(rootFlags, root))
+            {
+                continue;
+            }
+            if (root != nextNodeRow)
+            {
+                throw InvalidPredicateChildEdge();
+            }
+
+            var pendingCount = 0;
+            pending[pendingCount++] = root;
+            while (pendingCount != 0)
+            {
+                var parent = pending[--pendingCount];
+                if (parent != nextNodeRow)
+                {
+                    throw InvalidPredicateChildEdge();
+                }
+                nextNodeRow++;
+
+                var firstChild = childOffsets[parent];
+                var childEnd = childOffsets[parent + 1];
+                for (var child = childEnd - 1; child >= firstChild; child--)
+                {
+                    var childRow = children[child];
+                    if (IsRoot(rootFlags, childRow))
+                    {
+                        throw InvalidPredicateChildEdge();
+                    }
+
+                    if (pendingCount == pending.Length)
+                    {
+                        throw InvalidPredicateChildEdge();
+                    }
+
+                    pending[pendingCount++] = childRow;
+                }
+            }
+        }
+
+        if (nextNodeRow != nodeCount + 1)
+        {
+            throw InvalidPredicateChildEdge();
+        }
+    }
+
+    /// <summary>Gets the one-based PredicateNode parent row.</summary>
+    public int GetParentNodeRow(int row)
+        => checked((int)Read(GetRow(row), 0));
+
+    /// <summary>Gets the zero-based child ordinal.</summary>
+    public uint GetChildOrdinal(int row)
+        => Read(GetRow(row), 4);
+
+    /// <summary>Gets the one-based PredicateNode child row.</summary>
+    public int GetChildNodeRow(int row)
+        => checked((int)Read(GetRow(row), 8));
+
+    private ReadOnlySpan<byte> GetRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidPredicateChildEdge();
+        }
+
+        return _rows.Slice((row - 1) * RowSize, RowSize);
+    }
+
+    private static bool IsRoot(byte[] rootFlags, int row)
+    {
+        var index = row - 1;
+        return (rootFlags[index >> 3] & (1 << (index & 7))) != 0;
+    }
+
+    private static bool IsSet(byte[] bitSet, int index)
+        => (bitSet[index >> 3] & (1 << (index & 7))) != 0;
+
+    private static void Set(byte[] bitSet, int index)
+        => bitSet[index >> 3] |= (byte)(1 << (index & 7));
+
+    private static void SetRoot(byte[] rootFlags, int row)
+    {
+        var index = row - 1;
+        rootFlags[index >> 3] |= (byte)(1 << (index & 7));
+    }
+
+    private static bool ValidCount(int count)
+        => count is >= 0 and <= 0xFF_FFFF;
+
+    private static uint Read(ReadOnlySpan<byte> data, int offset)
+        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+
+    private static InvalidDataException InvalidPredicateChildEdge()
+        => new("Invalid TRRM PredicateChildEdge table.");
 }
 
 /// <summary>Validates disjoint PredicateReadFootprint ranges.</summary>
@@ -356,6 +546,58 @@ public static class TrRmPredicateGraphTableWriter
 
         _ = new TrRmPredicateGraphTableReader(
             result, rows.Count, nodeCount, readFootprintCount);
+        return result;
+    }
+
+    private static void Write(byte[] bytes, int offset, uint value)
+        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+}
+
+/// <summary>Encodes canonically ordered PredicateChildEdge rows.</summary>
+public static class TrRmPredicateChildEdgeTableWriter
+{
+    private const int RowSize = 12;
+
+    /// <summary>Encodes child edges by parent row and then child ordinal.</summary>
+    /// <param name="rows">The ordered child relationships.</param>
+    /// <param name="nodeCount">The number of PredicateNode rows.</param>
+    /// <param name="graphs">The validated PredicateGraph roots.</param>
+    /// <returns>The encoded PredicateChildEdge section.</returns>
+    public static byte[] Encode(IReadOnlyList<TrRmPredicateChildEdgeRow> rows,
+        int nodeCount, TrRmPredicateGraphTableReader graphs)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var orderedIndexes = new int[rows.Count];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            orderedIndexes[index] = index;
+        }
+        Array.Sort(orderedIndexes, (leftIndex, rightIndex) =>
+        {
+            var left = rows[leftIndex];
+            var right = rows[rightIndex];
+            var parentOrder = left.ParentNodeRow.CompareTo(right.ParentNodeRow);
+            return parentOrder != 0
+                ? parentOrder : left.ChildOrdinal.CompareTo(right.ChildOrdinal);
+        });
+
+        var result = new byte[rows.Count * RowSize];
+        for (var index = 0; index < orderedIndexes.Length; index++)
+        {
+            var row = rows[orderedIndexes[index]];
+            var offset = index * RowSize;
+            Write(result, offset, unchecked((uint)row.ParentNodeRow));
+            Write(result, offset + 4, row.ChildOrdinal);
+            Write(result, offset + 8, unchecked((uint)row.ChildNodeRow));
+        }
+
+        _ = new TrRmPredicateChildEdgeTableReader(
+            result, rows.Count, nodeCount, graphs);
         return result;
     }
 
