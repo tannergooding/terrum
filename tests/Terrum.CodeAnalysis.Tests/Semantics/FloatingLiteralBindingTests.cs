@@ -15,95 +15,97 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 
 public sealed class FloatingLiteralBindingTests
 {
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float32ToFloat64(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float64ToFloat32(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int UInt64ToFloat32(ulong value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long UInt64ToFloat64(ulong value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Int32ToFloat32(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long UInt32ToFloat64(uint value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Int64ToFloat32(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Int32ToFloat64(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int UInt32ToFloat32(uint value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Int64ToFloat64(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Char16ToFloat32(ushort value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Char16ToFloat64(ushort value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float64ToInt32(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint Float64ToUInt32(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64ToInt64(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong Float64ToUInt64(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32ToInt32(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate uint Float32ToUInt32(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float32ToInt64(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate ulong Float32ToUInt64(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32Binary(int left, int right);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64Binary(long left, long right);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32Copy(int value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64Copy(long value);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32Selector(int selector);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64Selector(int selector);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32FourOperands(int a, int b, int c, int d);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate long Float64FourOperands(long a, long b, long c, long d);
-
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int Float32Comparison(int left, int right);
+    private delegate int Float64Comparison(long left, long right);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float64Comparison(long left, long right);
+    private delegate double NativeFloat32ToFloat64(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeFloat64ToFloat32(double value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeUInt64ToFloat32(ulong value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeUInt64ToFloat64(ulong value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeInt32ToFloat32(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeUInt32ToFloat64(uint value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeInt64ToFloat32(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeInt32ToFloat64(int value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeUInt32ToFloat32(uint value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeInt64ToFloat64(long value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeChar16ToFloat32(ushort value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeChar16ToFloat64(ushort value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFloat64ToInt32(double value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint NativeFloat64ToUInt32(double value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long NativeFloat64ToInt64(double value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong NativeFloat64ToUInt64(double value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFloat32ToInt32(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate uint NativeFloat32ToUInt32(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate long NativeFloat32ToInt64(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong NativeFloat32ToUInt64(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeFloat32Binary(float left, float right);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeFloat64Binary(double left, double right);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeFloat32Copy(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeFloat64Copy(double value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeFloat32Selector(int selector);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeFloat64Selector(int selector);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate float NativeFloat32FourOperands(float a, float b, float c, float d);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate double NativeFloat64FourOperands(double a, double b, double c, double d);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFloat32Comparison(float left, float right);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int NativeFloat64Comparison(double left, double right);
     [TestCase("float32","0.1",0x3DCCCCCDL)]
     [TestCase("float64","0.1",0x3FB999999999999AL)]
     [TestCase("float32","-0.0",0x80000000L)]
@@ -268,7 +270,7 @@ public sealed class FloatingLiteralBindingTests
     public void FloatingFormatConversionsPersistThroughSemanticModules()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float64 Widen(float32 value) { return float64(value); }"));
+            " public float64 Widen(float32 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual24 = compilation.Program; Assert.That(__nunitActual24, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual24!; }))();
 
@@ -291,7 +293,7 @@ public sealed class FloatingLiteralBindingTests
     public void IntegerToFloatingConversionsPersistThroughSemanticModules()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float64 Convert(uint64 value) { return float64(value); }"));
+            " public float64 Convert(uint64 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual28 = compilation.Program; Assert.That(__nunitActual28, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual28!; }))();
 
@@ -314,8 +316,8 @@ public sealed class FloatingLiteralBindingTests
     public void Char16ToFloatingConversionsPersistThroughSemanticModules()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float32 Narrow(char16 value) { return float32(value); } "
-            + "[NoThrow] public float64 Widen(char16 value) { return float64(value); }"));
+            " public float32 Narrow(char16 value) { return float32(value); } "
+            + " public float64 Widen(char16 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual32 = compilation.Program; Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual32!; }))();
 
@@ -341,8 +343,8 @@ public sealed class FloatingLiteralBindingTests
     public void Char16ToFloatingConversionsTreatValuesAsUnsignedCodeUnits()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float32 Narrow(char16 value) { return float32(value); } "
-            + "[NoThrow] public float64 Widen(char16 value) { return float64(value); }"));
+            " public float32 Narrow(char16 value) { return float32(value); } "
+            + " public float64 Widen(char16 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual36 = compilation.Program; Assert.That(__nunitActual36, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual36!; }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-char16-float-{Guid.NewGuid():N}.dll");
@@ -352,8 +354,8 @@ public sealed class FloatingLiteralBindingTests
             File.WriteAllBytes(path,
                 NativeEmitter.EmitLibrary(program, ["Narrow", "Widen"], NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
-            var narrow = Export<Char16ToFloat32>(library, "Narrow");
-            var widen = Export<Char16ToFloat64>(library, "Widen");
+            var narrow = ExportChar16ToFloat32(library, "Narrow");
+            var widen = ExportChar16ToFloat64(library, "Widen");
             for (var value = 0; value <= ushort.MaxValue; value++)
             {
                 var codeUnit = (ushort)value;
@@ -378,21 +380,21 @@ public sealed class FloatingLiteralBindingTests
             struct Inner {
                 public float32 Single;
                 public int32 Marker;
-                [NoThrow] public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
+                 public Inner(float32 single, int32 marker) { Single = single; Marker = marker; }
             }
             struct Pair {
                 public Inner Nested;
                 public float64 Wide;
-                [NoThrow] public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
-                [NoThrow] public float32 ReadSingle() { return Nested.Single; }
+                 public Pair(Inner nested, float64 wide) { Nested = nested; Wide = wide; }
+                 public float32 ReadSingle() { return Nested.Single; }
             }
-            [NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }
-            [NoThrow] bool TryCreatePair(init ref<Pair> result) {
+             T Identity<T>(T value) where T : [Copy] { return value; }
+             bool TryCreatePair(init ref<Pair> result) {
                 result = new Pair(new Inner(float32(1), 42), float64(2));
                 return true;
             }
-            [NoThrow] float32 CopyFloat(float32 value) { return value; }
-            [NoThrow] T Forward<T>(T value) where T : [Copy] {
+             float32 CopyFloat(float32 value) { return value; }
+             T Forward<T>(T value) where T : [Copy] {
                 if (!TryCreatePair(init var pair)) { return Identity(value); }
                 if (CopyFloat(pair.ReadSingle()) != float32(1) || pair.Wide != float64(2)) {
                     return Identity(value);
@@ -411,8 +413,8 @@ public sealed class FloatingLiteralBindingTests
             File.WriteAllBytes(path,
                 NativeEmitter.EmitLibrary(program, ["CopyFloat32", "CopyFloat64"], NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
-            var copyFloat32 = Export<Float32Copy>(library, "CopyFloat32");
-            var copyFloat64 = Export<Float64Copy>(library, "CopyFloat64");
+            var copyFloat32 = ExportFloat32Copy(library, "CopyFloat32");
+            var copyFloat64 = ExportFloat64Copy(library, "CopyFloat64");
             uint[] singleBits = [
                 0x00000000, 0x80000000, 0x00000001, 0x007FFFFF, 0x00800000,
                 0x3F800000, 0x7F800000, 0xFF800000, 0x7F800001, 0xFFC12345,
@@ -502,8 +504,8 @@ public sealed class FloatingLiteralBindingTests
             File.WriteAllBytes(path,
                 NativeEmitter.EmitLibrary(program, ["Read32", "Read64"], NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
-            var read32 = Export<Float32Selector>(library, "Read32");
-            var read64 = Export<Float64Selector>(library, "Read64");
+            var read32 = ExportFloat32Selector(library, "Read32");
+            var read64 = ExportFloat64Selector(library, "Read64");
             (int Selector, uint Bits)[] singleCases = [
                 (0, 0x00000000),
                 (1, 0x80000000),
@@ -543,8 +545,8 @@ public sealed class FloatingLiteralBindingTests
     public void EmitsRuntimeChar16ToFloatingConversions()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] float32 Narrow(char16 value) { return float32(value); }
-            [NoThrow] float64 Widen(char16 value) { return float64(value); }
+             float32 Narrow(char16 value) { return float32(value); }
+             float64 Widen(char16 value) { return float64(value); }
             int32 Main() {
                 char16 codeUnit = char16(55296);
                 return Narrow(codeUnit) == 55296.0 && Widen(codeUnit) == 55296.0 ? 42 : 0;
@@ -588,13 +590,20 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3013"),Is.True);
     }
 
-    [Test]
-    public void KeepsFloatingValuesOutsideConstEval()
+    [TestCase("float16")]
+    [TestCase("bfloat16")]
+    [TestCase("float32")]
+    [TestCase("float64")]
+    [TestCase("float128")]
+    [TestCase("decimal32")]
+    [TestCase("decimal64")]
+    [TestCase("decimal128")]
+    public void AcceptsFloatingScalarsInConstEval(string type)
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[ConstEval] int32 Read() { float32 value = 0.1; return 42; }"));
+        var source = $"[ConstEval] int32 Read() {{ const {type} value = 0.1; return 42; }}";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
 
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3024"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase("public char16 Convert(float32 value) { return char16(value); }")]
     [TestCase("public float32 Remainder(float32 left, float32 right) { return left % right; }")]
@@ -612,28 +621,28 @@ public sealed class FloatingLiteralBindingTests
     public void EmitsFloatingArithmeticAndIeeeComparisons()
     {
         var source = """
-            [NoThrow] public float32 Add32(float32 left, float32 right) { return left + right; }
-            [NoThrow] public float32 Subtract32(float32 left, float32 right) { return left - right; }
-            [NoThrow] public float32 Multiply32(float32 left, float32 right) { return left * right; }
-            [NoThrow] public float32 Divide32(float32 left, float32 right) { return left / right; }
-            [NoThrow] public float32 Nested32(float32 a, float32 b, float32 c, float32 d) { return (a + b) * c - d; }
-            [NoThrow] public bool Equal32(float32 left, float32 right) { return left == right; }
-            [NoThrow] public bool NotEqual32(float32 left, float32 right) { return left != right; }
-            [NoThrow] public bool Less32(float32 left, float32 right) { return left < right; }
-            [NoThrow] public bool LessEqual32(float32 left, float32 right) { return left <= right; }
-            [NoThrow] public bool Greater32(float32 left, float32 right) { return left > right; }
-            [NoThrow] public bool GreaterEqual32(float32 left, float32 right) { return left >= right; }
-            [NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; }
-            [NoThrow] public float64 Subtract64(float64 left, float64 right) { return left - right; }
-            [NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; }
-            [NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }
-            [NoThrow] public float64 Nested64(float64 a, float64 b, float64 c, float64 d) { return (a + b) * c - d; }
-            [NoThrow] public bool Equal64(float64 left, float64 right) { return left == right; }
-            [NoThrow] public bool NotEqual64(float64 left, float64 right) { return left != right; }
-            [NoThrow] public bool Less64(float64 left, float64 right) { return left < right; }
-            [NoThrow] public bool LessEqual64(float64 left, float64 right) { return left <= right; }
-            [NoThrow] public bool Greater64(float64 left, float64 right) { return left > right; }
-            [NoThrow] public bool GreaterEqual64(float64 left, float64 right) { return left >= right; }
+             public float32 Add32(float32 left, float32 right) { return left + right; }
+             public float32 Subtract32(float32 left, float32 right) { return left - right; }
+             public float32 Multiply32(float32 left, float32 right) { return left * right; }
+             public float32 Divide32(float32 left, float32 right) { return left / right; }
+             public float32 Nested32(float32 a, float32 b, float32 c, float32 d) { return (a + b) * c - d; }
+             public bool Equal32(float32 left, float32 right) { return left == right; }
+             public bool NotEqual32(float32 left, float32 right) { return left != right; }
+             public bool Less32(float32 left, float32 right) { return left < right; }
+             public bool LessEqual32(float32 left, float32 right) { return left <= right; }
+             public bool Greater32(float32 left, float32 right) { return left > right; }
+             public bool GreaterEqual32(float32 left, float32 right) { return left >= right; }
+             public float64 Add64(float64 left, float64 right) { return left + right; }
+             public float64 Subtract64(float64 left, float64 right) { return left - right; }
+             public float64 Multiply64(float64 left, float64 right) { return left * right; }
+             public float64 Divide64(float64 left, float64 right) { return left / right; }
+             public float64 Nested64(float64 a, float64 b, float64 c, float64 d) { return (a + b) * c - d; }
+             public bool Equal64(float64 left, float64 right) { return left == right; }
+             public bool NotEqual64(float64 left, float64 right) { return left != right; }
+             public bool Less64(float64 left, float64 right) { return left < right; }
+             public bool LessEqual64(float64 left, float64 right) { return left <= right; }
+             public bool Greater64(float64 left, float64 right) { return left > right; }
+             public bool GreaterEqual64(float64 left, float64 right) { return left >= right; }
             int32 Main() {
                 if (Add32(1.5, 2.25) != 3.75 || Subtract64(4.0, 1.5) != 2.5) { return 1; }
                 if (!Less32(1.0, 2.0) || !GreaterEqual64(2.0, 2.0)) { return 2; }
@@ -662,28 +671,28 @@ public sealed class FloatingLiteralBindingTests
             File.WriteAllBytes(path, NativeEmitter.EmitLibrary(program, exports, NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
 
-            var add32 = Export<Float32Binary>(library, "Add32");
-            var subtract32 = Export<Float32Binary>(library, "Subtract32");
-            var multiply32 = Export<Float32Binary>(library, "Multiply32");
-            var divide32 = Export<Float32Binary>(library, "Divide32");
-            var nested32 = Export<Float32FourOperands>(library, "Nested32");
-            var equal32 = Export<Float32Comparison>(library, "Equal32");
-            var notEqual32 = Export<Float32Comparison>(library, "NotEqual32");
-            var less32 = Export<Float32Comparison>(library, "Less32");
-            var lessEqual32 = Export<Float32Comparison>(library, "LessEqual32");
-            var greater32 = Export<Float32Comparison>(library, "Greater32");
-            var greaterEqual32 = Export<Float32Comparison>(library, "GreaterEqual32");
-            var add64 = Export<Float64Binary>(library, "Add64");
-            var subtract64 = Export<Float64Binary>(library, "Subtract64");
-            var multiply64 = Export<Float64Binary>(library, "Multiply64");
-            var divide64 = Export<Float64Binary>(library, "Divide64");
-            var nested64 = Export<Float64FourOperands>(library, "Nested64");
-            var equal64 = Export<Float64Comparison>(library, "Equal64");
-            var notEqual64 = Export<Float64Comparison>(library, "NotEqual64");
-            var less64 = Export<Float64Comparison>(library, "Less64");
-            var lessEqual64 = Export<Float64Comparison>(library, "LessEqual64");
-            var greater64 = Export<Float64Comparison>(library, "Greater64");
-            var greaterEqual64 = Export<Float64Comparison>(library, "GreaterEqual64");
+            var add32 = ExportFloat32Binary(library, "Add32");
+            var subtract32 = ExportFloat32Binary(library, "Subtract32");
+            var multiply32 = ExportFloat32Binary(library, "Multiply32");
+            var divide32 = ExportFloat32Binary(library, "Divide32");
+            var nested32 = ExportFloat32FourOperands(library, "Nested32");
+            var equal32 = ExportFloat32Comparison(library, "Equal32");
+            var notEqual32 = ExportFloat32Comparison(library, "NotEqual32");
+            var less32 = ExportFloat32Comparison(library, "Less32");
+            var lessEqual32 = ExportFloat32Comparison(library, "LessEqual32");
+            var greater32 = ExportFloat32Comparison(library, "Greater32");
+            var greaterEqual32 = ExportFloat32Comparison(library, "GreaterEqual32");
+            var add64 = ExportFloat64Binary(library, "Add64");
+            var subtract64 = ExportFloat64Binary(library, "Subtract64");
+            var multiply64 = ExportFloat64Binary(library, "Multiply64");
+            var divide64 = ExportFloat64Binary(library, "Divide64");
+            var nested64 = ExportFloat64FourOperands(library, "Nested64");
+            var equal64 = ExportFloat64Comparison(library, "Equal64");
+            var notEqual64 = ExportFloat64Comparison(library, "NotEqual64");
+            var less64 = ExportFloat64Comparison(library, "Less64");
+            var lessEqual64 = ExportFloat64Comparison(library, "LessEqual64");
+            var greater64 = ExportFloat64Comparison(library, "Greater64");
+            var greaterEqual64 = ExportFloat64Comparison(library, "GreaterEqual64");
 
             Assert.That(add32(0x3FC00000, 0x40100000), Is.EqualTo(0x40700000));
             Assert.That(subtract32(0x40800000, 0x3FC00000), Is.EqualTo(0x40200000));
@@ -738,12 +747,12 @@ public sealed class FloatingLiteralBindingTests
     public void FloatingArithmeticIgnoresAndRestoresAmbientMxcsr()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float32 Add(float32 left, float32 right) { return left + right; } "
-            + "[NoThrow] public float32 Multiply(float32 left, float32 right) { return left * right; } "
-            + "[NoThrow] public float32 Divide(float32 left, float32 right) { return left / right; } "
-            + "[NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; } "
-            + "[NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; } "
-            + "[NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }"));
+            " public float32 Add(float32 left, float32 right) { return left + right; } "
+            + " public float32 Multiply(float32 left, float32 right) { return left * right; } "
+            + " public float32 Divide(float32 left, float32 right) { return left / right; } "
+            + " public float64 Add64(float64 left, float64 right) { return left + right; } "
+            + " public float64 Multiply64(float64 left, float64 right) { return left * right; } "
+            + " public float64 Divide64(float64 left, float64 right) { return left / right; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual46 = compilation.Program; Assert.That(__nunitActual46, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual46!; }))();
         var path = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-float-mxcsr-{Guid.NewGuid():N}.dll");
@@ -756,12 +765,12 @@ public sealed class FloatingLiteralBindingTests
                 NativeEmitter.EmitLibrary(program, ["Add", "Multiply", "Divide", "Add64", "Multiply64", "Divide64"],
                     NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
-            var add = Export<Float32Binary>(library, "Add");
-            var multiply = Export<Float32Binary>(library, "Multiply");
-            var divide = Export<Float32Binary>(library, "Divide");
-            var add64 = Export<Float64Binary>(library, "Add64");
-            var multiply64 = Export<Float64Binary>(library, "Multiply64");
-            var divide64 = Export<Float64Binary>(library, "Divide64");
+            var add = ExportFloat32Binary(library, "Add");
+            var multiply = ExportFloat32Binary(library, "Multiply");
+            var divide = ExportFloat32Binary(library, "Divide");
+            var add64 = ExportFloat64Binary(library, "Add64");
+            var multiply64 = ExportFloat64Binary(library, "Multiply64");
+            var divide64 = ExportFloat64Binary(library, "Divide64");
             var alteredControl = (originalControl & ~floatingControlMask) | 0x01000200;
             WriteFloatingControl(alteredControl, floatingControlMask);
 
@@ -790,16 +799,16 @@ public sealed class FloatingLiteralBindingTests
     public void FloatingConversionsIgnoreAndRestoreAmbientMxcsr()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float32 Narrow(float64 value) { return float32(value); } "
-            + "[NoThrow] public float64 Widen(float32 value) { return float64(value); } "
-            + "[NoThrow] public float32 FromInt32(int32 value) { return float32(value); } "
-            + "[NoThrow] public float32 FromInt64(int64 value) { return float32(value); } "
-            + "[NoThrow] public float32 FromUInt32(uint32 value) { return float32(value); } "
-            + "[NoThrow] public float32 FromUInt64(uint64 value) { return float32(value); } "
-            + "[NoThrow] public float64 FromInt32Wide(int32 value) { return float64(value); } "
-            + "[NoThrow] public float64 FromInt64Wide(int64 value) { return float64(value); } "
-            + "[NoThrow] public float64 FromUInt32Wide(uint32 value) { return float64(value); } "
-            + "[NoThrow] public float64 FromUInt64Wide(uint64 value) { return float64(value); } "
+            " public float32 Narrow(float64 value) { return float32(value); } "
+            + " public float64 Widen(float32 value) { return float64(value); } "
+            + " public float32 FromInt32(int32 value) { return float32(value); } "
+            + " public float32 FromInt64(int64 value) { return float32(value); } "
+            + " public float32 FromUInt32(uint32 value) { return float32(value); } "
+            + " public float32 FromUInt64(uint64 value) { return float32(value); } "
+            + " public float64 FromInt32Wide(int32 value) { return float64(value); } "
+            + " public float64 FromInt64Wide(int64 value) { return float64(value); } "
+            + " public float64 FromUInt32Wide(uint32 value) { return float64(value); } "
+            + " public float64 FromUInt64Wide(uint64 value) { return float64(value); } "
             + "public int32 Catch(float64 value) { unsafe { try { return int32(value); } catch { return 42; } } }"),
             BoundRuntimePolicy.CheckedExceptions);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -816,17 +825,17 @@ public sealed class FloatingLiteralBindingTests
                         "FromInt32Wide", "FromInt64Wide", "FromUInt32Wide", "FromUInt64Wide", "Catch"],
                     NativeRuntimePolicy.CheckedExceptions));
             library = NativeLibrary.Load(path);
-            var narrow = Export<Float64ToFloat32>(library, "Narrow");
-            var widen = Export<Float32ToFloat64>(library, "Widen");
-            var fromInt32 = Export<Int32ToFloat32>(library, "FromInt32");
-            var fromInt64 = Export<Int64ToFloat32>(library, "FromInt64");
-            var fromUInt32 = Export<UInt32ToFloat32>(library, "FromUInt32");
-            var fromUInt64 = Export<UInt64ToFloat32>(library, "FromUInt64");
-            var fromInt32Wide = Export<Int32ToFloat64>(library, "FromInt32Wide");
-            var fromInt64Wide = Export<Int64ToFloat64>(library, "FromInt64Wide");
-            var fromUInt32Wide = Export<UInt32ToFloat64>(library, "FromUInt32Wide");
-            var fromUInt64Wide = Export<UInt64ToFloat64>(library, "FromUInt64Wide");
-            var catchConversion = Export<Float64ToInt32>(library, "Catch");
+            var narrow = ExportFloat64ToFloat32(library, "Narrow");
+            var widen = ExportFloat32ToFloat64(library, "Widen");
+            var fromInt32 = ExportInt32ToFloat32(library, "FromInt32");
+            var fromInt64 = ExportInt64ToFloat32(library, "FromInt64");
+            var fromUInt32 = ExportUInt32ToFloat32(library, "FromUInt32");
+            var fromUInt64 = ExportUInt64ToFloat32(library, "FromUInt64");
+            var fromInt32Wide = ExportInt32ToFloat64(library, "FromInt32Wide");
+            var fromInt64Wide = ExportInt64ToFloat64(library, "FromInt64Wide");
+            var fromUInt32Wide = ExportUInt32ToFloat64(library, "FromUInt32Wide");
+            var fromUInt64Wide = ExportUInt64ToFloat64(library, "FromUInt64Wide");
+            var catchConversion = ExportFloat64ToInt32(library, "Catch");
             var alteredControl = (originalControl & ~floatingControlMask) | 0x01000200;
             WriteFloatingControl(alteredControl, floatingControlMask);
 
@@ -876,9 +885,9 @@ public sealed class FloatingLiteralBindingTests
     [Test]
     public void EmitsRuntimeFloatingFormatConversions()
     {
-        var source = "[NoThrow] float64 Widen(float32 value) { return float64(value); } "
-            + "[NoThrow] float32 Narrow(float64 value) { return float32(value); } "
-            + "[NoThrow] int32 Main() { float64 wide = Widen(0.1); _ = Narrow(wide); return 42; }";
+        var source = " float64 Widen(float32 value) { return float64(value); } "
+            + " float32 Narrow(float64 value) { return float32(value); } "
+            + " int32 Main() { float64 wide = Widen(0.1); _ = Narrow(wide); return 42; }";
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
 
@@ -891,8 +900,8 @@ public sealed class FloatingLiteralBindingTests
     public void FloatingArithmeticPersistsThroughSemanticModules()
     {
         var producerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float64 Add(float64 left, float64 right) { return left + right; } "
-            + "[NoThrow] public bool Less(float64 left, float64 right) { return left < right; }"));
+            " public float64 Add(float64 left, float64 right) { return left + right; } "
+            + " public bool Less(float64 left, float64 right) { return left < right; }"));
         Assert.That(producerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, producerCompilation.Diagnostics));
         var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual51 = producerCompilation.Program; Assert.That(__nunitActual51, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual51!; }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Add", "Less"]);
@@ -915,16 +924,16 @@ public sealed class FloatingLiteralBindingTests
     public void RuntimeFloatingFormatConversionsUseIeeeRounding()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public float64 Widen(float32 value) { return float64(value); } "
-            + "[NoThrow] public float32 Narrow(float64 value) { return float32(value); } "
-            + "[NoThrow] public float32 FromInt32(int32 value) { return float32(value); } "
-            + "[NoThrow] public float64 FromUInt64(uint64 value) { return float64(value); } "
-            + "[NoThrow] public float32 FromUInt64Single(uint64 value) { return float32(value); } "
-            + "[NoThrow] public float64 FromUInt32(uint32 value) { return float64(value); } "
-            + "[NoThrow] public float32 FromInt64(int64 value) { return float32(value); } "
-            + "[NoThrow] public float64 FromInt32Wide(int32 value) { return float64(value); } "
-            + "[NoThrow] public float32 FromUInt32Single(uint32 value) { return float32(value); } "
-            + "[NoThrow] public float64 FromInt64Wide(int64 value) { return float64(value); }"));
+            " public float64 Widen(float32 value) { return float64(value); } "
+            + " public float32 Narrow(float64 value) { return float32(value); } "
+            + " public float32 FromInt32(int32 value) { return float32(value); } "
+            + " public float64 FromUInt64(uint64 value) { return float64(value); } "
+            + " public float32 FromUInt64Single(uint64 value) { return float32(value); } "
+            + " public float64 FromUInt32(uint32 value) { return float64(value); } "
+            + " public float32 FromInt64(int64 value) { return float32(value); } "
+            + " public float64 FromInt32Wide(int32 value) { return float64(value); } "
+            + " public float32 FromUInt32Single(uint32 value) { return float32(value); } "
+            + " public float64 FromInt64Wide(int64 value) { return float64(value); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual53 = compilation.Program; Assert.That(__nunitActual53, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual53!; }))();
 
@@ -939,26 +948,16 @@ public sealed class FloatingLiteralBindingTests
                     NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
 
-            var widen = Marshal.GetDelegateForFunctionPointer<Float32ToFloat64>(
-                NativeLibrary.GetExport(library, "Widen"));
-            var narrow = Marshal.GetDelegateForFunctionPointer<Float64ToFloat32>(
-                NativeLibrary.GetExport(library, "Narrow"));
-            var fromInt32 = Marshal.GetDelegateForFunctionPointer<Int32ToFloat32>(
-                NativeLibrary.GetExport(library, "FromInt32"));
-            var fromUInt64 = Marshal.GetDelegateForFunctionPointer<UInt64ToFloat64>(
-                NativeLibrary.GetExport(library, "FromUInt64"));
-            var fromUInt64Single = Marshal.GetDelegateForFunctionPointer<UInt64ToFloat32>(
-                NativeLibrary.GetExport(library, "FromUInt64Single"));
-            var fromUInt32 = Marshal.GetDelegateForFunctionPointer<UInt32ToFloat64>(
-                NativeLibrary.GetExport(library, "FromUInt32"));
-            var fromInt64 = Marshal.GetDelegateForFunctionPointer<Int64ToFloat32>(
-                NativeLibrary.GetExport(library, "FromInt64"));
-            var fromInt32Wide = Marshal.GetDelegateForFunctionPointer<Int32ToFloat64>(
-                NativeLibrary.GetExport(library, "FromInt32Wide"));
-            var fromUInt32Single = Marshal.GetDelegateForFunctionPointer<UInt32ToFloat32>(
-                NativeLibrary.GetExport(library, "FromUInt32Single"));
-            var fromInt64Wide = Marshal.GetDelegateForFunctionPointer<Int64ToFloat64>(
-                NativeLibrary.GetExport(library, "FromInt64Wide"));
+            var widen = ExportFloat32ToFloat64(library, "Widen");
+            var narrow = ExportFloat64ToFloat32(library, "Narrow");
+            var fromInt32 = ExportInt32ToFloat32(library, "FromInt32");
+            var fromUInt64 = ExportUInt64ToFloat64(library, "FromUInt64");
+            var fromUInt64Single = ExportUInt64ToFloat32(library, "FromUInt64Single");
+            var fromUInt32 = ExportUInt32ToFloat64(library, "FromUInt32");
+            var fromInt64 = ExportInt64ToFloat32(library, "FromInt64");
+            var fromInt32Wide = ExportInt32ToFloat64(library, "FromInt32Wide");
+            var fromUInt32Single = ExportUInt32ToFloat32(library, "FromUInt32Single");
+            var fromInt64Wide = ExportInt64ToFloat64(library, "FromInt64Wide");
 
             Assert.That(widen(unchecked((int)0x3DCCCCCD)), Is.EqualTo(0x3FB99999A0000000L));
             Assert.That(narrow(0x3FF0000010000000L), Is.EqualTo(0x3F800000));
@@ -1013,22 +1012,14 @@ public sealed class FloatingLiteralBindingTests
                     NativeRuntimePolicy.FailFast));
             library = NativeLibrary.Load(path);
 
-            var fromFloat64ToInt32 = Marshal.GetDelegateForFunctionPointer<Float64ToInt32>(
-                NativeLibrary.GetExport(library, "FromFloat64ToInt32"));
-            var fromFloat64ToUInt32 = Marshal.GetDelegateForFunctionPointer<Float64ToUInt32>(
-                NativeLibrary.GetExport(library, "FromFloat64ToUInt32"));
-            var fromFloat64ToInt64 = Marshal.GetDelegateForFunctionPointer<Float64ToInt64>(
-                NativeLibrary.GetExport(library, "FromFloat64ToInt64"));
-            var fromFloat64ToUInt64 = Marshal.GetDelegateForFunctionPointer<Float64ToUInt64>(
-                NativeLibrary.GetExport(library, "FromFloat64ToUInt64"));
-            var fromFloat32ToInt32 = Marshal.GetDelegateForFunctionPointer<Float32ToInt32>(
-                NativeLibrary.GetExport(library, "FromFloat32ToInt32"));
-            var fromFloat32ToUInt32 = Marshal.GetDelegateForFunctionPointer<Float32ToUInt32>(
-                NativeLibrary.GetExport(library, "FromFloat32ToUInt32"));
-            var fromFloat32ToInt64 = Marshal.GetDelegateForFunctionPointer<Float32ToInt64>(
-                NativeLibrary.GetExport(library, "FromFloat32ToInt64"));
-            var fromFloat32ToUInt64 = Marshal.GetDelegateForFunctionPointer<Float32ToUInt64>(
-                NativeLibrary.GetExport(library, "FromFloat32ToUInt64"));
+            var fromFloat64ToInt32 = ExportFloat64ToInt32(library, "FromFloat64ToInt32");
+            var fromFloat64ToUInt32 = ExportFloat64ToUInt32(library, "FromFloat64ToUInt32");
+            var fromFloat64ToInt64 = ExportFloat64ToInt64(library, "FromFloat64ToInt64");
+            var fromFloat64ToUInt64 = ExportFloat64ToUInt64(library, "FromFloat64ToUInt64");
+            var fromFloat32ToInt32 = ExportFloat32ToInt32(library, "FromFloat32ToInt32");
+            var fromFloat32ToUInt32 = ExportFloat32ToUInt32(library, "FromFloat32ToUInt32");
+            var fromFloat32ToInt64 = ExportFloat32ToInt64(library, "FromFloat32ToInt64");
+            var fromFloat32ToUInt64 = ExportFloat32ToUInt64(library, "FromFloat32ToUInt64");
 
             Assert.That(fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(1.9)), Is.EqualTo(1));
             Assert.That(fromFloat64ToInt32(BitConverter.DoubleToInt64Bits(-1.9)), Is.EqualTo(-1));
@@ -1099,8 +1090,7 @@ public sealed class FloatingLiteralBindingTests
             File.WriteAllBytes(path,
                 NativeEmitter.EmitLibrary(program, ["Catch"], NativeRuntimePolicy.CheckedExceptions));
             library = NativeLibrary.Load(path);
-            var catchConversion = Marshal.GetDelegateForFunctionPointer<Float64ToInt32>(
-                NativeLibrary.GetExport(library, "Catch"));
+            var catchConversion = ExportFloat64ToInt32(library, "Catch");
 
             Assert.That(catchConversion(BitConverter.DoubleToInt64Bits(double.NaN)), Is.EqualTo(42));
             Assert.That(catchConversion(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)), Is.EqualTo(42));
@@ -1120,9 +1110,199 @@ public sealed class FloatingLiteralBindingTests
     public void FloatingToIntegerConversionsRemainCheckedOperations()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public int32 Convert(float64 value) { return int32(value); }"));
+            " public int32 Convert(float64 value) { return int32(value); }"));
 
-        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoThrow(compilation.Program!, "Convert");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+    }
+
+    private static Float32ToFloat64 ExportFloat32ToFloat64(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32ToFloat64>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(BitConverter.Int32BitsToSingle(value)));
+    }
+
+    private static Float64ToFloat32 ExportFloat64ToFloat32(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64ToFloat32>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(BitConverter.Int64BitsToDouble(value)));
+    }
+
+    private static UInt64ToFloat32 ExportUInt64ToFloat32(IntPtr library, string name)
+    {
+        var native = Export<NativeUInt64ToFloat32>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(value));
+    }
+
+    private static UInt64ToFloat64 ExportUInt64ToFloat64(IntPtr library, string name)
+    {
+        var native = Export<NativeUInt64ToFloat64>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(value));
+    }
+
+    private static Int32ToFloat32 ExportInt32ToFloat32(IntPtr library, string name)
+    {
+        var native = Export<NativeInt32ToFloat32>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(value));
+    }
+
+    private static UInt32ToFloat64 ExportUInt32ToFloat64(IntPtr library, string name)
+    {
+        var native = Export<NativeUInt32ToFloat64>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(value));
+    }
+
+    private static Int64ToFloat32 ExportInt64ToFloat32(IntPtr library, string name)
+    {
+        var native = Export<NativeInt64ToFloat32>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(value));
+    }
+
+    private static Int32ToFloat64 ExportInt32ToFloat64(IntPtr library, string name)
+    {
+        var native = Export<NativeInt32ToFloat64>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(value));
+    }
+
+    private static UInt32ToFloat32 ExportUInt32ToFloat32(IntPtr library, string name)
+    {
+        var native = Export<NativeUInt32ToFloat32>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(value));
+    }
+
+    private static Int64ToFloat64 ExportInt64ToFloat64(IntPtr library, string name)
+    {
+        var native = Export<NativeInt64ToFloat64>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(value));
+    }
+
+    private static Char16ToFloat32 ExportChar16ToFloat32(IntPtr library, string name)
+    {
+        var native = Export<NativeChar16ToFloat32>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(value));
+    }
+
+    private static Char16ToFloat64 ExportChar16ToFloat64(IntPtr library, string name)
+    {
+        var native = Export<NativeChar16ToFloat64>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(value));
+    }
+
+    private static Float64ToInt32 ExportFloat64ToInt32(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64ToInt32>(library, name);
+        return value => native(BitConverter.Int64BitsToDouble(value));
+    }
+
+    private static Float64ToUInt32 ExportFloat64ToUInt32(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64ToUInt32>(library, name);
+        return value => native(BitConverter.Int64BitsToDouble(value));
+    }
+
+    private static Float64ToInt64 ExportFloat64ToInt64(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64ToInt64>(library, name);
+        return value => native(BitConverter.Int64BitsToDouble(value));
+    }
+
+    private static Float64ToUInt64 ExportFloat64ToUInt64(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64ToUInt64>(library, name);
+        return value => native(BitConverter.Int64BitsToDouble(value));
+    }
+
+    private static Float32ToInt32 ExportFloat32ToInt32(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32ToInt32>(library, name);
+        return value => native(BitConverter.Int32BitsToSingle(value));
+    }
+
+    private static Float32ToUInt32 ExportFloat32ToUInt32(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32ToUInt32>(library, name);
+        return value => native(BitConverter.Int32BitsToSingle(value));
+    }
+
+    private static Float32ToInt64 ExportFloat32ToInt64(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32ToInt64>(library, name);
+        return value => native(BitConverter.Int32BitsToSingle(value));
+    }
+
+    private static Float32ToUInt64 ExportFloat32ToUInt64(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32ToUInt64>(library, name);
+        return value => native(BitConverter.Int32BitsToSingle(value));
+    }
+
+    private static Float32Binary ExportFloat32Binary(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32Binary>(library, name);
+        return (left, right) => BitConverter.SingleToInt32Bits(
+            native(BitConverter.Int32BitsToSingle(left), BitConverter.Int32BitsToSingle(right)));
+    }
+
+    private static Float64Binary ExportFloat64Binary(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64Binary>(library, name);
+        return (left, right) => BitConverter.DoubleToInt64Bits(
+            native(BitConverter.Int64BitsToDouble(left), BitConverter.Int64BitsToDouble(right)));
+    }
+
+    private static Float32Copy ExportFloat32Copy(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32Copy>(library, name);
+        return value => BitConverter.SingleToInt32Bits(native(BitConverter.Int32BitsToSingle(value)));
+    }
+
+    private static Float64Copy ExportFloat64Copy(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64Copy>(library, name);
+        return value => BitConverter.DoubleToInt64Bits(native(BitConverter.Int64BitsToDouble(value)));
+    }
+
+    private static Float32Selector ExportFloat32Selector(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32Selector>(library, name);
+        return selector => BitConverter.SingleToInt32Bits(native(selector));
+    }
+
+    private static Float64Selector ExportFloat64Selector(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64Selector>(library, name);
+        return selector => BitConverter.DoubleToInt64Bits(native(selector));
+    }
+
+    private static Float32FourOperands ExportFloat32FourOperands(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32FourOperands>(library, name);
+        return (a, b, c, d) => BitConverter.SingleToInt32Bits(native(
+            BitConverter.Int32BitsToSingle(a), BitConverter.Int32BitsToSingle(b),
+            BitConverter.Int32BitsToSingle(c), BitConverter.Int32BitsToSingle(d)));
+    }
+
+    private static Float64FourOperands ExportFloat64FourOperands(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64FourOperands>(library, name);
+        return (a, b, c, d) => BitConverter.DoubleToInt64Bits(native(
+            BitConverter.Int64BitsToDouble(a), BitConverter.Int64BitsToDouble(b),
+            BitConverter.Int64BitsToDouble(c), BitConverter.Int64BitsToDouble(d)));
+    }
+
+    private static Float32Comparison ExportFloat32Comparison(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat32Comparison>(library, name);
+        return (left, right) => native(
+            BitConverter.Int32BitsToSingle(left), BitConverter.Int32BitsToSingle(right));
+    }
+
+    private static Float64Comparison ExportFloat64Comparison(IntPtr library, string name)
+    {
+        var native = Export<NativeFloat64Comparison>(library, name);
+        return (left, right) => native(
+            BitConverter.Int64BitsToDouble(left), BitConverter.Int64BitsToDouble(right));
     }
 
     private static T Export<T>(IntPtr library, string name) where T : Delegate =>

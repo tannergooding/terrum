@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using System.Threading;
 using Terrum.CodeAnalysis.Diagnostics;
@@ -6090,6 +6092,19 @@ internal sealed partial class Binder
                     expression = signedLiteral;
                     break;
                 }
+                if (op.Kind is TokenKind.Plus or TokenKind.Minus
+                    && operandNode.Kind == SyntaxKind.LiteralExpression
+                    && operandType is PrimitiveType.Float16 or PrimitiveType.BFloat16
+                        or PrimitiveType.Float128 or PrimitiveType.Decimal32
+                        or PrimitiveType.Decimal64 or PrimitiveType.Decimal128
+                    && TryBindSignedWideFloatingLiteral(
+                        ((SyntaxTokenElement)operandNode.Children[0]).Token,
+                        operandType, op.Kind == TokenKind.Minus, node.Span,
+                        out var signedFloatingLiteral))
+                {
+                    expression = signedFloatingLiteral;
+                    break;
+                }
 
                 var operandContext = operandType == PrimitiveType.Bool ? operandType
                     : expected is PrimitiveType.Int8 or PrimitiveType.Int16
@@ -6813,14 +6828,21 @@ internal sealed partial class Binder
             "int128" => PrimitiveType.Int128,
             "uint128" => PrimitiveType.UInt128,
             "char16" => PrimitiveType.Char16,
+            "float16" => PrimitiveType.Float16,
+            "bfloat16" => PrimitiveType.BFloat16,
             "float32" => PrimitiveType.Float32,
             "float64" => PrimitiveType.Float64,
+            "float128" => PrimitiveType.Float128,
+            "decimal32" => PrimitiveType.Decimal32,
+            "decimal64" => PrimitiveType.Decimal64,
+            "decimal128" => PrimitiveType.Decimal128,
             _ => PrimitiveType.Int32,
         };
         return name is "char8" or "char16" or "char32" or "rune"
             or "int8" or "int16" or "int32" or "int64" or "int128"
             or "uint8" or "uint16" or "uint32" or "uint64" or "uint128"
-            or "float32" or "float64";
+            or "float16" or "bfloat16" or "float32" or "float64" or "float128"
+            or "decimal32" or "decimal64" or "decimal128";
     }
 
     private BoundExpression BindConversionCall(SyntaxNode node, SyntaxNode arguments, PrimitiveType target)
@@ -7518,6 +7540,21 @@ internal sealed partial class Binder
             Report("TRM3013", "Floating-point literal is outside its target format.", token.Span);
             return ErrorExpression(token.Span);
         }
+        if (expected is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128
+            or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128)
+        {
+            if (FloatingLiteralParser.TryParseWide(text.AsSpan(), expected.Value, out var wideFloatingValue))
+            {
+                return new BoundConstant(wideFloatingValue, expected.Value, token.Span);
+            }
+            Report("TRM3013", "Floating-point literal is outside its target format.", token.Span);
+            return ErrorExpression(token.Span);
+        }
+        if (expected is PrimitiveType.Int128 or PrimitiveType.UInt128
+            && TryBindWideIntegerLiteral(token, expected.Value, out var wideIntegerLiteral))
+        {
+            return wideIntegerLiteral;
+        }
         var digits = text.AsSpan();
         var hasDecodedIntegers = _tree.HasDecodedIntegers;
         ulong parsed = 0;
@@ -7592,6 +7629,11 @@ internal sealed partial class Binder
         bool negative, TextSpan span, out BoundConstant constant)
     {
         constant = ErrorExpression(span);
+        if (token.Kind == TokenKind.NumericLiteral
+            && type is PrimitiveType.Int128 or PrimitiveType.UInt128)
+        {
+            return TryBindSignedWideIntegerLiteral(token, type, negative, span, out constant);
+        }
         if (token.Kind != TokenKind.NumericLiteral
             || type is not (PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
                 or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16
@@ -7651,6 +7693,127 @@ internal sealed partial class Binder
         };
         constant = new BoundConstant(value, type, span);
         return true;
+    }
+
+    private bool TryBindWideIntegerLiteral(SyntaxToken token, PrimitiveType type,
+        out BoundConstant constant)
+    {
+        constant = ErrorExpression(token.Span);
+        if (token.Kind != TokenKind.NumericLiteral
+            || type is not (PrimitiveType.Int128 or PrimitiveType.UInt128))
+        {
+            return false;
+        }
+        if (!TryParseWideIntegerMagnitude(token, out var magnitude))
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
+
+        var based = ScannerHost.IntegerRadix(_tree.Source.GetSubText(token.Span).AsSpan()) != 10;
+        BigInteger value;
+        if (type == PrimitiveType.Int128 && based)
+        {
+            var modulus = BigInteger.One << 128;
+            if (magnitude >= modulus)
+            {
+                Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+                return true;
+            }
+            var signBit = BigInteger.One << 127;
+            value = magnitude >= signBit ? magnitude - modulus : magnitude;
+        }
+        else
+        {
+            var maximum = type == PrimitiveType.Int128
+                ? (BigInteger.One << 127) - BigInteger.One
+                : (BigInteger.One << 128) - BigInteger.One;
+            if (magnitude > maximum)
+            {
+                Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+                return true;
+            }
+            value = magnitude;
+        }
+
+        if (!ScalarBits.TryFromIntegerValue(value, type, out var bits))
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
+        constant = new BoundConstant(bits, type, token.Span);
+        return true;
+    }
+
+    private bool TryBindSignedWideIntegerLiteral(SyntaxToken token, PrimitiveType type,
+        bool negative, TextSpan span, out BoundConstant constant)
+    {
+        constant = ErrorExpression(span);
+        if (negative && type == PrimitiveType.UInt128)
+        {
+            return false;
+        }
+        if (!TryParseWideIntegerMagnitude(token, out var magnitude))
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
+
+        var maximum = type == PrimitiveType.Int128
+            ? negative ? BigInteger.One << 127 : (BigInteger.One << 127) - BigInteger.One
+            : (BigInteger.One << 128) - BigInteger.One;
+        if (magnitude > maximum)
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
+
+        var value = negative ? -magnitude : magnitude;
+        if (!ScalarBits.TryFromIntegerValue(value, type, out var bits))
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
+        constant = new BoundConstant(bits, type, span);
+        return true;
+    }
+
+    private bool TryBindSignedWideFloatingLiteral(SyntaxToken token, PrimitiveType type,
+        bool negative, TextSpan span, out BoundConstant constant)
+    {
+        constant = ErrorExpression(span);
+        var spelling = _tree.Source.GetSubText(token.Span);
+        if (negative)
+        {
+            spelling = string.Concat("-", spelling);
+        }
+        else
+        {
+            spelling = string.Concat("+", spelling);
+        }
+        if (!FloatingLiteralParser.TryParseWide(spelling.AsSpan(), type, out var bits))
+        {
+            Report("TRM3013", "Floating-point literal is outside its target format.", token.Span);
+            return true;
+        }
+        constant = new BoundConstant(bits, type, span);
+        return true;
+    }
+
+    private bool TryParseWideIntegerMagnitude(SyntaxToken token, out BigInteger magnitude)
+    {
+        var text = _tree.Source.GetSubText(token.Span).AsSpan();
+        var radix = ScannerHost.IntegerRadix(text);
+        var digits = (radix == 10 ? text : text[2..]).ToString()
+            .Replace("_", "", StringComparison.Ordinal);
+        var parseText = radix == 10 ? digits : string.Concat("0", digits);
+        var styles = radix switch {
+            2 => NumberStyles.AllowBinarySpecifier,
+            10 => NumberStyles.None,
+            16 => NumberStyles.AllowHexSpecifier,
+            _ => NumberStyles.None,
+        };
+        return BigInteger.TryParse(parseText, styles, CultureInfo.InvariantCulture, out magnitude);
     }
 
     private static bool IsUnicodeScalar(uint value)

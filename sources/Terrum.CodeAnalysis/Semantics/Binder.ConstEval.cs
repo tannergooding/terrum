@@ -40,7 +40,10 @@ internal sealed partial class Binder
         type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
             or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
             or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
-            or PrimitiveType.UInt64 or PrimitiveType.Int128 or PrimitiveType.UInt128;
+            or PrimitiveType.UInt64 or PrimitiveType.Int128 or PrimitiveType.UInt128
+            or PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float32
+            or PrimitiveType.Float64 or PrimitiveType.Float128 or PrimitiveType.Decimal32
+            or PrimitiveType.Decimal64 or PrimitiveType.Decimal128;
 
     private bool ResolveRequiredConstants(ImmutableArray<BoundFunction>.Builder functions)
     {
@@ -1128,7 +1131,11 @@ internal sealed partial class Binder
 
     private static bool IsStaticProofScalar(PrimitiveType type) =>
         PrimitiveTypeFacts.ScalarWidth(type) is > 0 and <= sizeof(ulong)
-            && (ConstEvalScalar(type) || type is PrimitiveType.Float32 or PrimitiveType.Float64);
+            && type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16
+                or PrimitiveType.Char32 or PrimitiveType.Rune or PrimitiveType.Int8
+                or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.Int64
+                or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+                or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private bool AreStaticProofStableArguments(ImmutableArray<BoundExpression> arguments)
     {

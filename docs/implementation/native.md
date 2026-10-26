@@ -147,6 +147,18 @@ and floating-to-integer frontend projections remain provisional. The
 below distinguish those implementation paths from complete conformance.
 Custom literal parsing and registered literal targets remain unsupported.
 
+The hosted Windows x64 emitter now preserves all bits through joint nonforeign
+identity/copy calls for `int128`, `uint128`, `float16`, `bfloat16`, `float128`
+and the three decimal formats. It uses the selected profile's low-XMM
+`float16`/`bfloat16` carriers, indirect `float128` arguments and XMM0 result,
+and indirect/hidden-result carriers for 128-bit integers and decimal128;
+decimal32/64 retain same-width integer-bit carriers. Direct foreign primitive
+signatures remain unsupported. Source binding now constructs exact wide integer,
+binary floating and BID decimal literals, including explicit `T(literal)`
+target selection and fixed-scalar `ConstEval` values. Wide operators/conversions,
+standard register-Body CallSite execution, and independent module-call
+replacement conformance remain separate gaps.
+
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`
 expressions. It substitutes successful required values before verification

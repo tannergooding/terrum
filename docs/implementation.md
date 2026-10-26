@@ -63,14 +63,19 @@ signatures; managed-class dependency closures remain separate. Public generic
 exports and executable TRRM support remain separate. The native backend emits
 Terrum-owned code; CIL is neither a dependency nor the default.
 
-Required constants and static proofs currently use the hosted scalar evaluator:
-`bool`, `char16`, `int32`, `uint32`, `int64`, and `uint64` with eligible `[ConstEval]` bodies
-supporting scalar locals, assignments, branches, loops, returns, and calls to
-other `[ConstEval]` functions. Its implementation limits are 4,096 interpreted
-statement steps and a call-depth limit of 64; these are not portable
-guarantees. Static proof support does not yet implement a general built-in
-predicate-refinement catalog for runtime values, so it does not fulfill the
-accepted v1 proof-floor scope.
+Required constants and `[ConstEval]` bodies admit fixed scalar values:
+`bool`, `char8`/`char16`/`char32`/`rune`, signed and unsigned 8/16/32/64/128-bit
+integers, binary16/`bfloat16`/binary32/64/128, and decimal32/64/128. Numeric
+literals construct directly in their selected target format, including exact
+wide integer bits, binary rounding and subnormals, and BID decimal cohorts.
+`nint`/`nuint` remain outside the fixed-scalar value-registration candidate.
+Eligible `[ConstEval]` bodies support scalar locals, assignments, branches,
+loops, returns, and calls to other `[ConstEval]` functions, subject to the
+currently implemented operation matrix; wide scalar operators remain
+unsupported. The evaluator limits are 4,096 interpreted statement steps and a
+call-depth limit of 64; these are not portable guarantees. Static proof support
+does not yet implement a general built-in predicate-refinement catalog for
+runtime values, so it does not fulfill the accepted v1 proof-floor scope.
 
 Current profile markers are syntax language version 46, semantic-module base
 revision 76, the provisionally implemented but unapproved private arithmetic

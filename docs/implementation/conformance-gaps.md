@@ -850,10 +850,11 @@ with behavior-specific variants are approved; semantic tuple comparison and
 the absence of serialized sort-key fields are approved.
 
 **Current/evidence:** `Binder.ConstEval` retains private depth 64/work 4096
-limits and admits only bool/char16/int32/uint32/int64/uint64 evaluator values.
-`ConstEvalTests` tests those private boundaries. The
-[implementation inventory](../implementation.md) explicitly does not claim
-the complete portable floor.
+limits and admits the returnable fixed scalar set except `nint`/`nuint`; wide
+scalar operator support is still incomplete. `ConstEvalTests`,
+`WideScalarLiteralTests`, and supervised wide-literal PE/JIT coverage exercise
+the current boundaries. The [implementation inventory](../implementation.md)
+explicitly does not claim the complete portable floor.
 
 **Routes/gate:** implement selected proof facts, executed-path ordinary/pure/
 constant forms, actual failure/effects and the minimum admitted value domain.

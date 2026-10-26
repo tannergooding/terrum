@@ -6,7 +6,7 @@ using System.Numerics;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
-internal static class FloatingLiteralParser
+internal static partial class FloatingLiteralParser
 {
     internal static bool TryParse(ReadOnlySpan<char> text, PrimitiveType type, out long value)
     {
