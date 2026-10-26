@@ -1756,8 +1756,10 @@ internal sealed partial class PeCompiler
                 return Math.Max(PrimitiveTypeFacts.IsWideInteger(unary.Type) ? 2 : 0,
                     ExpressionSpills(unary.Operand, ref maximumArguments));
             case BoundUpdate update:
-                return Math.Max(PrimitiveTypeFacts.IsWideInteger(update.Type) ? 5
-                    : PrimitiveTypeFacts.IsFloating(update.Type) ? 5 : 3, update.Place switch {
+                var requiredUpdateSpills = PrimitiveTypeFacts.IsWideInteger(update.Type) ? 5
+                    : update.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16 ? 18
+                    : PrimitiveTypeFacts.IsFloating(update.Type) ? 5 : 3;
+                return Math.Max(requiredUpdateSpills, update.Place switch {
                     BoundFieldRead field => ExpressionSpills(field.Receiver, ref maximumArguments),
                     BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
                     _ => 0,
@@ -1769,6 +1771,7 @@ internal sealed partial class PeCompiler
                         TokenKind.Slash or TokenKind.Percent => 9,
                         _ => 3,
                     }
+                    : compound.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16 ? 18
                     : PrimitiveTypeFacts.IsFloating(compound.Type)
                         ? CompoundOperators.Binary(compound.Operator) == TokenKind.Percent ? 6 : 5
                         : 3;
@@ -1834,8 +1837,12 @@ internal sealed partial class PeCompiler
                         TokenKind.Slash or TokenKind.Percent => 7,
                         _ => 3,
                     }
-                    : binary.Operator == TokenKind.Percent
-                        && PrimitiveTypeFacts.IsFloating(binary.Left.Type) ? 4 : 3;
+                    : binary.Left.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+                        ? IsFloatingComparison(binary.Operator) ? 6
+                            : binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                                or TokenKind.Slash or TokenKind.Percent ? 16 : 3
+                        : binary.Operator == TokenKind.Percent
+                            && PrimitiveTypeFacts.IsFloating(binary.Left.Type) ? 4 : 3;
                 return Math.Max(requiredBinarySpills,
                     Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
                         1 + ExpressionSpills(binary.Right, ref maximumArguments)));
@@ -2290,10 +2297,48 @@ internal sealed partial class PeCompiler
     private static void EnsureSupportedNativeFloatingOperator(PrimitiveType type)
     {
         if (PrimitiveTypeFacts.IsFloating(type)
-            && type is not (PrimitiveType.Float32 or PrimitiveType.Float64))
+            && type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
+                or PrimitiveType.Float32 or PrimitiveType.Float64))
         {
             throw new NotSupportedException(
-                "Native floating operator lowering currently supports float32 and float64 only.");
+                "Native floating operator lowering currently supports binary16/bfloat16/float32/float64 only.");
+        }
+    }
+    private static void EnsureSupportedNativeFloatingUnary(PrimitiveType type, TokenKind operation)
+    {
+        if (PrimitiveTypeFacts.IsFloating(type)
+            && (type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
+                or PrimitiveType.Float32 or PrimitiveType.Float64)
+                || operation is not (TokenKind.Plus or TokenKind.Minus)))
+        {
+            throw new NotSupportedException(
+                "Native floating unary lowering currently supports sign operations for binary16/bfloat16/float32/float64.");
+        }
+    }
+    private static bool IsFloatingComparison(TokenKind operation) =>
+        operation is TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less
+            or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
+
+    private static void EnsureSupportedNativeFloatingBinary(
+        PrimitiveType type, TokenKind operation)
+    {
+        var narrowComparison = type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+            && IsFloatingComparison(operation);
+        var narrowAddOrSubtract = type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+            && operation is TokenKind.Plus or TokenKind.Minus;
+        var narrowMultiply = type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+            && operation == TokenKind.Star;
+        var narrowDivide = type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+            && operation == TokenKind.Slash;
+        var narrowRemainder = type is PrimitiveType.Float16 or PrimitiveType.BFloat16
+            && operation == TokenKind.Percent;
+        if (PrimitiveTypeFacts.IsFloating(type)
+            && type is not (PrimitiveType.Float32 or PrimitiveType.Float64)
+            && !narrowComparison && !narrowAddOrSubtract && !narrowMultiply
+            && !narrowDivide && !narrowRemainder)
+        {
+            throw new NotSupportedException(
+                "Native floating binary lowering currently supports float16/bfloat16 comparisons and arithmetic, plus float32/float64 operators.");
         }
     }
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
@@ -4109,7 +4154,7 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundUnary unary:
-                EnsureSupportedNativeFloatingOperator(unary.Type);
+                EnsureSupportedNativeFloatingUnary(unary.Type, unary.Operator);
                 Expression(unary.Operand, spill);
                 if (PrimitiveTypeFacts.IsWideInteger(unary.Type))
                 {
@@ -4125,7 +4170,12 @@ internal sealed partial class PeCompiler
                 switch (unary.Operator)
                 {
                     case TokenKind.Minus:
-                        if (unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                        if (unary.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16)
+                        {
+                            _code.Byte(0x35);
+                            _code.Int32(0x8000);
+                        }
+                        else if (unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                         {
                             if (unary.Type == PrimitiveType.Float64)
                             {
@@ -4204,6 +4254,15 @@ internal sealed partial class PeCompiler
                     _code.Address(Spill(spill + 4));
                     _code.CopyMemory(Size(update.Type));
                 }
+                else if (update.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16)
+                {
+                    _code.Byte(0xB8);
+                    _code.Int32(update.Type == PrimitiveType.Float16 ? 0x3C00 : 0x3F80);
+                    FloatingNarrowBinary(update.Operator == TokenKind.PlusPlus
+                        ? TokenKind.Plus : TokenKind.Minus, update.Type, spill + 2);
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
+                }
                 else if (update.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                 {
                     if (update.Type == PrimitiveType.Float32)
@@ -4225,7 +4284,8 @@ internal sealed partial class PeCompiler
                     _code.Byte(0x48);
                 }
                 if (!PrimitiveTypeFacts.IsWideInteger(update.Type)
-                    && update.Type is not (PrimitiveType.Float32 or PrimitiveType.Float64))
+                    && update.Type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
+                        or PrimitiveType.Float32 or PrimitiveType.Float64))
                 {
                     _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
                     if (IsNarrowInteger(update.Type))
@@ -4302,6 +4362,13 @@ internal sealed partial class PeCompiler
                     _code.Load64(Spill(spill + 1), destinationRegister: true);
                     _code.Address(Spill(spill + 2));
                     _code.CopyMemory(Size(compound.Type));
+                }
+                else if (compound.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16)
+                {
+                    FloatingNarrowBinary(CompoundOperators.Binary(compound.Operator),
+                        compound.Type, spill + 2);
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
                 }
                 else if (compound.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                 {
@@ -4428,7 +4495,7 @@ internal sealed partial class PeCompiler
                 EmitOptionalEquality(equality, spill);
                 break;
             case BoundBinary binary:
-                EnsureSupportedNativeFloatingOperator(binary.Left.Type);
+                EnsureSupportedNativeFloatingBinary(binary.Left.Type, binary.Operator);
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {
                     Expression(binary.Left, spill);
@@ -4450,6 +4517,7 @@ internal sealed partial class PeCompiler
                     break;
                 }
                 var floating = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
+                var narrowFloating = binary.Left.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16;
                 Expression(binary.Left, spill);
                 if (!floating && (TryEmitUnsignedPowerOfTwoBinary(binary) || TryEmitSignedPowerOfTwoBinary(binary)))
                 {
@@ -4460,6 +4528,10 @@ internal sealed partial class PeCompiler
                 if (floating)
                 {
                     FloatingBinary(binary.Operator, binary.Left.Type, spill);
+                }
+                else if (narrowFloating)
+                {
+                    FloatingNarrowBinary(binary.Operator, binary.Left.Type, spill);
                 }
                 else
                 {
@@ -4879,6 +4951,1154 @@ internal sealed partial class PeCompiler
         _code.LoadMxcsr(savedMxcsr);
     }
 
+    private void FloatingNarrowComparison(TokenKind operation, PrimitiveType type, int spill)
+    {
+        var fractionBits = type == PrimitiveType.Float16 ? 10 : 7;
+        var exponentBits = type == PrimitiveType.Float16 ? 5 : 8;
+        var fractionMask = (1 << fractionBits) - 1;
+        var exponentMask = ((1 << exponentBits) - 1) << fractionBits;
+        var leftRaw = Spill(spill);
+        var rightRaw = Spill(spill + 1);
+        var leftMagnitude = Spill(spill + 2);
+        var rightMagnitude = Spill(spill + 3);
+        var leftSign = Spill(spill + 4);
+        var rightSign = Spill(spill + 5);
+        StoreValue(rightRaw, type);
+        var leftNaN = EmitNarrowNaNBranch(leftRaw, fractionMask, exponentMask);
+        var rightNaN = EmitNarrowNaNBranch(rightRaw, fractionMask, exponentMask);
+
+        _code.Load(leftRaw);
+        _code.Byte(0x25);
+        _code.Int32(0x7FFF);
+        _code.Store(leftMagnitude);
+        _code.Load(rightRaw);
+        _code.Byte(0x25);
+        _code.Int32(0x7FFF);
+        _code.Store(rightMagnitude);
+        _code.Load(leftRaw);
+        _code.Bytes(0xC1, 0xE8, 0x0F, 0x83, 0xE0, 0x01);
+        _code.Store(leftSign);
+        _code.Load(rightRaw);
+        _code.Bytes(0xC1, 0xE8, 0x0F, 0x83, 0xE0, 0x01);
+        _code.Store(rightSign);
+
+        _code.Load(leftMagnitude);
+        _code.Bytes(0x85, 0xC0);
+        var leftNonzero = _code.JumpIf(0x85);
+        _code.Load(rightMagnitude);
+        _code.Bytes(0x85, 0xC0);
+        var rightNonzero = _code.JumpIf(0x85);
+        _code.Bytes(0x31, 0xC0, 0x39, 0xC0);
+        EmitNarrowComparisonCondition(operation);
+        var equalExit = _code.Jump();
+
+        var compareNonzero = _code.Position;
+        _code.PatchRelative(leftNonzero, compareNonzero);
+        _code.PatchRelative(rightNonzero, compareNonzero);
+        _code.Load(leftSign);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(rightSign);
+        _code.Bytes(0x31, 0xC8, 0x85, 0xC0);
+        var sameSign = _code.JumpIf(0x84);
+
+        if (operation is TokenKind.EqualsEquals or TokenKind.BangEquals)
+        {
+            _code.Bytes(0x31, 0xC0);
+            if (operation == TokenKind.BangEquals)
+            {
+                _code.Bytes(0xB8);
+                _code.Int32(1);
+            }
+        }
+        else
+        {
+            _code.Load(leftSign);
+            _code.Bytes(0x85, 0xC0);
+            var leftIsPositive = _code.JumpIf(0x84);
+            var negativeResult = operation is TokenKind.Less or TokenKind.LessEquals;
+            _code.Bytes(0xB8);
+            _code.Int32(negativeResult ? 1 : 0);
+            var signDifferenceExit = _code.Jump();
+            _code.PatchRelative(leftIsPositive, _code.Position);
+            _code.Bytes(0xB8);
+            _code.Int32(negativeResult ? 0 : 1);
+            _code.PatchRelative(signDifferenceExit, _code.Position);
+        }
+        var signDifferenceExitToDone = _code.Jump();
+
+        var sameSignLabel = _code.Position;
+        _code.PatchRelative(sameSign, sameSignLabel);
+        _code.Load(leftSign);
+        _code.Bytes(0x85, 0xC0);
+        var nonnegative = _code.JumpIf(0x84);
+        _code.Load(leftMagnitude);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(rightMagnitude);
+        _code.Bytes(0x39, 0xC8);
+        EmitNarrowComparisonCondition(operation);
+        var negativeComparisonExit = _code.Jump();
+        _code.PatchRelative(nonnegative, _code.Position);
+        _code.Load(rightMagnitude);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(leftMagnitude);
+        _code.Bytes(0x39, 0xC8);
+        EmitNarrowComparisonCondition(operation);
+        var positiveComparisonExit = _code.Jump();
+
+        var unorderedLabel = _code.Position;
+        _code.PatchRelative(leftNaN, unorderedLabel);
+        _code.PatchRelative(rightNaN, unorderedLabel);
+        _code.Bytes(0x31, 0xC0);
+        if (operation == TokenKind.BangEquals)
+        {
+            _code.Bytes(0xB8);
+            _code.Int32(1);
+        }
+        var unorderedExit = _code.Jump();
+
+        var done = _code.Position;
+        _code.PatchRelative(equalExit, done);
+        _code.PatchRelative(signDifferenceExitToDone, done);
+        _code.PatchRelative(negativeComparisonExit, done);
+        _code.PatchRelative(positiveComparisonExit, done);
+        _code.PatchRelative(unorderedExit, done);
+
+        int EmitNarrowNaNBranch(int raw, int mask, int exponent)
+        {
+            _code.Load(raw);
+            _code.Bytes(0x89, 0xC1);
+            _code.Byte(0x25);
+            _code.Int32(exponent);
+            _code.Byte(0x3D);
+            _code.Int32(exponent);
+            var notSpecial = _code.JumpIf(0x85);
+            _code.Bytes(0x89, 0xC8, 0x25);
+            _code.Int32(mask);
+            _code.Bytes(0x85, 0xC0);
+            var isNaN = _code.JumpIf(0x85);
+            _code.PatchRelative(notSpecial, _code.Position);
+            return isNaN;
+        }
+
+        void EmitNarrowComparisonCondition(TokenKind comparison)
+        {
+            var condition = comparison switch {
+                TokenKind.EqualsEquals => (byte)0x94,
+                TokenKind.BangEquals => (byte)0x95,
+                TokenKind.Less => (byte)0x92,
+                TokenKind.LessEquals => (byte)0x96,
+                TokenKind.Greater => (byte)0x97,
+                TokenKind.GreaterEquals => (byte)0x93,
+                _ => throw new InvalidOperationException(),
+            };
+            _code.Bytes(0x0F, condition, 0xC0, 0x0F, 0xB6, 0xC0);
+        }
+    }
+
+    private void FloatingNarrowBinary(TokenKind operation, PrimitiveType type, int spill)
+    {
+        if (IsFloatingComparison(operation))
+        {
+            FloatingNarrowComparison(operation, type, spill);
+            return;
+        }
+        if (operation is TokenKind.Plus or TokenKind.Minus)
+        {
+            FloatingNarrowAddOrSubtract(operation, type, spill);
+            return;
+        }
+        if (operation == TokenKind.Star)
+        {
+            FloatingNarrowMultiply(type, spill);
+            return;
+        }
+        if (operation == TokenKind.Slash)
+        {
+            FloatingNarrowDivide(type, spill);
+            return;
+        }
+        if (operation == TokenKind.Percent)
+        {
+            FloatingNarrowRemainder(type, spill);
+            return;
+        }
+        throw new InvalidOperationException("The verifier admitted an unsupported narrow floating operator.");
+    }
+
+    private void FloatingNarrowAddOrSubtract(TokenKind operation, PrimitiveType type, int spill)
+    {
+        var fractionBits = type == PrimitiveType.Float16 ? 10 : 7;
+        var exponentBits = type == PrimitiveType.Float16 ? 5 : 8;
+        var exponentMask = (1 << exponentBits) - 1;
+        var signMask = 1 << (fractionBits + exponentBits);
+        var bias = (1 << (exponentBits - 1)) - 1;
+        var minimumExponent = 1 - bias;
+        var maximumExponent = bias;
+        var signA = Spill(spill + 2);
+        var exponentA = Spill(spill + 3);
+        var significandA = Spill(spill + 4);
+        var classA = Spill(spill + 5);
+        var signB = Spill(spill + 6);
+        var exponentB = Spill(spill + 7);
+        var significandB = Spill(spill + 8);
+        var classB = Spill(spill + 9);
+        var signResult = Spill(spill + 10);
+        var exponentResult = Spill(spill + 11);
+        var extendedA = Spill(spill + 12);
+        var extendedB = Spill(spill + 13);
+        var temporary = Spill(spill + 14);
+        var result = Spill(spill + 15);
+
+        var rightRaw = Spill(spill + 1);
+        StoreValue(rightRaw, type);
+        EmitNarrowDecode(type, Spill(spill), signA, exponentA, significandA, classA);
+        EmitNarrowDecode(type, rightRaw, signB, exponentB, significandB, classB);
+        if (operation == TokenKind.Minus)
+        {
+            _code.Load(signB);
+            _code.Byte(0x35);
+            _code.Int32(1);
+            _code.Store(signB);
+        }
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var leftNaN = _code.JumpIf(0x84);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var rightNaN = _code.JumpIf(0x84);
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var leftFinite = _code.JumpIf(0x85);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var rightFinite = _code.JumpIf(0x85);
+        _code.Load(signA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(signB);
+        _code.Bytes(0x39, 0xC8);
+        var sameInfinitySign = _code.JumpIf(0x84);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var oppositeInfinityExit = _code.Jump();
+        _code.PatchRelative(sameInfinitySign, _code.Position);
+        EmitNarrowInfinity(result, signA, exponentMask, fractionBits);
+        var bothInfinityExit = _code.Jump();
+
+        _code.PatchRelative(rightFinite, _code.Position);
+        EmitNarrowInfinity(result, signA, exponentMask, fractionBits);
+        var leftInfinityExit = _code.Jump();
+
+        _code.PatchRelative(leftFinite, _code.Position);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var bothFinite = _code.JumpIf(0x85);
+        EmitNarrowInfinity(result, signB, exponentMask, fractionBits);
+        var rightInfinityExit = _code.Jump();
+
+        _code.PatchRelative(bothFinite, _code.Position);
+        _code.Load(significandA);
+        _code.Bytes(0x85, 0xC0);
+        var leftNonzero = _code.JumpIf(0x85);
+        _code.Load(significandB);
+        _code.Bytes(0x85, 0xC0);
+        var rightNonzero = _code.JumpIf(0x85);
+        _code.Load(signA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(signB);
+        _code.Bytes(0x21, 0xC8, 0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        var bothZeroExit = _code.Jump();
+
+        var onlyRightNonzero = _code.Position;
+        _code.PatchRelative(rightNonzero, onlyRightNonzero);
+        _code.Load(rightRaw);
+        if (operation == TokenKind.Minus)
+        {
+            _code.Byte(0x35);
+            _code.Int32(signMask);
+        }
+        _code.Store(result);
+        var onlyRightExit = _code.Jump();
+
+        var checkRightZero = _code.Position;
+        _code.PatchRelative(leftNonzero, checkRightZero);
+        _code.Load(significandB);
+        _code.Bytes(0x85, 0xC0);
+        var bothNonzero = _code.JumpIf(0x85);
+        _code.Load(Spill(spill));
+        _code.Store(result);
+        var onlyLeftExit = _code.Jump();
+
+        _code.PatchRelative(bothNonzero, _code.Position);
+        EmitNarrowOrderOperands(exponentA, significandA, signA,
+            exponentB, significandB, signB, temporary);
+
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x29, 0xC1, 0x89, 0xC8);
+        _code.Store(exponentResult);
+
+        _code.Load(significandA);
+        _code.Bytes(0xC1, 0xE0, 0x03);
+        _code.Store(extendedA);
+        _code.Load(significandB);
+        _code.Bytes(0xC1, 0xE0, 0x03);
+        _code.Store(temporary);
+        EmitNarrowShiftRightJam(temporary, exponentResult, extendedB);
+        _code.Load(exponentA);
+        _code.Store(exponentResult);
+
+        _code.Load(signA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(signB);
+        _code.Bytes(0x39, 0xC8);
+        var subtractMagnitudes = _code.JumpIf(0x85);
+        _code.Load(extendedA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(extendedB);
+        _code.Bytes(0x01, 0xC8);
+        _code.Store(extendedA);
+        var carryThreshold = 1 << (fractionBits + 4);
+        _code.Byte(0x3D);
+        _code.Int32(carryThreshold);
+        var noCarry = _code.JumpIf(0x82);
+        _code.Load(extendedA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Bytes(0x83, 0xE1, 0x01, 0xD1, 0xE8, 0x09, 0xC8);
+        _code.Store(extendedA);
+        _code.Load(exponentA);
+        _code.Bytes(0x83, 0xC0, 0x01);
+        _code.Store(exponentResult);
+        var additionReady = _code.Position;
+        _code.PatchRelative(noCarry, additionReady);
+        _code.Load(signA);
+        _code.Store(signResult);
+        EmitNarrowRoundPack(type, signResult, exponentResult, extendedA, temporary,
+            result, fractionBits, bias, minimumExponent, maximumExponent);
+        var additionExit = _code.Jump();
+
+        _code.PatchRelative(subtractMagnitudes, _code.Position);
+        _code.Load(extendedB);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(extendedA);
+        _code.Bytes(0x29, 0xC8);
+        _code.Store(extendedA);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroDifference = _code.JumpIf(0x85);
+        _code.Bytes(0x31, 0xC0);
+        _code.Store(result);
+        var zeroDifferenceExit = _code.Jump();
+
+        _code.PatchRelative(nonzeroDifference, _code.Position);
+        _code.Load(signA);
+        _code.Store(signResult);
+        _code.Load(exponentA);
+        _code.Store(exponentResult);
+        var normalize = _code.Position;
+        _code.Load(extendedA);
+        _code.Byte(0x3D);
+        _code.Int32(1 << (fractionBits + 3));
+        var normalized = _code.JumpIf(0x83);
+        _code.Load(exponentResult);
+        _code.Bytes(0x83, 0xF8, unchecked((byte)minimumExponent));
+        var atMinimum = _code.JumpIf(0x8E);
+        _code.Load(extendedA);
+        _code.Bytes(0xD1, 0xE0);
+        _code.Store(extendedA);
+        _code.Load(exponentResult);
+        _code.Bytes(0x83, 0xE8, 0x01);
+        _code.Store(exponentResult);
+        var normalizeAgain = _code.Jump();
+        _code.PatchRelative(normalizeAgain, normalize);
+        var packDifference = _code.Position;
+        _code.PatchRelative(normalized, packDifference);
+        _code.PatchRelative(atMinimum, packDifference);
+        EmitNarrowRoundPack(type, signResult, exponentResult, extendedA, temporary,
+            result, fractionBits, bias, minimumExponent, maximumExponent);
+        var subtractionExit = _code.Jump();
+
+        var nanLabel = _code.Position;
+        _code.PatchRelative(leftNaN, nanLabel);
+        _code.PatchRelative(rightNaN, nanLabel);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var nanExit = _code.Jump();
+
+        var done = _code.Position;
+        _code.PatchRelative(oppositeInfinityExit, done);
+        _code.PatchRelative(bothInfinityExit, done);
+        _code.PatchRelative(leftInfinityExit, done);
+        _code.PatchRelative(rightInfinityExit, done);
+        _code.PatchRelative(bothZeroExit, done);
+        _code.PatchRelative(onlyRightExit, done);
+        _code.PatchRelative(onlyLeftExit, done);
+        _code.PatchRelative(additionExit, done);
+        _code.PatchRelative(zeroDifferenceExit, done);
+        _code.PatchRelative(subtractionExit, done);
+        _code.PatchRelative(nanExit, done);
+        _code.Load(result);
+    }
+
+    private void FloatingNarrowRemainder(PrimitiveType type, int spill)
+    {
+        var fractionBits = type == PrimitiveType.Float16 ? 10 : 7;
+        var exponentBits = type == PrimitiveType.Float16 ? 5 : 8;
+        var exponentMask = (1 << exponentBits) - 1;
+        var bias = (1 << (exponentBits - 1)) - 1;
+        var minimumExponent = 1 - bias;
+        var signA = Spill(spill + 2);
+        var exponentA = Spill(spill + 3);
+        var significandA = Spill(spill + 4);
+        var classA = Spill(spill + 5);
+        var signB = Spill(spill + 6);
+        var exponentB = Spill(spill + 7);
+        var significandB = Spill(spill + 8);
+        var classB = Spill(spill + 9);
+        var signResult = Spill(spill + 10);
+        var exponentResult = Spill(spill + 11);
+        var extendedA = Spill(spill + 12);
+        var temporary = Spill(spill + 14);
+        var result = Spill(spill + 15);
+
+        var rightRaw = Spill(spill + 1);
+        StoreValue(rightRaw, type);
+        EmitNarrowDecode(type, Spill(spill), signA, exponentA, significandA, classA);
+        EmitNarrowDecode(type, rightRaw, signB, exponentB, significandB, classB);
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var leftNaN = _code.JumpIf(0x84);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var rightNaN = _code.JumpIf(0x84);
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var leftFinite = _code.JumpIf(0x85);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var infiniteDividendExit = _code.Jump();
+
+        _code.PatchRelative(leftFinite, _code.Position);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var rightFinite = _code.JumpIf(0x85);
+        _code.Load(Spill(spill));
+        _code.Store(result);
+        var infiniteDivisorExit = _code.Jump();
+
+        _code.PatchRelative(rightFinite, _code.Position);
+        _code.Load(significandB);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroDivisor = _code.JumpIf(0x85);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var zeroDivisorExit = _code.Jump();
+
+        _code.PatchRelative(nonzeroDivisor, _code.Position);
+        _code.Load(significandA);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroDividend = _code.JumpIf(0x85);
+        _code.Load(Spill(spill));
+        _code.Store(result);
+        var zeroDividendExit = _code.Jump();
+
+        _code.PatchRelative(nonzeroDividend, _code.Position);
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x39, 0xC1);
+        var exponentLess = _code.JumpIf(0x8C);
+        var exponentGreater = _code.JumpIf(0x8F);
+        _code.Load(significandA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(significandB);
+        _code.Bytes(0x39, 0xC1);
+        var significandLess = _code.JumpIf(0x82);
+
+        var computeRemainder = _code.Position;
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x29, 0xC1, 0x89, 0xC8);
+        _code.Store(exponentResult);
+        _code.Load(significandB);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(significandA);
+        _code.Bytes(0x31, 0xD2, 0xF7, 0xF1, 0x89, 0xD0);
+        _code.Store(extendedA);
+        var reduce = _code.Position;
+        _code.Load(exponentResult);
+        _code.Bytes(0x85, 0xC0);
+        var reductionComplete = _code.JumpIf(0x84);
+        _code.Load(extendedA);
+        _code.Bytes(0xD1, 0xE0);
+        _code.Store(temporary);
+        _code.Load(significandB);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(temporary);
+        _code.Bytes(0x31, 0xD2, 0xF7, 0xF1, 0x89, 0xD0);
+        _code.Store(extendedA);
+        _code.Load(exponentResult);
+        _code.Bytes(0x83, 0xE8, 0x01);
+        _code.Store(exponentResult);
+        var nextReduction = _code.Jump();
+        _code.PatchRelative(nextReduction, reduce);
+        var finishReduction = _code.Position;
+        _code.PatchRelative(reductionComplete, finishReduction);
+
+        _code.Load(exponentB);
+        _code.Store(exponentResult);
+        _code.Load(signA);
+        _code.Store(signResult);
+        _code.Load(extendedA);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroRemainder = _code.JumpIf(0x85);
+        _code.Load(signResult);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        var zeroRemainderExit = _code.Jump();
+
+        _code.PatchRelative(nonzeroRemainder, _code.Position);
+        _code.Load(extendedA);
+        _code.Bytes(0xC1, 0xE0, 0x03);
+        _code.Store(extendedA);
+        var normalize = _code.Position;
+        _code.Load(extendedA);
+        _code.Byte(0x3D);
+        _code.Int32(1 << (fractionBits + 3));
+        var normalized = _code.JumpIf(0x83);
+        _code.Load(exponentResult);
+        _code.Bytes(0x83, 0xF8, unchecked((byte)minimumExponent));
+        var atMinimum = _code.JumpIf(0x8E);
+        _code.Load(extendedA);
+        _code.Bytes(0xD1, 0xE0);
+        _code.Store(extendedA);
+        _code.Load(exponentResult);
+        _code.Bytes(0x83, 0xE8, 0x01);
+        _code.Store(exponentResult);
+        var normalizeAgain = _code.Jump();
+        _code.PatchRelative(normalizeAgain, normalize);
+        var pack = _code.Position;
+        _code.PatchRelative(normalized, pack);
+        _code.PatchRelative(atMinimum, pack);
+        EmitNarrowRoundPack(type, signResult, exponentResult, extendedA, temporary,
+            result, fractionBits, bias, minimumExponent,
+            type == PrimitiveType.Float16 ? 15 : 127);
+        var finiteRemainderExit = _code.Jump();
+
+        var copyDividend = _code.Position;
+        _code.PatchRelative(exponentLess, copyDividend);
+        _code.PatchRelative(significandLess, copyDividend);
+        _code.Load(Spill(spill));
+        _code.Store(result);
+        var dividendExit = _code.Jump();
+
+        var nanLabel = _code.Position;
+        _code.PatchRelative(leftNaN, nanLabel);
+        _code.PatchRelative(rightNaN, nanLabel);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var nanExit = _code.Jump();
+
+        var done = _code.Position;
+        _code.PatchRelative(exponentGreater, computeRemainder);
+        _code.PatchRelative(infiniteDividendExit, done);
+        _code.PatchRelative(infiniteDivisorExit, done);
+        _code.PatchRelative(zeroDivisorExit, done);
+        _code.PatchRelative(zeroDividendExit, done);
+        _code.PatchRelative(zeroRemainderExit, done);
+        _code.PatchRelative(finiteRemainderExit, done);
+        _code.PatchRelative(dividendExit, done);
+        _code.PatchRelative(nanExit, done);
+        _code.Load(result);
+    }
+
+    private void FloatingNarrowMultiply(PrimitiveType type, int spill)
+    {
+        var fractionBits = type == PrimitiveType.Float16 ? 10 : 7;
+        var exponentBits = type == PrimitiveType.Float16 ? 5 : 8;
+        var exponentMask = (1 << exponentBits) - 1;
+        var bias = (1 << (exponentBits - 1)) - 1;
+        var minimumExponent = 1 - bias;
+        var maximumExponent = bias;
+        var signA = Spill(spill + 2);
+        var exponentA = Spill(spill + 3);
+        var significandA = Spill(spill + 4);
+        var classA = Spill(spill + 5);
+        var signB = Spill(spill + 6);
+        var exponentB = Spill(spill + 7);
+        var significandB = Spill(spill + 8);
+        var classB = Spill(spill + 9);
+        var signResult = Spill(spill + 10);
+        var exponentResult = Spill(spill + 11);
+        var extendedA = Spill(spill + 12);
+        var extendedB = Spill(spill + 13);
+        var temporary = Spill(spill + 14);
+        var result = Spill(spill + 15);
+
+        var rightRaw = Spill(spill + 1);
+        StoreValue(rightRaw, type);
+        EmitNarrowDecode(type, Spill(spill), signA, exponentA, significandA, classA);
+        EmitNarrowDecode(type, rightRaw, signB, exponentB, significandB, classB);
+        _code.Load(signA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(signB);
+        _code.Bytes(0x31, 0xC8);
+        _code.Store(signResult);
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var leftNaN = _code.JumpIf(0x84);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var rightNaN = _code.JumpIf(0x84);
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var leftFinite = _code.JumpIf(0x85);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var rightFinite = _code.JumpIf(0x85);
+        EmitNarrowInfinity(result, signResult, exponentMask, fractionBits);
+        var bothInfinityExit = _code.Jump();
+
+        _code.PatchRelative(rightFinite, _code.Position);
+        _code.Load(significandB);
+        _code.Bytes(0x85, 0xC0);
+        var leftInfinityNonzero = _code.JumpIf(0x85);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var leftInfinityZeroExit = _code.Jump();
+        _code.PatchRelative(leftInfinityNonzero, _code.Position);
+        EmitNarrowInfinity(result, signResult, exponentMask, fractionBits);
+        var leftInfinityExit = _code.Jump();
+
+        _code.PatchRelative(leftFinite, _code.Position);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var bothFinite = _code.JumpIf(0x85);
+        _code.Load(significandA);
+        _code.Bytes(0x85, 0xC0);
+        var rightInfinityNonzero = _code.JumpIf(0x85);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var rightInfinityZeroExit = _code.Jump();
+        _code.PatchRelative(rightInfinityNonzero, _code.Position);
+        EmitNarrowInfinity(result, signResult, exponentMask, fractionBits);
+        var rightInfinityExit = _code.Jump();
+
+        _code.PatchRelative(bothFinite, _code.Position);
+        _code.Load(significandA);
+        _code.Bytes(0x85, 0xC0);
+        var leftZero = _code.JumpIf(0x84);
+        _code.Load(significandB);
+        _code.Bytes(0x85, 0xC0);
+        var rightZero = _code.JumpIf(0x84);
+
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x01, 0xC8);
+        _code.Store(exponentResult);
+        _code.Load(significandA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(significandB);
+        _code.Bytes(0x0F, 0xAF, 0xC1);
+        _code.Store(temporary);
+        var highProductThreshold = 1 << ((2 * fractionBits) + 1);
+        _code.Byte(0x3D);
+        _code.Int32(highProductThreshold);
+        var lowProduct = _code.JumpIf(0x82);
+        _code.Byte(0xB8);
+        _code.Int32(fractionBits - 2);
+        _code.Store(extendedB);
+        _code.Load(exponentResult);
+        _code.Bytes(0x83, 0xC0, 0x01);
+        _code.Store(exponentResult);
+        var productShiftReady = _code.Jump();
+        _code.PatchRelative(lowProduct, _code.Position);
+        _code.Byte(0xB8);
+        _code.Int32(fractionBits - 3);
+        _code.Store(extendedB);
+        _code.PatchRelative(productShiftReady, _code.Position);
+        EmitNarrowShiftRightJam(temporary, extendedB, extendedA);
+        EmitNarrowRoundPack(type, signResult, exponentResult, extendedA, temporary,
+            result, fractionBits, bias, minimumExponent, maximumExponent);
+        var multiplyExit = _code.Jump();
+
+        var zeroLabel = _code.Position;
+        _code.PatchRelative(leftZero, zeroLabel);
+        _code.PatchRelative(rightZero, zeroLabel);
+        _code.Load(signResult);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        var zeroExit = _code.Jump();
+
+        var nanLabel = _code.Position;
+        _code.PatchRelative(leftNaN, nanLabel);
+        _code.PatchRelative(rightNaN, nanLabel);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var nanExit = _code.Jump();
+
+        var done = _code.Position;
+        _code.PatchRelative(bothInfinityExit, done);
+        _code.PatchRelative(leftInfinityZeroExit, done);
+        _code.PatchRelative(leftInfinityExit, done);
+        _code.PatchRelative(rightInfinityZeroExit, done);
+        _code.PatchRelative(rightInfinityExit, done);
+        _code.PatchRelative(multiplyExit, done);
+        _code.PatchRelative(zeroExit, done);
+        _code.PatchRelative(nanExit, done);
+        _code.Load(result);
+    }
+
+    private void FloatingNarrowDivide(PrimitiveType type, int spill)
+    {
+        var fractionBits = type == PrimitiveType.Float16 ? 10 : 7;
+        var exponentBits = type == PrimitiveType.Float16 ? 5 : 8;
+        var exponentMask = (1 << exponentBits) - 1;
+        var bias = (1 << (exponentBits - 1)) - 1;
+        var minimumExponent = 1 - bias;
+        var maximumExponent = bias;
+        var signA = Spill(spill + 2);
+        var exponentA = Spill(spill + 3);
+        var significandA = Spill(spill + 4);
+        var classA = Spill(spill + 5);
+        var signB = Spill(spill + 6);
+        var exponentB = Spill(spill + 7);
+        var significandB = Spill(spill + 8);
+        var classB = Spill(spill + 9);
+        var signResult = Spill(spill + 10);
+        var exponentResult = Spill(spill + 11);
+        var extendedA = Spill(spill + 12);
+        var shift = Spill(spill + 13);
+        var temporary = Spill(spill + 14);
+        var result = Spill(spill + 15);
+
+        var rightRaw = Spill(spill + 1);
+        StoreValue(rightRaw, type);
+        EmitNarrowDecode(type, Spill(spill), signA, exponentA, significandA, classA);
+        EmitNarrowDecode(type, rightRaw, signB, exponentB, significandB, classB);
+        _code.Load(signA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(signB);
+        _code.Bytes(0x31, 0xC8);
+        _code.Store(signResult);
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var leftNaN = _code.JumpIf(0x84);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var rightNaN = _code.JumpIf(0x84);
+
+        _code.Load(classA);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var leftFinite = _code.JumpIf(0x85);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var bothInfinity = _code.JumpIf(0x84);
+        EmitNarrowInfinity(result, signResult, exponentMask, fractionBits);
+        var infiniteNumeratorExit = _code.Jump();
+
+        _code.PatchRelative(bothInfinity, _code.Position);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var infinityPairExit = _code.Jump();
+
+        _code.PatchRelative(leftFinite, _code.Position);
+        _code.Load(classB);
+        _code.Bytes(0x83, 0xF8, 0x01);
+        var bothFinite = _code.JumpIf(0x85);
+        _code.Load(signResult);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        var infiniteDenominatorExit = _code.Jump();
+
+        _code.PatchRelative(bothFinite, _code.Position);
+        _code.Load(significandB);
+        _code.Bytes(0x85, 0xC0);
+        var divisorNonzero = _code.JumpIf(0x85);
+        _code.Load(significandA);
+        _code.Bytes(0x85, 0xC0);
+        var zeroNumerator = _code.JumpIf(0x84);
+        EmitNarrowInfinity(result, signResult, exponentMask, fractionBits);
+        var zeroDivisorExit = _code.Jump();
+
+        _code.PatchRelative(zeroNumerator, _code.Position);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var zeroOverZeroExit = _code.Jump();
+
+        _code.PatchRelative(divisorNonzero, _code.Position);
+        _code.Load(significandA);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroNumerator = _code.JumpIf(0x85);
+        _code.Load(signResult);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        var zeroQuotientExit = _code.Jump();
+
+        _code.PatchRelative(nonzeroNumerator, _code.Position);
+        _code.Load(significandA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(significandB);
+        _code.Bytes(0x39, 0xC1);
+        var numeratorBelowOne = _code.JumpIf(0x82);
+
+        _code.Byte(0xB8);
+        _code.Int32(fractionBits + 3);
+        _code.Store(shift);
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x29, 0xC1, 0x89, 0xC8);
+        _code.Store(exponentResult);
+        var normalizedRatio = _code.Jump();
+
+        _code.PatchRelative(numeratorBelowOne, _code.Position);
+        _code.Byte(0xB8);
+        _code.Int32(fractionBits + 4);
+        _code.Store(shift);
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x29, 0xC1, 0x83, 0xE9, 0x01, 0x89, 0xC8);
+        _code.Store(exponentResult);
+        _code.PatchRelative(normalizedRatio, _code.Position);
+
+        _code.Load(shift);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(significandA);
+        _code.Bytes(0xD3, 0xE0);
+        _code.Store(temporary);
+        _code.Load(significandB);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(temporary);
+        _code.Bytes(0x31, 0xD2, 0xF7, 0xF1);
+        _code.Bytes(0x85, 0xD2);
+        var exactQuotient = _code.JumpIf(0x84);
+        _code.Bytes(0x83, 0xC8, 0x01);
+        var quotientReady = _code.Position;
+        _code.PatchRelative(exactQuotient, quotientReady);
+        _code.Store(extendedA);
+        EmitNarrowRoundPack(type, signResult, exponentResult, extendedA, temporary,
+            result, fractionBits, bias, minimumExponent, maximumExponent);
+        var divisionExit = _code.Jump();
+
+        var nanLabel = _code.Position;
+        _code.PatchRelative(leftNaN, nanLabel);
+        _code.PatchRelative(rightNaN, nanLabel);
+        EmitNarrowQuietNaN(result, fractionBits, exponentMask);
+        var nanExit = _code.Jump();
+
+        var done = _code.Position;
+        _code.PatchRelative(infiniteNumeratorExit, done);
+        _code.PatchRelative(infinityPairExit, done);
+        _code.PatchRelative(infiniteDenominatorExit, done);
+        _code.PatchRelative(zeroDivisorExit, done);
+        _code.PatchRelative(zeroOverZeroExit, done);
+        _code.PatchRelative(zeroQuotientExit, done);
+        _code.PatchRelative(divisionExit, done);
+        _code.PatchRelative(nanExit, done);
+        _code.Load(result);
+    }
+
+    private void EmitNarrowDecode(PrimitiveType type, int raw, int sign,
+        int exponent, int significand, int valueClass)
+    {
+        var fractionBits = type == PrimitiveType.Float16 ? 10 : 7;
+        var exponentBits = type == PrimitiveType.Float16 ? 5 : 8;
+        var exponentMask = (1 << exponentBits) - 1;
+        var fractionMask = (1 << fractionBits) - 1;
+        var bias = (1 << (exponentBits - 1)) - 1;
+        var minimumExponent = 1 - bias;
+
+        _code.Load(raw);
+        _code.Bytes(0xC1, 0xE8, 0x0F, 0x83, 0xE0, 0x01);
+        _code.Store(sign);
+        _code.Load(raw);
+        _code.Bytes(0xC1, 0xE8, checked((byte)fractionBits));
+        _code.Byte(0x25);
+        _code.Int32(exponentMask);
+        _code.Store(exponent);
+        _code.Load(raw);
+        _code.Byte(0x25);
+        _code.Int32(fractionMask);
+        _code.Store(significand);
+        _code.Bytes(0x31, 0xC0);
+        _code.Store(valueClass);
+
+        _code.Load(exponent);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroExponent = _code.JumpIf(0x85);
+        _code.Byte(0xB8);
+        _code.Int32(minimumExponent);
+        _code.Store(exponent);
+        var subnormalDone = _code.Jump();
+
+        _code.PatchRelative(nonzeroExponent, _code.Position);
+        _code.Load(exponent);
+        _code.Byte(0x3D);
+        _code.Int32(exponentMask);
+        var normal = _code.JumpIf(0x85);
+        _code.Load(significand);
+        _code.Bytes(0x85, 0xC0);
+        var zeroFraction = _code.JumpIf(0x84);
+        _code.Byte(0xB8);
+        _code.Int32(2);
+        _code.Store(valueClass);
+        var nanDone = _code.Jump();
+
+        _code.PatchRelative(zeroFraction, _code.Position);
+        _code.Byte(0xB8);
+        _code.Int32(1);
+        _code.Store(valueClass);
+        var infinityDone = _code.Jump();
+
+        _code.PatchRelative(normal, _code.Position);
+        _code.Load(exponent);
+        _code.Byte(0x2D);
+        _code.Int32(bias);
+        _code.Store(exponent);
+        _code.Load(significand);
+        _code.Byte(0x0D);
+        _code.Int32(1 << fractionBits);
+        _code.Store(significand);
+
+        var done = _code.Position;
+        _code.PatchRelative(subnormalDone, done);
+        _code.PatchRelative(nanDone, done);
+        _code.PatchRelative(infinityDone, done);
+    }
+
+    private void EmitNarrowOrderOperands(int exponentA, int significandA, int signA,
+        int exponentB, int significandB, int signB, int temporary)
+    {
+        _code.Load(exponentA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(exponentB);
+        _code.Bytes(0x39, 0xC1);
+        var exponentLess = _code.JumpIf(0x8C);
+        var exponentGreater = _code.JumpIf(0x8F);
+        _code.Load(significandA);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(significandB);
+        _code.Bytes(0x39, 0xC1);
+        var significandLess = _code.JumpIf(0x82);
+        var alreadyOrdered = _code.Jump();
+
+        var swap = _code.Position;
+        Swap(signA, signB);
+        Swap(exponentA, exponentB);
+        Swap(significandA, significandB);
+        var done = _code.Position;
+        _code.PatchRelative(exponentLess, swap);
+        _code.PatchRelative(significandLess, swap);
+        _code.PatchRelative(exponentGreater, done);
+        _code.PatchRelative(alreadyOrdered, done);
+
+        void Swap(int first, int second)
+        {
+            _code.Load(first);
+            _code.Store(temporary);
+            _code.Load(second);
+            _code.Store(first);
+            _code.Load(temporary);
+            _code.Store(second);
+        }
+    }
+
+    private void EmitNarrowShiftRightJam(int value, int shift, int result)
+    {
+        _code.Load(shift);
+        _code.Bytes(0x85, 0xC0);
+        var nonzeroShift = _code.JumpIf(0x85);
+        _code.Load(value);
+        _code.Store(result);
+        var zeroShiftDone = _code.Jump();
+
+        _code.PatchRelative(nonzeroShift, _code.Position);
+        _code.Load(shift);
+        _code.Bytes(0x83, 0xF8, 0x20);
+        var smallShift = _code.JumpIf(0x8C);
+        _code.Load(value);
+        _code.Bytes(0x85, 0xC0);
+        var zeroValue = _code.JumpIf(0x84);
+        _code.Byte(0xB8);
+        _code.Int32(1);
+        _code.Store(result);
+        var largeShiftDone = _code.Jump();
+        _code.PatchRelative(zeroValue, _code.Position);
+        _code.Bytes(0x31, 0xC0);
+        _code.Store(result);
+        var largeZeroDone = _code.Jump();
+
+        _code.PatchRelative(smallShift, _code.Position);
+        _code.Load(shift);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(value);
+        _code.Bytes(0xD3, 0xE8);
+        _code.Store(result);
+        _code.Load(shift);
+        _code.Bytes(0x89, 0xC1, 0xB8);
+        _code.Int32(32);
+        _code.Bytes(0x29, 0xC8, 0x89, 0xC1);
+        _code.Load(value);
+        _code.Bytes(0xD3, 0xE0, 0x85, 0xC0);
+        var noSticky = _code.JumpIf(0x84);
+        _code.Load(result);
+        _code.Bytes(0x83, 0xC8, 0x01);
+        _code.Store(result);
+        var stickyDone = _code.Position;
+        _code.PatchRelative(noSticky, stickyDone);
+
+        var done = _code.Position;
+        _code.PatchRelative(zeroShiftDone, done);
+        _code.PatchRelative(largeShiftDone, done);
+        _code.PatchRelative(largeZeroDone, done);
+    }
+
+    private void EmitNarrowRoundPack(PrimitiveType type, int sign, int exponent,
+        int extended, int temporary, int result, int fractionBits, int bias,
+        int minimumExponent, int maximumExponent)
+    {
+        var hidden = 1 << fractionBits;
+        var overflowSignificand = hidden << 1;
+        var fractionMask = hidden - 1;
+        var exponentMask = type == PrimitiveType.Float16 ? 0x1F : 0xFF;
+
+        _code.Load(exponent);
+        _code.Bytes(0x83, 0xF8, unchecked((byte)minimumExponent));
+        var noUnderflow = _code.JumpIf(0x8D);
+        _code.Load(exponent);
+        _code.Bytes(0x89, 0xC1);
+        _code.Byte(0xB8);
+        _code.Int32(minimumExponent);
+        _code.Bytes(0x29, 0xC8);
+        _code.Store(temporary);
+        EmitNarrowShiftRightJam(extended, temporary, result);
+        _code.Load(result);
+        _code.Store(extended);
+        _code.Byte(0xB8);
+        _code.Int32(minimumExponent);
+        _code.Store(exponent);
+        _code.PatchRelative(noUnderflow, _code.Position);
+
+        _code.Load(extended);
+        _code.Bytes(0x83, 0xE0, 0x07);
+        _code.Store(temporary);
+        _code.Load(extended);
+        _code.Bytes(0xC1, 0xE8, 0x03);
+        _code.Store(result);
+
+        _code.Load(temporary);
+        _code.Bytes(0x83, 0xF8, 0x04);
+        var roundGreater = _code.JumpIf(0x8F);
+        var roundLess = _code.JumpIf(0x8C);
+        _code.Load(result);
+        _code.Bytes(0xA9, 0x01, 0x00, 0x00, 0x00);
+        var roundEven = _code.JumpIf(0x84);
+        var increment = _code.Position;
+        _code.PatchRelative(roundGreater, increment);
+        _code.Load(result);
+        _code.Bytes(0x83, 0xC0, 0x01);
+        _code.Store(result);
+        var incrementDone = _code.Jump();
+        var noIncrement = _code.Position;
+        _code.PatchRelative(roundLess, noIncrement);
+        _code.PatchRelative(roundEven, noIncrement);
+        _code.PatchRelative(incrementDone, _code.Position);
+
+        _code.Load(result);
+        _code.Byte(0x3D);
+        _code.Int32(overflowSignificand);
+        var noSignificandCarry = _code.JumpIf(0x82);
+        _code.Load(result);
+        _code.Bytes(0xD1, 0xE8);
+        _code.Store(result);
+        _code.Load(exponent);
+        _code.Bytes(0x83, 0xC0, 0x01);
+        _code.Store(exponent);
+        var carryDone = _code.Jump();
+        _code.PatchRelative(noSignificandCarry, _code.Position);
+        _code.PatchRelative(carryDone, _code.Position);
+        _code.Load(result);
+        _code.Store(temporary);
+
+        _code.Load(exponent);
+        _code.Bytes(0x83, 0xF8, checked((byte)maximumExponent));
+        var finite = _code.JumpIf(0x8E);
+        EmitNarrowInfinity(result, sign, exponentMask, fractionBits);
+        var overflowDone = _code.Jump();
+
+        _code.PatchRelative(finite, _code.Position);
+        _code.Load(temporary);
+        _code.Bytes(0x85, 0xC0);
+        var nonzero = _code.JumpIf(0x85);
+        _code.Load(sign);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        var zeroDone = _code.Jump();
+
+        _code.PatchRelative(nonzero, _code.Position);
+        _code.Load(exponent);
+        _code.Bytes(0x83, 0xF8, unchecked((byte)minimumExponent));
+        var aboveMinimum = _code.JumpIf(0x8F);
+        _code.Load(result);
+        _code.Byte(0x3D);
+        _code.Int32(hidden);
+        var normalAtMinimum = _code.JumpIf(0x83);
+
+        _code.Load(sign);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        _code.Load(temporary);
+        _code.Byte(0x25);
+        _code.Int32(fractionMask);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(result);
+        _code.Bytes(0x09, 0xC8);
+        _code.Store(result);
+        var subnormalDone = _code.Jump();
+
+        var normal = _code.Position;
+        _code.PatchRelative(aboveMinimum, normal);
+        _code.PatchRelative(normalAtMinimum, normal);
+        _code.Load(sign);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Store(result);
+        _code.Load(exponent);
+        _code.Byte(0x05);
+        _code.Int32(bias);
+        _code.Bytes(0xC1, 0xE0, checked((byte)fractionBits), 0x89, 0xC1);
+        _code.Load(result);
+        _code.Bytes(0x09, 0xC8);
+        _code.Store(result);
+        _code.Load(temporary);
+        _code.Byte(0x25);
+        _code.Int32(fractionMask);
+        _code.Bytes(0x89, 0xC1);
+        _code.Load(result);
+        _code.Bytes(0x09, 0xC8);
+        _code.Store(result);
+
+        var done = _code.Position;
+        _code.PatchRelative(overflowDone, done);
+        _code.PatchRelative(zeroDone, done);
+        _code.PatchRelative(subnormalDone, done);
+    }
+
+    private void EmitNarrowQuietNaN(int result, int fractionBits, int exponentMask)
+    {
+        _code.Byte(0xB8);
+        _code.Int32((exponentMask << fractionBits) | (1 << (fractionBits - 1)));
+        _code.Store(result);
+    }
+
+    private void EmitNarrowInfinity(int result, int sign, int exponentMask, int fractionBits)
+    {
+        _code.Load(sign);
+        _code.Bytes(0xC1, 0xE0, 0x0F);
+        _code.Byte(0x0D);
+        _code.Int32(exponentMask << fractionBits);
+        _code.Store(result);
+    }
+
     private void CastPrimitive(PrimitiveType source, PrimitiveType target, int savedMxcsr,
         int controlledMxcsr, int resultSpill)
     {
@@ -4987,7 +6207,11 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x89, 0xC0); // clear the upper half after loading a narrow unsigned value
         }
 
-        var minimum = targetSigned ? -(1L << (targetWidth - 1)) : 0;
+        var minimum = 0L;
+        if (targetSigned)
+        {
+            minimum = targetWidth == 64 ? long.MinValue : -(1L << (targetWidth - 1));
+        }
         var maximum = targetSigned
             ? (1UL << (targetWidth - 1)) - 1
             : targetWidth == 64 ? ulong.MaxValue : (1UL << targetWidth) - 1;
