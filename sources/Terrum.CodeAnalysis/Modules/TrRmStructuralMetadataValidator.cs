@@ -38,6 +38,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmTextCaptureShapeTableReader textCaptureShapes,
             TrRmTextFragmentShapeTableReader textFragmentShapes,
             TrRmPredicateGraphTableReader predicateGraphs,
+            TrRmPredicateReadFootprintTableReader predicateReadFootprints,
             TrRmPredicateCaptureTableReader predicateCaptures,
             TrRmBlobTableReader blobs,
             TrRmFrozenValueNodeTableReader frozenValueNodes,
@@ -82,6 +83,7 @@ public static class TrRmStructuralMetadataValidator
             TextCaptureShapes = textCaptureShapes;
             TextFragmentShapes = textFragmentShapes;
             PredicateGraphs = predicateGraphs;
+            PredicateReadFootprints = predicateReadFootprints;
             PredicateCaptures = predicateCaptures;
             Blobs = blobs;
             FrozenValueNodes = frozenValueNodes;
@@ -132,6 +134,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmTextCaptureShapeTableReader TextCaptureShapes { get; }
         internal TrRmTextFragmentShapeTableReader TextFragmentShapes { get; }
         internal TrRmPredicateGraphTableReader PredicateGraphs { get; }
+        internal TrRmPredicateReadFootprintTableReader PredicateReadFootprints { get; }
         internal TrRmPredicateCaptureTableReader PredicateCaptures { get; }
         internal TrRmBlobTableReader Blobs { get; }
         internal TrRmFrozenValueNodeTableReader FrozenValueNodes { get; }
@@ -667,7 +670,10 @@ public static class TrRmStructuralMetadataValidator
             out var textFragmentShapeCount);
         _ = index.TryGetSection(0x0037, out var predicateGraphBytes,
             out var predicateGraphCount);
-        _ = index.TryGetSection(0x0038, out _, out var predicateReadFootprintCount);
+        _ = index.TryGetSection(0x0038, out var predicateReadFootprintBytes,
+            out var predicateReadFootprintCount);
+        _ = index.TryGetSection(0x0039, out _, out var predicateReadRootCount);
+        _ = index.TryGetSection(0x003A, out _, out var predicateReadDependencyCount);
         _ = index.TryGetSection(0x003B, out _, out var predicateNodeCount);
         _ = index.TryGetSection(0x003E, out var predicateCaptureBytes,
             out var predicateCaptureCount);
@@ -793,6 +799,7 @@ public static class TrRmStructuralMetadataValidator
         var textCaptureShapes = default(TrRmTextCaptureShapeTableReader);
         var textFragmentShapes = default(TrRmTextFragmentShapeTableReader);
         var predicateGraphs = default(TrRmPredicateGraphTableReader);
+        var predicateReadFootprints = default(TrRmPredicateReadFootprintTableReader);
         var predicateCaptures = default(TrRmPredicateCaptureTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
@@ -813,6 +820,9 @@ public static class TrRmStructuralMetadataValidator
             predicateGraphs = new TrRmPredicateGraphTableReader(
                 predicateGraphBytes, predicateGraphCount, predicateNodeCount,
                 predicateReadFootprintCount);
+            predicateReadFootprints = new TrRmPredicateReadFootprintTableReader(
+                predicateReadFootprintBytes, predicateReadFootprintCount,
+                predicateReadRootCount, predicateReadDependencyCount);
             predicateCaptures = new TrRmPredicateCaptureTableReader(
                 predicateCaptureBytes, predicateCaptureCount,
                 predicateGraphCount, typeSpecs);
@@ -1052,7 +1062,7 @@ public static class TrRmStructuralMetadataValidator
             interfaceConstDefs, associatedConstDefs, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
             textContentShapes, textCaptureShapes, textFragmentShapes,
-            predicateGraphs, predicateCaptures,
+            predicateGraphs, predicateReadFootprints, predicateCaptures,
             blobs, frozenValueNodes,
             constantSources,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,

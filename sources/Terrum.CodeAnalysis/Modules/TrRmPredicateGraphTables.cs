@@ -13,6 +13,14 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly record struct TrRmPredicateGraphRow(
     int RootNodeRow, int ReadFootprintRow);
 
+/// <summary>A graph's exclusively owned read-root and direct-dependency ranges.</summary>
+/// <param name="RootFirstRow">The one-based first PredicateReadRoot row, or zero when empty.</param>
+/// <param name="RootRowCount">The number of PredicateReadRoot rows.</param>
+/// <param name="DependencyFirstRow">The one-based first PredicateReadDependency row, or zero when empty.</param>
+/// <param name="DependencyRowCount">The number of PredicateReadDependency rows.</param>
+public readonly record struct TrRmPredicateReadFootprintRow(
+    int RootFirstRow, int RootRowCount, int DependencyFirstRow, int DependencyRowCount);
+
 /// <summary>A graph-local typed capture for a value, checked reference or type argument.</summary>
 /// <param name="GraphRow">The one-based owning PredicateGraph row.</param>
 /// <param name="Ordinal">The zero-based capture ordinal.</param>
@@ -90,6 +98,115 @@ public readonly ref struct TrRmPredicateGraphTableReader
 
     private static InvalidDataException InvalidPredicateGraph()
         => new("Invalid TRRM PredicateGraph table.");
+}
+
+/// <summary>Validates disjoint PredicateReadFootprint ranges.</summary>
+public readonly ref struct TrRmPredicateReadFootprintTableReader
+{
+    private const int RowSize = 16;
+
+    private readonly ReadOnlySpan<byte> _rows;
+    private readonly int _recordCount;
+
+    /// <summary>Gets the number of validated PredicateReadFootprint rows.</summary>
+    public int Count => _recordCount;
+
+    /// <summary>Validates range shape, row bounds and exclusive ownership.</summary>
+    /// <param name="section">The borrowed 16-byte PredicateReadFootprint rows.</param>
+    /// <param name="recordCount">The number of PredicateReadFootprint rows.</param>
+    /// <param name="rootCount">The number of PredicateReadRoot rows.</param>
+    /// <param name="dependencyCount">The number of PredicateReadDependency rows.</param>
+    public TrRmPredicateReadFootprintTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int rootCount, int dependencyCount)
+    {
+        if (!ValidCount(recordCount) || !ValidCount(rootCount)
+            || !ValidCount(dependencyCount)
+            || (long)recordCount * RowSize != section.Length)
+        {
+            throw InvalidPredicateReadFootprint();
+        }
+
+        _rows = section;
+        _recordCount = recordCount;
+        var rootOwnership = new byte[(rootCount + 7) / 8];
+        var dependencyOwnership = new byte[(dependencyCount + 7) / 8];
+        for (var row = 1; row <= recordCount; row++)
+        {
+            var data = GetRow(row);
+            ValidateRange(Read(data, 0), Read(data, 4), rootCount, rootOwnership);
+            ValidateRange(Read(data, 8), Read(data, 12), dependencyCount,
+                dependencyOwnership);
+        }
+    }
+
+    /// <summary>Gets the one-based first PredicateReadRoot row, or zero when empty.</summary>
+    public int GetRootFirstRow(int row)
+        => checked((int)Read(GetRow(row), 0));
+
+    /// <summary>Gets the number of PredicateReadRoot rows.</summary>
+    public int GetRootRowCount(int row)
+        => checked((int)Read(GetRow(row), 4));
+
+    /// <summary>Gets the one-based first PredicateReadDependency row, or zero when empty.</summary>
+    public int GetDependencyFirstRow(int row)
+        => checked((int)Read(GetRow(row), 8));
+
+    /// <summary>Gets the number of PredicateReadDependency rows.</summary>
+    public int GetDependencyRowCount(int row)
+        => checked((int)Read(GetRow(row), 12));
+
+    private ReadOnlySpan<byte> GetRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidPredicateReadFootprint();
+        }
+
+        return _rows.Slice((row - 1) * RowSize, RowSize);
+    }
+
+    private static void ValidateRange(uint first, uint count, int targetCount,
+        byte[] ownership)
+    {
+        if (count == 0)
+        {
+            if (first != 0)
+            {
+                throw InvalidPredicateReadFootprint();
+            }
+
+            return;
+        }
+
+        var last = (ulong)first + count - 1;
+        if (first is 0 or > 0xFF_FFFF || last > (uint)targetCount)
+        {
+            throw InvalidPredicateReadFootprint();
+        }
+
+        var firstIndex = checked((int)first - 1);
+        var lastIndex = checked((int)last - 1);
+        for (var index = firstIndex; index <= lastIndex; index++)
+        {
+            var byteIndex = index >> 3;
+            var mask = (byte)(1 << (index & 7));
+            if ((ownership[byteIndex] & mask) != 0)
+            {
+                throw InvalidPredicateReadFootprint();
+            }
+
+            ownership[byteIndex] |= mask;
+        }
+    }
+
+    private static bool ValidCount(int count)
+        => count is >= 0 and <= 0xFF_FFFF;
+
+    private static uint Read(ReadOnlySpan<byte> data, int offset)
+        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+
+    private static InvalidDataException InvalidPredicateReadFootprint()
+        => new("Invalid TRRM PredicateReadFootprint table.");
 }
 
 /// <summary>Validates capture row roles, complete types and graph-local ordinals.</summary>
@@ -239,6 +356,45 @@ public static class TrRmPredicateGraphTableWriter
 
         _ = new TrRmPredicateGraphTableReader(
             result, rows.Count, nodeCount, readFootprintCount);
+        return result;
+    }
+
+    private static void Write(byte[] bytes, int offset, uint value)
+        => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
+}
+
+/// <summary>Encodes disjoint PredicateReadFootprint ranges.</summary>
+public static class TrRmPredicateReadFootprintTableWriter
+{
+    private const int RowSize = 16;
+
+    /// <summary>Encodes PredicateReadFootprint rows in one-based table order.</summary>
+    /// <param name="rows">The graph-owned read-root and direct-dependency ranges.</param>
+    /// <param name="rootCount">The number of PredicateReadRoot rows.</param>
+    /// <param name="dependencyCount">The number of PredicateReadDependency rows.</param>
+    /// <returns>The encoded PredicateReadFootprint section.</returns>
+    public static byte[] Encode(IReadOnlyList<TrRmPredicateReadFootprintRow> rows,
+        int rootCount, int dependencyCount)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        if (rows.Count > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rows));
+        }
+
+        var result = new byte[rows.Count * RowSize];
+        for (var index = 0; index < rows.Count; index++)
+        {
+            var row = rows[index];
+            var offset = index * RowSize;
+            Write(result, offset, unchecked((uint)row.RootFirstRow));
+            Write(result, offset + 4, unchecked((uint)row.RootRowCount));
+            Write(result, offset + 8, unchecked((uint)row.DependencyFirstRow));
+            Write(result, offset + 12, unchecked((uint)row.DependencyRowCount));
+        }
+
+        _ = new TrRmPredicateReadFootprintTableReader(
+            result, rows.Count, rootCount, dependencyCount);
         return result;
     }
 
