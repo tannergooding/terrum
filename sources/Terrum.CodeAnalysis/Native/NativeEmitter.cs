@@ -126,7 +126,8 @@ public static class NativeEmitter
         var system32ImportPaths = new Dictionary<int, string>();
         for (var index = 0; index < program.Functions.Length; index++)
         {
-            if (program.Functions[index].DirectNativeImport is DirectNativeImport directImport)
+            if (program.Functions[index] is { DirectNativeImport: DirectNativeImport directImport,
+                ModuleImport: null })
             {
                 system32ImportPaths.Add(index, System32ImportPath(directImport.LibraryName));
             }
@@ -182,6 +183,11 @@ public static class NativeEmitter
                 }
                 continue;
             }
+            if (function.IsModuleReference || function.ModuleImport is not null)
+            {
+                throw new NotSupportedException(
+                    "Provider-bound module imports require an explicit native module binding.");
+            }
             if (function.DirectNativeImport is not DirectNativeImport import
                 || !DirectNativeImportContract.IsValid(function, program.Structures,
                     program.NativeFunctionPointerSignatures, program.NativePointerTypes))
@@ -221,7 +227,8 @@ public static class NativeEmitter
         {
             throw new NotSupportedException("Native modules do not support Host.Source requirements.");
         }
-        if (program.Functions.Any(static function => function.DirectNativeImport is not null)
+        if (program.Functions.Any(static function => function.DirectNativeImport is not null
+                && function.ModuleImport is null)
             && !allowNativeImports)
         {
             throw new NotSupportedException("JIT and low-level import binding do not support source native imports.");
@@ -321,8 +328,8 @@ public static class NativeEmitter
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
         EmitLibraryCore(program, exports, null, runtimePolicy, cancellationToken).Image;
 
-    /// <summary>Provisionally emits a library with local invocation-scoped source context and exact export descriptors.</summary>
-    /// <remarks>The source-grant ABI remains experimental and is not a stable or accepted target contract.</remarks>
+    /// <summary>Test-only prototype: emits a library with invocation-scoped source context and export descriptors.</summary>
+    /// <remarks>The source-grant ABI is not a selected compiler boundary or a stable native contract.</remarks>
     public static NativeSourceGrantLibrary EmitLibraryWithSourceGrant(BoundProgram program,
         IReadOnlyList<string> exports, NativeRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default)
@@ -454,7 +461,8 @@ public static class NativeEmitter
         IReadOnlyList<NativeImportBinding> bindings)
     {
         var directFunctions = program.Functions.Where(static function => function.IsExternal
-            && function.DirectNativeImport is not null).ToDictionary(static function => function.Name,
+            && function.DirectNativeImport is not null && function.ModuleImport is null)
+            .ToDictionary(static function => function.Name,
                 StringComparer.Ordinal);
         foreach (var binding in bindings)
         {
@@ -595,6 +603,31 @@ public static class NativeEmitter
         {
             code = QualifyDirectNativeImports(program, code);
         }
+        var exportThunks = ImmutableArray.CreateBuilder<NativeExportThunk>();
+        foreach (var (exportName, functionIndex) in selected)
+        {
+            var function = program.Functions[functionIndex];
+            if (function.DirectNativeImport is not DirectNativeImport directImport)
+            {
+                continue;
+            }
+            if (!allowDirectNativeImports || function.IsModuleReference || function.ModuleImport is not null
+                || !DirectNativeImportContract.IsValid(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+                || imports is null || !imports.TryGetValue(functionIndex, out var import)
+                || !StringComparer.OrdinalIgnoreCase.Equals(import.DllName, directImport.LibraryName)
+                || import.ExportName != directImport.ExportName)
+            {
+                throw new ArgumentException(
+                    $"Direct native export '{exportName}' lacks a valid owned import binding.", nameof(exports));
+            }
+            exportThunks.Add(new NativeExportThunk(functionIndex, exportName,
+                import with { DllName = System32ImportPath(import.DllName) }));
+        }
+        if (exportThunks.Count != 0)
+        {
+            code = code with { NativeExportThunks = exportThunks.ToImmutable() };
+        }
         captureCode?.Invoke(code);
         return (PeImage.BuildLibrary(code, [.. selected]), usedImports);
     }
@@ -608,7 +641,14 @@ public static class NativeEmitter
     private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports,
         IReadOnlyDictionary<string, bool> structureVisibility, Dictionary<PrimitiveType, bool> publicLayouts)
     {
-        if (function.IsPrivate || function.IsInternal || function.IsExternal)
+        var isOwnedDirectNativeImport = function.IsExternal
+            && function.DirectNativeImport is not null
+            && !function.IsModuleReference && function.ModuleImport is null;
+        if (function.IsPrivate || function.IsInternal
+            || (function.IsExternal && !isOwnedDirectNativeImport)
+            || (isOwnedDirectNativeImport
+                && !DirectNativeImportContract.IsValid(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes)))
         {
             return false;
         }
@@ -922,6 +962,7 @@ internal sealed partial class PeCompiler
     }
     internal NativeCode Compile()
     {
+        RejectUnsupportedWideFloatingCallCarriers();
         PrepareFrames();
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
         EmitSourceFunctions();
@@ -1339,7 +1380,7 @@ internal sealed partial class PeCompiler
                     else
                     {
                         _code.StoreRegister(abiArgument, Slot(slot),
-                            IsStruct(type) || IsWide(type) || function.Variables[slot].IsOut
+                            IsStruct(type) || IsWide(type) || IsIndirect(type) || function.Variables[slot].IsOut
                                 || function.Variables[slot].IsImplicitRef);
                     }
                 }
@@ -1426,6 +1467,11 @@ internal sealed partial class PeCompiler
                     UnregisterManagedRoots(i);
                     Epilog();
                 }
+            }
+            if (_checkedExceptions)
+            {
+                // Keep a checked-helper call continuation inside its function range for unwind lookup.
+                _code.Byte(0x90);
             }
             if (_checkedExceptions && _managedRootFlags[i].Count != 0)
             {
@@ -1689,6 +1735,8 @@ internal sealed partial class PeCompiler
                     1 + ExpressionSpills(fixedArrayWrite.Value, ref maximumArguments)));
             case BoundNativeStorageAddress address:
                 return ExpressionSpills(address.Index, ref maximumArguments);
+            case BoundNativeOutputReservation:
+                return 0;
             case BoundNativePointerAddress:
                 return 0;
             case BoundNativePointerRead pointerRead:
@@ -1696,6 +1744,8 @@ internal sealed partial class PeCompiler
             case BoundNativePointerWrite pointerWrite:
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Address, ref maximumArguments),
                     1 + ExpressionSpills(pointerWrite.Value, ref maximumArguments)));
+            case BoundConstant constant:
+                return IsIndirect(constant.Type) ? Math.Max(1, (Size(constant.Type) + 15) / 16) : 0;
             case BoundUnary unary:
                 return ExpressionSpills(unary.Operand, ref maximumArguments);
             case BoundUpdate update:
@@ -1716,8 +1766,9 @@ internal sealed partial class PeCompiler
                 return Math.Max(4, update.Place is BoundFieldRead nominalField
                     ? ExpressionSpills(nominalField.Receiver, ref maximumArguments) : 0);
             case BoundCast cast:
-                return Math.Max(RequiresFloatingEnvironment(cast.Operand.Type, cast.Type) ? 3 : 0,
-                    ExpressionSpills(cast.Operand, ref maximumArguments));
+                return Math.Max(IsIndirect(cast.Type) ? Math.Max(1, (Size(cast.Type) + 15) / 16) : 0,
+                    Math.Max(RequiresFloatingEnvironment(cast.Operand.Type, cast.Type) ? 3 : 0,
+                        ExpressionSpills(cast.Operand, ref maximumArguments)));
             case TrRmScalarConvert conversion:
                 return ExpressionSpills(conversion.Operand, ref maximumArguments);
             case TrRmScalarOptionalLift lift:
@@ -2013,6 +2064,9 @@ internal sealed partial class PeCompiler
                 case BoundNativeStorageAddress address:
                     VisitExpression(address.Index);
                     break;
+                case BoundNativeOutputReservation reservation:
+                    _ = variables.Add(reservation.Variable);
+                    break;
                 case BoundNativePointerAddress address:
                     _ = variables.Add(address.Variable);
                     break;
@@ -2170,7 +2224,8 @@ internal sealed partial class PeCompiler
         source is PrimitiveType.Float32 or PrimitiveType.Float64
             || target is PrimitiveType.Float32 or PrimitiveType.Float64;
     private static bool IsWide(PrimitiveType type) =>
-        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.OwnedInt32Buffer
+        type is PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64
+            or PrimitiveType.OwnedInt32Buffer
             or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
             or PrimitiveType.NativeRawPointer
             or PrimitiveType.NativeStorageAddress
@@ -2178,13 +2233,52 @@ internal sealed partial class PeCompiler
             || NativeFunctionPointerTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
+    private static bool IsNarrowInteger(PrimitiveType type) =>
+        PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
+
+    private void LoadTypedPointerField(int offset, PrimitiveType type)
+    {
+        _code.LoadPointerField(offset, Size(type));
+        NormalizeNarrowInteger(type, checkRange: false);
+    }
+
+    private int UpdateStoreWidth(BoundExpression place, PrimitiveType type)
+    {
+        if (place is BoundRead read)
+        {
+            var variable = _program.Functions[_currentFunction].Variables[read.Variable];
+            if (!variable.IsImplicitRef && !variable.IsOut)
+            {
+                return Math.Max(4, Size(type));
+            }
+        }
+        return Size(type);
+    }
+
     private int ScratchSize(PrimitiveType type) => Math.Max(8, Size(type));
     private int ScratchAlignment(PrimitiveType type) =>
         Math.Max(8, ValueLayout.Alignment(type, _program.Structures));
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
+        || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Decimal128
         || IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);
+
+    private void RejectUnsupportedWideFloatingCallCarriers()
+    {
+        static bool IsUnsupported(PrimitiveType type)
+        {
+            return type is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128;
+        }
+
+        if (_program.Functions.Any(function => IsUnsupported(function.ReturnType)
+            || function.Variables.Any(variable => IsUnsupported(variable.Type)))
+            || _program.Structures.Any(structure => structure.Fields.Any(field => IsUnsupported(field.Type))))
+        {
+            throw new NotSupportedException(
+                "The selected native emitter does not yet implement the Windows x64 wide-floating call carriers.");
+        }
+    }
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || (IsStruct(type) && _program.Structures[(int)type - 100].IsUnique);
@@ -3675,6 +3769,9 @@ internal sealed partial class PeCompiler
             case BoundNativeStorageAddress address:
                 EmitNativeStorageAddress(address, spill);
                 break;
+            case BoundNativeOutputReservation reservation:
+                EmitNativeOutputReservation(reservation);
+                break;
             case BoundNativePointerAddress address:
                 EmitNativePointerAddress(address);
                 break;
@@ -3715,6 +3812,22 @@ internal sealed partial class PeCompiler
                         _nativeUtf8ZOffsets[checked((int)constant.Value)]));
                     _code.Bytes(0x48, 0x89, 0xD0); // mov rax,rdx
                 }
+                else if (constant.Type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Decimal128)
+                {
+                    var storage = Spill(spill);
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(unchecked((long)constant.Bits.Low));
+                    _code.Store64(storage);
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(unchecked((long)constant.Bits.High));
+                    _code.Store64(storage + sizeof(ulong));
+                    _code.Address(storage);
+                }
+                else if (constant.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128)
+                {
+                    throw new NotSupportedException(
+                        "The selected native emitter does not yet implement the Windows x64 wide-floating call carriers.");
+                }
                 else if (IsWide(constant.Type))
                 {
                     _code.Bytes(0x48, 0xB8);
@@ -3724,6 +3837,7 @@ internal sealed partial class PeCompiler
                 {
                     _code.Byte(0xB8);
                     _code.Int32(constant.Type is PrimitiveType.Float32 or PrimitiveType.UInt32
+                        or PrimitiveType.Decimal32
                         ? unchecked((int)constant.Value) : checked((int)constant.Value));
                 }
                 break;
@@ -3810,7 +3924,7 @@ internal sealed partial class PeCompiler
                     _code.Load64(Slot(read.Variable));
                     if (!IsIndirect(read.Type))
                     {
-                        _code.LoadPointerField(0, Size(read.Type));
+                        LoadTypedPointerField(0, read.Type);
                     }
                 }
                 else if (read.Variable == 0 && IsBorrowedReceiver() && !IsUnique(read.Type))
@@ -3818,7 +3932,7 @@ internal sealed partial class PeCompiler
                     _code.Load64(Slot(0));
                     if (!IsIndirect(read.Type))
                     {
-                        _code.LoadPointerField(0, Size(read.Type));
+                        LoadTypedPointerField(0, read.Type);
                     }
                 }
                 else
@@ -3911,7 +4025,7 @@ internal sealed partial class PeCompiler
                     }
                     else
                     {
-                        _code.LoadPointerField(32 + classField.Offset, classField.Size);
+                        LoadTypedPointerField(32 + classField.Offset, fieldRead.Type);
                     }
                     break;
                 }
@@ -3932,7 +4046,7 @@ internal sealed partial class PeCompiler
                     }
                     else
                     {
-                        _code.LoadPointerField(field.Offset, field.Size);
+                        LoadTypedPointerField(field.Offset, field.Type);
                     }
                     break;
                 }
@@ -3952,6 +4066,7 @@ internal sealed partial class PeCompiler
                 {
                     _code.Bytes(0x89, 0xC0); // clear adjacent aggregate bits above the field
                 }
+                NormalizeNarrowInteger(field.Type, checkRange: false);
                 break;
             case BoundBufferRead bufferRead:
                 EmitBufferIndex(bufferRead.Buffer, bufferRead.Index, bufferRead.IsEndRelativeOffset, spill);
@@ -3987,7 +4102,12 @@ internal sealed partial class PeCompiler
                                 _code.Byte(0x48);
                             }
                             _code.Bytes(0xF7, 0xD8);
-                            if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                            if (IsNarrowInteger(unary.Type))
+                            {
+                                NormalizeNarrowInteger(unary.Type,
+                                    checkRange: unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked);
+                            }
+                            else if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                             {
                                 RuntimeBranch(unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
                                     ? (byte)0x82 : (byte)0x80, 0);
@@ -4000,6 +4120,7 @@ internal sealed partial class PeCompiler
                             _code.Byte(0x48);
                         }
                         _code.Bytes(0xF7, 0xD0);
+                        NormalizeNarrowInteger(unary.Type, checkRange: false);
                         break;
                     case TokenKind.Bang:
                         _code.Bytes(0x83, 0xF0, 0x01);
@@ -4009,7 +4130,8 @@ internal sealed partial class PeCompiler
             case BoundUpdate update:
                 var rootedUpdate = UpdateAddress(update.Place, spill);
                 _code.Store64(Spill(spill + 1));
-                _code.LoadPointerField(0, IsWide(update.Type) ? 8 : 4);
+                _code.LoadPointerField(0, Size(update.Type));
+                NormalizeNarrowInteger(update.Type, checkRange: false);
                 StoreValue(Spill(spill + 2), update.Type);
                 var updateBegin = _code.Position;
                 var updateFunclet = -1;
@@ -4024,17 +4146,18 @@ internal sealed partial class PeCompiler
                     _code.Byte(0x48);
                 }
                 _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
-                if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                if (IsNarrowInteger(update.Type))
+                {
+                    NormalizeNarrowInteger(update.Type,
+                        checkRange: update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked);
+                }
+                else if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
                 {
                     RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
                         ? (byte)0x82 : (byte)0x80, 0);
                 }
                 _code.Load64(Spill(spill + 1), destinationRegister: true);
-                if (IsWide(update.Type))
-                {
-                    _code.Byte(0x48);
-                }
-                _code.Bytes(0x89, 0x02);
+                _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
                 if (updateFunclet >= 0)
                 {
                     _code.Byte(0x90);
@@ -4054,7 +4177,8 @@ internal sealed partial class PeCompiler
             {
                 var rooted = UpdateAddress(compound.Place, spill);
                 _code.Store64(Spill(spill + 1));
-                _code.LoadPointerField(0, IsWide(compound.Type) ? 8 : 4);
+                _code.LoadPointerField(0, Size(compound.Type));
+                NormalizeNarrowInteger(compound.Type, checkRange: false);
                 StoreValue(Spill(spill + 2), compound.Type);
                 var begin = _code.Position;
                 var funclet = -1;
@@ -4065,7 +4189,7 @@ internal sealed partial class PeCompiler
                     _managedStagedRoots.Add(funclet, [Spill(spill)]);
                 }
                 Expression(compound.Right, spill + 4);
-                if (IsWide(compound.Right.Type))
+                if (IsWide(compound.Right.Type) || CompoundOperators.IsShift(compound.Operator))
                 {
                     _code.Bytes(0x48, 0x89, 0xC1);
                 }
@@ -4076,11 +4200,7 @@ internal sealed partial class PeCompiler
                 LoadValue(Spill(spill + 2), compound.Type);
                 Binary(CompoundOperators.Binary(compound.Operator), compound.Type, compound.OverflowBehavior);
                 _code.Load64(Spill(spill + 1), destinationRegister: true);
-                if (IsWide(compound.Type))
-                {
-                    _code.Byte(0x48);
-                }
-                _code.Bytes(0x89, 0x02);
+                _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
                 if (funclet >= 0)
                 {
                     _code.Byte(0x90);
@@ -4207,7 +4327,8 @@ internal sealed partial class PeCompiler
                 }
                 else
                 {
-                    if (IsWide(binary.Left.Type))
+                    if (IsWide(binary.Right.Type)
+                        || binary.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
                     {
                         _code.Bytes(0x48, 0x89, 0xC1); // mov rcx,rax
                     }
@@ -4350,6 +4471,11 @@ internal sealed partial class PeCompiler
                         _code.Address(scratch);
                         _code.Store64(Spill(argumentSpills[i]));
                     }
+                    else if (call.Arguments[i] is BoundNativeOutputReservation reservation)
+                    {
+                        Expression(reservation, argumentExpressionSpillBase);
+                        _code.Store64(Spill(argumentSpills[i]));
+                    }
                     else
                     {
                         if (IsImplicitReferenceArgument(call, i))
@@ -4419,7 +4545,7 @@ internal sealed partial class PeCompiler
                     var argumentIndex = call.ArgumentIndex(i);
                     if (IsImplicitReferenceArgument(call, argumentIndex)
                         || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
-                        or BoundFieldLoan or BoundMutableFieldLoan)
+                        or BoundFieldLoan or BoundMutableFieldLoan or BoundNativeOutputReservation)
                     {
                         _code.Load64(Spill(argumentSpills[argumentIndex]));
                     }
@@ -4434,7 +4560,7 @@ internal sealed partial class PeCompiler
                     var argumentIndex = call.ArgumentIndex(i);
                     if (IsImplicitReferenceArgument(call, argumentIndex)
                         || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan or BoundMutableReceiverLoan
-                        or BoundFieldLoan or BoundMutableFieldLoan)
+                        or BoundFieldLoan or BoundMutableFieldLoan or BoundNativeOutputReservation)
                     {
                         _code.Load64(Spill(argumentSpills[argumentIndex]));
                     }
@@ -4445,7 +4571,8 @@ internal sealed partial class PeCompiler
                     var argumentType = call.Arguments[argumentIndex].Type;
                     var isAddress = IsImplicitReferenceArgument(call, argumentIndex)
                         || call.Arguments[argumentIndex] is BoundOutArgument or BoundReceiverLoan
-                            or BoundMutableReceiverLoan or BoundFieldLoan or BoundMutableFieldLoan;
+                            or BoundMutableReceiverLoan or BoundFieldLoan or BoundMutableFieldLoan
+                            or BoundNativeOutputReservation;
                     if (nativeAbi && !isAddress
                         && argumentType is PrimitiveType.Float32 or PrimitiveType.Float64)
                     {
@@ -4453,7 +4580,8 @@ internal sealed partial class PeCompiler
                     }
                     else
                     {
-                        _code.MoveArgument(i + hidden, isAddress || IsStruct(argumentType) || IsWide(argumentType));
+                        _code.MoveArgument(i + hidden,
+                            isAddress || IsStruct(argumentType) || IsWide(argumentType) || IsIndirect(argumentType));
                     }
                 }
                 if (sourceHidden != 0)
@@ -4592,7 +4720,7 @@ internal sealed partial class PeCompiler
     {
         if (!RequiresFloatingEnvironment(source, target))
         {
-            CastPrimitive(source, target, 0, 0);
+            CastPrimitive(source, target, 0, 0, spill);
             return;
         }
 
@@ -4603,11 +4731,12 @@ internal sealed partial class PeCompiler
         var controlledMxcsr = Spill(spill + 1);
         BeginFloatingEnvironment(savedMxcsr, controlledMxcsr);
         LoadValue(operand, source);
-        CastPrimitive(source, target, savedMxcsr, controlledMxcsr);
+        CastPrimitive(source, target, savedMxcsr, controlledMxcsr, spill);
         _code.LoadMxcsr(savedMxcsr);
     }
 
-    private void CastPrimitive(PrimitiveType source, PrimitiveType target, int savedMxcsr, int controlledMxcsr)
+    private void CastPrimitive(PrimitiveType source, PrimitiveType target, int savedMxcsr,
+        int controlledMxcsr, int resultSpill)
     {
         if (source is PrimitiveType.Float32 or PrimitiveType.Float64
             && target is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
@@ -4616,8 +4745,7 @@ internal sealed partial class PeCompiler
             return;
         }
         if (target is PrimitiveType.Float32 or PrimitiveType.Float64
-            && source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                or PrimitiveType.UInt64 or PrimitiveType.Char16)
+            && (PrimitiveTypeFacts.IsInteger(source) || source == PrimitiveType.Char16))
         {
             if (source == PrimitiveType.UInt64)
             {
@@ -4631,6 +4759,24 @@ internal sealed partial class PeCompiler
                 }
                 EmitIntegerToFloating(source, target);
             }
+            return;
+        }
+        if ((source is PrimitiveType.Char16 or PrimitiveType.Int8 or PrimitiveType.Int16
+                or PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.UInt8
+                or PrimitiveType.UInt16 or PrimitiveType.UInt32 or PrimitiveType.UInt64)
+            && (target is PrimitiveType.Int128 or PrimitiveType.UInt128))
+        {
+            EmitIntegerTo128(source, target, resultSpill);
+            return;
+        }
+        if ((PrimitiveTypeFacts.IsInteger(source) || source == PrimitiveType.Char16)
+            && (PrimitiveTypeFacts.IsInteger(target) || target == PrimitiveType.Char16))
+        {
+            EmitCheckedIntegerConversion(source, target);
+            return;
+        }
+        if (source == target)
+        {
             return;
         }
         if (source == PrimitiveType.Float32 && target == PrimitiveType.Float64)
@@ -4647,45 +4793,94 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x66, 0x0F, 0x7E, 0xC0); // movd eax,xmm0
             return;
         }
-        if (source == PrimitiveType.Int32 && IsWide(target))
+        throw new InvalidOperationException("The verifier admitted an unsupported conversion.");
+    }
+
+    private void EmitIntegerTo128(PrimitiveType source, PrimitiveType target, int resultSpill)
+    {
+        var sourceSigned = PrimitiveTypeFacts.IsSignedInteger(source);
+        if (source == PrimitiveType.Char16)
         {
-            _code.Bytes(0x48, 0x63, 0xC0); // movsxd rax,eax
+            _code.Bytes(0x0F, 0xB7, 0xC0); // zero-extend the raw code unit
         }
-        if (target == PrimitiveType.Char16 && source != PrimitiveType.Char16)
+        else if (sourceSigned && source != PrimitiveType.Int64)
         {
-            if (IsWide(source))
-            {
-                _code.Byte(0x48);
-            }
-            _code.Byte(0x3D);
-            _code.Int32(ushort.MaxValue);
-            RuntimeBranch(0x87, 0);
+            _code.Bytes(0x48, 0x63, 0xC0); // sign-extend the source value to RAX
         }
-        else if ((target is PrimitiveType.UInt32 or PrimitiveType.UInt64
-            && source is PrimitiveType.Int32 or PrimitiveType.Int64)
-            || (target == PrimitiveType.Int32 && source is PrimitiveType.UInt32 or PrimitiveType.UInt64)
-            || (target == PrimitiveType.Int64 && source == PrimitiveType.UInt64))
+        if (target == PrimitiveType.UInt128 && sourceSigned)
         {
-            if (IsWide(source) || IsWide(target))
-            {
-                _code.Byte(0x48);
-            }
-            _code.Bytes(0x85, 0xC0);
-            RuntimeBranch(0x88, 0);
+            _code.Bytes(0x48, 0x85, 0xC0);
+            RuntimeBranch(0x8C, 0);
         }
-        if (IsWide(source) && target is PrimitiveType.Int32 or PrimitiveType.UInt32)
+
+        if (sourceSigned && target == PrimitiveType.Int128)
         {
-            if (target == PrimitiveType.Int32)
-            {
-                _code.Bytes(0x48, 0x63, 0xC8); // movsxd rcx,eax
-            }
-            else
-            {
-                _code.Bytes(0x89, 0xC1); // mov ecx,eax; zero-extends rcx
-            }
-            _code.Bytes(0x48, 0x39, 0xC8); // cmp rax,rcx
-            RuntimeBranch(0x85, 0);
+            _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0xC1, 0xFA, 0x3F); // high word is sign extension
         }
+        else
+        {
+            _code.Bytes(0x31, 0xD2); // unsigned inputs and successful uint128 inputs zero-extend
+        }
+        _code.Store64(Spill(resultSpill));
+        _code.Bytes(0x48, 0x89, 0xD0);
+        _code.Store64(Spill(resultSpill) + sizeof(ulong));
+        _code.Address(Spill(resultSpill));
+    }
+
+    private void EmitCheckedIntegerConversion(PrimitiveType source, PrimitiveType target)
+    {
+        var sourceWidth = source == PrimitiveType.Char16 ? 16 : PrimitiveTypeFacts.IntegerWidth(source);
+        var targetWidth = target == PrimitiveType.Char16 ? 16 : PrimitiveTypeFacts.IntegerWidth(target);
+        var sourceSigned = PrimitiveTypeFacts.IsSignedInteger(source);
+        var targetSigned = target != PrimitiveType.Char16 && PrimitiveTypeFacts.IsSignedInteger(target);
+
+        if (sourceSigned && sourceWidth < 64)
+        {
+            _code.Bytes(0x48, 0x63, 0xC0); // sign-extend the source value to RAX
+        }
+        else if (!sourceSigned && sourceWidth < 32)
+        {
+            _code.Bytes(0x89, 0xC0); // clear the upper half after loading a narrow unsigned value
+        }
+
+        var minimum = targetSigned ? -(1L << (targetWidth - 1)) : 0;
+        var maximum = targetSigned
+            ? (1UL << (targetWidth - 1)) - 1
+            : targetWidth == 64 ? ulong.MaxValue : (1UL << targetWidth) - 1;
+
+        if (sourceSigned && !targetSigned)
+        {
+            CompareRaxToBound(0);
+            RuntimeBranch(0x8C, 0);
+        }
+        else if (sourceSigned && targetSigned)
+        {
+            CompareRaxToBound(unchecked((ulong)minimum));
+            RuntimeBranch(0x8C, 0);
+        }
+
+        CompareRaxToBound(maximum);
+        RuntimeBranch(sourceSigned && targetSigned ? (byte)0x8F : (byte)0x87, 0);
+
+        if (targetWidth == 8 && targetSigned)
+        {
+            _code.Bytes(0x0F, 0xBE, 0xC0);
+        }
+        else if (targetWidth == 16)
+        {
+            _code.Bytes(0x0F, targetSigned ? (byte)0xBF : (byte)0xB7, 0xC0);
+        }
+        else if (targetWidth <= 32)
+        {
+            _code.Bytes(0x89, 0xC0); // canonicalize the 32-bit destination carrier
+        }
+    }
+
+    private void CompareRaxToBound(ulong value)
+    {
+        _code.Bytes(0x48, 0xBA);
+        _code.Int64(unchecked((long)value));
+        _code.Bytes(0x48, 0x39, 0xD0);
     }
 
     private void EmitFloatingToInteger(PrimitiveType source, PrimitiveType target, int savedMxcsr, int controlledMxcsr)
@@ -5248,14 +5443,23 @@ internal sealed partial class PeCompiler
             BinaryWide(op, type == PrimitiveType.UInt64, overflowBehavior);
             return;
         }
-        var unsigned = type is PrimitiveType.UInt32 or PrimitiveType.Char16;
+        var width = PrimitiveTypeFacts.IntegerWidth(type);
+        var narrow = IsNarrowInteger(type);
+        var unsigned = type is PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune;
         switch (op)
         {
             case TokenKind.ShiftLeft:
             case TokenKind.ShiftRight:
             case TokenKind.ShiftRightUnsigned:
-                _code.Bytes(0x83, 0xF9, 0x20); // cmp ecx,32; unsigned comparison rejects negative counts
+                _code.Bytes(0x48, 0x83, 0xF9, checked((byte)width));
                 RuntimeBranch(0x83, 0);
+                if (op == TokenKind.ShiftRightUnsigned && narrow
+                    && PrimitiveTypeFacts.IsSignedInteger(type))
+                {
+                    _code.Byte(0x25);
+                    _code.Int32((1 << width) - 1);
+                }
                 _code.Bytes(0xD3, op == TokenKind.ShiftLeft ? (byte)0xE0
                     : op == TokenKind.ShiftRight && !unsigned ? (byte)0xF8 : (byte)0xE8);
                 break;
@@ -5305,8 +5509,12 @@ internal sealed partial class PeCompiler
                     }
                     break;
                 }
-                _code.Byte(0x3D); // cmp eax, int.MinValue
-                _code.Int32(int.MinValue);
+                _code.Byte(0x3D);
+                _code.Int32(width switch {
+                    8 => sbyte.MinValue,
+                    16 => short.MinValue,
+                    _ => int.MinValue,
+                });
                 var normal = _code.JumpIf(0x85);
                 _code.Bytes(0x83, 0xF9, 0xFF); // cmp ecx,-1
                 var normalAgain = _code.JumpIf(0x85);
@@ -5352,6 +5560,41 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x0F, 0xB6, 0xC0); // movzx eax,al
                 break;
         }
+        NormalizeNarrowInteger(type, checkRange: narrow
+            && overflowBehavior == BoundIntegerOverflowBehavior.Checked
+            && op is TokenKind.Plus or TokenKind.Minus or TokenKind.Star);
+    }
+
+    private void NormalizeNarrowInteger(PrimitiveType type, bool checkRange)
+    {
+        var width = PrimitiveTypeFacts.IntegerWidth(type);
+        if (width is not (8 or 16))
+        {
+            return;
+        }
+        if (PrimitiveTypeFacts.IsSignedInteger(type))
+        {
+            if (checkRange)
+            {
+                _code.Bytes(0x89, 0xC2); // preserve the full result for exact-width range checking
+            }
+            _code.Bytes(0x0F, width == 8 ? (byte)0xBE : (byte)0xBF, 0xC0);
+            if (checkRange)
+            {
+                _code.Bytes(0x39, 0xD0);
+                RuntimeBranch(0x85, 0);
+            }
+        }
+        else
+        {
+            if (checkRange)
+            {
+                _code.Byte(0x3D);
+                _code.Int32((1 << width) - 1);
+                RuntimeBranch(0x87, 0);
+            }
+            _code.Bytes(0x0F, width == 8 ? (byte)0xB6 : (byte)0xB7, 0xC0);
+        }
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
@@ -5363,7 +5606,7 @@ internal sealed partial class PeCompiler
             case TokenKind.ShiftLeft:
             case TokenKind.ShiftRight:
             case TokenKind.ShiftRightUnsigned:
-                _code.Bytes(0x83, 0xF9, 0x40); // cmp ecx,64
+                _code.Bytes(0x48, 0x83, 0xF9, 0x40); // cmp rcx,64; unsigned comparison rejects negative or oversized counts
                 RuntimeBranch(0x83, 0);
                 _code.Bytes(0x48, 0xD3, op == TokenKind.ShiftLeft ? (byte)0xE0
                     : op == TokenKind.ShiftRight && !unsigned ? (byte)0xF8 : (byte)0xE8);
@@ -5734,6 +5977,29 @@ internal sealed class MachineCode
             Byte(0x24);
         }
         Int32(offset);
+    }
+    internal void StorePointerField(int width)
+    {
+        if (width == 8)
+        {
+            Bytes(0x48, 0x89, 0x02);
+        }
+        else if (width == 4)
+        {
+            Bytes(0x89, 0x02);
+        }
+        else if (width == 2)
+        {
+            Bytes(0x66, 0x89, 0x02);
+        }
+        else if (width == 1)
+        {
+            Bytes(0x88, 0x02);
+        }
+        else
+        {
+            throw new ArgumentOutOfRangeException(nameof(width));
+        }
     }
     internal void StoreRegister(int argument, int offset, bool wide)
     {

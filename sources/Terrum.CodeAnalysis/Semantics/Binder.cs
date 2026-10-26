@@ -20,6 +20,9 @@ internal sealed partial class Binder
     private SyntaxTree _tree;
     private readonly ImmutableArray<SyntaxTree> _trees;
     private readonly Dictionary<SyntaxTree, (string Namespace, ImmutableArray<string> Usings)> _contexts = [];
+    private readonly Dictionary<SyntaxNode, (string Namespace, ImmutableArray<string> Usings)> _nodeContexts =
+        new(ReferenceEqualityComparer.Instance);
+    private readonly List<(SyntaxTree Tree, SyntaxNode Declaration)> _scopedDeclarations = [];
     private readonly CancellationToken _cancellationToken;
     private List<Diagnostic>? _diagnostics;
     private List<SourceDiagnostic>? _sourceDiagnostics;
@@ -51,10 +54,11 @@ internal sealed partial class Binder
     private long _nativeStringZLiteralBytes;
     private readonly HashSet<int> _unresolvedVacantLocals = [];
     private readonly HashSet<int> _constLocals = [];
-    private readonly Dictionary<int, int> _constInt32Values = [];
+    private readonly Dictionary<int, BoundConstant> _constScalarValues = [];
     private int _localStart;
     private readonly List<Dictionary<string, int>> _scopes = [];
     private readonly List<LoopBinding> _loops = [];
+    private readonly List<SwitchBinding> _switches = [];
     private ImmutableDictionary<string, PrimitiveType>? _genericOwnerTypeArguments;
     private int _finallyLoopDepth;
     private GenericInstantiation? _genericContext;
@@ -78,7 +82,19 @@ internal sealed partial class Binder
     {
         internal string? Name { get; init; }
         internal bool HasContinue { get; set; }
+        internal bool IsSwitchDispatcher { get; init; }
     }
+
+    private readonly record struct SwitchTarget(BoundConstant Value, int ArmOrdinal);
+
+    private sealed record SwitchBinding(int StateVariable, int DispatchLoopIndex,
+        PrimitiveType SelectorType, ImmutableArray<SwitchTarget> Targets, int DefaultArm);
+
+    private sealed record SwitchArmBinding(SyntaxNode Syntax, SyntaxNode BodySyntax,
+        BoundConstant? Value, bool IsWildcard, BoundExpression? Guard, int Ordinal, bool IsFallback);
+
+    private readonly record struct BindingContext(
+        SyntaxTree Tree, string Namespace, ImmutableArray<string> Usings);
 
     private sealed class AliasDefinition(SyntaxTree tree, SyntaxNode declaration, SyntaxNode target,
         ImmutableArray<string> typeParameters, string qualifiedName, bool isPublic)
@@ -141,7 +157,7 @@ internal sealed partial class Binder
         SourceArithmeticProfile sourceArithmeticProfile, TokenKind operation, PrimitiveType type, bool unary = false)
     {
         if (sourceArithmeticProfile != SourceArithmeticProfile.Release
-            || type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))
+            || !PrimitiveTypeFacts.IsInteger(type))
         {
             return BoundIntegerOverflowBehavior.Checked;
         }
@@ -165,6 +181,20 @@ internal sealed partial class Binder
     {
         _tree = tree;
         var (namespaceName, usings) = _contexts[tree];
+        SetContext(tree, namespaceName, usings);
+    }
+
+    private void SetContext(SyntaxTree tree, SyntaxNode? declaration)
+    {
+        var (namespaceName, usings) = declaration is not null
+            && _nodeContexts.TryGetValue(declaration, out var scopedContext)
+            ? scopedContext : _contexts[tree];
+        SetContext(tree, namespaceName, usings);
+    }
+
+    private void SetContext(SyntaxTree tree, string namespaceName, ImmutableArray<string> usings)
+    {
+        _tree = tree;
         _namespace = namespaceName;
         _usings.Clear();
         foreach (var imported in usings)
@@ -172,6 +202,85 @@ internal sealed partial class Binder
             _ = _usings.Add(imported);
         }
     }
+
+    private BindingContext CaptureContext()
+        => new(_tree, _namespace, [.. _usings]);
+
+    private void RestoreContext(BindingContext context)
+        => SetContext(context.Tree, context.Namespace, context.Usings);
+
+    private void CollectTreeContexts(SyntaxTree tree)
+    {
+        var namespaceName = "";
+        var usings = ImmutableArray.CreateBuilder<string>();
+        foreach (var child in tree.Root.Children.OfType<SyntaxNode>())
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            switch (child.Kind)
+            {
+                case SyntaxKind.UsingDirective:
+                    usings.Add(DirectiveName(child));
+                    break;
+                case SyntaxKind.NamespaceDeclaration:
+                    namespaceName = DirectiveName(child);
+                    _nodeContexts[child] = (namespaceName, usings.ToImmutable());
+                    break;
+                case SyntaxKind.NamespaceBlockDeclaration:
+                    CollectNamespaceBlock(tree, child, namespaceName, usings.ToImmutable());
+                    break;
+                default:
+                    AddScopedDeclaration(tree, child, namespaceName, usings.ToImmutable());
+                    break;
+            }
+        }
+        _contexts.Add(tree, (namespaceName, usings.ToImmutable()));
+    }
+
+    private void CollectNamespaceBlock(SyntaxTree tree, SyntaxNode namespaceBlock,
+        string parentNamespace, ImmutableArray<string> inheritedUsings)
+    {
+        var namespaceName = QualifyNamespace(parentNamespace, DirectiveName(namespaceBlock));
+        var usings = inheritedUsings.ToBuilder();
+        foreach (var child in namespaceBlock.Children.OfType<SyntaxNode>())
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            switch (child.Kind)
+            {
+                case SyntaxKind.UsingDirective:
+                    usings.Add(DirectiveName(child));
+                    break;
+                case SyntaxKind.NamespaceBlockDeclaration:
+                    CollectNamespaceBlock(tree, child, namespaceName, usings.ToImmutable());
+                    break;
+                case SyntaxKind.NamespaceDeclaration:
+                    _nodeContexts[child] = (namespaceName, usings.ToImmutable());
+                    break;
+                default:
+                    AddScopedDeclaration(tree, child, namespaceName, usings.ToImmutable());
+                    break;
+            }
+        }
+    }
+
+    private void AddScopedDeclaration(SyntaxTree tree, SyntaxNode declaration,
+        string namespaceName, ImmutableArray<string> usings)
+    {
+        var context = (namespaceName, usings);
+        var pending = new Stack<SyntaxNode>();
+        pending.Push(declaration);
+        while (pending.TryPop(out var node))
+        {
+            _nodeContexts[node] = context;
+            foreach (var child in node.Children.OfType<SyntaxNode>())
+            {
+                pending.Push(child);
+            }
+        }
+        _scopedDeclarations.Add((tree, declaration));
+    }
+
+    private static string QualifyNamespace(string parent, string name)
+        => string.IsNullOrEmpty(parent) ? name : parent + "." + name;
 
     internal BoundProgram? Bind()
     {
@@ -266,86 +375,70 @@ internal sealed partial class Binder
 
         foreach (var tree in _trees)
         {
-            _tree = tree;
-            _namespace = "";
-            _usings.Clear();
-            foreach (var child in tree.Root.Children)
-            {
-                if (child is SyntaxNode { Kind: SyntaxKind.UsingDirective } usingNode)
-                {
-                    _ = _usings.Add(DirectiveName(usingNode));
-                }
-                else if (child is SyntaxNode { Kind: SyntaxKind.NamespaceDeclaration } namespaceNode)
-                {
-                    _namespace = DirectiveName(namespaceNode);
-                }
-            }
-            _contexts.Add(tree, (_namespace, [.. _usings]));
+            CollectTreeContexts(tree);
         }
         DeclareProtocols();
-        foreach (var tree in _trees)
+        foreach (var (tree, child) in _scopedDeclarations)
         {
-            SetContext(tree);
-            foreach (var child in tree.Root.Children)
+            SetContext(tree, child);
+            if (child.Kind == SyntaxKind.ClassDeclaration)
             {
-                if (child is SyntaxNode { Kind: SyntaxKind.ClassDeclaration } classDeclaration)
+                DeclareClassName(tree, child);
+            }
+            if (child.Kind == SyntaxKind.StructDeclaration)
+            {
+                var structure = child;
+                if (HasGenericTypeParameters(structure))
                 {
-                    DeclareClassName(tree, classDeclaration);
+                    DeclareGenericStructTemplate(tree, structure);
+                    continue;
                 }
-                if (child is SyntaxNode { Kind: SyntaxKind.StructDeclaration } structure)
+                var name = StructName(structure).Name;
+                var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
+                if (TryPrimitiveType(name, out var primitive))
                 {
-                    if (HasGenericTypeParameters(structure))
+                    if (!_coreLibrary || _namespace.Length != 0)
                     {
-                        DeclareGenericStructTemplate(tree, structure);
-                        continue;
+                        Report("TRM3003", $"The primitive type '{name}' can only be declared by the Core library.", structure.Span);
                     }
-                    var name = StructName(structure).Name;
-                    var qualified = string.IsNullOrEmpty(_namespace) ? name : _namespace + "." + name;
-                    if (TryPrimitiveType(name, out var primitive))
+                    else if (!_primitiveDeclarations.Add(name))
                     {
-                        if (!_coreLibrary || _namespace.Length != 0)
-                        {
-                            Report("TRM3003", $"The primitive type '{name}' can only be declared by the Core library.", structure.Span);
-                        }
-                        else if (!_primitiveDeclarations.Add(name))
-                        {
-                            Report("TRM3003", $"Duplicate primitive declaration '{name}'.", structure.Span);
-                        }
-                        else
-                        {
-                            _ = _acceptedPrimitiveDeclarations.Add(structure);
-                            _structNames.Add(name, primitive);
-                            ValidatePrimitiveDeclaration(structure, name);
-                        }
-                        continue;
+                        Report("TRM3003", $"Duplicate primitive declaration '{name}'.", structure.Span);
                     }
-                    if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
-                        || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
-                        or "MutableInt32BufferView"
-                        || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
+                    else
                     {
-                        Report("TRM3003", "A compiler-owned native buffer or view type cannot be redeclared.", structure.Span);
-                        continue;
+                        _ = _acceptedPrimitiveDeclarations.Add(structure);
+                        _structNames.Add(name, primitive);
+                        ValidatePrimitiveDeclaration(structure, name);
                     }
-                    var index = _structs.Count;
-                    if (index >= SemanticVerifier.MaximumVariables)
-                    {
-                        Report("TRM3016", "Source exceeds the supported number of value layouts.", structure.Span);
-                        return null;
-                    }
-                    if (_classNames.ContainsKey(qualified) || _genericStructTemplates.ContainsKey(qualified)
-                        || !_structNames.TryAdd(qualified, (PrimitiveType)(100 + index)))
-                    {
-                        Report("TRM3003", $"Duplicate struct '{name}'.", structure.Span);
-                        continue;
-                    }
-                    var isPublic = structure.Children.OfType<SyntaxTokenElement>()
-                        .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
-                    _structs.Add(new BoundStruct(qualified, [], 0) {
-                        IsInternal = !isPublic,
-                    });
-                    _structDeclarations.Add(index, (tree, structure));
+                    continue;
                 }
+                if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
+                    || name == "Span" || qualified is NativeBufferIntrinsics.TypeName or "ReadonlyInt32BufferView"
+                    or "MutableInt32BufferView"
+                    || name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName)
+                {
+                    Report("TRM3003", "A compiler-owned native buffer or view type cannot be redeclared.", structure.Span);
+                    continue;
+                }
+                var index = _structs.Count;
+                if (index >= SemanticVerifier.MaximumVariables)
+                {
+                    Report("TRM3016", "Source exceeds the supported number of value layouts.", structure.Span);
+                    return null;
+                }
+                if (_classNames.ContainsKey(qualified) || _genericStructTemplates.ContainsKey(qualified)
+                    || !_structNames.TryAdd(qualified, (PrimitiveType)(100 + index)))
+                {
+                    Report("TRM3003", $"Duplicate struct '{name}'.", structure.Span);
+                    continue;
+                }
+                var isPublic = structure.Children.OfType<SyntaxTokenElement>()
+                    .Any(static element => element.Token.Kind == TokenKind.PublicKeyword);
+                _structs.Add(new BoundStruct(qualified, [], 0) {
+                    IsInternal = !isPublic,
+                });
+                _structDeclarations.Add(index, (tree, structure));
             }
         }
 
@@ -369,70 +462,64 @@ internal sealed partial class Binder
             DeclareClass(index);
         }
         DeclareConformances();
-        foreach (var tree in _trees)
+        foreach (var (tree, node) in _scopedDeclarations)
         {
-            SetContext(tree);
-            foreach (var child in tree.Root.Children)
+            SetContext(tree, node);
+            if (node.Kind is SyntaxKind.UsingDirective or SyntaxKind.NamespaceDeclaration
+                or SyntaxKind.NamespaceBlockDeclaration)
             {
-                if (child is not SyntaxNode node || node.Kind is SyntaxKind.UsingDirective or SyntaxKind.NamespaceDeclaration)
+                continue;
+            }
+            if (node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
+            {
+                if (HasGenericTypeParameters(node))
                 {
                     continue;
                 }
-                if (node.Kind is SyntaxKind.StructDeclaration or SyntaxKind.ClassDeclaration)
+                var structName = StructName(node).Name;
+                if (TryPrimitiveType(structName, out _)
+                    && (node.Kind != SyntaxKind.StructDeclaration
+                        || !_acceptedPrimitiveDeclarations.Contains(node)))
                 {
-                    if (HasGenericTypeParameters(node))
+                    continue;
+                }
+                foreach (var member in node.Children)
+                {
+                    if (member is SyntaxNode declaration && declaration.Kind is SyntaxKind.FunctionDeclaration
+                        or SyntaxKind.ConstructorDeclaration or SyntaxKind.OperatorDeclaration
+                        or SyntaxKind.PropertyDeclaration)
                     {
-                        continue;
-                    }
-                    var structName = StructName(node).Name;
-                    if (TryPrimitiveType(structName, out _)
-                        && (node.Kind != SyntaxKind.StructDeclaration
-                            || !_acceptedPrimitiveDeclarations.Contains(node)))
-                    {
-                        continue;
-                    }
-                    foreach (var member in node.Children)
-                    {
-                        if (member is SyntaxNode declaration && declaration.Kind is SyntaxKind.FunctionDeclaration
-                            or SyntaxKind.ConstructorDeclaration or SyntaxKind.OperatorDeclaration
-                            or SyntaxKind.PropertyDeclaration)
+                        if (TryPrimitiveType(structName, out _)
+                            && declaration.Kind is SyntaxKind.ConstructorDeclaration
+                                or SyntaxKind.OperatorDeclaration)
                         {
-                            if (TryPrimitiveType(structName, out _)
-                                && declaration.Kind is SyntaxKind.ConstructorDeclaration
-                                    or SyntaxKind.OperatorDeclaration)
-                            {
-                                Report("TRM3001", "Core primitive declarations cannot define constructors or operators.",
-                                    declaration.Span);
-                                continue;
-                            }
-                            Declare(declaration, structName);
+                            Report("TRM3001", "Core primitive declarations cannot define constructors or operators.",
+                                declaration.Span);
+                            continue;
                         }
+                        Declare(declaration, structName);
                     }
-                    continue;
                 }
-                if (node.Kind == SyntaxKind.InterfaceDeclaration)
-                {
-                    continue;
-                }
-                if (node.Kind == SyntaxKind.AliasDeclaration)
-                {
-                    continue;
-                }
-                if (node.Kind != SyntaxKind.FunctionDeclaration)
-                {
-                    Report("TRM3001", "Only top-level function declarations are supported.", node.Span);
-                    continue;
-                }
-                if (node.Children.OfType<SyntaxNode>()
-                    .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList)
-                    is SyntaxNode typeParameters)
-                {
-                    DeclareGeneric(node, typeParameters);
-                }
-                else
-                {
-                    Declare(node, null);
-                }
+                continue;
+            }
+            if (node.Kind is SyntaxKind.InterfaceDeclaration or SyntaxKind.AliasDeclaration)
+            {
+                continue;
+            }
+            if (node.Kind != SyntaxKind.FunctionDeclaration)
+            {
+                Report("TRM3001", "Only top-level function declarations are supported.", node.Span);
+                continue;
+            }
+            if (node.Children.OfType<SyntaxNode>()
+                .FirstOrDefault(static child => child.Kind == SyntaxKind.TypeParameterList)
+                is SyntaxNode typeParameters)
+            {
+                DeclareGeneric(node, typeParameters);
+            }
+            else
+            {
+                Declare(node, null);
             }
         }
 
@@ -476,7 +563,7 @@ internal sealed partial class Binder
         {
             if (_functions.ContainsKey(template.Name))
             {
-                SetContext(template.Tree);
+                SetContext(template.Tree, template.Declaration);
                 Report("TRM3003", $"Generic and concrete functions cannot share '{template.Name}'.",
                     template.Declaration.Span);
             }
@@ -499,7 +586,7 @@ internal sealed partial class Binder
             {
                 if (entryPoint >= 0)
                 {
-                    _tree = signature.Tree;
+                    SetContext(signature.Tree, declaration);
                     Report("TRM3002", "Multiple parameterless Main functions make the entry point ambiguous.", declaration.Span);
                 }
                 else
@@ -507,7 +594,7 @@ internal sealed partial class Binder
                     entryPoint = index;
                     if (signature.RequiresUnsafeCaller)
                     {
-                        _tree = signature.Tree;
+                        SetContext(signature.Tree, declaration);
                         Report("TRM3028", "An entry point cannot require an unsafe caller.", declaration.Span);
                     }
                 }
@@ -536,12 +623,12 @@ internal sealed partial class Binder
             }
             var declaration = signature.Declaration ?? throw new InvalidOperationException("Source declaration is missing.");
             var syntaxBody = signature.Body ?? throw new InvalidOperationException("Source body is missing.");
-            SetContext(signature.Tree);
+            SetContext(signature.Tree, declaration);
             _variables.Clear();
             _scopes.Clear();
             _unresolvedVacantLocals.Clear();
             _constLocals.Clear();
-            _constInt32Values.Clear();
+            _constScalarValues.Clear();
             _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
             _returnType = signature.ReturnType;
             _currentStruct = signature.StructName;
@@ -564,7 +651,8 @@ internal sealed partial class Binder
 
             foreach (var parameter in signature.Parameters)
             {
-                var slot = AddVariable(parameter.Name, parameter.Type, parameter.IsOut, parameter.Span);
+                var slot = AddVariable(parameter.Name, parameter.Type, parameter.IsOut,
+                    parameter.Span, parameter.IsEscapedThis);
                 if (parameter.IsOut || parameter.IsImplicitRef)
                 {
                     _variables[slot] = _variables[slot] with {
@@ -650,6 +738,8 @@ internal sealed partial class Binder
                 CapturedParameters = signature.CapturedParameters,
                 ReturnsForwardedBacking = signature.ReturnsForwardedBacking,
                 ResultDependencyParameters = signature.ResultDependencyParameters,
+                ResultDependencyIncludesReceiver = signature.ResultDependencyIncludesReceiver,
+                DependencyContracts = signature.DependencyContracts,
             });
         }
 
@@ -705,9 +795,14 @@ internal sealed partial class Binder
     private static string DirectiveName(SyntaxNode directive)
     {
         var builder = new StringBuilder();
-        for (var index = 1; index < directive.Children.Length - 1; index++)
+        for (var index = 1; index < directive.Children.Length; index++)
         {
-            _ = builder.Append(((SyntaxTokenElement)directive.Children[index]).Token.Name);
+            if (directive.Children[index] is not SyntaxTokenElement tokenElement
+                || tokenElement.Token.Kind is TokenKind.OpenBrace or TokenKind.Semicolon)
+            {
+                break;
+            }
+            _ = builder.Append(tokenElement.Token.Name);
         }
         return builder.ToString();
     }
@@ -725,12 +820,7 @@ internal sealed partial class Binder
     private static string AttributeName(SyntaxNode attribute)
     {
         var builder = new StringBuilder();
-        var start = attribute.Children is [
-            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
-            SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword },
-            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
-            ..
-        ] ? 3 : 1;
+        var start = AttributeNameStart(attribute);
         for (var index = start; index < attribute.Children.Length; index++)
         {
             if (attribute.Children[index] is not SyntaxTokenElement token)
@@ -751,6 +841,42 @@ internal sealed partial class Binder
             }
         }
         return builder.ToString();
+    }
+
+    private static int AttributeNameStart(SyntaxNode attribute)
+    {
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return 3;
+        }
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            (SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "this" }
+                or SyntaxTokenElement { Token.Name: "method" }),
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return 3;
+        }
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Name: "param" },
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
+            SyntaxTokenElement,
+            SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return 6;
+        }
+        return 1;
     }
 
     private static bool TryDecodeDirectNativeImportAttribute(SyntaxNode attribute,
@@ -784,40 +910,116 @@ internal sealed partial class Binder
             && DirectNativeImportContract.IsValidExportName(exportName);
     }
 
-    private static bool TryDecodeDirectNativeOutputAttribute(SyntaxNode attribute,
-        out int parameterIndex, out uint resultCondition)
+    private static bool TryGetParameterAttributeTarget(SyntaxNode attribute, out string parameterName)
     {
-        parameterIndex = -1;
-        resultCondition = 0;
-        var children = attribute.Children;
-        if (children.Length != 12
-            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
-            || children[1] is not SyntaxTokenElement { Token.Name: "Terrum" }
-            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
-            || children[3] is not SyntaxTokenElement { Token.Name: "Interop" }
-            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.Dot }
-            || children[5] is not SyntaxTokenElement { Token.Name: "NativeOutput" }
-            || children[6] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
-            || children[7] is not SyntaxTokenElement index
-            || index.Token.Kind != TokenKind.NumericLiteral
-            || !ScannerHost.TryParseIntegerMagnitude(index.Token.Text.AsSpan(), out var magnitude)
-            || magnitude > int.MaxValue
-            || children[8] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma }
-            || children[9] is not SyntaxTokenElement condition
-            || condition.Token.Kind != TokenKind.Identifier
-            || condition.Token.Name is not ("NonZero" or "NonNegative")
-            || children[10] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
-            || children[11] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        parameterName = "";
+        if (attribute.Children is not [
+                SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+                SyntaxTokenElement { Token.Name: "param" },
+                SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
+                SyntaxTokenElement { Token.Kind: TokenKind.Identifier } parameter,
+                SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
+                SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+                ..
+            ])
         {
             return false;
         }
 
-        parameterIndex = (int)magnitude;
-        resultCondition = condition.Token.Name == "NonNegative"
-            ? DirectNativeImportContract.Int32NonNegativeResultCondition
-            : DirectNativeImportContract.Int32NonZeroResultCondition;
+        parameterName = parameter.Token.Name;
         return true;
     }
+
+    private static DependencyAttributeTarget GetDependencyAttributeTarget(
+        SyntaxNode attribute)
+    {
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return new DependencyAttributeTarget(
+                DependencyAttributeTargetKind.Return, null);
+        }
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "this" },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return new DependencyAttributeTarget(
+                DependencyAttributeTargetKind.Receiver, null);
+        }
+        if (attribute.Children is [
+            SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
+            SyntaxTokenElement { Token.Name: "method" },
+            SyntaxTokenElement { Token.Kind: TokenKind.Colon },
+            ..
+        ])
+        {
+            return new DependencyAttributeTarget(
+                DependencyAttributeTargetKind.Operation, null);
+        }
+        return TryGetParameterAttributeTarget(attribute, out var parameterName)
+            ? new DependencyAttributeTarget(
+                DependencyAttributeTargetKind.Parameter, parameterName)
+            : new DependencyAttributeTarget(DependencyAttributeTargetKind.Default, null);
+    }
+
+    private static bool TryGetDependencyRelation(string attributeName,
+        out BoundDependencyRelation relation)
+    {
+        relation = attributeName switch
+        {
+            "DependsOn" or "Terrum.CodeAnalysis.DependsOn"
+                => BoundDependencyRelation.DependsOn,
+            "Captures" or "Terrum.CodeAnalysis.Captures"
+                => BoundDependencyRelation.Captures,
+            "ForwardsBacking" or "Terrum.CodeAnalysis.ForwardsBacking"
+                => BoundDependencyRelation.ForwardsBacking,
+            _ => 0,
+        };
+        return relation != 0;
+    }
+
+    private static bool TryDecodeDirectNativeOutputAttribute(SyntaxNode attribute,
+        out bool nonNegative)
+    {
+        nonNegative = false;
+        var children = attribute.Children.OfType<SyntaxTokenElement>().ToArray();
+        var argumentStart = Array.FindLastIndex(children,
+            static child => child.Token.Kind == TokenKind.OpenParen);
+        if (argumentStart < 0 || argumentStart + 4 >= children.Length
+            || children[argumentStart + 1].Token.Name != "When"
+            || children[argumentStart + 2].Token.Kind != TokenKind.Colon
+            || children[^2].Token.Kind != TokenKind.CloseParen
+            || children[^1].Token.Kind != TokenKind.CloseBracket
+            || children.Skip(argumentStart + 3).Take(children.Length - argumentStart - 5)
+                .Any(static child => child.Token.Kind is not (TokenKind.Identifier or TokenKind.Dot)))
+        {
+            return false;
+        }
+
+        var conditionName = string.Concat(children.Skip(argumentStart + 3)
+            .Take(children.Length - argumentStart - 5)
+            .Select(static child => child.Token.Kind == TokenKind.Dot ? "." : child.Token.Name));
+        if (conditionName is not ("NativeOutputCondition.NonZero"
+            or "NativeOutputCondition.NonNegative"
+            or "Terrum.Interop.NativeOutputCondition.NonZero"
+            or "Terrum.Interop.NativeOutputCondition.NonNegative"))
+        {
+            return false;
+        }
+
+        nonNegative = conditionName.EndsWith(".NonNegative", StringComparison.Ordinal);
+        return true;
+    }
+
+    private static bool IsNativeOutputAttribute(string name) =>
+        name is "NativeOutput" or "Terrum.Interop.NativeOutput";
 
     private bool TryBindDirectNativePointerType(SyntaxNode node, out PrimitiveType pointeeType,
         out bool isWritable)
@@ -836,7 +1038,7 @@ internal sealed partial class Binder
         isWritable = firstToken.Token.Kind == TokenKind.WriteKeyword;
         var pointee = BindType(typeArguments[0], allowVoid: true);
         if (isWritable
-            ? !DirectNativeImportContract.IsOutputPointee(pointee)
+            ? !DirectNativeImportContract.IsOutputPointee(pointee, _structs)
             : !DirectNativeImportContract.IsInputPointee(pointee, _structs))
         {
             return false;
@@ -850,13 +1052,28 @@ internal sealed partial class Binder
         type = name switch
         {
             "bool" => PrimitiveType.Bool,
+            "char8" => PrimitiveType.Char8,
             "char16" => PrimitiveType.Char16,
+            "char32" => PrimitiveType.Char32,
+            "rune" => PrimitiveType.Rune,
+            "int8" => PrimitiveType.Int8,
+            "int16" => PrimitiveType.Int16,
             "int32" => PrimitiveType.Int32,
             "uint32" => PrimitiveType.UInt32,
+            "uint8" => PrimitiveType.UInt8,
+            "uint16" => PrimitiveType.UInt16,
             "int64" => PrimitiveType.Int64,
             "uint64" => PrimitiveType.UInt64,
+            "int128" => PrimitiveType.Int128,
+            "uint128" => PrimitiveType.UInt128,
+            "float16" => PrimitiveType.Float16,
+            "bfloat16" => PrimitiveType.BFloat16,
             "float32" => PrimitiveType.Float32,
             "float64" => PrimitiveType.Float64,
+            "float128" => PrimitiveType.Float128,
+            "decimal32" => PrimitiveType.Decimal32,
+            "decimal64" => PrimitiveType.Decimal64,
+            "decimal128" => PrimitiveType.Decimal128,
             _ => PrimitiveType.Void,
         };
         return type != PrimitiveType.Void;
@@ -914,7 +1131,7 @@ internal sealed partial class Binder
             return;
         }
         var (tree, declaration) = _structDeclarations[index];
-        SetContext(tree);
+        SetContext(tree, declaration);
         if (_layingOut.Count >= MaximumSemanticDepth || !_layingOut.Add(index))
         {
             Report("TRM3005", "Value layouts must be acyclic and within the semantic nesting limit.", declaration.Span);
@@ -1034,8 +1251,9 @@ internal sealed partial class Binder
             }
             if (IsStruct(type) && !_laidOut.Contains((int)type - 100))
             {
+                var previousContext = CaptureContext();
                 DeclareStruct((int)type - 100);
-                SetContext(tree);
+                RestoreContext(previousContext);
             }
             if (IsUnique(type) && !isUnique)
             {
@@ -1116,8 +1334,7 @@ internal sealed partial class Binder
         if (isTransparent && (isUnique || fields.Count != 1
             || (isBlittable
                 ? !IsBlittableLayoutFieldType(fields[0].Type)
-                : fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64))))
+                : PrimitiveTypeFacts.ScalarWidth(fields[0].Type) <= 0)))
         {
             Report("TRM3005", "Transparent Copy structs require exactly one scalar value field.", declaration.Span);
         }
@@ -1234,10 +1451,8 @@ internal sealed partial class Binder
 
     private static bool IsBlittableLayoutFieldType(PrimitiveType type)
     {
-        if (type is PrimitiveType.Bool or PrimitiveType.Char16
-            or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64
-            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.NativeRawPointer
+        if (PrimitiveTypeFacts.ScalarWidth(type) > 0
+            || type is PrimitiveType.NativeRawPointer
             || NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type))
         {
             return true;
@@ -1396,9 +1611,9 @@ internal sealed partial class Binder
         });
         _structDeclarations.Add(index, (template.Tree, template.Declaration));
 
-        var previousTree = _tree;
+        var previousContext = CaptureContext();
         var previousGenericOwnerTypeArguments = _genericOwnerTypeArguments;
-        SetContext(template.Tree);
+        SetContext(template.Tree, template.Declaration);
         _aliasTypeArguments.Add(typeMap);
         _genericOwnerTypeArguments = typeMap;
         try
@@ -1416,21 +1631,19 @@ internal sealed partial class Binder
         {
             _genericOwnerTypeArguments = previousGenericOwnerTypeArguments;
             _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
-            SetContext(previousTree);
+            RestoreContext(previousContext);
         }
         return type;
     }
 
     private void DeclareAliases()
     {
-        foreach (var tree in _trees)
+        foreach (var (tree, declaration) in _scopedDeclarations
+            .Where(static item => item.Declaration.Kind == SyntaxKind.AliasDeclaration))
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            SetContext(tree);
-            foreach (var declaration in tree.Root.Children.OfType<SyntaxNode>()
-                .Where(static node => node.Kind == SyntaxKind.AliasDeclaration))
+            SetContext(tree, declaration);
             {
-                _cancellationToken.ThrowIfCancellationRequested();
                 SyntaxToken? nameToken = null;
                 SyntaxNode? target = null;
                 SyntaxNode? typeParameterList = null;
@@ -1550,8 +1763,8 @@ internal sealed partial class Binder
         foreach (var alias in _aliases.Values)
         {
             _cancellationToken.ThrowIfCancellationRequested();
-            var previousTree = _tree;
-            SetContext(alias.Tree);
+            var previousContext = CaptureContext();
+            SetContext(alias.Tree, alias.Declaration);
             var edges = new HashSet<AliasDefinition>();
             foreach (var typeName in DescendantTypeNames(alias.Target))
             {
@@ -1563,7 +1776,7 @@ internal sealed partial class Binder
                 }
             }
             dependencies.Add(alias, edges);
-            SetContext(previousTree);
+            RestoreContext(previousContext);
         }
 
         var states = new Dictionary<AliasDefinition, byte>();
@@ -1715,8 +1928,8 @@ internal sealed partial class Binder
             return DeclaredTypeResolution.Invalid;
         }
 
-        var previousTree = _tree;
-        SetContext(alias.Tree);
+        var previousContext = CaptureContext();
+        SetContext(alias.Tree, alias.Declaration);
         var diagnosticCount = DiagnosticCount;
         if (typeArguments is ImmutableArray<PrimitiveType> resolvedArguments)
         {
@@ -1768,7 +1981,7 @@ internal sealed partial class Binder
             {
                 _aliasTypeArguments.RemoveAt(_aliasTypeArguments.Count - 1);
             }
-            SetContext(previousTree);
+            RestoreContext(previousContext);
         }
     }
 
@@ -1800,7 +2013,6 @@ internal sealed partial class Binder
         var isInternal = false;
         var isStatic = false;
         var isExternal = false;
-        var isNoThrow = false;
         var requiresUnsafeCaller = false;
         var isNativeCallable = false;
         var isNativeVTableMethod = false;
@@ -1812,11 +2024,10 @@ internal sealed partial class Binder
         var nativeVTableSlot = -1;
         string? nativeLibraryName = null;
         string? nativeExportName = null;
-        var nativeOutputParameterIndexes = new HashSet<int>();
-        var nativeOutputResultConditions = new Dictionary<int, uint>();
+        var nativeOutputConditionsByName = new Dictionary<string, bool>(StringComparer.Ordinal);
         var nativeParameters = new Dictionary<int, NativeParameterDefinition>();
-        SyntaxNode? captures = null;
-        SyntaxNode? resultDependencies = null;
+        var dependencyAttributes = new List<(SyntaxNode Attribute,
+            int? InlineParameterOrdinal)>();
         var accessModifiers = 0;
         for (var index = 0; index < modifierCount; index++)
         {
@@ -1831,7 +2042,8 @@ internal sealed partial class Binder
                     && attributeName != "Terrum.Interop.NativeOutput"
                     && attributeName != "Terrum.Interop.NativeParameter"
                     && attributeName != "Terrum.Interop.NativeCallable"
-                    && attributeName != "Terrum.Interop.NativeVTableMethod")
+                    && attributeName != "Terrum.Interop.NativeVTableMethod"
+                    && !TryGetDependencyRelation(attributeName, out _))
                 {
                     Report("TRM3001",
                         "Only the supported qualified interop attributes are accepted.",
@@ -1887,19 +2099,15 @@ internal sealed partial class Binder
                     }
                     continue;
                 }
-                if (attributeName == "Terrum.Interop.NativeOutput")
+                if (IsNativeOutputAttribute(attributeName))
                 {
-                    if (returnTarget || !TryDecodeDirectNativeOutputAttribute(attribute,
-                            out var outputParameterIndex, out var outputResultCondition)
-                        || !nativeOutputParameterIndexes.Add(outputParameterIndex))
+                    if (returnTarget || !TryGetParameterAttributeTarget(attribute, out var outputParameterName)
+                        || !TryDecodeDirectNativeOutputAttribute(attribute, out var nonNegative)
+                        || !nativeOutputConditionsByName.TryAdd(outputParameterName, nonNegative))
                     {
                         Report("TRM3030",
-                            "NativeOutput requires one distinct parameter ordinal and an explicit supported result condition.",
+                            "NativeOutput must target one distinct parameter with a supported When condition.",
                             attribute.Span);
-                    }
-                    else
-                    {
-                        nativeOutputResultConditions.Add(outputParameterIndex, outputResultCondition);
                     }
                     continue;
                 }
@@ -1920,25 +2128,26 @@ internal sealed partial class Binder
                     }
                     continue;
                 }
-                if (property)
+                if (TryGetDependencyRelation(attributeName, out _))
                 {
-                    Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
-                }
-                else if (returnTarget && attributeName == "DependsOn")
-                {
-                    if (resultDependencies is null)
+                    if (property)
                     {
-                        resultDependencies = attribute;
+                        Report("TRM3023",
+                            "Dependency annotations on a property must select an exact accessor.",
+                            attribute.Span);
                     }
                     else
                     {
-                        Report("TRM3023", "Forwarded Span results cannot repeat the DependsOn annotation.",
-                            attribute.Span);
+                        dependencyAttributes.Add((attribute, null));
                     }
                 }
-                else if (!returnTarget && attributeName == "NoThrow" && !isNoThrow)
+                else if (property)
                 {
-                    isNoThrow = true;
+                    Report("TRM3001", "Getter effects belong on the get accessor.", attribute.Span);
+                }
+                else if (!returnTarget && attributeName == "NoThrow")
+                {
+                    Report("TRM3017", "The general NoThrow source contract is retired.", attribute.Span);
                 }
                 else if (!returnTarget && attributeName == "DoesNotReturn" && !doesNotReturn)
                 {
@@ -1953,14 +2162,9 @@ internal sealed partial class Binder
                 {
                     isConstEval = true;
                 }
-                else if (!returnTarget && attributeName == "Captures"
-                    && captures is null)
-                {
-                    captures = attribute;
-                }
                 else
                 {
-                    Report("TRM3001", "Only distinct parameterless NoThrow, DoesNotReturn, Cleanup, and ConstEval contracts are supported.", attribute.Span);
+                    Report("TRM3001", "Only distinct parameterless DoesNotReturn, Cleanup, and ConstEval contracts are supported.", attribute.Span);
                 }
                 continue;
             }
@@ -2086,7 +2290,7 @@ internal sealed partial class Binder
             }
             requiresUnsafeCaller = true;
         }
-        if (nativeOutputParameterIndexes.Count != 0 && !isExternal)
+        if (nativeOutputConditionsByName.Count != 0 && !isExternal)
         {
             Report("TRM3030", "NativeOutput may appear only on an extern callable.", declaration.Span);
         }
@@ -2128,11 +2332,18 @@ internal sealed partial class Binder
                 {
                     if (child is SyntaxNode { Kind: SyntaxKind.Attribute } attribute)
                     {
-                        if (attribute.Children[1] is not SyntaxTokenElement { Token.Text: "NoThrow" } || isNoThrow)
+                        if (TryGetDependencyRelation(AttributeName(attribute), out _))
                         {
-                            Report("TRM3001", "Only a single getter-local NoThrow effect is supported.", attribute.Span);
+                            dependencyAttributes.Add((attribute, null));
                         }
-                        isNoThrow = true;
+                        else if (attribute.Children[1] is SyntaxTokenElement { Token.Text: "NoThrow" })
+                        {
+                            Report("TRM3017", "The general NoThrow source contract is retired.", attribute.Span);
+                        }
+                        else
+                        {
+                            Report("TRM3001", "Getter-local attributes are not supported.", attribute.Span);
+                        }
                     }
                     else if (child is SyntaxTokenElement { Token.Kind: TokenKind.UnsafeKeyword } unsafeAccessor)
                     {
@@ -2186,14 +2397,15 @@ internal sealed partial class Binder
         {
             Report("TRM3007", "A getter must return a supported by-value Copy type.", declaration.Span);
         }
-        var spanResultCandidate = returnType == PrimitiveType.TokenSpan && !constructor
-            && containingType is null && body is not null && isInternal
-            && resultDependencies is not null;
-        if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-            || (!constructor && TokenSpanContract.IsDependent(returnType, _structs) && !spanResultCandidate))
-        {
-            Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
-        }
+        var hasResultDependency = dependencyAttributes.Any(dependency =>
+            dependency.InlineParameterOrdinal is null
+            && TryGetDependencyRelation(AttributeName(dependency.Attribute),
+                out var relation)
+            && relation is BoundDependencyRelation.DependsOn
+                or BoundDependencyRelation.ForwardsBacking
+            && GetDependencyAttributeTarget(dependency.Attribute).Kind
+                is DependencyAttributeTargetKind.Default
+                    or DependencyAttributeTargetKind.Return);
         if (isCleanup)
         {
             var structureIndex = containingType is not null && !classConstructor
@@ -2220,6 +2432,7 @@ internal sealed partial class Binder
         }
         var declared = ImmutableArray.CreateBuilder<Parameter>();
         var names = new HashSet<string>(StringComparer.Ordinal);
+        var nativeOutputConditionsByIndex = new Dictionary<int, bool>();
 
         foreach (var child in parameters?.Children ?? [])
         {
@@ -2228,33 +2441,74 @@ internal sealed partial class Binder
                 continue;
             }
 
-            var typeNode = parameter.Children.OfType<SyntaxNode>().Single();
-            var token = ((SyntaxTokenElement)parameter.Children[^1]).Token;
+            var sourceChildren = parameter.Children
+                .Where(static element => element is not SyntaxNode { Kind: SyntaxKind.Attribute })
+                .ToArray();
+            var typeNode = sourceChildren.OfType<SyntaxNode>().Single();
+            var token = ((SyntaxTokenElement)sourceChildren[^1]).Token;
+            var parameterIndex = declared.Count;
+            bool? nativeOutputCondition = null;
+            if (nativeOutputConditionsByName.Remove(token.Name, out var targetedCondition))
+            {
+                nativeOutputCondition = targetedCondition;
+            }
+            foreach (var attribute in parameter.Children.OfType<SyntaxNode>()
+                .Where(static node => node.Kind == SyntaxKind.Attribute))
+            {
+                if (TryGetDependencyRelation(AttributeName(attribute), out _))
+                {
+                    if (GetDependencyAttributeTarget(attribute).Kind
+                        != DependencyAttributeTargetKind.Default)
+                    {
+                        Report("TRM3023",
+                            "A parameter-local dependency annotation cannot declare a second attribute target.",
+                            attribute.Span);
+                    }
+                    else
+                    {
+                        dependencyAttributes.Add((attribute, parameterIndex));
+                    }
+                }
+                else if (!IsNativeOutputAttribute(AttributeName(attribute))
+                    || TryGetParameterAttributeTarget(attribute, out _)
+                    || !TryDecodeDirectNativeOutputAttribute(attribute, out var inlineCondition)
+                    || nativeOutputCondition.HasValue)
+                {
+                    Report("TRM3030",
+                        "A native output parameter accepts one parameter-targeted NativeOutput attribute with a supported When condition.",
+                        attribute.Span);
+                }
+                else
+                {
+                    nativeOutputCondition = inlineCondition;
+                }
+            }
+            if (nativeOutputCondition is bool outputCondition)
+            {
+                nativeOutputConditionsByIndex.Add(declared.Count, outputCondition);
+            }
             PrimitiveType? nativePointeeType = null;
             PrimitiveType type;
-            var parameterIndex = declared.Count;
-            if (nativeOutputParameterIndexes.Contains(parameterIndex)
-                && (nativeLibraryName is not null || isNativeVTableMethod)
-                && TryBindDirectNativePointerType(typeNode,
-                    out var outputPointeeType, out var isWritableOutputPointer)
-                && isWritableOutputPointer)
+            var isWritableNativePointer = false;
+            var pointeeType = PrimitiveType.Void;
+            var hasDirectNativePointerType = (nativeLibraryName is not null || isNativeVTableMethod)
+                && TryBindDirectNativePointerType(typeNode, out pointeeType,
+                    out isWritableNativePointer);
+            if (hasDirectNativePointerType)
             {
-                type = PrimitiveType.NativeStorageAddress;
-                nativePointeeType = outputPointeeType;
-            }
-            else if (nativeLibraryName is not null
-                && TryBindDirectNativePointerType(typeNode, out var pointeeType, out var isWritablePointer)
-                && nativeParameters.ContainsKey(parameterIndex + 1) && !isWritablePointer)
-            {
-                type = PrimitiveType.NativeRawPointer;
                 nativePointeeType = pointeeType;
-            }
-            else if (isNativeVTableMethod
-                && TryBindDirectNativePointerType(typeNode, out pointeeType, out isWritablePointer)
-                && nativeParameters.ContainsKey(parameterIndex + 1) && !isWritablePointer)
-            {
-                type = PrimitiveType.NativeRawPointer;
-                nativePointeeType = pointeeType;
+                if (nativeOutputCondition.HasValue && isWritableNativePointer)
+                {
+                    type = BindType(typeNode, allowVoid: false);
+                }
+                else if (nativeParameters.ContainsKey(parameterIndex + 1) && !isWritableNativePointer)
+                {
+                    type = PrimitiveType.NativeRawPointer;
+                }
+                else
+                {
+                    type = BindType(typeNode, allowVoid: false);
+                }
             }
             else
             {
@@ -2265,18 +2519,18 @@ internal sealed partial class Binder
                 Report("TRM3023", "A native buffer view cannot be a parameter.", parameter.Span);
             }
 
-            var isInit = parameter.Children is [SyntaxTokenElement { Token.Text: "init" },
+            var isInit = sourceChildren is [SyntaxTokenElement { Token.Text: "init" },
                 SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
                 SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
-            var isImplicitRef = parameter.Children is [SyntaxTokenElement { Token.Text: "implicit" },
+            var isImplicitRef = sourceChildren is [SyntaxTokenElement { Token.Text: "implicit" },
                 SyntaxTokenElement { Token.Kind: TokenKind.RefKeyword },
                 SyntaxTokenElement { Token.Kind: TokenKind.Less }, SyntaxNode,
                 SyntaxTokenElement { Token.Kind: TokenKind.Greater }, SyntaxTokenElement];
-            var isOut = parameter.Children.Length == 3
-                && parameter.Children[0] is SyntaxTokenElement passing
+            var isOut = sourceChildren.Length == 3
+                && sourceChildren[0] is SyntaxTokenElement passing
                 && passing.Token.Kind == TokenKind.OutKeyword;
-            if (parameter.Children.Length != 2 && !isOut && !isInit && !isImplicitRef)
+            if (sourceChildren.Length != 2 && !isOut && !isInit && !isImplicitRef)
             {
                 Report("TRM3001", "Passing modes are not supported.", parameter.Span);
             }
@@ -2323,8 +2577,52 @@ internal sealed partial class Binder
                 Report("TRM3004", $"Duplicate parameter '{token.Text}'.", token.Span);
             }
 
-            declared.Add(new Parameter(token.Name, type, token.Span, isOut || isInit, isInit,
-                isImplicitRef, nativePointeeType));
+            declared.Add(new Parameter(token.Name, type, token.Span,
+                isOut || isInit, isInit, isImplicitRef, nativePointeeType,
+                isWritableNativePointer, token.Text == "@this"));
+        }
+        var dependencyContracts = BindDependencyContracts(
+            dependencyAttributes, declared.ToImmutable(), returnType,
+            containingType, isStatic, constructor, classConstructor,
+            [.. nativeOutputConditionsByIndex.Keys], declaration.Span);
+        var hasBoundResultDependency = dependencyContracts.Any(static contract =>
+            contract.Destination == BoundDependencyDestination.Result
+            && contract.Relation is BoundDependencyRelation.DependsOn
+                or BoundDependencyRelation.ForwardsBacking);
+        var spanResultCandidate = returnType == PrimitiveType.TokenSpan && !constructor
+            && body is not null && isInternal
+            && (hasResultDependency || hasBoundResultDependency);
+        if (returnType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+        {
+            Report("TRM3023", "A native buffer view cannot be returned.", returnNode!.Span);
+        }
+        else if (!constructor && TokenSpanContract.IsDependent(returnType, _structs)
+            && !spanResultCandidate)
+        {
+            Report("TRM3023",
+                "A dependency-bearing result requires an explicit relationship or a single eligible default source.",
+                returnNode!.Span);
+        }
+        var (capturedParameters, resultDependencyParameters,
+            resultDependencyIncludesReceiver, returnsForwardedBacking) =
+            ProjectTokenSpanDependencyMetadata(dependencyContracts, returnType,
+                constructor);
+        if (constructor && TokenSpanContract.IsCursor(returnType, _structs)
+            && capturedParameters.IsEmpty)
+        {
+            Report("TRM3023",
+                "TokenCursor construction must declare its checked backing dependency capture.",
+                declaration.Span);
+        }
+        foreach (var unknownTarget in nativeOutputConditionsByName.Keys)
+        {
+            Report("TRM3030",
+                $"NativeOutput targets unknown parameter '{unknownTarget}'.",
+                declaration.Span);
+        }
+        if (nativeOutputConditionsByIndex.Count != 0 && !isExternal)
+        {
+            Report("TRM3030", "NativeOutput may appear only on an extern callable.", declaration.Span);
         }
 
         PrimitiveType? nativeFunctionPointerType = null;
@@ -2332,7 +2630,8 @@ internal sealed partial class Binder
         {
             var nativeSignature = new NativeFunctionPointerSignatureDefinition(NativeCallingConvention.Native,
                 returnType, [.. declared.Select(static parameter => parameter.Type)]);
-            if (declared.Any(static parameter => parameter.IsOut || parameter.IsInit || parameter.IsImplicitRef)
+            if (declared.Any(static parameter => parameter.IsOut || parameter.IsInit || parameter.IsImplicitRef
+                    || parameter.IsWritableNativePointer)
                 || !NativeFunctionPointerContract.IsValidSignature(nativeSignature,
                     [.. _nativeFunctionPointerSignatures]))
             {
@@ -2347,23 +2646,29 @@ internal sealed partial class Binder
         }
 
         DirectNativeImport? directNativeImport = null;
+        var nativeOutputContracts = ImmutableArray.CreateBuilder<NativeOutputContract>();
+        var nativeOutputContractFacts = ImmutableArray<NativeOutputContract>.Empty;
         if (nativeLibraryName is not null && nativeExportName is not null)
         {
             var nativeOutputs = ImmutableArray.CreateBuilder<DirectNativeOutput>();
             var directNativeParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
-            foreach (var outputIndex in nativeOutputParameterIndexes.Order())
+            foreach (var (outputIndex, nonNegative) in nativeOutputConditionsByIndex.OrderBy(
+                static pair => pair.Key))
             {
                 if (outputIndex >= declared.Count
-                    || declared[outputIndex].Type != PrimitiveType.NativeStorageAddress
-                    || declared[outputIndex].NativePointeeType is not PrimitiveType outputType)
+                    || !declared[outputIndex].IsWritableNativePointer
+                    || declared[outputIndex].NativePointeeType is not PrimitiveType outputType
+                    || !DirectNativeImportContract.IsNativeOutputCellType(outputType, _structs))
                 {
                     Report("TRM3030",
-                        "NativeOutput must identify a write ptr<T> parameter in the direct native signature.",
+                        "NativeOutput requires a write ptr<T> parameter in the direct native signature.",
                         nativeImportAttribute?.Span ?? declaration.Span);
                     continue;
                 }
                 var resultCondition = DirectNativeImportContract.ResolveResultCondition(
-                    returnType, nativeOutputResultConditions[outputIndex]);
+                    returnType, nonNegative
+                        ? DirectNativeImportContract.Int32NonNegativeResultCondition
+                        : DirectNativeImportContract.Int32NonZeroResultCondition);
                 if (!DirectNativeImportContract.IsValidResultCondition(returnType, resultCondition))
                 {
                     Report("TRM3030",
@@ -2371,6 +2676,22 @@ internal sealed partial class Binder
                         nativeImportAttribute?.Span ?? declaration.Span);
                 }
                 nativeOutputs.Add(new DirectNativeOutput(outputIndex, outputType, resultCondition, 1));
+                var (successSelector, complementSelector) = resultCondition switch
+                {
+                    DirectNativeImportContract.Int32NonZeroResultCondition
+                        or DirectNativeImportContract.UInt32NonZeroResultCondition
+                        => (NativeOutputSelector.NonZero, NativeOutputSelector.Zero),
+                    DirectNativeImportContract.Int32NonNegativeResultCondition
+                        => (NativeOutputSelector.NonNegative, NativeOutputSelector.Negative),
+                    _ => throw new InvalidOperationException("Validated native output condition is unassigned."),
+                };
+                nativeOutputContracts.Add(new NativeOutputContract(outputIndex, outputType,
+                    NativeOutputFormation.VacantWholeObject,
+                    NativeOutputPublicationPhase.NormalCompletion,
+                    successSelector, NativeOutputState.Live,
+                    complementSelector, NativeOutputState.Vacant,
+                    NativeOutputContractValidator.CreateDependencies(
+                        dependencyContracts, outputIndex)));
             }
             foreach (var (ordinal, nativeParameter) in nativeParameters.OrderBy(
                 static pair => pair.Key))
@@ -2379,7 +2700,7 @@ internal sealed partial class Binder
                 if (parameterIndex < 0 || parameterIndex >= declared.Count
                     || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
                     || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
-                    || nativeOutputParameterIndexes.Contains(parameterIndex))
+                    || nativeOutputConditionsByIndex.ContainsKey(parameterIndex))
                 {
                     Report("TRM3030",
                         "NativeParameter must identify a non-output raw pointer parameter.",
@@ -2392,14 +2713,7 @@ internal sealed partial class Binder
             for (var index = 0; index < declared.Count; index++)
             {
                 var parameter = declared[index];
-                if (parameter.Type == PrimitiveType.NativeStorageAddress
-                    && !nativeOutputParameterIndexes.Contains(index))
-                {
-                    Report("TRM3030",
-                        "A direct native writable pointer requires NativeOutput metadata.",
-                        parameter.Span);
-                }
-                else if (parameter.NativePointeeType is null
+                if (parameter.NativePointeeType is null
                     && parameter.Type != PrimitiveType.NativeStorageAddress
                     && !DirectNativeImportContract.IsValueParameter(parameter.Type,
                         [.. _nativeFunctionPointerSignatures], [.. _nativePointerTypes]))
@@ -2413,12 +2727,12 @@ internal sealed partial class Binder
                 && returnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
             {
                 Report("TRM3030",
-                    "NativeOutput currently requires an int32 or uint32 result.",
+                    "NativeOutput requires an int32 or uint32 result.",
                     declaration.Span);
             }
-            if (nativeOutputParameterIndexes.Count != nativeOutputs.Count)
+            if (nativeOutputConditionsByIndex.Count != nativeOutputs.Count)
             {
-                Report("TRM3030", "Every NativeOutput ordinal must resolve to one supported pointer parameter.",
+                Report("TRM3030", "Every NativeOutput must resolve to one supported pointer parameter.",
                     declaration.Span);
             }
             if (returnType is not (PrimitiveType.Void or PrimitiveType.NativeRawPointer)
@@ -2434,12 +2748,18 @@ internal sealed partial class Binder
                 nativeOutputs.ToImmutable()) {
                 Parameters = directNativeParameters.ToImmutable(),
             };
+            nativeOutputContractFacts = nativeOutputContracts.ToImmutable();
         }
         NativeVTableMethodDefinition? nativeVTableMethod = null;
         if (isNativeVTableMethod)
         {
             var nativeVTableParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
-            var nativeVTableOutputs = ImmutableArray.CreateBuilder<DirectNativeOutput>();
+            if (nativeOutputConditionsByIndex.Count != 0)
+            {
+                Report("TRM3030",
+                    "NativeOutput requires a direct import or an independently admitted foreign interface method.",
+                    nativeVTableMethodAttribute?.Span ?? declaration.Span);
+            }
             if (nativeLibraryName is not null)
             {
                 Report("TRM3030", "NativeVTableMethod cannot also declare a direct NativeImport.",
@@ -2461,7 +2781,7 @@ internal sealed partial class Binder
                 if (parameterIndex <= 0 || parameterIndex >= declared.Count
                     || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
                     || declared[parameterIndex].IsOut
-                    || nativeOutputParameterIndexes.Contains(parameterIndex)
+                    || nativeOutputConditionsByIndex.ContainsKey(parameterIndex)
                     || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
                     || !DirectNativeImportContract.IsInputPointee(pointeeType, _structs))
                 {
@@ -2472,40 +2792,6 @@ internal sealed partial class Binder
                 }
                 nativeVTableParameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
                     nativeParameter.Access, nativeParameter.Retention, nativeParameter.Extent));
-            }
-            foreach (var outputIndex in nativeOutputParameterIndexes.Order())
-            {
-                if (outputIndex <= 0 || outputIndex >= declared.Count
-                    || declared[outputIndex].Type != PrimitiveType.NativeStorageAddress
-                    || declared[outputIndex].NativePointeeType is not PrimitiveType outputType)
-                {
-                    Report("TRM3030",
-                        "NativeOutput must identify a writable pointer parameter after the vtable receiver.",
-                        nativeVTableMethodAttribute?.Span ?? declaration.Span);
-                    continue;
-                }
-
-                var resultCondition = DirectNativeImportContract.ResolveResultCondition(
-                    returnType, nativeOutputResultConditions[outputIndex]);
-                if (!DirectNativeImportContract.IsValidResultCondition(returnType, resultCondition))
-                {
-                    Report("TRM3030",
-                        "NativeOutput result conditions must be compatible with the callable result type.",
-                        nativeVTableMethodAttribute?.Span ?? declaration.Span);
-                }
-                nativeVTableOutputs.Add(new DirectNativeOutput(outputIndex, outputType, resultCondition, 1));
-            }
-            if (nativeOutputParameterIndexes.Count != nativeVTableOutputs.Count)
-            {
-                Report("TRM3030",
-                    "Every NativeOutput ordinal must resolve to one supported vtable pointer parameter.",
-                    declaration.Span);
-            }
-            if (nativeVTableOutputs.Count > 0
-                && returnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
-            {
-                Report("TRM3030", "NativeOutput currently requires an int32 or uint32 result.",
-                    declaration.Span);
             }
             if (returnType != PrimitiveType.Void
                 && !DirectNativeImportContract.IsValueParameter(returnType,
@@ -2518,14 +2804,11 @@ internal sealed partial class Binder
             for (var index = 0; index < declared.Count; index++)
             {
                 var parameter = declared[index];
-                if (nativeOutputParameterIndexes.Contains(index))
+                if (parameter.IsWritableNativePointer)
                 {
-                    if (parameter.Type != PrimitiveType.NativeStorageAddress || parameter.IsInit)
-                    {
-                        Report("TRM3030",
-                            "NativeOutput requires a writable pointer parameter.",
-                            parameter.Span);
-                    }
+                    Report("TRM3030",
+                        "NativeOutput is not supported on NativeVTableMethod without an admitted interface method contract.",
+                        parameter.Span);
                 }
                 else if (parameter.IsInit || parameter.IsImplicitRef
                     || (parameter.IsOut
@@ -2541,15 +2824,11 @@ internal sealed partial class Binder
                 }
             }
             nativeVTableMethod = new NativeVTableMethodDefinition(nativeVTableSlot,
-                nativeVTableParameters.ToImmutable())
-            {
-                Outputs = nativeVTableOutputs.ToImmutable(),
-            };
+                nativeVTableParameters.ToImmutable());
         }
-        else if (!isNativeVTableMethod && nativeLibraryName is null
-            && nativeOutputParameterIndexes.Count != 0)
+        else if (nativeLibraryName is null && nativeOutputConditionsByIndex.Count != 0)
         {
-            Report("TRM3030", "NativeOutput requires a two-string direct NativeImport declaration.",
+            Report("TRM3030", "NativeOutput requires a direct import or an independently admitted foreign interface method.",
                 declaration.Span);
         }
         if (operatorDeclaration && operatorKey.Arity == 1
@@ -2574,13 +2853,9 @@ internal sealed partial class Binder
             var declaringType = containingType is null ? null
                 : (string.IsNullOrEmpty(_namespace) ? "" : _namespace + ".") + containingType;
             externalFunction = new BoundFunction(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
-                [.. boundParameters.Select((parameter, index) => new BoundVariable(
+                [.. boundParameters.Select(static parameter => new BoundVariable(
                     parameter.Name, parameter.Type, false, parameter.Span) {
-                    IsOut = parameter.IsOut
-                        || directNativeImport?.Outputs.Any(
-                            output => output.ParameterIndex == index) == true
-                        || nativeVTableMethod?.Outputs.Any(
-                            output => output.ParameterIndex == index) == true,
+                    IsOut = parameter.IsOut,
                     IsInit = parameter.IsInit,
                     IsImplicitRef = parameter.IsImplicitRef,
                 })], boundParameters.Length, new BoundBlock([], declaration.Span), declaration.Span) {
@@ -2589,7 +2864,6 @@ internal sealed partial class Binder
                 IsInternal = isInternal,
                 IsStatic = isStatic,
                 IsOperator = operatorDeclaration,
-                IsNoThrow = isNoThrow,
                 RequiresUnsafeCaller = requiresUnsafeCaller,
                 DoesNotReturn = doesNotReturn,
                 IsConstructor = constructor,
@@ -2597,52 +2871,17 @@ internal sealed partial class Binder
                 IsCleanup = isCleanup,
                 DeclaringStruct = declaringType,
                 DirectNativeImport = directNativeImport,
+                NativeOutputRole = nativeOutputContractFacts.IsEmpty
+                    ? null : NativeOutputDeclarationRole.DirectImport,
+                NativeOutputContracts = nativeOutputContractFacts,
                 NativeVTableMethod = nativeVTableMethod,
                 Intrinsic = isNativeVTableMethod ? BoundIntrinsic.NativeVTableCall : BoundIntrinsic.None,
+                CapturedParameters = capturedParameters,
+                ReturnsForwardedBacking = returnsForwardedBacking,
+                ResultDependencyParameters = resultDependencyParameters,
+                ResultDependencyIncludesReceiver = resultDependencyIncludesReceiver,
+                DependencyContracts = dependencyContracts,
             };
-        }
-        ImmutableArray<int> resultDependencyParameters = [];
-        if (resultDependencies is not null)
-        {
-            if (!spanResultCandidate)
-            {
-                Report("TRM3023", "Forwarded Span result dependencies require an internal compilation-local function returning Span<Token>.",
-                    declaration.Span);
-            }
-            else
-            {
-                resultDependencyParameters = BindResultDependencyParameters(resultDependencies, declared.ToImmutable());
-            }
-        }
-        ImmutableArray<int> capturedParameters = [];
-        if (captures is not null)
-        {
-            if (!constructor || returnType == PrimitiveType.Void
-                || !TokenSpanContract.IsCursor(returnType, _structs)
-                || declared.Count != 1 || declared[0].Type != PrimitiveType.TokenSpan || declared[0].IsOut
-                || captures.Children is not [
-                    SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket },
-                    SyntaxTokenElement { Token.Text: "Captures" },
-                    SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
-                    SyntaxTokenElement { Token.Text: "nameof" },
-                    SyntaxTokenElement { Token.Kind: TokenKind.OpenParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.Identifier } selector,
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseParen },
-                    SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket }]
-                || selector.Token.Name != declared[0].Name)
-            {
-                Report("TRM3023", "Captures requires nameof of the sole Span<Token> input of TokenCursor's constructor.",
-                    captures.Span);
-            }
-            else
-            {
-                capturedParameters = [1];
-            }
-        }
-        if (constructor && TokenSpanContract.IsCursor(returnType, _structs) && capturedParameters.IsEmpty)
-        {
-            Report("TRM3023", "TokenCursor construction must declare its checked backing dependency capture.", declaration.Span);
         }
         var callableIsPublic = !isPrivate && !isInternal
             && (containingType is null
@@ -2671,7 +2910,7 @@ internal sealed partial class Binder
         _signatures.Add(new Signature(qualifiedName, classConstructor ? PrimitiveType.Void : returnType,
             declared.ToImmutable(), body, declaration, _tree,
             containingType, constructor && !classConstructor, isPrivate, isInternal, isMutable, isStatic,
-            isNoThrow, doesNotReturn, externalFunction) {
+            false, doesNotReturn, externalFunction) {
             GenericOwnerTypeArguments = _genericOwnerTypeArguments,
             IsInternal = isInternal || _genericOwnerTypeArguments is not null,
             IsCleanup = isCleanup,
@@ -2682,83 +2921,666 @@ internal sealed partial class Binder
             RequiresUnsafeCaller = requiresUnsafeCaller,
             NativeFunctionPointerType = nativeFunctionPointerType,
             CapturedParameters = capturedParameters,
-            ReturnsForwardedBacking = spanResultCandidate && !resultDependencyParameters.IsEmpty,
+            ReturnsForwardedBacking = returnsForwardedBacking,
             ResultDependencyParameters = resultDependencyParameters,
+            ResultDependencyIncludesReceiver = resultDependencyIncludesReceiver,
+            DependencyContracts = dependencyContracts,
         });
     }
 
-    private ImmutableArray<int> BindResultDependencyParameters(SyntaxNode attribute,
-        ImmutableArray<Parameter> parameters)
+    private ImmutableArray<BoundDependencyContract> BindDependencyContracts(
+        IReadOnlyList<(SyntaxNode Attribute, int? InlineParameterOrdinal)> attributes,
+        ImmutableArray<Parameter> parameters, PrimitiveType returnType,
+        string? containingType, bool isStatic, bool constructor, bool classConstructor,
+        HashSet<int> nativeOutputParameters, TextSpan declarationSpan)
     {
-        var children = attribute.Children;
-        if (children.Length < 10
-            || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
-            || children[1] is not SyntaxTokenElement { Token.Kind: TokenKind.ReturnKeyword }
-            || children[2] is not SyntaxTokenElement { Token.Kind: TokenKind.Colon }
-            || children[3] is not SyntaxTokenElement { Token.Text: "DependsOn" }
-            || children[4] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
-            || children[^2] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
-            || children[^1] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
+        var contracts = ImmutableArray.CreateBuilder<BoundDependencyContract>();
+        var contractSpans = new List<TextSpan>();
+        var seenTargets = new HashSet<(BoundDependencyRelation,
+            BoundDependencyDestination, int?)>();
+        foreach (var (attribute, inlineParameterOrdinal) in attributes)
         {
-            Report("TRM3023", "DependsOn requires a nonempty return-target list of nameof(parameter) selectors.",
-                attribute.Span);
-            return [];
-        }
-
-        var result = ImmutableArray.CreateBuilder<int>();
-        var seen = new HashSet<int>();
-        var index = 5;
-        var end = children.Length - 2;
-        while (index < end)
-        {
-            if (index + 3 >= end
-                || children[index] is not SyntaxTokenElement { Token.Text: "nameof" }
-                || children[index + 1] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenParen }
-                || children[index + 2] is not SyntaxTokenElement { Token.Kind: TokenKind.Identifier } selector
-                || children[index + 3] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen })
+            if (!TryGetDependencyRelation(AttributeName(attribute), out var relation))
             {
-                Report("TRM3023", "DependsOn requires a nonempty return-target list of nameof(parameter) selectors.",
-                    attribute.Span);
-                return [];
+                continue;
             }
 
-            var parameterIndex = -1;
+            var target = GetDependencyAttributeTarget(attribute);
+            if (inlineParameterOrdinal is int inlineParameter)
+            {
+                if (target.Kind != DependencyAttributeTargetKind.Default)
+                {
+                    Report("TRM3023",
+                        "A parameter-local dependency annotation cannot declare a second target.",
+                        attribute.Span);
+                    continue;
+                }
+
+                if ((uint)inlineParameter >= (uint)parameters.Length)
+                {
+                    Report("TRM3023", "Dependency annotation targets an invalid parameter.",
+                        attribute.Span);
+                    continue;
+                }
+                target = new DependencyAttributeTarget(
+                    DependencyAttributeTargetKind.Parameter,
+                    parameters[inlineParameter].Name);
+            }
+
+            if (!TryResolveDependencyDestination(relation, target,
+                inlineParameterOrdinal.HasValue, parameters, returnType,
+                containingType, isStatic, constructor, classConstructor,
+                nativeOutputParameters,
+                attribute.Span, out var destination, out var destinationOrdinal))
+            {
+                continue;
+            }
+
+            var hasReceiver = containingType is not null && !isStatic
+                && !constructor && !classConstructor;
+            if (!TryBindDependencySources(attribute, parameters, hasReceiver,
+                out var sources))
+            {
+                continue;
+            }
+            if (sources.Any(source => source.Kind == BoundDependencySourceKind.Formal
+                && nativeOutputParameters.Contains(source.FormalOrdinal!.Value)))
+            {
+                Report("TRM3023",
+                    "A native output formal cannot be used as a dependency source.",
+                    attribute.Span);
+                continue;
+            }
+            if (relation == BoundDependencyRelation.ForwardsBacking && sources.IsEmpty)
+            {
+                Report("TRM3023", "ForwardsBacking requires at least one source.",
+                    attribute.Span);
+                continue;
+            }
+            if (!seenTargets.Add((relation, destination, destinationOrdinal)))
+            {
+                Report("TRM3023",
+                    "A dependency schema cannot repeat the same effective target.",
+                    attribute.Span);
+                continue;
+            }
+
+            contracts.Add(new BoundDependencyContract(relation, destination,
+                destinationOrdinal, sources));
+            contractSpans.Add(attribute.Span);
+        }
+
+        var hasDeclaredResultDependency = attributes.Any(dependency =>
+            dependency.InlineParameterOrdinal is null
+            && TryGetDependencyRelation(AttributeName(dependency.Attribute),
+                out var relation)
+            && relation == BoundDependencyRelation.DependsOn
+            && GetDependencyAttributeTarget(dependency.Attribute).Kind
+                is DependencyAttributeTargetKind.Default
+                    or DependencyAttributeTargetKind.Return);
+        if (returnType == PrimitiveType.TokenSpan && !constructor
+            && !hasDeclaredResultDependency)
+        {
+            var eligibleSources = ImmutableArray.CreateBuilder<BoundDependencySource>();
+            if (containingType is not null && !isStatic && !classConstructor)
+            {
+                eligibleSources.Add(new BoundDependencySource(
+                    BoundDependencySourceKind.Receiver, null));
+            }
             for (var parameter = 0; parameter < parameters.Length; parameter++)
             {
-                if (parameters[parameter].Name == selector.Token.Name)
+                if (IsEligibleDependencySource(parameters[parameter]))
                 {
-                    parameterIndex = parameter;
-                    break;
+                    eligibleSources.Add(new BoundDependencySource(
+                        BoundDependencySourceKind.Formal, parameter));
                 }
             }
-            if (parameterIndex < 0 || parameters[parameterIndex] is not {
-                Type: PrimitiveType.TokenSpan,
-                IsOut: false,
-                IsInit: false,
-            } || !seen.Add(parameterIndex))
+
+            if (eligibleSources.Count == 1)
             {
-                Report("TRM3023", "Forwarded Span dependencies must name distinct readonly Span<Token> input parameters.",
-                    selector.Token.Span);
-                return [];
+                contracts.Add(new BoundDependencyContract(
+                    BoundDependencyRelation.DependsOn,
+                    BoundDependencyDestination.Result, null,
+                    eligibleSources.ToImmutable()));
+                contractSpans.Add(declarationSpan);
             }
-            result.Add(parameterIndex);
-            index += 4;
-            if (index < end)
+            else if (eligibleSources.Count > 1)
             {
-                if (children[index] is not SyntaxTokenElement { Token.Kind: TokenKind.Comma })
-                {
-                    Report("TRM3023", "DependsOn selectors must be separated by commas.", attribute.Span);
-                    return [];
-                }
-                index++;
+                Report("TRM3023",
+                    "A view result with multiple eligible sources requires an explicit DependsOn set.",
+                    declarationSpan);
             }
         }
-        if (result.Count == 0)
+
+        var boundContracts = contracts.ToImmutable();
+        for (var contractIndex = 0; contractIndex < boundContracts.Length; contractIndex++)
         {
-            Report("TRM3023", "DependsOn requires at least one eligible Span<Token> input.", attribute.Span);
-            return [];
+            var forwarding = boundContracts[contractIndex];
+            if (forwarding.Relation != BoundDependencyRelation.ForwardsBacking)
+            {
+                continue;
+            }
+
+            var hasRelationship = false;
+            var permittedSources = new HashSet<BoundDependencySource>();
+            foreach (var relationship in boundContracts)
+            {
+                if (relationship.Destination != forwarding.Destination
+                    || relationship.DestinationOrdinal != forwarding.DestinationOrdinal
+                    || relationship.Relation is not (BoundDependencyRelation.DependsOn
+                        or BoundDependencyRelation.Captures))
+                {
+                    continue;
+                }
+
+                hasRelationship = true;
+                permittedSources.UnionWith(relationship.Sources);
+            }
+            if (!hasRelationship || forwarding.Sources.Any(
+                source => !permittedSources.Contains(source)))
+            {
+                Report("TRM3023",
+                    "ForwardsBacking requires an existing dependency or capture relationship and cannot add sources.",
+                    contractSpans[contractIndex]);
+            }
         }
-        return result.ToImmutable();
+
+        return boundContracts;
+    }
+
+    private bool TryResolveDependencyDestination(
+        BoundDependencyRelation relation, DependencyAttributeTarget target,
+        bool inlineParameter, ImmutableArray<Parameter> parameters,
+        PrimitiveType returnType, string? containingType, bool isStatic,
+        bool constructor, bool classConstructor,
+        HashSet<int> nativeOutputParameters, TextSpan span,
+        out BoundDependencyDestination destination, out int? destinationOrdinal)
+    {
+        destination = default;
+        destinationOrdinal = null;
+        var hasReceiver = containingType is not null && !isStatic
+            && !classConstructor;
+        var hasResult = !constructor && !classConstructor
+            && returnType != PrimitiveType.Void;
+
+        if (inlineParameter)
+        {
+            var parameterOrdinal = FindParameterOrdinal(target.ParameterName, parameters);
+            if (parameterOrdinal < 0
+                || relation is not (BoundDependencyRelation.DependsOn
+                    or BoundDependencyRelation.ForwardsBacking)
+                || (!parameters[parameterOrdinal].IsInit
+                    && !nativeOutputParameters.Contains(parameterOrdinal)))
+            {
+                Report("TRM3023",
+                    "An inline DependsOn or ForwardsBacking annotation must target an init parameter.",
+                    span);
+                return false;
+            }
+            destination = BoundDependencyDestination.InitializedOutput;
+            destinationOrdinal = parameterOrdinal;
+            return true;
+        }
+
+        switch (target.Kind)
+        {
+            case DependencyAttributeTargetKind.Default:
+                if (relation == BoundDependencyRelation.DependsOn)
+                {
+                    if (!hasResult)
+                    {
+                        Report("TRM3023", "DependsOn requires a result or init-output target.",
+                            span);
+                        return false;
+                    }
+                    destination = BoundDependencyDestination.Result;
+                    return true;
+                }
+                if (relation == BoundDependencyRelation.Captures)
+                {
+                    if ((constructor && !classConstructor) || hasReceiver)
+                    {
+                        destination = BoundDependencyDestination.Receiver;
+                        return true;
+                    }
+                    Report("TRM3023",
+                        "Captures requires an explicit result or retained-formal target on a static or top-level callable.",
+                        span);
+                    return false;
+                }
+                if (constructor && !classConstructor)
+                {
+                    destination = BoundDependencyDestination.Receiver;
+                    return true;
+                }
+                if (hasResult)
+                {
+                    destination = BoundDependencyDestination.Result;
+                    return true;
+                }
+                Report("TRM3023",
+                    "ForwardsBacking requires a result, constructor receiver or explicit destination.",
+                    span);
+                return false;
+
+            case DependencyAttributeTargetKind.Return:
+                if (relation == BoundDependencyRelation.Captures
+                    ? !hasResult || !CanCaptureValue(returnType)
+                    : !hasResult)
+                {
+                    Report("TRM3023",
+                        "The return target is incompatible with this dependency schema or result type.",
+                        span);
+                    return false;
+                }
+                destination = BoundDependencyDestination.Result;
+                return true;
+
+            case DependencyAttributeTargetKind.Receiver:
+                if (relation == BoundDependencyRelation.DependsOn
+                    || !((constructor && !classConstructor) || hasReceiver))
+                {
+                    Report("TRM3023",
+                        "The receiver target is incompatible with this declaration or dependency schema.",
+                        span);
+                    return false;
+                }
+                destination = BoundDependencyDestination.Receiver;
+                return true;
+
+            case DependencyAttributeTargetKind.Parameter:
+                var formalOrdinal = FindParameterOrdinal(target.ParameterName, parameters);
+                if (formalOrdinal < 0)
+                {
+                    Report("TRM3023",
+                        $"Dependency annotation targets unknown parameter '{target.ParameterName}'.",
+                        span);
+                    return false;
+                }
+                var formal = parameters[formalOrdinal];
+                if (relation == BoundDependencyRelation.DependsOn)
+                {
+                    if (!formal.IsInit && !nativeOutputParameters.Contains(formalOrdinal))
+                    {
+                        Report("TRM3023",
+                            "A parameter-targeted DependsOn annotation requires an init or native output.",
+                            span);
+                        return false;
+                    }
+                    destination = BoundDependencyDestination.InitializedOutput;
+                }
+                else if (relation == BoundDependencyRelation.Captures)
+                {
+                    if (nativeOutputParameters.Contains(formalOrdinal))
+                    {
+                        Report("TRM3023",
+                            "NativeOutput formals are not retained holder destinations.",
+                            span);
+                        return false;
+                    }
+                    if (formal.IsInit)
+                    {
+                        destination = BoundDependencyDestination.InitializedOutput;
+                    }
+                    else if (!CanCaptureParameter(formal))
+                    {
+                        Report("TRM3023",
+                            "Captures requires a retained formal destination.",
+                            span);
+                        return false;
+                    }
+                    else
+                    {
+                        destination = BoundDependencyDestination.RetainedFormal;
+                    }
+                }
+                else if (formal.IsInit || nativeOutputParameters.Contains(formalOrdinal))
+                {
+                    destination = BoundDependencyDestination.InitializedOutput;
+                }
+                else if (CanCaptureParameter(formal))
+                {
+                    destination = BoundDependencyDestination.RetainedFormal;
+                }
+                else
+                {
+                    Report("TRM3023",
+                        "ForwardsBacking requires an initialized output or retained formal destination.",
+                        span);
+                    return false;
+                }
+                destinationOrdinal = formalOrdinal;
+                return true;
+
+            case DependencyAttributeTargetKind.Operation:
+                Report("TRM3023",
+                    "The method target requires an admitted completion-operation relationship.",
+                    span);
+                return false;
+
+            default:
+                Report("TRM3023", "Dependency annotation target is unsupported.", span);
+                return false;
+        }
+    }
+
+    private bool TryBindDependencySources(SyntaxNode attribute,
+        ImmutableArray<Parameter> parameters, bool hasReceiver,
+        out ImmutableArray<BoundDependencySource> sources)
+    {
+        sources = [];
+        var children = attribute.Children;
+        var nameStart = AttributeNameStart(attribute);
+        var argumentOpen = -1;
+        for (var index = nameStart; index < children.Length; index++)
+        {
+            if (children[index] is SyntaxTokenElement
+                { Token.Kind: TokenKind.OpenParen })
+            {
+                argumentOpen = index;
+                break;
+            }
+        }
+        if (argumentOpen < 0 || children.Length < 2
+            || children[^2] is not SyntaxTokenElement
+                { Token.Kind: TokenKind.CloseParen, Token.IsMissing: false }
+            || children[^1] is not SyntaxTokenElement
+                { Token.Kind: TokenKind.CloseBracket, Token.IsMissing: false })
+        {
+            Report("TRM3023",
+                "A dependency schema requires a parenthesized flat source list.",
+                attribute.Span);
+            return false;
+        }
+
+        var indexInList = argumentOpen + 1;
+        var end = children.Length - 2;
+        if (indexInList == end)
+        {
+            return true;
+        }
+
+        var result = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        var seen = new HashSet<BoundDependencySource>();
+        while (indexInList < end)
+        {
+            BoundDependencySource source;
+            var sourceSpan = attribute.Span;
+            if (children[indexInList] is SyntaxTokenElement
+                { Token.Kind: TokenKind.Identifier, Token.Text: "this" } receiver)
+            {
+                sourceSpan = receiver.Token.Span;
+                if (!hasReceiver)
+                {
+                    Report("TRM3023",
+                        "The direct this source requires an instance receiver.",
+                        sourceSpan);
+                    return false;
+                }
+                source = new BoundDependencySource(
+                    BoundDependencySourceKind.Receiver, null);
+                indexInList++;
+            }
+            else if (children[indexInList] is SyntaxTokenElement
+                { Token.Kind: TokenKind.StringLiteral } literal)
+            {
+                sourceSpan = literal.Token.Span;
+                if (!StringLiteralDecoder.TryDecode(literal.Token.Text.AsSpan(),
+                    out var parameterName))
+                {
+                    Report("TRM3023",
+                        "A dependency source literal must decode to one exact formal name.",
+                        sourceSpan);
+                    return false;
+                }
+                var formalOrdinal = FindParameterOrdinal(parameterName, parameters);
+                if (formalOrdinal < 0)
+                {
+                    Report("TRM3023",
+                        $"Dependency annotation names unknown parameter '{parameterName}'.",
+                        sourceSpan);
+                    return false;
+                }
+                source = new BoundDependencySource(
+                    BoundDependencySourceKind.Formal, formalOrdinal);
+                indexInList++;
+            }
+            else if (children[indexInList] is SyntaxTokenElement
+                    { Token.Kind: TokenKind.Identifier, Token.Text: "nameof" }
+                && indexInList + 3 < end
+                && children[indexInList + 1] is SyntaxTokenElement
+                    { Token.Kind: TokenKind.OpenParen }
+                && children[indexInList + 2] is SyntaxTokenElement
+                    { Token.Kind: TokenKind.Identifier } selector
+                && children[indexInList + 3] is SyntaxTokenElement
+                    { Token.Kind: TokenKind.CloseParen })
+            {
+                sourceSpan = selector.Token.Span;
+                var formalOrdinal = FindParameterOrdinal(
+                    selector.Token.Name, parameters);
+                if (formalOrdinal < 0)
+                {
+                    Report("TRM3023",
+                        $"Dependency annotation names unknown parameter '{selector.Token.Name}'.",
+                        sourceSpan);
+                    return false;
+                }
+                source = new BoundDependencySource(
+                    BoundDependencySourceKind.Formal, formalOrdinal);
+                indexInList += 4;
+            }
+            else
+            {
+                Report("TRM3023",
+                    "A dependency source must be this, nameof(parameter), or a literal formal name.",
+                    sourceSpan);
+                return false;
+            }
+
+            if (!seen.Add(source))
+            {
+                Report("TRM3023",
+                    "A dependency source cannot be listed more than once.",
+                    sourceSpan);
+                return false;
+            }
+            result.Add(source);
+
+            if (indexInList < end)
+            {
+                if (children[indexInList] is not SyntaxTokenElement
+                    { Token.Kind: TokenKind.Comma })
+                {
+                    Report("TRM3023",
+                        "Dependency source recipes must be separated by commas.",
+                        attribute.Span);
+                    return false;
+                }
+                indexInList++;
+                if (indexInList == end)
+                {
+                    Report("TRM3023",
+                        "A dependency source list cannot end with a comma.",
+                        attribute.Span);
+                    return false;
+                }
+            }
+        }
+
+        sources = result.ToImmutable();
+        return true;
+    }
+
+    private bool CanCaptureParameter(Parameter parameter)
+    {
+        if (parameter.IsOut || parameter.IsImplicitRef
+            || IsUnique(parameter.Type) || ManagedClassTypes.IsManaged(parameter.Type))
+        {
+            return true;
+        }
+        if (!NativePointerTypes.IsType(parameter.Type))
+        {
+            return false;
+        }
+        var pointerIndex = NativePointerTypes.Index(parameter.Type);
+        if ((uint)pointerIndex >= (uint)_nativePointerTypes.Count)
+        {
+            return false;
+        }
+        var pointer = _nativePointerTypes[pointerIndex];
+        if (!pointer.IsWritable)
+        {
+            return false;
+        }
+
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(pointer.PointeeType);
+        while (pending.TryPop(out var current))
+        {
+            if (current == PrimitiveType.NativeRawPointer || NativePointerTypes.IsType(current))
+            {
+                return true;
+            }
+            var structureIndex = (int)current - 100;
+            if (structureIndex < 0 || structureIndex >= _structs.Count
+                || !visited.Add(current))
+            {
+                continue;
+            }
+            foreach (var field in _structs[structureIndex].Fields)
+            {
+                pending.Push(field.Type);
+            }
+        }
+        return false;
+    }
+
+    private bool IsEligibleDependencySource(Parameter parameter)
+        => !parameter.IsOut && !parameter.IsInit
+            && (parameter.IsImplicitRef || CarriesDependencySource(parameter.Type));
+
+    private bool CarriesDependencySource(PrimitiveType type)
+    {
+        if (CarriesDependencySourceDirectly(type))
+        {
+            return true;
+        }
+        if ((int)type < 100 || (int)type - 100 >= _structs.Count)
+        {
+            return false;
+        }
+
+        var pending = new Stack<PrimitiveType>();
+        var seen = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        while (pending.TryPop(out var current))
+        {
+            if (!seen.Add(current))
+            {
+                continue;
+            }
+
+            var structureIndex = (int)current - 100;
+            if ((uint)structureIndex >= (uint)_structs.Count)
+            {
+                continue;
+            }
+            foreach (var field in _structs[structureIndex].Fields)
+            {
+                if (CarriesDependencySourceDirectly(field.Type))
+                {
+                    return true;
+                }
+                if ((int)field.Type >= 100)
+                {
+                    pending.Push(field.Type);
+                }
+            }
+        }
+        return false;
+    }
+
+    private bool CarriesDependencySourceDirectly(PrimitiveType type)
+        => type is PrimitiveType.ReadonlyInt32BufferView
+                or PrimitiveType.MutableInt32BufferView
+                or PrimitiveType.ManagedNode
+                or PrimitiveType.OptionalManagedNode
+                or PrimitiveType.WriteManagedNode
+                or PrimitiveType.OptionalWriteManagedNode
+            || TokenSpanContract.IsDependent(type, _structs)
+            || ManagedClassTypes.IsManaged(type)
+            || IsUnique(type);
+
+    private bool CanCaptureValue(PrimitiveType type)
+        => IsUnique(type) || ManagedClassTypes.IsManaged(type);
+
+    private static int FindParameterOrdinal(string? parameterName,
+        ImmutableArray<Parameter> parameters)
+    {
+        if (parameterName is null)
+        {
+            return -1;
+        }
+
+        for (var parameter = 0; parameter < parameters.Length; parameter++)
+        {
+            if (parameters[parameter].Name == parameterName)
+            {
+                return parameter;
+            }
+        }
+        return -1;
+    }
+
+    private (ImmutableArray<int> CapturedParameters,
+        ImmutableArray<int> ResultDependencyParameters,
+        bool ResultDependencyIncludesReceiver, bool ReturnsForwardedBacking)
+        ProjectTokenSpanDependencyMetadata(
+            ImmutableArray<BoundDependencyContract> contracts,
+            PrimitiveType returnType, bool constructor)
+    {
+        ImmutableArray<int> capturedParameters = [];
+        if (constructor && TokenSpanContract.IsCursor(returnType, _structs))
+        {
+            var capture = contracts.FirstOrDefault(static contract =>
+                contract.Relation == BoundDependencyRelation.Captures
+                && contract.Destination == BoundDependencyDestination.Receiver);
+            if (capture is not null)
+            {
+                capturedParameters = [
+                    .. capture.Sources
+                    .Where(static source => source.Kind == BoundDependencySourceKind.Formal)
+                    .Select(static source => source.FormalOrdinal!.Value + 1),
+                ];
+            }
+        }
+
+        if (returnType != PrimitiveType.TokenSpan)
+        {
+            return (capturedParameters, [], false, false);
+        }
+
+        var resultDependency = contracts.FirstOrDefault(static contract =>
+            contract.Relation == BoundDependencyRelation.DependsOn
+            && contract.Destination == BoundDependencyDestination.Result)
+            ?? contracts.FirstOrDefault(static contract =>
+                contract.Relation == BoundDependencyRelation.ForwardsBacking
+                && contract.Destination == BoundDependencyDestination.Result);
+        if (resultDependency is null)
+        {
+            return (capturedParameters, [], false, false);
+        }
+
+        var parameters = resultDependency.Sources
+            .Where(static source => source.Kind == BoundDependencySourceKind.Formal)
+            .Select(static source => source.FormalOrdinal!.Value)
+            .ToImmutableArray();
+        var receiver = resultDependency.Sources.Any(static source =>
+            source.Kind == BoundDependencySourceKind.Receiver);
+        var forwards = returnType == PrimitiveType.TokenSpan
+            && (parameters.Length != 0 || receiver);
+        return (capturedParameters, parameters, receiver, forwards);
     }
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
@@ -2813,11 +3635,6 @@ internal sealed partial class Binder
                 return writable ? GetNativePointerType(PrimitiveType.Void, isWritable: true, span: node.Span)
                     : PrimitiveType.NativeRawPointer;
             }
-            if (IsUnshadowedBareChar8Type(typeArgumentNodes[0]))
-            {
-                Report("TRM3005", "ptr<char8> is not supported by the current source type profile.", node.Span);
-                return PrimitiveType.Int32;
-            }
             var diagnosticCount = DiagnosticCount;
             var pointeeType = BindType(typeArgumentNodes[0], allowVoid: false);
             if (DiagnosticCount != diagnosticCount)
@@ -2840,9 +3657,9 @@ internal sealed partial class Binder
                 Report("TRM3005", "Only the closed Copy Token span is available in this provisional profile.", node.Span);
                 return PrimitiveType.Int32;
             }
-            var context = _tree;
+            var context = CaptureContext();
             DeclareStruct((int)element - 100);
-            SetContext(context);
+            RestoreContext(context);
             if (!TokenSpanContract.ValidTokenLayout(_structs))
             {
                 Report("TRM3005", "Token spans require the verified 0/4/8 field offsets, 12-byte stride and four-byte alignment.",
@@ -3014,13 +3831,6 @@ internal sealed partial class Binder
         return builder.ToString();
     }
 
-    private static bool IsBareChar8Type(SyntaxNode node) =>
-        node.Children is [SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Name: "char8" }];
-
-    private bool IsUnshadowedBareChar8Type(SyntaxNode node) =>
-        IsBareChar8Type(node) && !TryGetAliasTypeArgument("char8", out _)
-        && ResolveTypeName("char8", out _) == DeclaredTypeResolution.Missing;
-
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
             || ((int)type >= 100 && (int)type - 100 < _structs.Count
@@ -3036,7 +3846,7 @@ internal sealed partial class Binder
             receiver = (SyntaxNode)receiver.Children[1];
         }
         if (receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token, out var slot)
             && _variables[slot].Type == type)
         {
             return new BoundReceiverLoan(slot, type, receiver.Span);
@@ -3058,7 +3868,7 @@ internal sealed partial class Binder
             receiver = (SyntaxNode)receiver.Children[1];
         }
         if (receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token, out var slot)
             && _variables[slot].Type == type && _variables[slot].IsMutable)
         {
             return new BoundMutableReceiverLoan(slot, type, span);
@@ -3228,14 +4038,28 @@ internal sealed partial class Binder
         }
 
         if (node.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)node.Children[0]).Token.Name, out var slot)
-            && _constInt32Values.TryGetValue(slot, out value))
+            && TryFindVariable(((SyntaxTokenElement)node.Children[0]).Token, out var slot)
+            && _constScalarValues.TryGetValue(slot, out var constant)
+            && constant.Type == PrimitiveType.Int32
+            && constant.Value is >= int.MinValue and <= int.MaxValue)
         {
+            value = (int)constant.Value;
             return true;
         }
 
         value = 0;
         return false;
+    }
+
+    private BoundExpression FoldSwitchConstantLocals(BoundExpression expression)
+    {
+        var rewritten = expression.RewriteNestedExpressions(FoldSwitchConstantLocals);
+        if (rewritten is BoundRead read
+            && _constScalarValues.TryGetValue(read.Variable, out var constant))
+        {
+            return constant with { Span = read.Span };
+        }
+        return FoldScalarConstant(rewritten);
     }
 
     private BoundExpression BindBufferCount(BoundExpression owner, TextSpan span)
@@ -3297,7 +4121,7 @@ internal sealed partial class Binder
             receiver = (SyntaxNode)receiver.Children[1];
         }
         if (receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token, out var slot)
             && _variables[slot].Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
         {
             return slot;
@@ -3347,6 +4171,12 @@ internal sealed partial class Binder
             }
         }
 
+        return CompleteBlockScope(statements, outputOwners, block.Span);
+    }
+
+    private BoundBlock CompleteBlockScope(ImmutableArray<BoundStatement>.Builder statements,
+        List<(int Statement, int Variable)> outputOwners, TextSpan blockSpan)
+    {
         foreach (var slot in _scopes[^1].Values)
         {
             if (_unresolvedVacantLocals.Remove(slot))
@@ -3364,31 +4194,31 @@ internal sealed partial class Binder
         {
             if (bound[index] is BoundViewScope view)
             {
-                bound = bound[..index].Add(view with { Body = new BoundBlock(bound[(index + 1)..], block.Span) });
+                bound = bound[..index].Add(view with { Body = new BoundBlock(bound[(index + 1)..], blockSpan) });
             }
             if (bound[index] is BoundLocal local && IsUnique(local.Initializer.Type))
             {
                 var method = CleanupMethod(local.Initializer.Type);
                 var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                 bound = bound[..(index + 1)].Add(new BoundTryFinally(
-                    new BoundBlock(bound[(index + 1)..], block.Span),
-                    new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, block.Span)], block.Span),
-                    block.Span));
+                    new BoundBlock(bound[(index + 1)..], blockSpan),
+                    new BoundBlock([new BoundDrop(local.Variable, cleanupFunction, blockSpan)], blockSpan),
+                    blockSpan));
             }
-            if (bound[index] is BoundLocal span && span.Initializer.Type == PrimitiveType.TokenSpan)
+            if (bound[index] is BoundLocal tokenSpan && tokenSpan.Initializer.Type == PrimitiveType.TokenSpan)
             {
                 bound = bound[..(index + 1)].Add(new BoundTryFinally(
-                    new BoundBlock(bound[(index + 1)..], block.Span),
-                    new BoundBlock([new BoundDropSpan(span.Variable, block.Span)], block.Span), block.Span));
+                    new BoundBlock(bound[(index + 1)..], blockSpan),
+                    new BoundBlock([new BoundDropSpan(tokenSpan.Variable, blockSpan)], blockSpan), blockSpan));
             }
             if (bound[index] is BoundVacantLocal vacant && IsUnique(_variables[vacant.Variable].Type))
             {
                 var method = CleanupMethod(_variables[vacant.Variable].Type);
                 var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                 bound = bound[..(index + 1)].Add(new BoundTryFinally(
-                    new BoundBlock(bound[(index + 1)..], block.Span),
-                    new BoundBlock([new BoundDrop(vacant.Variable, cleanupFunction, block.Span)], block.Span),
-                    block.Span));
+                    new BoundBlock(bound[(index + 1)..], blockSpan),
+                    new BoundBlock([new BoundDrop(vacant.Variable, cleanupFunction, blockSpan)], blockSpan),
+                    blockSpan));
             }
             for (var output = outputOwners.Count - 1; output >= 0; output--)
             {
@@ -3400,13 +4230,13 @@ internal sealed partial class Binder
                 var method = CleanupMethod(_variables[slot].Type);
                 var cleanupFunction = method is not null && _functions.TryGetValue(method, out var found) ? found : -1;
                 bound = bound[..index]
-                    .Add(new BoundOwnerDeclaration(slot, block.Span))
-                    .Add(new BoundTryFinally(new BoundBlock(bound[index..], block.Span),
-                        new BoundBlock([new BoundDrop(slot, cleanupFunction, block.Span)], block.Span),
-                        block.Span));
+                    .Add(new BoundOwnerDeclaration(slot, blockSpan))
+                    .Add(new BoundTryFinally(new BoundBlock(bound[index..], blockSpan),
+                        new BoundBlock([new BoundDrop(slot, cleanupFunction, blockSpan)], blockSpan),
+                        blockSpan));
             }
         }
-        return new BoundBlock(bound, block.Span) {
+        return new BoundBlock(bound, blockSpan) {
             IsManagedLexicalScope = true,
             RetiredManagedLocals = managedLocals,
         };
@@ -3428,7 +4258,7 @@ internal sealed partial class Binder
             variableReceiver = (SyntaxNode)variableReceiver.Children[1];
         }
         var viewSlot = variableReceiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)variableReceiver.Children[0]).Token.Name, out var slot)
+            && TryFindVariable(((SyntaxTokenElement)variableReceiver.Children[0]).Token, out var slot)
             && !_unresolvedVacantLocals.Contains(slot)
             && _variables[slot].Type == PrimitiveType.MutableInt32BufferView
                 ? slot : -1;
@@ -3447,6 +4277,364 @@ internal sealed partial class Binder
             expressionNode.Span);
         return null;
     }
+
+    private BoundBlock BindSwitchStatement(SyntaxNode node)
+    {
+        var outerScopeCount = _scopes.Count;
+        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+        var statements = ImmutableArray.CreateBuilder<BoundStatement>();
+        var outputOwners = new List<(int Statement, int Variable)>();
+        try
+        {
+            var selectorNode = (SyntaxNode)node.Children[2];
+            var firstSelectorVariable = _variables.Count;
+            var selector = BindExpression(selectorNode, null);
+            for (var slot = firstSelectorVariable; slot < _variables.Count; slot++)
+            {
+                if (IsUnique(_variables[slot].Type)
+                    && _scopes[^1].TryGetValue(_variables[slot].Name, out var scoped)
+                    && scoped == slot)
+                {
+                    outputOwners.Add((0, slot));
+                }
+            }
+            if (selector.Type is not (PrimitiveType.Bool or PrimitiveType.Char16
+                or PrimitiveType.Int32 or PrimitiveType.UInt32
+                or PrimitiveType.Int64 or PrimitiveType.UInt64))
+            {
+                Report("TRM3007", "Switch statements require a supported scalar selector.", selectorNode.Span);
+                return CompleteBlockScope(statements, outputOwners, node.Span);
+            }
+
+            var selectorVariable = _variables.Count;
+            _variables.Add(new BoundVariable($"<switch-selector-{selectorVariable}>",
+                selector.Type, false, selectorNode.Span));
+            statements.Add(new BoundLocal(selectorVariable, selector, node.Span));
+            var selectorRead = new BoundRead(selectorVariable, selector.Type, selectorNode.Span);
+            var armNodes = node.Children.OfType<SyntaxNode>()
+                .Where(static child => child.Kind == SyntaxKind.SwitchArm).ToArray();
+            var arms = new List<SwitchArmBinding>(armNodes.Length);
+            var targets = ImmutableArray.CreateBuilder<SwitchTarget>();
+            var priorUnguardedLabels = new List<BoundConstant>();
+            var nextOrdinal = 0;
+            var defaultArm = -1;
+            var sawFallback = false;
+
+            for (var armIndex = 0; armIndex < armNodes.Length; armIndex++)
+            {
+                var armNode = armNodes[armIndex];
+                var pattern = armNode.Children.OfType<SyntaxNode>().FirstOrDefault(static child =>
+                    child.Kind is SyntaxKind.SwitchConstantPattern or SyntaxKind.SwitchWildcardPattern);
+                var body = armNode.Children.OfType<SyntaxNode>()
+                    .LastOrDefault(static child => child.Kind == SyntaxKind.Block);
+                if (pattern is null || body is null)
+                {
+                    Report("TRM3001", "A switch arm requires a supported pattern and braced body.", armNode.Span);
+                    continue;
+                }
+                if (armNode.Children.OfType<SyntaxNode>()
+                    .Any(static child => child.Kind == SyntaxKind.Attribute))
+                {
+                    Report("TRM3001", "Switch arm attributes are not supported by this compiler path.", armNode.Span);
+                }
+                var guardClause = armNode.Children.OfType<SyntaxNode>()
+                    .FirstOrDefault(static child => child.Kind == SyntaxKind.SwitchWhenClause);
+                BoundExpression? guard = null;
+                if (guardClause is not null)
+                {
+                    var guardExpression = guardClause.Children.OfType<SyntaxNode>().FirstOrDefault();
+                    if (guardExpression is null)
+                    {
+                        Report("TRM3001", "A switch guard requires a Boolean expression.", guardClause.Span);
+                    }
+                    else
+                    {
+                        var firstGuardVariable = _variables.Count;
+                        guard = BindExpression(guardExpression, PrimitiveType.Bool);
+                        if (_variables.Count != firstGuardVariable)
+                        {
+                            Report("TRM3007",
+                                "Switch guards cannot introduce output bindings in this compiler path.",
+                                guardExpression.Span);
+                        }
+                    }
+                }
+
+                var isWildcard = pattern.Kind == SyntaxKind.SwitchWildcardPattern;
+                BoundConstant? value = null;
+                if (!isWildcard)
+                {
+                    var patternExpression = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
+                    if (patternExpression is null)
+                    {
+                        Report("TRM3001", "A switch constant pattern requires an expression.", pattern.Span);
+                    }
+                    else
+                    {
+                        var expression = BindExpression(patternExpression, selector.Type);
+                        if (FoldSwitchConstantLocals(expression) is BoundConstant constant
+                            && constant.Type == selector.Type)
+                        {
+                            value = constant;
+                        }
+                        else
+                        {
+                            Report("TRM3007",
+                                "A switch constant pattern must be a compile-time scalar of the selector type.",
+                                pattern.Span);
+                        }
+                    }
+                }
+
+                var isFallback = isWildcard && guard is null;
+                if (sawFallback)
+                {
+                    Report("TRM3007", "An unguarded wildcard switch arm must be the final arm.", armNode.Span);
+                }
+                var ordinal = nextOrdinal;
+                if (isFallback)
+                {
+                    if (defaultArm >= 0)
+                    {
+                        Report("TRM3007", "A switch statement cannot contain multiple unguarded wildcard arms.",
+                            armNode.Span);
+                    }
+                    defaultArm = ordinal;
+                    sawFallback = true;
+                    if (armIndex != armNodes.Length - 1)
+                    {
+                        Report("TRM3007", "An unguarded wildcard switch arm must be the final arm.", armNode.Span);
+                    }
+                }
+                else
+                {
+                    nextOrdinal++;
+                    if (value is BoundConstant label && guard is null)
+                    {
+                        var duplicates = priorUnguardedLabels.Any(prior =>
+                            SwitchConstantsEqual(prior, label, armNode.Span));
+                        if (duplicates)
+                        {
+                            Report("TRM3007", "An unguarded switch constant cannot be repeated.", armNode.Span);
+                        }
+                        else
+                        {
+                            priorUnguardedLabels.Add(label);
+                            targets.Add(new SwitchTarget(label, ordinal));
+                        }
+                    }
+                    else if (value is BoundConstant guardedLabel
+                        && priorUnguardedLabels.Any(prior =>
+                            SwitchConstantsEqual(prior, guardedLabel, armNode.Span)))
+                    {
+                        Report("TRM3007", "A guarded switch arm follows an unguarded matching arm.", armNode.Span);
+                    }
+                }
+                arms.Add(new SwitchArmBinding(armNode, body, value, isWildcard, guard, ordinal, isFallback));
+            }
+
+            var boolTrue = arms.Any(static arm => !arm.IsWildcard && arm.Guard is null
+                && arm.Value is { Type: PrimitiveType.Bool, Value: 1 });
+            var boolFalse = arms.Any(static arm => !arm.IsWildcard && arm.Guard is null
+                && arm.Value is { Type: PrimitiveType.Bool, Value: 0 });
+            if (defaultArm < 0 && !(selector.Type == PrimitiveType.Bool && boolTrue && boolFalse))
+            {
+                Report("TRM3007", "A switch statement requires complete scalar coverage or an unguarded wildcard.",
+                    node.Span);
+            }
+
+            var needsDispatcher = arms.Any(static arm => ContainsSwitchTransfer(arm.BodySyntax));
+            var fallbackOrdinal = defaultArm >= 0 ? defaultArm : nextOrdinal;
+            BoundExpression initialArm = new BoundConstant(fallbackOrdinal, PrimitiveType.Int32, node.Span);
+            for (var armIndex = arms.Count - 1; armIndex >= 0; armIndex--)
+            {
+                var arm = arms[armIndex];
+                if (arm.IsFallback)
+                {
+                    continue;
+                }
+                initialArm = new BoundConditional(
+                    SwitchArmCondition(selectorRead, arm),
+                    new BoundConstant(arm.Ordinal, PrimitiveType.Int32, arm.Syntax.Span),
+                    initialArm, PrimitiveType.Int32, arm.Syntax.Span);
+            }
+
+            BoundBlock[] boundBodies;
+            var stateVariable = -1;
+            if (needsDispatcher)
+            {
+                stateVariable = _variables.Count;
+                _variables.Add(new BoundVariable("<switch-arm>", PrimitiveType.Int32,
+                    true, node.Span));
+                var dispatchLoopIndex = _loops.Count;
+                var binding = new SwitchBinding(stateVariable, dispatchLoopIndex, selector.Type,
+                    targets.ToImmutable(), defaultArm);
+                _loops.Add(new LoopBinding { IsSwitchDispatcher = true });
+                _switches.Add(binding);
+                try
+                {
+                    boundBodies = [.. arms.Select(arm => BindBlock(arm.BodySyntax))];
+                }
+                finally
+                {
+                    _switches.RemoveAt(_switches.Count - 1);
+                    _loops.RemoveAt(_loops.Count - 1);
+                }
+
+                var fallbackIndex = arms.FindIndex(static arm => arm.IsFallback);
+                BoundStatement alternate = fallbackIndex >= 0
+                    ? WithSwitchExit(boundBodies[fallbackIndex], arms[fallbackIndex].Syntax.Span)
+                    : new BoundBlock([new BoundBreak(node.Span)], node.Span);
+                for (var armIndex = arms.Count - 1; armIndex >= 0; armIndex--)
+                {
+                    var arm = arms[armIndex];
+                    if (arm.IsFallback)
+                    {
+                        continue;
+                    }
+                    var stateMatch = new BoundBinary(TokenKind.EqualsEquals,
+                        new BoundRead(stateVariable, PrimitiveType.Int32, arm.Syntax.Span),
+                        new BoundConstant(arm.Ordinal, PrimitiveType.Int32, arm.Syntax.Span),
+                        PrimitiveType.Bool, arm.Syntax.Span);
+                    alternate = new BoundIf(stateMatch,
+                        WithSwitchExit(boundBodies[armIndex], arm.Syntax.Span),
+                        alternate, arm.Syntax.Span);
+                }
+                statements.Add(new BoundLocal(stateVariable, initialArm, node.Span));
+                statements.Add(new BoundWhile(new BoundConstant(1, PrimitiveType.Bool, node.Span),
+                    alternate, node.Span) { SwitchArmVariable = stateVariable });
+            }
+            else
+            {
+                boundBodies = [.. arms.Select(arm => BindBlock(arm.BodySyntax))];
+                var fallbackIndex = arms.FindIndex(static arm => arm.IsFallback);
+                BoundStatement alternate = fallbackIndex >= 0
+                    ? boundBodies[fallbackIndex]
+                    : new BoundBlock([], node.Span);
+                for (var armIndex = arms.Count - 1; armIndex >= 0; armIndex--)
+                {
+                    var arm = arms[armIndex];
+                    if (arm.IsFallback)
+                    {
+                        continue;
+                    }
+                    alternate = new BoundIf(SwitchArmCondition(selectorRead, arm),
+                        boundBodies[armIndex], alternate, arm.Syntax.Span);
+                }
+                statements.Add(alternate);
+            }
+            return CompleteBlockScope(statements, outputOwners, node.Span);
+        }
+        finally
+        {
+            if (_scopes.Count > outerScopeCount)
+            {
+                _scopes.RemoveAt(_scopes.Count - 1);
+            }
+        }
+    }
+
+    private BoundBlock BindSwitchTransfer(SyntaxNode node)
+    {
+        if (_switches.Count == 0)
+        {
+            Report("TRM3008", "A switch transfer requires an enclosing statement switch.", node.Span);
+            return new BoundBlock([], node.Span);
+        }
+        var binding = _switches[^1];
+        var targetNode = node.Children[1];
+        var targetArm = -1;
+        if (targetNode is SyntaxTokenElement { Token.Kind: TokenKind.Underscore })
+        {
+            targetArm = binding.DefaultArm;
+        }
+        else if (targetNode is SyntaxNode targetExpression)
+        {
+            var firstVariable = _variables.Count;
+            var value = FoldSwitchConstantLocals(
+                BindExpression(targetExpression, binding.SelectorType)) is BoundConstant constant
+                    ? constant : null;
+            if (_variables.Count != firstVariable)
+            {
+                Report("TRM3007", "A switch transfer target cannot introduce output bindings.", targetExpression.Span);
+            }
+            if (value is null || value.Type != binding.SelectorType)
+            {
+                Report("TRM3007", "A switch transfer target must be a constant of the selector type.",
+                    targetExpression.Span);
+            }
+            else
+            {
+                foreach (var target in binding.Targets)
+                {
+                    if (SwitchConstantsEqual(target.Value, value, targetExpression.Span))
+                    {
+                        targetArm = target.ArmOrdinal;
+                        break;
+                    }
+                }
+            }
+        }
+        if (targetArm < 0)
+        {
+            Report("TRM3008",
+                "A switch transfer must target an existing unguarded constant arm or wildcard arm.", node.Span);
+            return new BoundBlock([], node.Span);
+        }
+
+        var depth = _loops.Count - binding.DispatchLoopIndex;
+        if (depth <= 0)
+        {
+            Report("TRM3008", "A switch transfer has no active dispatcher.", node.Span);
+            return new BoundBlock([], node.Span);
+        }
+        return new BoundBlock([
+            new BoundAssignment(binding.StateVariable,
+                new BoundConstant(targetArm, PrimitiveType.Int32, node.Span), node.Span),
+            new BoundContinue(node.Span) { TargetDepth = depth },
+        ], node.Span);
+    }
+
+    private static bool ContainsSwitchTransfer(SyntaxNode statement)
+    {
+        var pending = new Stack<SyntaxNode>();
+        pending.Push(statement);
+        while (pending.TryPop(out var current))
+        {
+            if (current.Kind == SyntaxKind.SwitchTransferStatement)
+            {
+                return true;
+            }
+            if (current.Kind == SyntaxKind.SwitchStatement)
+            {
+                continue;
+            }
+            foreach (var child in current.Children.OfType<SyntaxNode>())
+            {
+                pending.Push(child);
+            }
+        }
+        return false;
+    }
+
+    private static BoundExpression SwitchArmCondition(BoundRead selector, SwitchArmBinding arm)
+    {
+        BoundExpression match = arm.IsWildcard
+            ? new BoundConstant(1, PrimitiveType.Bool, arm.Syntax.Span)
+            : new BoundBinary(TokenKind.EqualsEquals, selector, arm.Value
+                ?? new BoundConstant(0, selector.Type, arm.Syntax.Span),
+                PrimitiveType.Bool, arm.Syntax.Span);
+        return arm.Guard is null ? match
+            : new BoundBinary(TokenKind.AmpersandAmpersand, match, arm.Guard,
+                PrimitiveType.Bool, arm.Syntax.Span);
+    }
+
+    private static BoundBlock WithSwitchExit(BoundBlock body, TextSpan span)
+        => body with { Statements = body.Statements.Add(new BoundBreak(span)) };
+
+    private static bool SwitchConstantsEqual(BoundConstant left, BoundConstant right, TextSpan span)
+        => FoldScalarConstant(new BoundBinary(TokenKind.EqualsEquals, left, right,
+            PrimitiveType.Bool, span)) is BoundConstant { Type: PrimitiveType.Bool, Value: 1 };
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Unsupported syntax kinds are rejected by the default branch.")]
     private BoundStatement BindStatement(SyntaxNode node, string? loopLabel = null)
@@ -3605,11 +4793,9 @@ internal sealed partial class Binder
                 {
                     _ = _constRequired.Add(boundLocal);
                     _ = _constLocals.Add(boundLocal.Variable);
-                    if (boundLocal.Initializer is BoundConstant {
-                        Type: PrimitiveType.Int32, Value: >= int.MinValue and <= int.MaxValue,
-                    } constant)
+                    if (FoldSwitchConstantLocals(boundLocal.Initializer) is BoundConstant constant)
                     {
-                        _constInt32Values[boundLocal.Variable] = (int)constant.Value;
+                        _constScalarValues[boundLocal.Variable] = constant;
                     }
                 }
                 return local;
@@ -3802,17 +4988,21 @@ internal sealed partial class Binder
                 }
                 var op = ((SyntaxTokenElement)node.Children[1]).Token;
                 var place = BindExpression(target, null);
-                if (place.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                if (!PrimitiveTypeFacts.IsInteger(place.Type))
                 {
                     Report("TRM3007", "Built-in compound assignment requires an integer place; nominal compound operators are unsupported.", op.Span);
                 }
                 CheckWritableUpdatePlace(place, target.Span);
-                var right = BindExpression((SyntaxNode)node.Children[2],
-                    op.Kind is TokenKind.ShiftLeftEquals or TokenKind.ShiftRightEquals or TokenKind.ShiftRightUnsignedEquals
-                        ? PrimitiveType.Int32 : place.Type);
-                if (right.Type != (op.Kind is TokenKind.ShiftLeftEquals or TokenKind.ShiftRightEquals
-                    or TokenKind.ShiftRightUnsignedEquals ? PrimitiveType.Int32 : place.Type))
+                var isShift = op.Kind is TokenKind.ShiftLeftEquals or TokenKind.ShiftRightEquals
+                    or TokenKind.ShiftRightUnsignedEquals;
+                var rightNode = (SyntaxNode)node.Children[2];
+                var rightKnown = KnownType(rightNode);
+                var rightContext = isShift
+                    ? rightKnown is null ? PrimitiveType.Int32 : (PrimitiveType?)null
+                    : place.Type;
+                var right = BindExpression(rightNode, rightContext);
+                if ((!isShift && right.Type != place.Type)
+                    || (isShift && !PrimitiveTypeFacts.IsInteger(right.Type)))
                 {
                     Report("TRM3007", "Compound assignment requires an exact operand type.", op.Span);
                 }
@@ -3965,6 +5155,12 @@ internal sealed partial class Binder
                 return new BoundIf(condition, then, otherwise, node.Span);
             }
 
+            case SyntaxKind.SwitchStatement:
+                return BindSwitchStatement(node);
+
+            case SyntaxKind.SwitchTransferStatement:
+                return BindSwitchTransfer(node);
+
             case SyntaxKind.WhileStatement:
             {
                 var condition = BindExpression((SyntaxNode)node.Children[2], PrimitiveType.Bool);
@@ -4000,8 +5196,9 @@ internal sealed partial class Binder
             {
                 var label = node.Children.Length == 3
                     ? ((SyntaxTokenElement)node.Children[1]).Token.Name : null;
-                var target = label is null ? _loops.Count - 1
-                    : _loops.FindLastIndex(loop => loop.Name == label);
+                var target = label is null
+                    ? _loops.FindLastIndex(static loop => !loop.IsSwitchDispatcher)
+                    : _loops.FindLastIndex(loop => !loop.IsSwitchDispatcher && loop.Name == label);
                 if (target < 0)
                 {
                     Report("TRM3008", label is null ? "Loop transfer requires an enclosing loop."
@@ -4553,7 +5750,7 @@ internal sealed partial class Binder
             case SyntaxKind.NameExpression:
             {
                 var token = ((SyntaxTokenElement)node.Children[0]).Token;
-                if (TryFindVariable(token.Name, out var slot))
+                if (TryFindVariable(token, out var slot))
                 {
                     if (NativeFixedArrayContract.IsCarrier(_variables[slot].Type))
                     {
@@ -4692,6 +5889,8 @@ internal sealed partial class Binder
                         "uint32" => PrimitiveType.UInt32,
                         "int64" => PrimitiveType.Int64,
                         "uint64" => PrimitiveType.UInt64,
+                        "int128" => PrimitiveType.Int128,
+                        "uint128" => PrimitiveType.UInt128,
                         "char16" => PrimitiveType.Char16,
                         _ => throw new InvalidOperationException(),
                     };
@@ -4768,7 +5967,9 @@ internal sealed partial class Binder
                             break;
                         }
                         if (operandNode.Kind != SyntaxKind.NameExpression
-                            || !TryFindVariable(NameText(operandNode), out var pointerVariable)
+                            || !TryFindVariable(
+                                ((SyntaxTokenElement)operandNode.Children[0]).Token,
+                                out var pointerVariable)
                             || _nativePointerTypes[NativePointerTypes.Index(expectedPointerType)].PointeeType
                                 != _variables[pointerVariable].Type
                             || !DirectNativeImportContract.IsInputPointee(
@@ -4879,26 +6080,25 @@ internal sealed partial class Binder
                 var operandType = op.Kind == TokenKind.Bang ? PrimitiveType.Bool
                     : KnownType(operandNode) ?? expected ?? PrimitiveType.Int32;
 
-                // A decimal negative minimum cannot be represented as a positive operand of its signed type.
-                if (op.Kind == TokenKind.Minus && operandNode.Kind == SyntaxKind.LiteralExpression &&
-                    operandType is PrimitiveType.Int32 or PrimitiveType.Int64 &&
-                    TryMinimumLiteral(((SyntaxTokenElement)operandNode.Children[0]).Token, operandType))
+                if (op.Kind is TokenKind.Plus or TokenKind.Minus
+                    && operandNode.Kind == SyntaxKind.LiteralExpression
+                    && TryBindSignedIntegerLiteral(
+                        ((SyntaxTokenElement)operandNode.Children[0]).Token,
+                        operandType, op.Kind == TokenKind.Minus, node.Span,
+                        out var signedLiteral))
                 {
-                    var literal = ((SyntaxTokenElement)operandNode.Children[0]).Token;
-                    if (expected != operandType)
-                    {
-                        Report("TRM3014", "An unsuffixed integer literal requires a signed integer context.", literal.Span);
-                    }
-
-                    expression = new BoundConstant(operandType == PrimitiveType.Int32 ? int.MinValue : long.MinValue,
-                        operandType, node.Span);
+                    expression = signedLiteral;
                     break;
                 }
 
                 var operandContext = operandType == PrimitiveType.Bool ? operandType
-                    : expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    : expected is PrimitiveType.Int8 or PrimitiveType.Int16
+                        or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                        or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                         or PrimitiveType.Float32 or PrimitiveType.Float64
-                        || KnownType(operandNode) is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        || KnownType(operandNode) is PrimitiveType.Int8 or PrimitiveType.Int16
+                            or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                            or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
                             or PrimitiveType.Float32 or PrimitiveType.Float64
                         ? operandType : (PrimitiveType?)null;
                 var operand = BindExpression(operandNode, operandContext);
@@ -4907,11 +6107,11 @@ internal sealed partial class Binder
                     Report("TRM3007", $"Unary operator requires {TypeName(operandType)}.", op.Span);
                 }
                 if (op.Kind is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Tilde or TokenKind.Bang)
-                    || (op.Kind == TokenKind.Minus && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64))
-                    || (op.Kind == TokenKind.Plus && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64))
-                    || (op.Kind == TokenKind.Tilde && operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)))
+                    || (op.Kind == TokenKind.Minus && !PrimitiveTypeFacts.IsInteger(operandType)
+                        && operandType is not (PrimitiveType.Float32 or PrimitiveType.Float64))
+                    || (op.Kind == TokenKind.Plus && !PrimitiveTypeFacts.IsInteger(operandType)
+                        && operandType is not (PrimitiveType.Float32 or PrimitiveType.Float64))
+                    || (op.Kind == TokenKind.Tilde && !PrimitiveTypeFacts.IsInteger(operandType)))
                 {
                     Report("TRM3001", "Unsupported unary operator.", op.Span);
                 }
@@ -4933,8 +6133,7 @@ internal sealed partial class Binder
                 }
                 var place = BindExpression(updateTarget, null);
                 var nominal = IsStruct(place.Type) && !IsUnique(place.Type);
-                if (!nominal && place.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                if (!nominal && !PrimitiveTypeFacts.IsInteger(place.Type))
                 {
                     Report("TRM3007", "Increment and decrement require a Copy integer or Copy struct place.", updateTarget.Span);
                 }
@@ -5201,13 +6400,14 @@ internal sealed partial class Binder
             case TokenKind.Slash:
             case TokenKind.Percent:
                 operandType = leftKnown ?? rightKnown
-                    ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                        or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 ? expected : null);
+                    ?? (expected is PrimitiveType expectedArithmeticType
+                        && (PrimitiveTypeFacts.IsInteger(expectedArithmeticType)
+                            || expectedArithmeticType is PrimitiveType.Float32 or PrimitiveType.Float64) ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
                 var floatingArithmetic = operandType is PrimitiveType.Float32 or PrimitiveType.Float64
                     && op.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                    or PrimitiveType.UInt64) && !floatingArithmetic)
+                if (!(operandType is PrimitiveType integerType && PrimitiveTypeFacts.IsInteger(integerType))
+                    && !floatingArithmetic)
                 {
                     Report("TRM3007", "Arithmetic requires same-type integer operands or float32/float64 operands "
                         + "for +, -, * and /.", op.Span);
@@ -5217,11 +6417,10 @@ internal sealed partial class Binder
             case TokenKind.ShiftLeft:
             case TokenKind.ShiftRight:
             case TokenKind.ShiftRightUnsigned:
-                operandType = leftKnown ?? (expected is PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64 ? expected : null);
+                operandType = leftKnown ?? (expected is PrimitiveType expectedShiftType
+                    && PrimitiveTypeFacts.IsInteger(expectedShiftType) ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64))
+                if (operandType is not PrimitiveType shiftType || !PrimitiveTypeFacts.IsInteger(shiftType))
                 {
                     Report("TRM3007", "Shifts require a known integer left operand.", op.Span);
                 }
@@ -5233,8 +6432,9 @@ internal sealed partial class Binder
             case TokenKind.GreaterEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                    or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Float32 or PrimitiveType.Float64))
+                if (!(operandType is PrimitiveType orderedType && (PrimitiveTypeFacts.IsInteger(orderedType)
+                    || PrimitiveTypeFacts.IsCodeUnitOrRune(orderedType)
+                    || orderedType is PrimitiveType.Float32 or PrimitiveType.Float64)))
                 {
                     Report("TRM3007", "Comparison requires numeric operands with a known context.", op.Span);
                 }
@@ -5251,7 +6451,8 @@ internal sealed partial class Binder
             case TokenKind.Caret:
                 operandType = leftKnown ?? rightKnown ?? expected;
                 resultType = operandType ?? PrimitiveType.Int32;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Bool))
+                if (operandType != PrimitiveType.Bool
+                    && (operandType is not PrimitiveType bitwiseType || !PrimitiveTypeFacts.IsInteger(bitwiseType)))
                 {
                     Report("TRM3007", "Bitwise operands must both be int32 or both be bool.", op.Span);
                 }
@@ -5261,9 +6462,11 @@ internal sealed partial class Binder
             case TokenKind.BangEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (operandType is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                    or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Bool
-                    or PrimitiveType.Float32 or PrimitiveType.Float64))
+                if (!(operandType == PrimitiveType.Bool
+                    || (operandType is PrimitiveType equalityType
+                        && (PrimitiveTypeFacts.IsInteger(equalityType)
+                            || PrimitiveTypeFacts.IsCodeUnitOrRune(equalityType)
+                            || equalityType is PrimitiveType.Float32 or PrimitiveType.Float64))))
                 {
                     Report("TRM3007", "Equality requires operands of the same supported numeric, bool or char16 type.", op.Span);
                 }
@@ -5278,9 +6481,13 @@ internal sealed partial class Binder
 
         var left = BindExpression(leftNode, operandType);
         var shift = op.Kind is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned;
-        var right = BindExpression(rightNode, shift ? PrimitiveType.Int32 : operandType);
+        var rightContext = shift
+            ? rightKnown is null ? PrimitiveType.Int32 : (PrimitiveType?)null
+            : operandType;
+        var right = BindExpression(rightNode, rightContext);
         if (operandType is null || left.Type != operandType
-            || right.Type != (shift ? PrimitiveType.Int32 : operandType) || operandType == PrimitiveType.Void)
+            || (shift ? !PrimitiveTypeFacts.IsInteger(right.Type) : right.Type != operandType)
+            || operandType == PrimitiveType.Void)
         {
             Report("TRM3007", "Binary operands must have the same supported type.", op.Span);
         }
@@ -5592,16 +6799,28 @@ internal sealed partial class Binder
             return false;
         }
         target = name switch {
+            "char8" => PrimitiveType.Char8,
+            "char32" => PrimitiveType.Char32,
+            "rune" => PrimitiveType.Rune,
+            "int8" => PrimitiveType.Int8,
+            "int16" => PrimitiveType.Int16,
             "int32" => PrimitiveType.Int32,
+            "uint8" => PrimitiveType.UInt8,
+            "uint16" => PrimitiveType.UInt16,
             "uint32" => PrimitiveType.UInt32,
             "int64" => PrimitiveType.Int64,
             "uint64" => PrimitiveType.UInt64,
+            "int128" => PrimitiveType.Int128,
+            "uint128" => PrimitiveType.UInt128,
             "char16" => PrimitiveType.Char16,
             "float32" => PrimitiveType.Float32,
             "float64" => PrimitiveType.Float64,
             _ => PrimitiveType.Int32,
         };
-        return name is "int32" or "uint32" or "int64" or "uint64" or "char16" or "float32" or "float64";
+        return name is "char8" or "char16" or "char32" or "rune"
+            or "int8" or "int16" or "int32" or "int64" or "int128"
+            or "uint8" or "uint16" or "uint32" or "uint64" or "uint128"
+            or "float32" or "float64";
     }
 
     private BoundExpression BindConversionCall(SyntaxNode node, SyntaxNode arguments, PrimitiveType target)
@@ -5621,8 +6840,8 @@ internal sealed partial class Binder
         }
         if (target is PrimitiveType.Float32 or PrimitiveType.Float64)
         {
-            if (operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                or PrimitiveType.UInt64 or PrimitiveType.Char16 or PrimitiveType.Float32 or PrimitiveType.Float64)
+            if (PrimitiveTypeFacts.IsInteger(operand.Type)
+                || operand.Type is PrimitiveType.Char16 or PrimitiveType.Float32 or PrimitiveType.Float64)
             {
                 return new BoundCast(operand, target, node.Span);
             }
@@ -5638,10 +6857,25 @@ internal sealed partial class Binder
             Report("TRM3007", "This typed floating-point conversion is not supported.", operand.Span);
             return ErrorExpression(node.Span);
         }
-        if (operand.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-            or PrimitiveType.UInt64 or PrimitiveType.Char16))
+        if (target == PrimitiveType.Char16 && PrimitiveTypeFacts.IsInteger(operand.Type))
+        {
+            return new BoundCast(operand, target, node.Span);
+        }
+        if (operand.Type == PrimitiveType.Char16
+            && (PrimitiveTypeFacts.IsInteger(target)
+                || (target is PrimitiveType.Int128 or PrimitiveType.UInt128)))
+        {
+            return new BoundCast(operand, target, node.Span);
+        }
+        if (PrimitiveTypeFacts.IsInteger(operand.Type)
+            && target is PrimitiveType.Int128 or PrimitiveType.UInt128)
+        {
+            return new BoundCast(operand, target, node.Span);
+        }
+        if (!PrimitiveTypeFacts.IsInteger(operand.Type) || !PrimitiveTypeFacts.IsInteger(target))
         {
             Report("TRM3007", "A checked conversion requires a numeric operand.", operand.Span);
+            return ErrorExpression(node.Span);
         }
         return new BoundCast(operand, target, node.Span);
     }
@@ -5826,7 +7060,8 @@ internal sealed partial class Binder
                     slot = forwarded;
                 }
                 else if (outputTarget?.Kind == SyntaxKind.NameExpression
-                    && TryFindVariable(((SyntaxTokenElement)outputTarget.Children[0]).Token.Name, out var existing))
+                    && TryFindVariable(((SyntaxTokenElement)outputTarget.Children[0]).Token,
+                        out var existing))
                 {
                     slot = existing;
                 }
@@ -5946,7 +7181,7 @@ internal sealed partial class Binder
                     && directImport.Outputs.FirstOrDefault(output =>
                         output.ParameterIndex == position) is DirectNativeOutput nativeOutput)
                 {
-                    bound.Add(BindDirectNativeOutputAddress(value, nativeOutput, argument.Span));
+                    bound.Add(BindDirectNativeOutputReservation(value, nativeOutput, argument.Span));
                 }
                 else if (signature?.External is BoundFunction nativeVTableOutputFunction
                     && nativeVTableOutputFunction.NativeVTableMethod is not null
@@ -5954,7 +7189,7 @@ internal sealed partial class Binder
                     && NativeVTableCallContract.OutputForParameter(
                         nativeVTableOutputFunction, position) is DirectNativeOutput vtableOutput)
                 {
-                    bound.Add(BindDirectNativeOutputAddress(value, vtableOutput, argument.Span));
+                    bound.Add(BindDirectNativeOutputReservation(value, vtableOutput, argument.Span));
                 }
                 else if (signature?.External is BoundFunction directParameterFunction
                     && directParameterFunction.DirectNativeImport is not null
@@ -6170,8 +7405,10 @@ internal sealed partial class Binder
     }
 
     private static bool IsScalarPrimitiveType(PrimitiveType type) =>
-        type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
+        type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
+            or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+            or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
             || NativeFunctionPointerTypes.IsType(type);
 
     private bool IsSupportedImplicitReferenceType(PrimitiveType type) =>
@@ -6244,17 +7481,25 @@ internal sealed partial class Binder
             {
                 return ErrorExpression(token.Span);
             }
-            if (expected != PrimitiveType.Char16)
+            if (expected is not (PrimitiveType.Char8 or PrimitiveType.Char16
+                or PrimitiveType.Char32 or PrimitiveType.Rune))
             {
                 Report("TRM3014", "A character literal requires a representable target type.", token.Span);
                 return ErrorExpression(token.Span);
             }
-            if (scalar > ushort.MaxValue)
+            var valid = expected.Value switch
             {
-                Report("TRM3013", "Character literal is outside the char16 scalar range.", token.Span);
+                PrimitiveType.Char8 => scalar <= 0x7F,
+                PrimitiveType.Char16 => scalar <= ushort.MaxValue,
+                PrimitiveType.Char32 or PrimitiveType.Rune => scalar <= 0x10_FFFF,
+                _ => false,
+            };
+            if (!valid)
+            {
+                Report("TRM3013", "Character literal is outside the target's representable scalar range.", token.Span);
                 return ErrorExpression(token.Span);
             }
-            return new BoundConstant(scalar, PrimitiveType.Char16, token.Span);
+            return new BoundConstant(scalar, expected.Value, token.Span);
         }
 
         if (token.Kind != TokenKind.NumericLiteral)
@@ -6287,7 +7532,10 @@ internal sealed partial class Binder
         }
 
         var type = expected;
-        if (type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16))
+        if (type is not (PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+            or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char8
+            or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune))
         {
             Report("TRM3014", "An unsuffixed integer literal requires a numeric context.", token.Span);
         }
@@ -6295,12 +7543,19 @@ internal sealed partial class Binder
         var based = ScannerHost.IntegerRadix(digits) != 10;
         // Based literals construct the destination's bits; only nonzero bits beyond its width are out of range.
         ulong max = type switch {
+            PrimitiveType.Int8 when based => byte.MaxValue,
+            PrimitiveType.Int8 => 127UL,
+            PrimitiveType.Int16 when based => ushort.MaxValue,
+            PrimitiveType.Int16 => 32767UL,
             PrimitiveType.UInt32 => uint.MaxValue,
+            PrimitiveType.UInt8 or PrimitiveType.Char8 => byte.MaxValue,
+            PrimitiveType.UInt16 or PrimitiveType.Char16 => ushort.MaxValue,
+            PrimitiveType.Char32 => uint.MaxValue,
+            PrimitiveType.Rune => 0x10_FFFF,
             PrimitiveType.Int32 when based => uint.MaxValue,
             PrimitiveType.Int64 when based => ulong.MaxValue,
             PrimitiveType.Int64 => long.MaxValue,
             PrimitiveType.UInt64 => ulong.MaxValue,
-            PrimitiveType.Char16 => ushort.MaxValue,
             _ => int.MaxValue,
         };
         if ((hasDecodedIntegers && !TryIntegerMagnitude(token, out parsed)) || overflow)
@@ -6313,32 +7568,93 @@ internal sealed partial class Binder
             Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
             return ErrorExpression(token.Span);
         }
+        if (type == PrimitiveType.Rune && !IsUnicodeScalar((uint)parsed))
+        {
+            Report("TRM3013", "Rune literal is not a Unicode scalar value.", token.Span);
+            return ErrorExpression(token.Span);
+        }
 
         var value = type switch {
             PrimitiveType.UInt64 => unchecked((long)parsed),
             PrimitiveType.Int64 => unchecked((long)parsed),
+            PrimitiveType.Int8 => unchecked((sbyte)parsed),
+            PrimitiveType.Int16 => unchecked((short)parsed),
+            PrimitiveType.UInt8 or PrimitiveType.Char8 => (byte)parsed,
+            PrimitiveType.UInt16 or PrimitiveType.Char16 => (ushort)parsed,
+            PrimitiveType.Char32 or PrimitiveType.Rune => (long)(uint)parsed,
+            PrimitiveType.UInt32 => unchecked((int)parsed),
             _ => unchecked((int)parsed),
         };
         return new BoundConstant(value, type ?? PrimitiveType.Int32, token.Span);
     }
 
-    private bool TryMinimumLiteral(SyntaxToken token, PrimitiveType type)
+    private bool TryBindSignedIntegerLiteral(SyntaxToken token, PrimitiveType type,
+        bool negative, TextSpan span, out BoundConstant constant)
     {
-        if (token.Kind != TokenKind.NumericLiteral)
+        constant = ErrorExpression(span);
+        if (token.Kind != TokenKind.NumericLiteral
+            || type is not (PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+                or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                or PrimitiveType.UInt32 or PrimitiveType.UInt64 or PrimitiveType.Char8
+                or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune))
         {
             return false;
         }
-
-        var digits = _tree.Source.GetSubText(token.Span).AsSpan();
-        if (digits.IsEmpty || ScannerHost.IntegerRadix(digits) != 10
-            || (_tree.HasDecodedIntegers && ScannerHost.IntegerDigitCount(digits) != digits.Length))
+        if (negative && type is PrimitiveType.UInt8 or PrimitiveType.UInt16
+            or PrimitiveType.UInt32 or PrimitiveType.UInt64)
         {
             return false;
         }
+        if (!TryIntegerMagnitude(token, out var magnitude))
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
 
-        var minimumMagnitude = type == PrimitiveType.Int32 ? 2147483648UL : 9223372036854775808UL;
-        return TryIntegerMagnitude(token, out var parsed) && parsed == minimumMagnitude;
+        var maximum = type switch
+        {
+            PrimitiveType.Int8 => negative ? 128UL : 127UL,
+            PrimitiveType.Int16 => negative ? 32768UL : 32767UL,
+            PrimitiveType.Int32 => negative ? 2147483648UL : 2147483647UL,
+            PrimitiveType.Int64 => negative ? 9223372036854775808UL : 9223372036854775807UL,
+            PrimitiveType.UInt8 or PrimitiveType.Char8 => negative ? 0UL : byte.MaxValue,
+            PrimitiveType.UInt16 or PrimitiveType.Char16 => negative ? 0UL : ushort.MaxValue,
+            PrimitiveType.UInt32 or PrimitiveType.Char32 => negative ? 0UL : uint.MaxValue,
+            PrimitiveType.Rune => negative ? 0UL : 0x10_FFFF,
+            PrimitiveType.UInt64 => negative ? 0UL : ulong.MaxValue,
+            _ => ulong.MaxValue,
+        };
+        if (magnitude > maximum)
+        {
+            Report("TRM3013", "Integer literal is outside its destination range.", token.Span);
+            return true;
+        }
+        if (type == PrimitiveType.Rune && !IsUnicodeScalar((uint)magnitude))
+        {
+            Report("TRM3013", "Rune literal is not a Unicode scalar value.", token.Span);
+            return true;
+        }
+
+        var value = type switch
+        {
+            PrimitiveType.Int8 => negative ? -(long)magnitude : (long)magnitude,
+            PrimitiveType.Int16 => negative ? -(long)magnitude : (long)magnitude,
+            PrimitiveType.Int32 => negative ? -(long)magnitude : (long)magnitude,
+            PrimitiveType.Int64 => negative && magnitude == 9223372036854775808UL
+                ? long.MinValue : negative ? -(long)magnitude : (long)magnitude,
+            PrimitiveType.UInt8 or PrimitiveType.Char8 => (long)(byte)magnitude,
+            PrimitiveType.UInt16 or PrimitiveType.Char16 => (long)(ushort)magnitude,
+            PrimitiveType.UInt32 => unchecked((int)magnitude),
+            PrimitiveType.Char32 or PrimitiveType.Rune => (long)(uint)magnitude,
+            PrimitiveType.UInt64 => unchecked((long)magnitude),
+            _ => 0,
+        };
+        constant = new BoundConstant(value, type, span);
+        return true;
     }
+
+    private static bool IsUnicodeScalar(uint value)
+        => value is <= 0x10_FFFF and not (>= 0xD800 and <= 0xDFFF);
 
     private bool TryIntegerMagnitude(SyntaxToken token, out ulong magnitude)
     {
@@ -6373,8 +7689,9 @@ internal sealed partial class Binder
                 return PrimitiveType.Void;
             case SyntaxKind.NameExpression:
             {
-                var name = ((SyntaxTokenElement)node.Children[0]).Token.Name;
-                if (TryFindVariable(name, out var slot))
+                var token = ((SyntaxTokenElement)node.Children[0]).Token;
+                var name = token.Name;
+                if (TryFindVariable(token, out var slot))
                 {
                     return _unresolvedVacantLocals.Contains(slot) ? null : _variables[slot].Type;
                 }
@@ -6658,7 +7975,8 @@ internal sealed partial class Binder
         }
 
         variable = -1;
-        if (node.Kind != SyntaxKind.NameExpression || !TryFindVariable(NameText(node), out variable)
+        if (node.Kind != SyntaxKind.NameExpression
+            || !TryFindVariable(((SyntaxTokenElement)node.Children[0]).Token, out variable)
             || !NativeFixedArrayContract.IsCarrier(_variables[variable].Type)
             || _variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
             || layout.CarrierType != _variables[variable].Type)
@@ -6681,7 +7999,9 @@ internal sealed partial class Binder
         }
 
         var index = BindNativeFixedArrayIndex((SyntaxNode)node.Children[2], layout);
-        if (index is BoundConstant constant && (constant.Value < 0 || constant.Value >= layout.ElementCount))
+        if (index is BoundConstant constant
+            && (!constant.TryGetLegacyValue(out var constantValue)
+                || constantValue < 0 || constantValue >= layout.ElementCount))
         {
             Report("TRM3030", $"Fixed-array element index must be in [0, {layout.ElementCount}).", index.Span);
         }
@@ -6689,11 +8009,14 @@ internal sealed partial class Binder
         return new BoundNativeFixedArrayElement(variable, layout, index, node.Span);
     }
 
-    private int AddVariable(string name, PrimitiveType type, bool isMutable, TextSpan span)
+    private int AddVariable(string name, PrimitiveType type, bool isMutable,
+        TextSpan span, bool allowReceiverShadow = false)
     {
         foreach (var scope in _scopes)
         {
-            if (scope.ContainsKey(name))
+            if (scope.TryGetValue(name, out var existing)
+                && !(allowReceiverShadow && name == "this" && _hasReceiver
+                    && _scopes.Count == 1 && existing == 0))
             {
                 Report("TRM3004", $"Variable '{name}' already exists in an enclosing scope; shadowing is not supported.", span);
                 break;
@@ -6763,6 +8086,18 @@ internal sealed partial class Binder
         return false;
     }
 
+    private bool TryFindVariable(SyntaxToken token, out int slot)
+    {
+        if (token.Text == "this" && _hasReceiver && _variables.Count != 0
+            && _variables[0].Name == "this")
+        {
+            slot = 0;
+            return true;
+        }
+
+        return TryFindVariable(token.Name, out slot);
+    }
+
     private bool HasVariableReceiverName(SyntaxNode receiver)
     {
         while (receiver.Kind == SyntaxKind.MemberAccessExpression)
@@ -6771,7 +8106,7 @@ internal sealed partial class Binder
         }
 
         return receiver.Kind == SyntaxKind.NameExpression
-            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token.Name, out _);
+            && TryFindVariable(((SyntaxTokenElement)receiver.Children[0]).Token, out _);
     }
 
     private bool TryFindFunctionExact(string name, out int function)
@@ -6854,11 +8189,26 @@ internal sealed partial class Binder
         }
         switch (type)
         {
+            case PrimitiveType.Char8:
+                AppendTypeNameText(builder, "char8", ref remainingCharacters);
+                break;
             case PrimitiveType.Int32:
                 AppendTypeNameText(builder, "int32", ref remainingCharacters);
                 break;
+            case PrimitiveType.Int8:
+                AppendTypeNameText(builder, "int8", ref remainingCharacters);
+                break;
+            case PrimitiveType.Int16:
+                AppendTypeNameText(builder, "int16", ref remainingCharacters);
+                break;
             case PrimitiveType.UInt32:
                 AppendTypeNameText(builder, "uint32", ref remainingCharacters);
+                break;
+            case PrimitiveType.UInt8:
+                AppendTypeNameText(builder, "uint8", ref remainingCharacters);
+                break;
+            case PrimitiveType.UInt16:
+                AppendTypeNameText(builder, "uint16", ref remainingCharacters);
                 break;
             case PrimitiveType.Int64:
                 AppendTypeNameText(builder, "int64", ref remainingCharacters);
@@ -6866,14 +8216,44 @@ internal sealed partial class Binder
             case PrimitiveType.UInt64:
                 AppendTypeNameText(builder, "uint64", ref remainingCharacters);
                 break;
+            case PrimitiveType.Int128:
+                AppendTypeNameText(builder, "int128", ref remainingCharacters);
+                break;
+            case PrimitiveType.UInt128:
+                AppendTypeNameText(builder, "uint128", ref remainingCharacters);
+                break;
+            case PrimitiveType.Float16:
+                AppendTypeNameText(builder, "float16", ref remainingCharacters);
+                break;
+            case PrimitiveType.BFloat16:
+                AppendTypeNameText(builder, "bfloat16", ref remainingCharacters);
+                break;
             case PrimitiveType.Float32:
                 AppendTypeNameText(builder, "float32", ref remainingCharacters);
                 break;
             case PrimitiveType.Float64:
                 AppendTypeNameText(builder, "float64", ref remainingCharacters);
                 break;
+            case PrimitiveType.Float128:
+                AppendTypeNameText(builder, "float128", ref remainingCharacters);
+                break;
+            case PrimitiveType.Decimal32:
+                AppendTypeNameText(builder, "decimal32", ref remainingCharacters);
+                break;
+            case PrimitiveType.Decimal64:
+                AppendTypeNameText(builder, "decimal64", ref remainingCharacters);
+                break;
+            case PrimitiveType.Decimal128:
+                AppendTypeNameText(builder, "decimal128", ref remainingCharacters);
+                break;
             case PrimitiveType.Char16:
                 AppendTypeNameText(builder, "char16", ref remainingCharacters);
+                break;
+            case PrimitiveType.Char32:
+                AppendTypeNameText(builder, "char32", ref remainingCharacters);
+                break;
+            case PrimitiveType.Rune:
+                AppendTypeNameText(builder, "rune", ref remainingCharacters);
                 break;
             case PrimitiveType.Bool:
                 AppendTypeNameText(builder, "bool", ref remainingCharacters);
@@ -7038,8 +8418,22 @@ internal sealed partial class Binder
         (_sourceDiagnostics ??= []).Add(new SourceDiagnostic(tree, diagnostic));
     }
 
-    private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span, bool IsOut, bool IsInit = false,
-        bool IsImplicitRef = false, PrimitiveType? NativePointeeType = null);
+    private enum DependencyAttributeTargetKind : byte
+    {
+        Default,
+        Return,
+        Receiver,
+        Parameter,
+        Operation,
+    }
+
+    private readonly record struct DependencyAttributeTarget(
+        DependencyAttributeTargetKind Kind, string? ParameterName);
+
+    private sealed record Parameter(string Name, PrimitiveType Type, TextSpan Span,
+        bool IsOut, bool IsInit = false, bool IsImplicitRef = false,
+        PrimitiveType? NativePointeeType = null, bool IsWritableNativePointer = false,
+        bool IsEscapedThis = false);
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
@@ -7058,5 +8452,7 @@ internal sealed partial class Binder
         internal ImmutableArray<int> CapturedParameters { get; init; } = [];
         internal bool ReturnsForwardedBacking { get; init; }
         internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
+        internal bool ResultDependencyIncludesReceiver { get; init; }
+        internal ImmutableArray<BoundDependencyContract> DependencyContracts { get; init; } = [];
     }
 }

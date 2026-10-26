@@ -9,7 +9,7 @@ using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
-/// <summary>Primitive types supported by the first executable profile.</summary>
+/// <summary>Primitive type identities used by the compiler.</summary>
 [SuppressMessage("Design", "CA1027:Mark enums with FlagsAttribute", Justification = "Primitive type ordinals are disjoint discriminants, not combinable flags.")]
 public enum PrimitiveType
 {
@@ -67,6 +67,42 @@ public enum PrimitiveType
     LegacyNativeStorageRecord = 30,
     /// <summary>An unmanaged opaque <c>ptr&lt;void&gt;</c> value with no pinning or ownership guarantee.</summary>
     NativeRawPointer,
+    /// <summary>An unsigned eight-bit raw code unit.</summary>
+    Char8 = 32,
+    /// <summary>An unsigned thirty-two-bit raw code unit.</summary>
+    Char32,
+    /// <summary>A validated Unicode scalar value.</summary>
+    Rune,
+    /// <summary>A signed eight-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    Int8,
+    /// <summary>A signed sixteen-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    Int16,
+    /// <summary>An unsigned eight-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    UInt8,
+    /// <summary>An unsigned sixteen-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    UInt16,
+    /// <summary>A signed one-hundred-twenty-eight-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    Int128 = 39,
+    /// <summary>An unsigned one-hundred-twenty-eight-bit integer.</summary>
+    [SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Names the Terrum primitive type represented by the compiler.")]
+    UInt128,
+    /// <summary>An IEEE-754 binary16 value stored as its raw sixteen-bit representation.</summary>
+    Float16,
+    /// <summary>A bfloat16 value stored as its raw sixteen-bit representation.</summary>
+    BFloat16,
+    /// <summary>An IEEE-754 binary128 value stored as its raw one-hundred-twenty-eight-bit representation.</summary>
+    Float128,
+    /// <summary>An IEEE decimal32 BID value stored as its raw thirty-two-bit representation.</summary>
+    Decimal32,
+    /// <summary>An IEEE decimal64 BID value stored as its raw sixty-four-bit representation.</summary>
+    Decimal64,
+    /// <summary>An IEEE decimal128 BID value stored as its raw one-hundred-twenty-eight-bit representation.</summary>
+    Decimal128,
 }
 
 /// <summary>Disjoint source-class type identifiers start above the complete inline-struct range.</summary>
@@ -337,11 +373,46 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
 /// <param name="ParameterCount">The number of parameter slots.</param>
 /// <param name="Body">The structured body.</param>
 /// <param name="Span">The source range.</param>
+internal enum BoundDependencyRelation : byte
+{
+    DependsOn = 1,
+    Captures = 2,
+    ForwardsBacking = 3,
+}
+
+internal enum BoundDependencyDestination : byte
+{
+    Result = 1,
+    Receiver = 2,
+    InitializedOutput = 3,
+    RetainedFormal = 4,
+    Operation = 5,
+}
+
+internal enum BoundDependencySourceKind : byte
+{
+    Receiver = 1,
+    Formal = 2,
+}
+
+internal readonly record struct BoundDependencySource(
+    BoundDependencySourceKind Kind, int? FormalOrdinal);
+
+internal sealed record BoundDependencyContract(
+    BoundDependencyRelation Relation,
+    BoundDependencyDestination Destination,
+    int? DestinationOrdinal,
+    ImmutableArray<BoundDependencySource> Sources);
+
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
     internal DirectNativeImport? DirectNativeImport { get; init; }
+    internal NativeOutputDeclarationRole? NativeOutputRole { get; init; }
+    internal ImmutableArray<NativeOutputContract> NativeOutputContracts { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
+    /// <summary>Whether this external declaration originated in a module reference rather than source import syntax.</summary>
+    internal bool IsModuleReference { get; init; }
     internal PrimitiveType? NativeFunctionPointerType { get; init; }
     internal string? NativeCallableEntryName { get; init; }
 
@@ -397,9 +468,12 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Whether a Span result forwards backing from its declared input parameters. Never persisted.</summary>
     internal bool ReturnsForwardedBacking { get; init; }
-
-    /// <summary>Input parameter ordinals that conservatively constrain a forwarded Span result. Never persisted.</summary>
+    /// <summary>Input parameter ordinals that constrain a forwarded Span result. Never persisted.</summary>
     internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];
+    /// <summary>Whether the receiver is an admitted source of a forwarded Span result. Never persisted.</summary>
+    internal bool ResultDependencyIncludesReceiver { get; init; }
+
+    internal ImmutableArray<BoundDependencyContract> DependencyContracts { get; init; } = [];
 }
 
 internal sealed record BoundModuleImport(string ProducerIdentity, string ExportKey,
@@ -413,6 +487,70 @@ internal sealed record DirectNativeImport(string LibraryName, string ExportName,
 
 internal sealed record DirectNativeOutput(int ParameterIndex, PrimitiveType PointeeType,
     uint ResultCondition, uint FailureDisposition);
+
+internal enum NativeOutputDeclarationRole : byte
+{
+    DirectImport = 1,
+    ForeignInterfaceMethod = 2,
+}
+
+internal enum NativeOutputFormation : byte
+{
+    VacantWholeObject = 1,
+}
+
+internal enum NativeOutputPublicationPhase : byte
+{
+    NormalCompletion = 1,
+}
+
+internal enum NativeOutputSelector : byte
+{
+    NonZero = 3,
+    Zero = 4,
+    NonNegative = 5,
+    Negative = 6,
+}
+
+internal enum NativeOutputState : byte
+{
+    Vacant = 0,
+    Live = 1,
+}
+
+internal enum NativeOutputDependencySourceKind : byte
+{
+    Empty = 0,
+    Formal = 1,
+    Receiver = 2,
+}
+
+internal enum NativeOutputDependencyRelationship : byte
+{
+    Empty = 0,
+    Borrow = 1,
+    Forward = 2,
+    Union = 3,
+}
+
+internal readonly record struct NativeOutputDependency(
+    byte DestinationKind,
+    NativeOutputDependencySourceKind SourceKind,
+    NativeOutputDependencyRelationship Relationship,
+    NativeOutputPublicationPhase Phase,
+    int DestinationOrdinal,
+    int SourceOrdinal);
+
+internal sealed record NativeOutputContract(
+    int FormalOrdinal,
+    PrimitiveType PointeeType,
+    NativeOutputFormation Formation,
+    NativeOutputPublicationPhase PublicationPhase,
+    NativeOutputSelector SuccessSelector,
+    NativeOutputState SuccessState,
+    NativeOutputSelector ComplementSelector,
+    NativeOutputState ComplementState,
+    ImmutableArray<NativeOutputDependency> Dependencies);
 
 internal sealed record DirectNativeParameter(int ParameterIndex, PrimitiveType PointeeType,
     NativeParameterAccess Access, NativeParameterRetention Retention, int Extent);
@@ -609,10 +747,54 @@ public abstract record BoundExpression(PrimitiveType Type, TextSpan Span)
 }
 
 /// <summary>A scalar constant represented by its canonical or raw-bit payload.</summary>
-/// <param name="Value">The 64-bit payload; uint64 uses its unchecked bit pattern, float32/float64 use IEEE-754 bits, int32/uint32 retain their signed 32-bit bit-pattern payload, char16 uses 0..65535, booleans use zero or one, and native UTF-NUL pointers use a compiler-owned literal index.</param>
-/// <param name="Type">The constant type.</param>
-/// <param name="Span">The source range.</param>
-public sealed record BoundConstant(long Value, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);
+public sealed record BoundConstant : BoundExpression
+{
+    private readonly long? _legacyValue;
+
+    /// <summary>The source-compatible 64-bit payload for values whose complete representation fits.</summary>
+    /// <exception cref="InvalidOperationException">The complete value uses more than sixty-four bits.</exception>
+    public long Value => _legacyValue
+        ?? throw new InvalidOperationException("This scalar constant requires its complete bit payload.");
+
+    internal ScalarBits Bits { get; }
+
+    /// <summary>Creates a constant using the existing payload representation.</summary>
+    /// <param name="value">The 64-bit payload using the type's existing bound representation.</param>
+    /// <param name="type">The constant type.</param>
+    /// <param name="span">The source range.</param>
+    public BoundConstant(long value, PrimitiveType type, TextSpan span) : base(type, span)
+    {
+        if (PrimitiveTypeFacts.ScalarWidth(type) > sizeof(ulong))
+        {
+            throw new ArgumentException("A wide scalar constant requires its complete bit payload.", nameof(value));
+        }
+        _legacyValue = value;
+        Bits = ScalarBits.FromLegacyValue(value, type);
+    }
+
+    internal BoundConstant(ScalarBits bits, PrimitiveType type, TextSpan span) : base(type, span)
+    {
+        Bits = bits;
+        _legacyValue = bits.TryGetLegacyValue(type, out var value) ? value : null;
+    }
+
+    internal bool TryGetLegacyValue(out long value)
+    {
+        value = _legacyValue.GetValueOrDefault();
+        return _legacyValue.HasValue;
+    }
+
+    /// <summary>Deconstructs a value that has a source-compatible 64-bit payload.</summary>
+    public void Deconstruct(out long value, out PrimitiveType type, out TextSpan span)
+    {
+        value = Value;
+        type = Type;
+        span = Span;
+    }
+
+    /// <summary>Returns a diagnostic description of this constant.</summary>
+    public override string ToString() => $"BoundConstant {{ Type = {Type}, Span = {Span}, Bits = {Bits} }}";
+}
 
 /// <summary>A verified address of a static function with a concrete native ABI signature.</summary>
 public sealed record BoundNativeFunctionAddress(int Function, PrimitiveType Type, TextSpan Span)
@@ -719,6 +901,10 @@ public sealed record BoundNativeStorageAddress(
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
 }
+
+/// <summary>A call-extent reservation of vacant local storage for a native output formal.</summary>
+public sealed record BoundNativeOutputReservation(int Variable, PrimitiveType PointeeType,
+    TextSpan Span) : BoundExpression(PrimitiveType.Void, Span);
 
 /// <summary>An explicitly absent optional managed handle.</summary>
 public sealed record BoundNull(PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span);

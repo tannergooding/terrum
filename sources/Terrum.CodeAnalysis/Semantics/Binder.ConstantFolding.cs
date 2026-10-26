@@ -77,6 +77,12 @@ internal sealed partial class Binder
                 when TryConvertFloatingToIntegerConstant(operand, cast.Type, out var integerBits):
                 return new BoundConstant(integerBits, cast.Type, expression.Span);
 
+            case BoundCast { Operand: BoundConstant operand, Type: PrimitiveType.Int128 or PrimitiveType.UInt128 } cast
+                when (PrimitiveTypeFacts.IsInteger(operand.Type) || operand.Type == PrimitiveType.Char16)
+                    && TryScalarValue(operand, out var wideInput)
+                    && ScalarBits.TryFromIntegerValue(wideInput, cast.Type, out var wideBits):
+                return new BoundConstant(wideBits, cast.Type, expression.Span);
+
             case BoundCast { Operand: BoundConstant operand }
                 when TryScalarValue(operand, out var input):
                 value = input;
@@ -101,32 +107,37 @@ internal sealed partial class Binder
                     case TokenKind.Minus when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64:
                         value = -input;
                         break;
-                    case TokenKind.Tilde when unary.Type is PrimitiveType.Int32 or PrimitiveType.Int64:
-                        value = ~input;
-                        break;
-                    case TokenKind.Tilde when unary.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64:
-                        value = (unary.Type == PrimitiveType.UInt32 ? uint.MaxValue : (BigInteger)ulong.MaxValue) ^ input;
+                    case TokenKind.Tilde when PrimitiveTypeFacts.IsInteger(unary.Type):
+                        var width = PrimitiveTypeFacts.IntegerWidth(unary.Type);
+                        var modulus = BigInteger.One << width;
+                        value = (~input) & (modulus - BigInteger.One);
+                        if (PrimitiveTypeFacts.IsSignedInteger(unary.Type)
+                            && value >= (BigInteger.One << (width - 1)))
+                        {
+                            value -= modulus;
+                        }
                         break;
                     default:
                         return expression;
                 }
                 break;
 
-            case BoundBinary { Left: BoundConstant left, Right: BoundConstant { Type: PrimitiveType.Int32 } count } shift
+            case BoundBinary { Left: BoundConstant left, Right: BoundConstant count } shift
                 when shift.Operator is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned
-                    && shift.Type == left.Type && TryScalarValue(left, out var shifted):
+                    && shift.Type == left.Type && PrimitiveTypeFacts.IsInteger(count.Type)
+                    && TryScalarValue(left, out var shifted) && TryScalarValue(count, out var shiftCount):
             {
-                var width = shift.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 ? 32 : 64;
-                if (count.Value < 0 || count.Value >= width)
+                var width = PrimitiveTypeFacts.IntegerWidth(shift.Type);
+                if (shiftCount < BigInteger.Zero || shiftCount >= width)
                 {
                     return expression;
                 }
                 value = shift.Operator switch {
-                    TokenKind.ShiftLeft => (shifted << (int)count.Value) & ((BigInteger.One << width) - 1),
-                    TokenKind.ShiftRightUnsigned => (shifted & ((BigInteger.One << width) - 1)) >> (int)count.Value,
-                    _ => shifted >> (int)count.Value,
+                    TokenKind.ShiftLeft => (shifted << (int)shiftCount) & ((BigInteger.One << width) - 1),
+                    TokenKind.ShiftRightUnsigned => (shifted & ((BigInteger.One << width) - 1)) >> (int)shiftCount,
+                    _ => shifted >> (int)shiftCount,
                 };
-                if (shift.Type is PrimitiveType.Int32 or PrimitiveType.Int64
+                if (PrimitiveTypeFacts.IsSignedInteger(shift.Type)
                     && value >= (BigInteger.One << (width - 1)))
                 {
                     value -= BigInteger.One << width;
@@ -188,14 +199,15 @@ internal sealed partial class Binder
     private static bool TryScalarValue(BoundConstant constant, out BigInteger value)
     {
         value = constant.Type switch {
-            PrimitiveType.Int32 or PrimitiveType.Int64 => constant.Value,
+            PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.Int64
+                or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune => constant.Value,
+            PrimitiveType.UInt8 => unchecked((byte)constant.Value),
+            PrimitiveType.UInt16 => unchecked((ushort)constant.Value),
             PrimitiveType.UInt32 => unchecked((uint)(int)constant.Value),
             PrimitiveType.UInt64 => unchecked((ulong)constant.Value),
-            PrimitiveType.Char16 => constant.Value,
             _ => default,
         };
-        return constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-            or PrimitiveType.UInt64 or PrimitiveType.Char16;
+        return PrimitiveTypeFacts.IsInteger(constant.Type) || PrimitiveTypeFacts.IsCodeUnitOrRune(constant.Type);
     }
 
     private static bool TryConvertToFloatingConstant(BoundConstant source, PrimitiveType destination, out long value)
@@ -203,8 +215,7 @@ internal sealed partial class Binder
         value = 0;
         if (destination is PrimitiveType.Float32 or PrimitiveType.Float64
             && TryScalarValue(source, out var integer)
-            && (source.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                or PrimitiveType.UInt64 or PrimitiveType.Char16))
+            && (PrimitiveTypeFacts.IsInteger(source.Type) || source.Type == PrimitiveType.Char16))
         {
             value = destination == PrimitiveType.Float32
                 ? unchecked((uint)BitConverter.SingleToInt32Bits((float)integer))
@@ -252,19 +263,30 @@ internal sealed partial class Binder
     {
         bits = default;
         if (type switch {
+            PrimitiveType.Int8 => value < sbyte.MinValue || value > sbyte.MaxValue,
+            PrimitiveType.Int16 => value < short.MinValue || value > short.MaxValue,
             PrimitiveType.Int32 => value < int.MinValue || value > int.MaxValue,
+            PrimitiveType.UInt8 => value < byte.MinValue || value > byte.MaxValue,
+            PrimitiveType.UInt16 => value < ushort.MinValue || value > ushort.MaxValue,
             PrimitiveType.UInt32 => value < 0 || value > uint.MaxValue,
             PrimitiveType.Int64 => value < long.MinValue || value > long.MaxValue,
             PrimitiveType.UInt64 => value < 0 || value > ulong.MaxValue,
+            PrimitiveType.Char8 => value < byte.MinValue || value > byte.MaxValue,
             PrimitiveType.Char16 => value < 0 || value > ushort.MaxValue,
+            PrimitiveType.Char32 => value < 0 || value > uint.MaxValue,
+            PrimitiveType.Rune => value < 0 || value > 0x10_FFFF
+                || (value >= 0xD800 && value <= 0xDFFF),
             _ => true,
         })
         {
             return false;
         }
         bits = type switch {
+            PrimitiveType.UInt8 or PrimitiveType.Char8 => (byte)value,
+            PrimitiveType.UInt16 or PrimitiveType.Char16 => (ushort)value,
             PrimitiveType.UInt32 => unchecked((int)(uint)value),
             PrimitiveType.UInt64 => unchecked((long)(ulong)value),
+            PrimitiveType.Char32 or PrimitiveType.Rune => (long)(uint)value,
             _ => (long)value,
         };
         return true;
@@ -273,11 +295,7 @@ internal sealed partial class Binder
     private static bool TryWrapScalar(BigInteger value, PrimitiveType type, out long bits)
     {
         bits = default;
-        var width = type switch {
-            PrimitiveType.Int32 or PrimitiveType.UInt32 => 32,
-            PrimitiveType.Int64 or PrimitiveType.UInt64 => 64,
-            _ => 0,
-        };
+        var width = PrimitiveTypeFacts.IntegerWidth(type);
         if (width == 0)
         {
             return false;
@@ -288,14 +306,18 @@ internal sealed partial class Binder
         {
             wrapped += modulus;
         }
-        if ((type is PrimitiveType.Int32 or PrimitiveType.Int64)
+        if (PrimitiveTypeFacts.IsSignedInteger(type)
             && wrapped >= (BigInteger.One << (width - 1)))
         {
             wrapped -= modulus;
         }
         bits = type switch {
+            PrimitiveType.UInt8 => (byte)wrapped,
+            PrimitiveType.UInt16 => (ushort)wrapped,
             PrimitiveType.UInt32 => unchecked((int)(uint)wrapped),
             PrimitiveType.UInt64 => unchecked((long)(ulong)wrapped),
+            PrimitiveType.Int8 => (sbyte)wrapped,
+            PrimitiveType.Int16 => (short)wrapped,
             _ => (long)wrapped,
         };
         return true;

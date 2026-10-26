@@ -11,6 +11,19 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 
 public sealed class NoThrowTests
 {
+    private static BoundProgram MarkNoThrow(BoundProgram program, params string[] functionNames)
+    {
+        var functions = program.Functions;
+        for (var index = 0; index < functions.Length; index++)
+        {
+            if (functionNames.Length == 0 || functionNames.Contains(functions[index].Name, StringComparer.Ordinal))
+            {
+                functions = functions.SetItem(index, functions[index] with { IsNoThrow = true });
+            }
+        }
+        return program with { Functions = functions };
+    }
+
     [Test]
     public void ParameterlessAttributesRetainLosslessSyntaxAndTraversal()
     {
@@ -32,39 +45,63 @@ public sealed class NoThrowTests
         Assert.That(tree.HasErrors, Is.True);
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
     }
-    [TestCase("[NoThrow] [NoThrow] int32 F() { return 0; }")]
+
+    [TestCase("[NoThrow] int32 F() { return 42; }")]
+    [TestCase("struct Value { public int32 Number; [NoThrow] public Value(int32 number) { Number = number; } }")]
+    [TestCase("struct Value { public int32 Result { [NoThrow] get { return 42; } } }")]
+    [TestCase("[NoThrow] T Identity<T>(T value) where T : [Copy] { return value; }")]
+    [TestCase("interface Addition<A, B, C> { [NoThrow] static C operator +(A left, B right); }")]
+    public void RetiredNoThrowSourceUseIsDiagnosed(string source)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3017"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
     [TestCase("[Unknown] int32 F() { return 0; }")]
     [TestCase("[NoThrow] struct S { public int32 Value; }")]
     [TestCase("struct S { [NoThrow] public int32 Value; }")]
-    public void UnknownDuplicateAndMisplacedContractsAreRejected(string source)
+    public void UnknownAndMisplacedContractsAreRejected(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3001"),Is.True);
     }
-    [TestCase("[NoThrow] void F() { require true || false; }")]
-    [TestCase("[NoThrow] int32 F() { return -1; }")]
-    [TestCase("[NoThrow] int32 F() { return -2147483648; }")]
-    [TestCase("[NoThrow] int64 F() { return -9223372036854775808; }")]
-    [TestCase("[NoThrow] bool F(int32 a, int32 b) { return a < b || a == b; }")]
-    [TestCase("[NoThrow] int32 F(int32 a, int32 b) { return +(a & b) ^ ~a; }")]
-    [TestCase("[NoThrow] int64 F(int32 value) { return int64(value); }")]
-    [TestCase("[NoThrow] int64 F(uint32 value) { return int64(value); }")]
-    [TestCase("[NoThrow] uint64 F(uint32 value) { return uint64(value); }")]
-    [TestCase("[NoThrow] uint32 F(char16 value) { return uint32(value); }")]
-    [TestCase("[NoThrow] int32 F(char16 value) { return int32(value); }")]
-    [TestCase("[NoThrow] int64 F(char16 value) { return int64(value); }")]
-    [TestCase("[NoThrow] uint64 F(char16 value) { return uint64(value); }")]
-    [TestCase("[NoThrow] char16 F(char16 value) { return char16(value); }")]
-    [TestCase("[NoThrow] bool F(bool success, out int32 value) { if (!success) { return false; } value = 42; return true; }")]
-    [TestCase("[NoThrow] int32 F(bool choose) { if (choose) { return G(false); } return 42; } [NoThrow] int32 G(bool choose) { return F(choose); }")]
-    public void InfallibleOperationsSatisfyDeclaredContracts(string source)
+    [TestCase("void F() { require true || false; }")]
+    [TestCase("int32 F() { return -1; }")]
+    [TestCase("int32 F() { return -2147483648; }")]
+    [TestCase("int64 F() { return -9223372036854775808; }")]
+    [TestCase("bool F(int32 a, int32 b) { return a < b || a == b; }")]
+    [TestCase("int32 F(int32 a, int32 b) { return +(a & b) ^ ~a; }")]
+    [TestCase("int64 F(int32 value) { return int64(value); }")]
+    [TestCase("int64 F(uint32 value) { return int64(value); }")]
+    [TestCase("uint64 F(uint32 value) { return uint64(value); }")]
+    [TestCase("int16 F(int8 value) { return int16(value); }")]
+    [TestCase("uint16 F(uint8 value) { return uint16(value); }")]
+    [TestCase("int32 F(int16 value) { return int32(value); }")]
+    [TestCase("uint32 F(uint16 value) { return uint32(value); }")]
+    [TestCase("int64 F(int8 value) { return int64(value); }")]
+    [TestCase("uint64 F(uint8 value) { return uint64(value); }")]
+    [TestCase("float32 F(int8 value) { return float32(value); }")]
+    [TestCase("float64 F(uint16 value) { return float64(value); }")]
+    [TestCase("uint32 F(char16 value) { return uint32(value); }")]
+    [TestCase("int32 F(char16 value) { return int32(value); }")]
+    [TestCase("int64 F(char16 value) { return int64(value); }")]
+    [TestCase("uint64 F(char16 value) { return uint64(value); }")]
+    [TestCase("float32 F(char16 value) { return float32(value); }")]
+    [TestCase("int128 F(char16 value) { return int128(value); }")]
+    [TestCase("uint128 F(uint64 value) { return uint128(value); }")]
+    [TestCase("char16 F(char16 value) { return char16(value); }")]
+    [TestCase("bool F(bool success, out int32 value) { if (!success) { return false; } value = 42; return true; }")]
+    [TestCase("int32 F(bool choose) { if (choose) { return G(false); } return 42; } int32 G(bool choose) { return F(choose); }")]
+    public void InfallibleOperationsSatisfyInternalProofs(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
-        {var __nunitItems0 = program.Functions;        Assert.Multiple(() => { foreach (var __nunitItem2 in __nunitItems0) { Assert.That(__nunitItem2.IsNoThrow, Is.True); } });}
+        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))());
         SemanticVerifier.VerifyLibrary(program);
     }
     [TestCase("int32","1 + 2",PrimitiveType.Int32,3L)]
@@ -78,6 +115,14 @@ public sealed class NoThrowTests
     [TestCase("uint64","uint64.MaxValue / uint64.MaxValue",PrimitiveType.UInt64,1L)]
     [TestCase("uint64","uint64.MaxValue - 1",PrimitiveType.UInt64,-2L)]
     [TestCase("uint64","uint64(uint32.MaxValue) + 1",PrimitiveType.UInt64,4294967296L)]
+    [TestCase("int8","int8(int16(-128))",PrimitiveType.Int8,-128L)]
+    [TestCase("uint8","uint8(uint16(255))",PrimitiveType.UInt8,255L)]
+    [TestCase("int16","int16(int8(-128))",PrimitiveType.Int16,-128L)]
+    [TestCase("uint16","uint16(uint8(255))",PrimitiveType.UInt16,255L)]
+    [TestCase("int32","int32(int8(-128))",PrimitiveType.Int32,-128L)]
+    [TestCase("uint32","uint32(uint8(255))",PrimitiveType.UInt32,255L)]
+    [TestCase("int64","int64(int16(-32768))",PrimitiveType.Int64,-32768L)]
+    [TestCase("uint64","uint64(uint16(65535))",PrimitiveType.UInt64,65535L)]
     [TestCase("char16","char16(int32(65535))",PrimitiveType.Char16,65535L)]
     [TestCase("int32","int32(uint32(42))",PrimitiveType.Int32,42L)]
     [TestCase("int32","+int32(42)",PrimitiveType.Int32,42L)]
@@ -107,7 +152,7 @@ public sealed class NoThrowTests
     {
         ArgumentNullException.ThrowIfNull(expression);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            $"[NoThrow] public {resultType} Fold() {{ return {expression}; }}"));
+            $"public {resultType} Fold() {{ return {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var function = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual3 = compilation.Program; Assert.That(__nunitActual3, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual3!; }))().Functions);
         var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
@@ -138,14 +183,13 @@ public sealed class NoThrowTests
         ArgumentNullException.ThrowIfNull(expression);
         var parameter = expression.Contains("value", StringComparison.Ordinal) ? "int32 value" : "";
         var callee = expression.Contains("Read()", StringComparison.Ordinal)
-            ? "[NoThrow] int32 Read() { return 42; }" : "";
+            ? "int32 Read() { return 42; }" : "";
         var source = $"{resultType} Fold({parameter}) {{ return {expression}; }} {callee}";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("[NoThrow] " + source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        Assert.That(compilation.Program, Is.Null);
         var baseline = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(baseline.HasErrors, Is.False, string.Join(Environment.NewLine, baseline.Diagnostics));
-        var function = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = baseline.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))().Functions, static function => function.Name == "Fold");
+        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = baseline.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))());
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        var function = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Fold");
         var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual7 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual7!; }))();
         Assert.That(result.Value, Is.Not.TypeOf<BoundConstant>());
     }
@@ -171,27 +215,30 @@ public sealed class NoThrowTests
         Assert.That(callee.IsNoThrow, Is.False);
 
         var caller = Compilation.CreateLibrary(SyntaxTree.Parse(
-            Callee + " [NoThrow] int32 Caller() { return Callee(); }"));
-        Assert.That(caller.Program, Is.Null);
-        Assert.That(global::System.Linq.Enumerable.Any(caller.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+            Callee + " int32 Caller() { return Callee(); }"));
+        Assert.That(caller.HasErrors, Is.False, string.Join(Environment.NewLine, caller.Diagnostics));
+        var program = MarkNoThrow(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = caller.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+            "Caller");
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
-    public void ConstantTrueComparisonSatisfiesNoThrowRequire()
+    public void ConstantTrueComparisonSatisfiesInternalNoFailureProof()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] void Check() { require int32(1) == int32(1); }"));
+            "void Check() { require int32(1) == int32(1); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.VerifyLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))());
+        SemanticVerifier.VerifyLibrary(MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))()));
     }
     [TestCase("(true && true) == true")]
     [TestCase("(!false) == true")]
-    public void PureBooleanFactsSatisfyNoThrowRequire(string expression)
+    public void PureBooleanFactsSatisfyInternalNoFailureProof(string expression)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            $"[NoThrow] void Check() {{ require {expression}; }}"));
+            $"void Check() {{ require {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.VerifyLibrary(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))());
+        SemanticVerifier.VerifyLibrary(MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))()));
     }
     [TestCase("!false",true)]
     [TestCase("!true",false)]
@@ -216,7 +263,7 @@ public sealed class NoThrowTests
     {
         ArgumentNullException.ThrowIfNull(expression);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            $"[NoThrow] bool Fold() {{ return {expression}; }}"));
+            $"bool Fold() {{ return {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var function = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))().Functions);
         var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual14 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual14, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual14!; }))();
@@ -232,18 +279,19 @@ public sealed class NoThrowTests
     {
         ArgumentNullException.ThrowIfNull(expression);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            $"[NoThrow] void Check() {{ require {expression}; }}"));
-        Assert.That(compilation.HasErrors, Is.EqualTo(!expected));
+            $"void Check() {{ require {expression}; }}"));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))());
         if (expected)
         {
-            var function = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))().Functions);
+            var function = global::System.Linq.Enumerable.Single(program.Functions);
             var requirement = ((global::System.Func<BoundRequire>)(() => { var __nunitActual17 = function.Body.Statements[0]; Assert.That(__nunitActual17, Is.TypeOf<BoundRequire>()); return (BoundRequire)__nunitActual17!; }))();
             Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual18 = requirement.Condition; Assert.That(__nunitActual18, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual18!; }))().Value, Is.EqualTo(1L));
+            SemanticVerifier.VerifyLibrary(program);
         }
         else
         {
-            Assert.That(compilation.Program, Is.Null);
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
         }
     }
     [TestCase("bool Fold(bool value) { return false && value; }",typeof(BoundRead))]
@@ -263,15 +311,24 @@ public sealed class NoThrowTests
             _ = ((global::System.Func<BoundBinary>)(() => { var __nunitActual22 = comparison.Left; Assert.That(__nunitActual22, Is.TypeOf<BoundBinary>()); return (BoundBinary)__nunitActual22!; }))();
         }
     }
-    [TestCase("[NoThrow] bool Fold() { return true || Fail(); } bool Fail() { return true; }","TRM3017")]
-    [TestCase("[NoThrow] bool Fold() { return false && int32.MaxValue + 1 > int32(0); }","TRM3017")]
+    [TestCase("bool Fold() { return true || Fail(); } bool Fail() { return true; }","TRM3017")]
+    [TestCase("bool Fold() { return false && int32.MaxValue + 1 > int32(0); }","TRM3017")]
     [TestCase("bool Fold() { return false && Missing(); }","TRM3011")]
     [TestCase("bool Fold() { return true || int32(1) == uint32(1); }","TRM3007")]
     public void ConstantBooleanSidesDoNotHideInvalidOrEffectfulOperands(string source, string code)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.That(compilation.Program, Is.Null);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        if (code == "TRM3017")
+        {
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), "Fold");
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        }
+        else
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        }
     }
     [TestCase("int32.MinValue == int32.MinValue",true)]
     [TestCase("int32.MinValue != int32.MinValue",false)]
@@ -306,7 +363,7 @@ public sealed class NoThrowTests
     {
         ArgumentNullException.ThrowIfNull(expression);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            $"[NoThrow] bool Compare() {{ return {expression}; }}"));
+            $"bool Compare() {{ return {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var function = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual23 = compilation.Program; Assert.That(__nunitActual23, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual23!; }))().Functions);
         var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual24 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual24, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual24!; }))();
@@ -319,26 +376,27 @@ public sealed class NoThrowTests
     [TestCase("uint64.MaxValue >= uint64(0)",true)]
     [TestCase("char16(1) < char16(0)",false)]
     [TestCase("true != true",false)]
-    public void NoThrowRequireKeepsBooleanLiteralFailurePolicy(string comparison, bool expected)
+    public void InternalNoFailureProofKeepsBooleanLiteralFailurePolicy(string comparison, bool expected)
     {
         ArgumentNullException.ThrowIfNull(comparison);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            $"[NoThrow] void Check() {{ require {comparison}; }}"));
-        Assert.That(compilation.HasErrors, Is.EqualTo(!expected));
+            $"void Check() {{ require {comparison}; }}"));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))());
         if (expected)
         {
-            var function = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))().Functions);
+            var function = global::System.Linq.Enumerable.Single(program.Functions);
             var requirement = ((global::System.Func<BoundRequire>)(() => { var __nunitActual27 = function.Body.Statements[0]; Assert.That(__nunitActual27, Is.TypeOf<BoundRequire>()); return (BoundRequire)__nunitActual27!; }))();
             Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual28 = requirement.Condition; Assert.That(__nunitActual28, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual28!; }))().Value, Is.EqualTo(1L));
+            SemanticVerifier.VerifyLibrary(program);
         }
         else
         {
-            Assert.That(compilation.Program, Is.Null);
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+            _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
         }
     }
     [TestCase("bool Compare(int32 value) { return value == 42; }")]
-    [TestCase("[NoThrow] bool Compare() { return Read() == 42; } [NoThrow] int32 Read() { return 42; }")]
+    [TestCase("bool Compare() { return Read() == 42; } int32 Read() { return 42; }")]
     [TestCase("bool Compare() { return int32.MaxValue + 1 == int32(0); }")]
     public void UnknownOrFailingComparisonsRetainExecutableOperands(string source)
     {
@@ -360,7 +418,6 @@ public sealed class NoThrowTests
         Assert.That(compilation.Program, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
     }
-    [TestCase("[NoThrow] int32 Check() { if (int32(1) == int32(1)) { return 42; } return 1 / 0; }","TRM3017")]
     [TestCase("int32 Check() { if (int32(1) != int32(1)) { return Missing(); } return 42; }","TRM3011")]
     public void UnreachableComparisonBranchesRetainNormalChecks(string source, string code)
     {
@@ -386,6 +443,12 @@ public sealed class NoThrowTests
     [TestCase("int32 F(int32 value) { return -value; }")]
     [TestCase("int32 F() { return -int32.MinValue; }")]
     [TestCase("int64 F() { return -int64.MinValue; }")]
+    [TestCase("int8 F(int16 value) { return int8(value); }")]
+    [TestCase("uint8 F(int16 value) { return uint8(value); }")]
+    [TestCase("int16 F(uint16 value) { return int16(value); }")]
+    [TestCase("int64 F(uint64 value) { return int64(value); }")]
+    [TestCase("int16 F(char16 value) { return int16(value); }")]
+    [TestCase("char16 F(uint32 value) { return char16(value); }")]
     [TestCase("char16 F(int32 value) { return char16(value); }")]
     [TestCase("uint32 F(int32 value) { return uint32(value); }")]
     [TestCase("int32 F(uint32 value) { return int32(value); }")]
@@ -413,26 +476,26 @@ public sealed class NoThrowTests
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
-    [TestCase("return Host.Data[1];")]
-    [TestCase("Host.Data[1] = 1; return 0;")]
     [TestCase("int32 index = 0; return Host.Data[index];")]
-    public void CheckedBufferAccessIsNotAnImplicitNoThrowCapability(string body)
+    [TestCase("mut int32 index = 0; Host.Data[index] = 1; return 0;")]
+    public void CheckedBufferAccessIsNotAnImplicitNoFailureCapability(string body)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("[NoThrow] int32 Main() { " + body + " }"),
+        var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"),
             [new HostBuffer("Data", PrimitiveType.Int32, [42], true)]);
-        Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))());
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program));
     }
 
     [Test]
-    public void NoThrowDoesNotWaiveConditionalOutputAssignment()
+    public void ConditionalOutputAssignmentRemainsRequiredWithoutNoThrow()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] bool Try(bool success, out int32 value) {
+            bool Try(bool success, out int32 value) {
                 if (!success) { return false; }
                 value = 42; return true;
             }
-            [NoThrow] int32 Main() {
+            int32 Main() {
                 if (Try(false, out var value)) { }
                 return value;
             }

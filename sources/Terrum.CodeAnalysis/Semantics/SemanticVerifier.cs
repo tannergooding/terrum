@@ -117,6 +117,7 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            VerifyDependencyContracts(function, program);
             if (function.NativeVTableMethod is not null
                 ? !NativeVTableCallContract.IsValid(function, program)
                 : function.Intrinsic == BoundIntrinsic.NativeVTableCall)
@@ -229,6 +230,7 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
             }
+
         }
         if (program.Buffers.Any(static buffer => buffer.IsInvocationScoped) && !program.RequiresSourceGrant)
         {
@@ -373,9 +375,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             if (structure.IsTransparent && (structure.IsUnique || structure.Fields.Length != 1
-                || structure.Fields[0].Type is not (PrimitiveType.Bool or PrimitiveType.Char16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.Float32 or PrimitiveType.Float64)
+                || PrimitiveTypeFacts.ScalarWidth(structure.Fields[0].Type) <= 0
                 || structure.Fields[0].Offset != 0 || structure.Fields[0].Size != structure.Size))
             {
                 throw Invalid();
@@ -482,8 +482,11 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                     if ((variable.IsInit && (!variable.IsOut
-                        || (variable.Type is not (PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32
-                            or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        || (variable.Type is not (PrimitiveType.Bool or PrimitiveType.Char8
+                            or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune
+                            or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+                            or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+                            or PrimitiveType.Int64 or PrimitiveType.UInt64
                             or PrimitiveType.Float32 or PrimitiveType.Float64
                             or PrimitiveType.OwnedInt32Buffer)
                             && !ManagedClassTypes.IsManaged(variable.Type)
@@ -494,7 +497,10 @@ public static partial class SemanticVerifier
                             || (function.ReturnType != PrimitiveType.Bool
                                 && !variable.IsInit
                                 && variable.Type is not (PrimitiveType.Bool
-                                    or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+                                    or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
+                                    or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16
+                                    or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                                    or PrimitiveType.UInt32
                                     or PrimitiveType.Int64 or PrimitiveType.UInt64
                                     or PrimitiveType.Float32 or PrimitiveType.Float64)
                                 && !IsCopyStruct(program, variable.Type)
@@ -617,8 +623,11 @@ public static partial class SemanticVerifier
                             || program.Structures[declaringType].IsUnique
                             || function.ParameterCount != 0
                             || (function.ReturnType is not (PrimitiveType.Bool or PrimitiveType.Char16
-                                or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                                or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64)
+                                or PrimitiveType.Char8 or PrimitiveType.Char32 or PrimitiveType.Rune
+                                or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+                                or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+                                or PrimitiveType.Int64 or PrimitiveType.UInt64
+                                or PrimitiveType.Float32 or PrimitiveType.Float64)
                                 && !IsCopyStruct(program, function.ReturnType))
                         : function.ParameterCount != 1 || function.Variables[0].IsMutable
                             || IsUnique(program, function.Variables[0].Type))
@@ -730,10 +739,14 @@ public static partial class SemanticVerifier
 
         var hasSpanDependencies = VerifySpanContracts(program);
         var hasNativeOutputContracts = program.Functions.Any(static function =>
-            function is not null && !NativeOutputs(function).IsDefaultOrEmpty);
+            function is not null && NativeOutputCount(function) != 0);
         var hasDoesNotReturnFunctions = program.Functions.Any(
             static function => function.DoesNotReturn);
-        var nativePointerWriteEffects = CreateNativePointerWriteEffects(program);
+        var nativePointerCaptureEffects = CreateNativePointerCaptureEffects(program);
+        var nativePointerWriteEffects = CreateNativePointerWriteEffects(
+            program, nativePointerCaptureEffects);
+        ValidateNativePointerWriteContracts(
+            program, nativePointerWriteEffects, nativePointerCaptureEffects);
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
         {
             var function = program.Functions[functionIndex];
@@ -753,7 +766,7 @@ public static partial class SemanticVerifier
             try
             {
                 backingDependencies = CreateBackingDependencies(function, program, hasSpanDependencies,
-                    nativePointerWriteEffects);
+                    nativePointerCaptureEffects);
             }
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
             {
@@ -766,6 +779,7 @@ public static partial class SemanticVerifier
                     PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                     ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
                 Dependencies = backingDependencies,
+                NativePointerCaptureEffects = nativePointerCaptureEffects,
             };
             if (function.IsConstructor)
             {
@@ -990,6 +1004,8 @@ public static partial class SemanticVerifier
                     break;
                 case BoundNativeStorageAddress address:
                     Expression(address.Index, scope, depth + 1);
+                    break;
+                case BoundNativeOutputReservation:
                     break;
                 case BoundNativePointerRead pointerRead:
                     Expression(pointerRead.Address, scope, depth + 1);
@@ -1505,6 +1521,8 @@ public static partial class SemanticVerifier
                     break;
                 case BoundNativeStorageAddress address:
                     Expression(address.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeOutputReservation:
                     break;
                 case BoundNativeFixedArrayInitialization fixedArray:
                     if (fixedArray.Elements.IsDefault)
@@ -2110,7 +2128,8 @@ public static partial class SemanticVerifier
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
         if ((!allowDirectNativeImports
-                && program.Functions.Any(static function => function.DirectNativeImport is not null))
+                && program.Functions.Any(static function => function.DirectNativeImport is not null
+                    && (!function.IsModuleReference || function.ModuleImport is null)))
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
@@ -2163,6 +2182,12 @@ public static partial class SemanticVerifier
 
     internal static bool ProvidesNoFailureGuarantee(BoundFunction function) =>
         function.IsNoThrow || function.NativeFunctionPointerType is not null;
+
+    // Native exception unwinding remains a separate failure edge.
+    internal static bool CanCallWithoutTerrumFailure(BoundFunction caller, BoundFunction target) =>
+        ProvidesNoFailureGuarantee(target)
+        || (!caller.IsNoThrow && caller.NativeFunctionPointerType is not null
+            && (target.DirectNativeImport is not null || target.NativeVTableMethod is not null));
 
     private static bool Statement(BoundStatement statement, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, bool reachable = true,
@@ -2242,6 +2267,13 @@ public static partial class SemanticVerifier
                 }
                 else
                 {
+                    if (local.Initializer is BoundMove localMove)
+                    {
+                        CheckNativePointerLifetimeEnd(
+                            localMove.Variable, initialized, localMove.Span);
+                        initialized.Dependencies?.TransferBackingSource(
+                            localMove.Variable, local.Variable);
+                    }
                     Expression(local.Initializer, initialized, fieldMasks, declarations, function, program,
                         ref remaining, depth + 1, failures);
                 }
@@ -2256,6 +2288,24 @@ public static partial class SemanticVerifier
                 if (HasFields(program, local.Initializer.Type))
                 {
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
+                }
+                if (local.Initializer is not BoundMove
+                    && TokenSpanContract.IsDependent(local.Initializer.Type, program.Structures)
+                    && initialized.Dependencies is BackingDependencies localBackingDependencies)
+                {
+                    localBackingDependencies.SetBackingSources(local.Variable,
+                        BackingOf(local.Initializer, localBackingDependencies, program,
+                            ref remaining, depth + 1));
+                }
+                if (local.Initializer is not BoundMove
+                    && CarriesNativePointer(local.Initializer, program)
+                    && initialized.Dependencies is BackingDependencies localPointerDependencies)
+                {
+                    localPointerDependencies.SetNativePointerProvenance(local.Variable,
+                        NativePointerBackingOf(local.Initializer, localPointerDependencies,
+                            program, ref remaining, depth + 1),
+                        NativePointerMayBeUnknownOf(local.Initializer, localPointerDependencies,
+                            program, ref remaining, depth + 1));
                 }
                 return false;
             case BoundVacantLocal vacant:
@@ -2307,6 +2357,7 @@ public static partial class SemanticVerifier
                 }
                 initialized.InvalidateNativeOutputVariable(end.Variable);
                 initialized.Retire(end.Variable);
+                initialized.Dependencies?.ClearBackingSources(end.Variable);
                 fieldMasks[end.Variable] = 0;
                 return false;
             case BoundDrop drop:
@@ -2336,6 +2387,11 @@ public static partial class SemanticVerifier
                 }
                 initialized.InvalidateNativeOutputVariable(drop.Variable);
                 initialized[drop.Variable] = false;
+                initialized.Dependencies?.ClearBackingSources(drop.Variable);
+                if (initialized.Dependencies is BackingDependencies dropDependencies)
+                {
+                    dropDependencies.ClearNativePointerProvenance(drop.Variable);
+                }
                 fieldMasks[drop.Variable] = 0;
                 return false;
             case BoundDropSpan span:
@@ -2346,6 +2402,7 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(span.Span, "Ownership");
                 }
                 initialized[span.Variable] = false;
+                initialized.Dependencies?.ClearBackingSources(span.Variable);
                 return false;
             case BoundDropConstructedFields partial:
                 if (!inCleanup || !function.IsConstructor || partial.Variable != 0
@@ -2399,6 +2456,13 @@ public static partial class SemanticVerifier
                 {
                     CheckBackingInvalidation(assignment.Variable, initialized, assignment.Span);
                 }
+                if (assignment.Value is BoundMove assignmentMove)
+                {
+                    CheckNativePointerLifetimeEnd(
+                        assignmentMove.Variable, initialized, assignmentMove.Span);
+                    initialized.Dependencies?.TransferBackingSource(
+                        assignmentMove.Variable, assignment.Variable);
+                }
                 var assignmentCompletes = EvaluateExpression(assignment.Value, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1, failures,
                     cleanupCounterStep: cleanupCounterStep);
@@ -2418,6 +2482,24 @@ public static partial class SemanticVerifier
                 }
                 initialized.MarkAssigned(assignment.Variable);
                 initialized.SetNativeOutputResult(assignment.Variable, nativeOutputAssignmentResult);
+                if (assignment.Value is not BoundMove
+                    && TokenSpanContract.IsDependent(assignment.Value.Type, program.Structures)
+                    && initialized.Dependencies is BackingDependencies assignmentBackingDependencies)
+                {
+                    assignmentBackingDependencies.SetBackingSources(assignment.Variable,
+                        BackingOf(assignment.Value, assignmentBackingDependencies, program,
+                            ref remaining, depth + 1));
+                }
+                if (assignment.Value is not BoundMove
+                    && CarriesNativePointer(assignment.Value, program)
+                    && initialized.Dependencies is BackingDependencies assignmentPointerDependencies)
+                {
+                    assignmentPointerDependencies.SetNativePointerProvenance(assignment.Variable,
+                        NativePointerBackingOf(assignment.Value, assignmentPointerDependencies,
+                            program, ref remaining, depth + 1),
+                        NativePointerMayBeUnknownOf(assignment.Value, assignmentPointerDependencies,
+                            program, ref remaining, depth + 1));
+                }
                 return false;
             case BoundOptionalAssignment optionalAssignment:
                 if (optionalAssignment.Place is null || optionalAssignment.Value is null
@@ -2594,6 +2676,22 @@ public static partial class SemanticVerifier
                 if (targetField.Type == PrimitiveType.TokenSpan)
                 {
                     VerifySpanFieldWrite(fieldAssignment, function, initialized);
+                    if (initialized.Dependencies is BackingDependencies fieldBackingDependencies)
+                    {
+                        fieldBackingDependencies.SetBackingSources(fieldAssignment.Variable,
+                            BackingOf(fieldAssignment.Value, fieldBackingDependencies, program,
+                                ref remaining, depth + 1));
+                    }
+                }
+                if (CarriesNativePointer(targetField.Type, program)
+                    && initialized.Dependencies is BackingDependencies fieldPointerDependencies)
+                {
+                    fieldPointerDependencies.AddNativePointerProvenance(
+                        fieldAssignment.Variable,
+                        NativePointerBackingOf(fieldAssignment.Value, fieldPointerDependencies,
+                            program, ref remaining, depth + 1),
+                        NativePointerMayBeUnknownOf(fieldAssignment.Value,
+                            fieldPointerDependencies, program, ref remaining, depth + 1));
                 }
                 fieldMasks[fieldAssignment.Variable] |= 1u << fieldAssignment.Field;
                 initialized[fieldAssignment.Variable] = fieldMasks[fieldAssignment.Variable]
@@ -2746,6 +2844,19 @@ public static partial class SemanticVerifier
                     elseState, elseReachable && !elseReturns);
                 return (!thenReachable || thenReturns) && (!elseReachable || elseReturns);
             case BoundWhile loop:
+                if (inCleanup && IsMisidentifiedCleanupSwitchDispatcher(loop, function))
+                {
+                    throw Invalid(loop.Span);
+                }
+                if (inCleanup && loop.SwitchArmVariable >= 0)
+                {
+                    var canBeFacts = new Dictionary<BoundExpression, byte>();
+                    if (ProveCleanupSwitch(loop, function, program,
+                        ref remaining, depth + 1, canBeFacts) is null)
+                    {
+                        throw Invalid(loop.Span);
+                    }
+                }
                 if ((loop.IsPostTested && loop.Iterator is not null)
                     || loop.Iterator is not (null or BoundLifetimeEnd or BoundAssignment or BoundExpressionStatement
                     or BoundBlock { Statements.IsEmpty: true, IsManagedLexicalScope: false, RetiredManagedLocals.IsEmpty: true }))
@@ -2918,6 +3029,9 @@ public static partial class SemanticVerifier
                         changed |= nextState != headState.Possibilities(i) || nextMask != headMasks[i];
                         headState.SetPossibilities(i, nextState);
                         headMasks[i] = nextMask;
+                        changed |= backState is not null && !localToIteration
+                            ? headState.MergeProvenanceSlot(i, backState)
+                            : headState.CopyProvenanceSlot(i, entryState);
                     }
                     var mergedNativeState = entryState.Clone();
                     if (backState is not null)
@@ -3174,7 +3288,7 @@ public static partial class SemanticVerifier
                     }
                 }
                 CheckNativePointerReturn(function, initialized, result.Span);
-                IReadOnlySet<int>? forwardedBacking = null;
+                IReadOnlySet<ProvenanceAnchor>? forwardedBacking = null;
                 if (result.Value is { Type: PrimitiveType.TokenSpan } spanResult)
                 {
                     forwardedBacking = BackingOf(spanResult, initialized.Dependencies, program,
@@ -3244,7 +3358,8 @@ public static partial class SemanticVerifier
                             {
                                 throw InvalidEffect(result.Span, "Ownership");
                             }
-                            dependencies.Staged.Add(forwardedBacking);
+                            dependencies.Staged.Add(new StagedDependencySource(
+                                null, -1, [.. forwardedBacking], EmptyBackingSources, false));
                         }
                         try
                         {
@@ -3523,52 +3638,6 @@ public static partial class SemanticVerifier
         internal FailureEdges Continues { get; } = new();
     }
 
-    private static bool HasUnsupportedCleanupFlow(BoundStatement statement, BoundFunction function, BoundProgram program,
-        ref int remaining, int depth, Dictionary<BoundExpression, byte> canBeFacts)
-    {
-        Count(ref remaining, depth);
-        switch (statement)
-        {
-            case BoundBlock block:
-                foreach (var child in block.Statements)
-                {
-                    if (HasUnsupportedCleanupFlow(child, function, program, ref remaining, depth + 1, canBeFacts))
-                    {
-                        return true;
-                    }
-                }
-                return false;
-            case BoundExpressionStatement { Expression: BoundCall call }:
-                return program.Functions[call.Function].DoesNotReturn;
-            case BoundIf conditional:
-                return (CanBe(conditional.Condition, true, ref remaining, canBeFacts)
-                    && HasUnsupportedCleanupFlow(conditional.Then, function, program, ref remaining, depth + 1, canBeFacts))
-                    || (conditional.Else is not null
-                        && CanBe(conditional.Condition, false, ref remaining, canBeFacts)
-                        && HasUnsupportedCleanupFlow(conditional.Else, function, program, ref remaining, depth + 1, canBeFacts));
-            case BoundWhile loop:
-                if (loop.SwitchArmVariable >= 0)
-                {
-                    return ProveCleanupSwitch(loop, function, program, ref remaining, depth + 1, canBeFacts)
-                        is not { CanComplete: true, Transfers.Count: 0 };
-                }
-                return (loop.IsPostTested || CanBe(loop.Condition, true, ref remaining, canBeFacts))
-                    && loop is not {
-                        Condition: BoundConstant { Type: PrimitiveType.Bool, Value: 1 },
-                        Body: BoundBlock { Statements: [BoundBreak] },
-                    };
-            case BoundTryFinally nested:
-                return HasUnsupportedCleanupFlow(nested.Body, function, program, ref remaining, depth + 1, canBeFacts)
-                    || HasUnsupportedCleanupFlow(nested.Finally, function, program, ref remaining, depth + 1, canBeFacts);
-            case BoundViewScope view:
-                return HasUnsupportedCleanupFlow(view.Body, function, program, ref remaining, depth + 1, canBeFacts);
-            case BoundUnsafe unsafeBlock:
-                return HasUnsupportedCleanupFlow(unsafeBlock.Body, function, program, ref remaining, depth + 1, canBeFacts);
-            default:
-                return false;
-        }
-    }
-
     private sealed class InitializationState
     {
         private static readonly NativeOutputDestinationState UnknownNativeOutputDestination = new(null);
@@ -3590,6 +3659,7 @@ public static partial class SemanticVerifier
         internal BoundProgram Program { get; }
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
         internal BackingDependencies? Dependencies { get; init; }
+        internal HashSet<NativePointerWriteEffect>[]? NativePointerCaptureEffects { get; init; }
 
         internal InitializationState(BoundProgram program, int length,
             bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions)
@@ -3680,7 +3750,12 @@ public static partial class SemanticVerifier
             }
         }
 
-        internal bool IsVacant(int index) => (_possibilities[index] & 2) == 0;
+        internal bool IsVacant(int index) =>
+            (_possibilities[index] & 2) == 0 && !IsNativeOutputReserved(index);
+
+        internal bool IsNativeOutputReserved(int index) =>
+            (uint)index < (uint)Length
+                && _nativeOutputDestinations[index] is { IsReserved: true };
 
         internal bool HasRetiredValue(int index) => (_possibilities[index] & 4) != 0;
 
@@ -3688,6 +3763,7 @@ public static partial class SemanticVerifier
         {
             _possibilities[index] = 4;
             SetNativeOutputState(index, null, null);
+            Dependencies?.ClearNativePointerProvenance(index);
         }
 
         internal byte Possibilities(int index) => _possibilities[index];
@@ -3705,6 +3781,40 @@ public static partial class SemanticVerifier
             _possibilities[index] |= other._possibilities[index];
             MergeNativeOutputSlot(index, _nativeOutputDestinations[index], _nativeOutputResults[index],
                 other._nativeOutputDestinations[index], other._nativeOutputResults[index]);
+            if (Dependencies is not null && other.Dependencies is not null)
+            {
+                _ = Dependencies.MergeSlot(index, other.Dependencies);
+            }
+            else if (Dependencies is not null || other.Dependencies is not null)
+            {
+                throw Invalid();
+            }
+        }
+
+        internal bool MergeProvenanceSlot(int index, InitializationState other)
+        {
+            if (Dependencies is not null && other.Dependencies is not null)
+            {
+                return Dependencies.MergeSlot(index, other.Dependencies);
+            }
+            if (Dependencies is not null || other.Dependencies is not null)
+            {
+                throw Invalid();
+            }
+            return false;
+        }
+
+        internal bool CopyProvenanceSlot(int index, InitializationState other)
+        {
+            if (Dependencies is not null && other.Dependencies is not null)
+            {
+                return Dependencies.CopySlot(index, other.Dependencies);
+            }
+            if (Dependencies is not null || other.Dependencies is not null)
+            {
+                throw Invalid();
+            }
+            return false;
         }
 
         internal InitializationState Clone()
@@ -3713,9 +3823,13 @@ public static partial class SemanticVerifier
                 _completionShapeFacts, _completionFacts, _nativeOutputFlowFacts,
                 HasNativeOutputContracts, HasDoesNotReturnFunctions) {
                 StatementInputs = StatementInputs,
-                Dependencies = Dependencies,
+                Dependencies = Dependencies?.Clone(),
+                NativePointerCaptureEffects = NativePointerCaptureEffects,
             };
-            CopyTo(result);
+            Array.Copy(_possibilities, result._possibilities, Length);
+            Array.Copy(_nativeOutputDestinations, result._nativeOutputDestinations, Length);
+            Array.Copy(_nativeOutputResults, result._nativeOutputResults, Length);
+            result._nativeOutputStateCount = _nativeOutputStateCount;
             return result;
         }
 
@@ -3725,6 +3839,14 @@ public static partial class SemanticVerifier
             Array.Copy(_nativeOutputDestinations, destination._nativeOutputDestinations, Length);
             Array.Copy(_nativeOutputResults, destination._nativeOutputResults, Length);
             destination._nativeOutputStateCount = _nativeOutputStateCount;
+            if (Dependencies is not null && destination.Dependencies is not null)
+            {
+                Dependencies.CopyTo(destination.Dependencies);
+            }
+            else if (Dependencies is not null || destination.Dependencies is not null)
+            {
+                throw Invalid();
+            }
         }
 
         internal void MarkAssigned(int index)
@@ -3735,8 +3857,43 @@ public static partial class SemanticVerifier
 
         internal void MarkNativeOutputPending(int index)
         {
-            _possibilities[index] = 3;
-            SetNativeOutputState(index, new NativeOutputDestinationState(new object()), null);
+            var destination = _nativeOutputDestinations[index];
+            destination = destination is null
+                ? new NativeOutputDestinationState(new object())
+                : destination with { Version = new object(), IsReserved = false };
+            _possibilities[index] = (byte)(destination.UnavailablePossibilities | 3);
+            SetNativeOutputState(index, destination, null);
+        }
+
+        internal void ReserveNativeOutput(int index)
+        {
+            if (!IsVacant(index)
+                || _nativeOutputDestinations[index] is { IsReserved: true })
+            {
+                throw Invalid();
+            }
+            var unavailablePossibilities = _possibilities[index];
+            SetNativeOutputState(index, null, null);
+            Dependencies?.ClearNativePointerProvenance(index);
+            _possibilities[index] = (byte)(unavailablePossibilities | 8);
+            SetNativeOutputState(index, new NativeOutputDestinationState(new object()) {
+                UnavailablePossibilities = unavailablePossibilities,
+                IsReserved = true,
+            }, null);
+        }
+
+        internal void CancelUninvokedNativeOutputReservations()
+        {
+            for (var index = 0; index < Length; index++)
+            {
+                if (_nativeOutputDestinations[index] is not { IsReserved: true } destination)
+                {
+                    continue;
+                }
+                _possibilities[index] = destination.UnavailablePossibilities;
+                SetNativeOutputState(index, null, null);
+                Dependencies?.ClearNativePointerProvenance(index);
+            }
         }
 
         internal NativeOutputCallFact? NativeOutputResult(int index) => _nativeOutputResults[index];
@@ -3756,16 +3913,17 @@ public static partial class SemanticVerifier
                 _possibilities[index] = 3;
             }
             SetNativeOutputState(index, null, null);
+            Dependencies?.ClearNativePointerProvenance(index);
         }
 
         internal void InvalidateNativeOutputCorrelations()
         {
             for (var index = 0; index < Length; index++)
             {
-                if (_nativeOutputDestinations[index] is not null)
+                if (_nativeOutputDestinations[index] is NativeOutputDestinationState destination)
                 {
                     _possibilities[index] = 3;
-                    SetNativeOutputState(index, UnknownNativeOutputDestination, null);
+                    SetNativeOutputState(index, destination with { Version = null }, null);
                 }
                 else
                 {
@@ -3780,7 +3938,12 @@ public static partial class SemanticVerifier
                 && _nativeOutputDestinations[destination.Variable] is NativeOutputDestinationState state
                 && ReferenceEquals(state.Version, destination.Version))
             {
-                _possibilities[destination.Variable] = available ? (byte)2 : (byte)1;
+                _possibilities[destination.Variable] = available
+                    ? (byte)2 : state.UnavailablePossibilities;
+                if (!available)
+                {
+                    Dependencies?.ClearNativePointerProvenance(destination.Variable);
+                }
             }
         }
 
@@ -3885,15 +4048,17 @@ public static partial class SemanticVerifier
 
         internal void Add(InitializationState state, uint[] masks)
         {
+            var failureState = state.Clone();
+            failureState.CancelUninvokedNativeOutputReservations();
             if (_state is null)
             {
-                _state = state.Clone();
+                _state = failureState;
                 _masks = (uint[])masks.Clone();
                 return;
             }
-            for (var index = 0; index < state.Length; index++)
+            for (var index = 0; index < failureState.Length; index++)
             {
-                _state.Merge(index, state);
+                _state.Merge(index, failureState);
                 _masks![index] &= masks[index];
             }
         }
@@ -4061,13 +4226,28 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                 }
-                else if (constant.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                    or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
-                    or PrimitiveType.Char16 or PrimitiveType.Bool)
+                else if (!constant.Bits.IsCanonicalFor(constant.Type)
+                    || constant.Type is not (PrimitiveType.Void or PrimitiveType.Int8 or PrimitiveType.Int16
+                    or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                    or PrimitiveType.Float32 or PrimitiveType.Float64
+                    or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
+                    or PrimitiveType.Rune or PrimitiveType.Bool or PrimitiveType.Int128 or PrimitiveType.UInt128
+                    or PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128
+                    or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128)
                     || (constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                         && constant.Value is < int.MinValue or > int.MaxValue)
+                    || (constant.Type == PrimitiveType.Int8 && constant.Value is < sbyte.MinValue or > sbyte.MaxValue)
+                    || (constant.Type == PrimitiveType.Int16 && constant.Value is < short.MinValue or > short.MaxValue)
+                    || (constant.Type == PrimitiveType.UInt8 && constant.Value is < byte.MinValue or > byte.MaxValue)
+                    || (constant.Type == PrimitiveType.UInt16 && constant.Value is < ushort.MinValue or > ushort.MaxValue)
                     || (constant.Type == PrimitiveType.Bool && constant.Value is not (0 or 1))
+                    || (constant.Type == PrimitiveType.Char8 && constant.Value is < byte.MinValue or > byte.MaxValue)
                     || (constant.Type == PrimitiveType.Char16 && constant.Value is < 0 or > ushort.MaxValue)
+                    || (constant.Type == PrimitiveType.Char32 && constant.Value is < uint.MinValue or > uint.MaxValue)
+                    || (constant.Type == PrimitiveType.Rune
+                        && (constant.Value is < 0 or > 0x10_FFFF
+                            || constant.Value is >= 0xD800 and <= 0xDFFF))
                     || (constant.Type == PrimitiveType.Float32 && constant.Value is < 0 or > uint.MaxValue))
                 {
                     throw Invalid();
@@ -4124,11 +4304,17 @@ public static partial class SemanticVerifier
                     foreach (var backing in NativePointerBackingOf(pointerRead.Address,
                         nativePointerDependencies, program, ref remaining, depth + 1))
                     {
-                        if (initialized.HasRetiredValue(backing))
+                        if (backing.Kind != ProvenanceAnchorKind.NativeStorage
+                            || (uint)backing.Identity >= (uint)initialized.Length)
                         {
                             throw InvalidEffect(pointerRead.Span, "NativePointer");
                         }
-                        if (initialized.HasNativeOutputState(backing) && !initialized[backing])
+                        if (initialized.HasRetiredValue(backing.Identity))
+                        {
+                            throw InvalidEffect(pointerRead.Span, "NativePointer");
+                        }
+                        if (initialized.HasNativeOutputState(backing.Identity)
+                            && !initialized[backing.Identity])
                         {
                             throw InvalidEffect(pointerRead.Span, "NativeImport");
                         }
@@ -4164,11 +4350,16 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
+                if (initialized.Dependencies is BackingDependencies pointerWriteDependencies)
+                {
+                    ApplyNativePointerWrite(pointerWrite.Address, pointerWrite.Value,
+                        pointerWriteDependencies, program, ref remaining, depth + 1);
+                }
                 initialized.InvalidateNativeOutputCorrelations();
                 break;
             case BoundNativeFixedArrayInitialization:
                 throw InvalidEffect(expression.Span, "NativeImport");
-            case BoundNativeStorageAddress:
+            case BoundNativeStorageAddress or BoundNativeOutputReservation:
             case BoundRead read when NativeFixedArrayContract.IsCarrier(read.Type):
                 throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNativeFixedArrayElement fixedArrayElement:
@@ -4283,10 +4474,11 @@ public static partial class SemanticVerifier
             case BoundIsInitialized initializationTest:
                 if (initializationTest.Type != PrimitiveType.Bool
                     || initializationTest.Variable < 0 || initializationTest.Variable >= initialized.Length
+                    || initialized.IsNativeOutputReserved(initializationTest.Variable)
                     || (initializationTest.Variable >= function.ParameterCount
                         + (function.IsConstructor ? 1 : 0) && !declarations.Contains(initializationTest.Variable)))
                 {
-                    throw Invalid(initializationTest.Span);
+                    throw InvalidEffect(initializationTest.Span, "NativeImport");
                 }
                 break;
             case BoundIsSome pattern:
@@ -4338,16 +4530,18 @@ public static partial class SemanticVerifier
             case BoundCast cast:
                 var castOperandCompletes = EvaluateExpression(cast.Operand, initialized,
                     fieldMasks, declarations, function, program, ref remaining, depth + 1, failures);
-                var integerConversion = (cast.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
-                    && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16);
-                var integerToFloatingConversion = (cast.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Char16)
+                var integerConversion = (PrimitiveTypeFacts.IsInteger(cast.Operand.Type)
+                    && (PrimitiveTypeFacts.IsInteger(cast.Type) || cast.Type == PrimitiveType.Char16
+                        || cast.Type is PrimitiveType.Int128 or PrimitiveType.UInt128))
+                    || (cast.Operand.Type == PrimitiveType.Char16
+                        && (PrimitiveTypeFacts.IsInteger(cast.Type)
+                            || cast.Type is PrimitiveType.Int128 or PrimitiveType.UInt128));
+                var integerToFloatingConversion = (PrimitiveTypeFacts.IsInteger(cast.Operand.Type)
+                    || cast.Operand.Type == PrimitiveType.Char16)
                     && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
                 var floatingToIntegerConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
-                    && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64);
+                    && (cast.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
+                        or PrimitiveType.UInt64);
                 var floatingConversion = (cast.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                     && (cast.Type is PrimitiveType.Float32 or PrimitiveType.Float64);
                 if (!integerConversion && !integerToFloatingConversion
@@ -4479,7 +4673,8 @@ public static partial class SemanticVerifier
                     break;
                 }
                 var readBacking = BackingOf(spanRead.View, initialized.Dependencies, program, ref remaining, depth + 1);
-                initialized.Dependencies?.Staged.Add(readBacking);
+                initialized.Dependencies?.Staged.Add(new StagedDependencySource(
+                    null, -1, [.. readBacking], EmptyBackingSources, false));
                 try
                 {
                     if (!EvaluateExpression(spanRead.Index, initialized, fieldMasks, declarations,
@@ -4620,6 +4815,7 @@ public static partial class SemanticVerifier
                 break;
             case BoundMove move:
                 CheckBackingInvalidation(move.Variable, initialized, move.Span);
+                CheckNativePointerLifetimeEnd(move.Variable, initialized, move.Span);
                 if (!IsUnique(program, move.Type) || move.Variable < 0 || move.Variable >= initialized.Length
                     || (move.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
                     || !initialized[move.Variable] || move.Type != function.Variables[move.Variable].Type
@@ -4672,21 +4868,18 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var integerNegation = unary.Operator == TokenKind.Minus
-                    && (unary.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64);
+                    && PrimitiveTypeFacts.IsInteger(unary.Type);
                 if (unary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping
                     && !integerNegation)
                 {
                     throw Invalid();
                 }
+                var integerOperand = PrimitiveTypeFacts.IsInteger(unary.Operand.Type);
+                var floatingOperand = unary.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
                 var unaryValid = unary.Operator switch {
-                    TokenKind.Plus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-                        or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
-                    TokenKind.Tilde => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64 && unary.Type == unary.Operand.Type,
-                    TokenKind.Minus => unary.Operand.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32
-                        or PrimitiveType.Float64 && unary.Type == unary.Operand.Type,
+                    TokenKind.Plus => (integerOperand || floatingOperand) && unary.Type == unary.Operand.Type,
+                    TokenKind.Tilde => integerOperand && unary.Type == unary.Operand.Type,
+                    TokenKind.Minus => (integerOperand || floatingOperand) && unary.Type == unary.Operand.Type,
                     TokenKind.Bang => unary.Operand.Type == PrimitiveType.Bool && unary.Type == PrimitiveType.Bool,
                     _ => false,
                 };
@@ -4703,8 +4896,10 @@ public static partial class SemanticVerifier
                 var unaryNegationMayOverflow = checkedNegation
                     && (unary.Operand is not BoundConstant operand
                         || (unary.Type switch {
+                            PrimitiveType.Int8 => operand.Value == sbyte.MinValue,
+                            PrimitiveType.Int16 => operand.Value == short.MinValue,
                             PrimitiveType.Int32 => operand.Value == int.MinValue,
-                            PrimitiveType.UInt32 => operand.Value != 0,
+                            PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32 => operand.Value != 0,
                             PrimitiveType.Int64 => operand.Value == long.MinValue,
                             PrimitiveType.UInt64 => operand.Value != 0,
                             _ => false,
@@ -4720,8 +4915,7 @@ public static partial class SemanticVerifier
                 break;
             case BoundUpdate update:
                 if (update.Place is null || update.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
-                    || update.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    || !PrimitiveTypeFacts.IsInteger(update.Type)
                     || update.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
                         or BoundIntegerOverflowBehavior.Wrapping)
                     || update.Place.Type != update.Type
@@ -4754,13 +4948,12 @@ public static partial class SemanticVerifier
             case BoundCompoundAssignment compound:
                 if (!statementCompound || compound.Place is null || compound.Right is null
                     || !CompoundOperators.IsSupported(compound.Operator)
-                    || compound.Type is not (PrimitiveType.Int32 or PrimitiveType.UInt32
-                        or PrimitiveType.Int64 or PrimitiveType.UInt64)
+                    || !PrimitiveTypeFacts.IsInteger(compound.Type)
                     || compound.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
                         or BoundIntegerOverflowBehavior.Wrapping)
                     || compound.Place.Type != compound.Type
-                    || compound.Right.Type != (CompoundOperators.IsShift(compound.Operator)
-                        ? PrimitiveType.Int32 : compound.Type)
+                    || (CompoundOperators.IsShift(compound.Operator)
+                        ? !PrimitiveTypeFacts.IsInteger(compound.Right.Type) : compound.Right.Type != compound.Type)
                     || (compound.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
                         && !function.IsStatic))
                 {
@@ -4866,9 +5059,9 @@ public static partial class SemanticVerifier
                     binaryCompletes = leftCompletes && rightCompletes;
                 }
                 var operands = binary.Left.Type == binary.Right.Type && binary.Left.Type != PrimitiveType.Void;
-                var integerOperands = binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64;
+                var integerOperands = PrimitiveTypeFacts.IsInteger(binary.Left.Type);
                 var floatingOperands = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
+                var codeUnitOperands = PrimitiveTypeFacts.IsCodeUnitOrRune(binary.Left.Type);
                 var floatingArithmetic = floatingOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
                     or TokenKind.Star or TokenKind.Slash);
                 var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
@@ -4892,16 +5085,16 @@ public static partial class SemanticVerifier
                             && binary.Type == binary.Left.Type,
                     TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned =>
                         integerOperands
-                            && binary.Right.Type == PrimitiveType.Int32 && binary.Type == binary.Left.Type,
+                            && PrimitiveTypeFacts.IsInteger(binary.Right.Type) && binary.Type == binary.Left.Type,
                     TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals =>
-                        operands && (integerOperands || binary.Left.Type == PrimitiveType.Char16 || floatingOperands)
+                        operands && (integerOperands || codeUnitOperands || floatingOperands)
                             && binary.Type == PrimitiveType.Bool,
                     TokenKind.EqualsEquals or TokenKind.BangEquals =>
-                        operands && (integerOperands || binary.Left.Type is PrimitiveType.Char16 or PrimitiveType.Bool
+                        operands && (integerOperands || codeUnitOperands || binary.Left.Type == PrimitiveType.Bool
                             || floatingOperands || binary.Left.Type == PrimitiveType.NativeRawPointer)
                             && binary.Type == PrimitiveType.Bool,
                     TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret =>
-                        operands && binary.Left.Type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Bool
+                        operands && (integerOperands || binary.Left.Type == PrimitiveType.Bool)
                             && binary.Type == binary.Left.Type,
                     TokenKind.AmpersandAmpersand or TokenKind.PipePipe =>
                         operands && binary.Left.Type == PrimitiveType.Bool && binary.Type == PrimitiveType.Bool,
@@ -5006,6 +5199,11 @@ public static partial class SemanticVerifier
                 }
                 if (indirectCallCompletes)
                 {
+                    if (initialized.Dependencies is BackingDependencies dependencies
+                        && MayWriteNativePointerStorage(call, program))
+                    {
+                        dependencies.MarkAllNativePointerProvenanceUnknown();
+                    }
                     initialized.InvalidateNativeOutputCorrelations();
                 }
                 break;
@@ -5034,7 +5232,7 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(call.Span, "UnsafeCaller");
                 }
-                if (RequiresNoFailureProof(function) && !ProvidesNoFailureGuarantee(target))
+                if (RequiresNoFailureProof(function) && !CanCallWithoutTerrumFailure(function, target))
                 {
                     throw InvalidNoFailureEffect(function, call.Span);
                 }
@@ -5101,8 +5299,11 @@ public static partial class SemanticVerifier
                         {
                             throw Invalid();
                         }
-                        var directNativeOutput = DirectNativeImportContract.OutputForParameter(
+                        var nativeOutputContract = NativeOutputContractForParameter(
                             target, parameterIndex);
+                        var directNativeOutput = nativeOutputContract is null
+                            ? DirectNativeImportContract.OutputForParameter(target, parameterIndex)
+                            : null;
                         var nativeVTableOutput = NativeVTableCallContract.OutputForParameter(
                             target, parameterIndex);
                         var directNativeParameter = DirectNativeImportContract.ParameterForParameter(
@@ -5191,47 +5392,54 @@ public static partial class SemanticVerifier
                         }
                         else
                         {
-                            var isAllowedStorageAddress = argument is BoundNativeStorageAddress storageAddress
-                                && directNativeOutput is not null
-                                && DirectNativeImportContract.MatchesAddress(
-                                    storageAddress, directNativeOutput, function, program);
-                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress nativeVTableOutputAddress
-                                && nativeVTableOutput is not null
-                                && DirectNativeImportContract.MatchesAddress(
-                                    nativeVTableOutputAddress, nativeVTableOutput, function, program);
-                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress matchedDirectParameterAddress
-                                && directNativeParameter is not null
-                                && DirectNativeImportContract.MatchesAddress(
-                                    matchedDirectParameterAddress, directNativeParameter, function, program);
-                            isAllowedStorageAddress |= argument is BoundNativeStorageAddress nativeVTableAddress
-                                && nativeVTableParameter is not null
-                                && DirectNativeImportContract.MatchesAddress(
-                                    nativeVTableAddress, nativeVTableParameter, function, program);
-                            if (directNativeOutput is not null)
+                            var isAllowedStorageAddress =
+                                argument is BoundNativeStorageAddress matchedDirectParameterAddress
+                                    && directNativeParameter is not null
+                                    && DirectNativeImportContract.MatchesAddress(
+                                        matchedDirectParameterAddress, directNativeParameter, function, program);
+                            isAllowedStorageAddress |= isNativeVTableParameterAddress;
+                            if (nativeOutputContract is not null)
                             {
-                                if (argument is not BoundNativeStorageAddress outputAddress
-                                    || !DirectNativeImportContract.MatchesAddress(
-                                        outputAddress, directNativeOutput, function, program)
-                                    || !directNativeOutputTargets.Add(outputAddress.Variable))
+                                if (argument is not BoundNativeOutputReservation reservation
+                                    || !MatchesReservation(reservation, nativeOutputContract,
+                                        function, program)
+                                    || !directNativeOutputTargets.Add(reservation.Variable))
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                VerifyDirectNativeOutputAddress(outputAddress, directNativeOutput,
+                                VerifyNativeOutputReservation(reservation, nativeOutputContract,
+                                    initialized, fieldMasks, declarations, function, program,
+                                    ref remaining, depth + 1, failures);
+                            }
+                            else if (directNativeOutput is not null)
+                            {
+                                if (argument is not BoundNativeOutputReservation reservation
+                                    || !DirectNativeImportContract.MatchesReservation(
+                                        reservation, directNativeOutput, function, program)
+                                    || !directNativeOutputTargets.Add(reservation.Variable))
+                                {
+                                    throw InvalidEffect(argument.Span, "NativeImport");
+                                }
+                                VerifyNativeOutputReservation(reservation, directNativeOutput,
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1, failures);
                             }
                             else if (nativeVTableOutput is not null)
                             {
-                                if (argument is not BoundNativeStorageAddress outputAddress
-                                    || !DirectNativeImportContract.MatchesAddress(
-                                        outputAddress, nativeVTableOutput, function, program)
-                                    || !directNativeOutputTargets.Add(outputAddress.Variable))
+                                if (argument is not BoundNativeOutputReservation reservation
+                                    || !DirectNativeImportContract.MatchesReservation(
+                                        reservation, nativeVTableOutput, function, program)
+                                    || !directNativeOutputTargets.Add(reservation.Variable))
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                VerifyDirectNativeOutputAddress(outputAddress, nativeVTableOutput,
+                                VerifyNativeOutputReservation(reservation, nativeVTableOutput,
                                     initialized, fieldMasks, declarations, function, program,
                                     ref remaining, depth + 1, failures);
+                            }
+                            else if (argument is BoundNativeOutputReservation)
+                            {
+                                throw InvalidEffect(argument.Span, "NativeImport");
                             }
                             else if (directNativeParameter is not null)
                             {
@@ -5378,7 +5586,7 @@ public static partial class SemanticVerifier
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
                                 }
-                                if (argument is not BoundNativeStorageAddress)
+                                if (argument is not (BoundNativeStorageAddress or BoundNativeOutputReservation))
                                 {
                                     if (IsUnique(program, argument.Type)
                                         && argument is not (BoundMove or BoundCall))
@@ -5400,6 +5608,9 @@ public static partial class SemanticVerifier
                             reservedReceiver = loanRoot;
                         }
                         if (argument.Type != target.Variables[parameterSlot].Type
+                            && !(argument is BoundNativeOutputReservation && nativeOutputContract is not null)
+                            && !(argument is BoundNativeOutputReservation && directNativeOutput is not null)
+                            && !(argument is BoundNativeOutputReservation && nativeVTableOutput is not null)
                             && !isDirectNativeParameterAddress
                             && !isDirectNativeStringPointerArgument
                             && !isNativeVTableParameterAddress
@@ -5419,14 +5630,12 @@ public static partial class SemanticVerifier
                             initialized[implicitReferenceTemporary] = true;
                             fieldMasks[implicitReferenceTemporary] = 0;
                         }
-                        if (initialized.Dependencies is BackingDependencies dependencies
-                            && TokenSpanContract.IsDependent(argument.Type, program.Structures))
-                        {
-                            dependencies.Staged.Add(BackingOf(argument, dependencies, program, ref remaining, depth + 1));
-                        }
+                        StageDependencySource(call, parameterIndex, argument, target,
+                            initialized, program, ref remaining, depth + 1);
                     }
                     if (!argumentsComplete)
                     {
+                        initialized.CancelUninvokedNativeOutputReservations();
                         break;
                     }
                     if (loanRoot >= 0 && !initialized[loanRoot]
@@ -5438,7 +5647,8 @@ public static partial class SemanticVerifier
                     {
                         throw InvalidEffect(call.Span, "NativeImport");
                     }
-                    ApplyNativeOutputCallEffects(call, target, initialized);
+                    ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
+                    ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
                     if (!ProvidesNoFailureGuarantee(target))
                     {
                         failures?.Add(initialized, fieldMasks);
@@ -5533,8 +5743,10 @@ public static partial class SemanticVerifier
         && DirectNativeImportContract.IsStringPointerArgument(argument, parameter, program);
 
     private static bool IsImplicitReferenceScalarType(PrimitiveType type) =>
-        type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+        type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
+            or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+            or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private static bool IsImplicitReferenceType(PrimitiveType type, BoundProgram program) =>
         IsImplicitReferenceScalarType(type) || IsCopyStruct(program, type);
@@ -5607,9 +5819,13 @@ public static partial class SemanticVerifier
     }
 
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
-        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-            or PrimitiveType.Float32 or PrimitiveType.Float64
-            or PrimitiveType.Char16 or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
+        type is PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune
+            or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.UInt8
+            or PrimitiveType.UInt16 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float16 or PrimitiveType.BFloat16
+            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128
+            or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128
+            or PrimitiveType.Bool or PrimitiveType.OwnedInt32Buffer or PrimitiveType.TokenSpan
             or PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode or PrimitiveType.NativeUtf16ZPointer
             or PrimitiveType.NativeUtf8ZPointer
             or PrimitiveType.NativeStorageAddress
@@ -5628,9 +5844,12 @@ public static partial class SemanticVerifier
                     || program.Classes[ManagedClassTypes.ClassIndex(type)].IsMutable));
 
     internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
-        type is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64
-            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64
-            or PrimitiveType.Char16 or PrimitiveType.Bool
+        type is PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune
+            or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.UInt8
+            or PrimitiveType.UInt16 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+            or PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float16 or PrimitiveType.BFloat16
+            or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128
+            or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128 or PrimitiveType.Bool
             || NativePointerTypes.IsType(type)
             || NativeFunctionPointerTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type)
@@ -5775,14 +5994,54 @@ public static partial class SemanticVerifier
             && index is BoundConstant { Type: PrimitiveType.Int32 } constant
             && constant.Value >= 0 && constant.Value < program.Buffers[buffer].Values.Length;
 
-    private static bool IsTotalConversion(PrimitiveType source, PrimitiveType destination) =>
-        source == destination || source == PrimitiveType.Char16
-            || (source == PrimitiveType.Int32 && destination == PrimitiveType.Int64)
-            || (source == PrimitiveType.UInt32 && destination is PrimitiveType.Int64 or PrimitiveType.UInt64)
-            || ((source is PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64)
-                && (destination is PrimitiveType.Float32 or PrimitiveType.Float64))
-            || ((source is PrimitiveType.Float32 or PrimitiveType.Float64)
-                && (destination is PrimitiveType.Float32 or PrimitiveType.Float64));
+    private static bool IsTotalConversion(PrimitiveType source, PrimitiveType destination)
+    {
+        if (source == destination)
+        {
+            return true;
+        }
+        if (destination == PrimitiveType.Int128)
+        {
+            return PrimitiveTypeFacts.IsInteger(source) || source == PrimitiveType.Char16;
+        }
+        if (destination == PrimitiveType.UInt128)
+        {
+            return source == PrimitiveType.Char16
+                || (PrimitiveTypeFacts.IsInteger(source) && !PrimitiveTypeFacts.IsSignedInteger(source));
+        }
+        if (destination is PrimitiveType.Float32 or PrimitiveType.Float64)
+        {
+            return PrimitiveTypeFacts.IsInteger(source) || source == PrimitiveType.Char16
+                || source is PrimitiveType.Float32 or PrimitiveType.Float64;
+        }
+        if (source == PrimitiveType.Char16)
+        {
+            if (!PrimitiveTypeFacts.IsInteger(destination))
+            {
+                return false;
+            }
+            var codeUnitDestinationWidth = PrimitiveTypeFacts.IntegerWidth(destination);
+            return PrimitiveTypeFacts.IsSignedInteger(destination)
+                ? codeUnitDestinationWidth >= 32 : codeUnitDestinationWidth >= 16;
+        }
+        if (!PrimitiveTypeFacts.IsInteger(source)
+            || !(PrimitiveTypeFacts.IsInteger(destination) || destination == PrimitiveType.Char16))
+        {
+            return false;
+        }
+
+        var sourceWidth = PrimitiveTypeFacts.IntegerWidth(source);
+        var destinationWidth = destination == PrimitiveType.Char16
+            ? 16 : PrimitiveTypeFacts.IntegerWidth(destination);
+        var sourceSigned = PrimitiveTypeFacts.IsSignedInteger(source);
+        var destinationSigned = destination != PrimitiveType.Char16
+            && PrimitiveTypeFacts.IsSignedInteger(destination);
+        if (sourceSigned)
+        {
+            return destinationSigned && destinationWidth >= sourceWidth;
+        }
+        return destinationSigned ? destinationWidth > sourceWidth : destinationWidth >= sourceWidth;
+    }
 
     private static uint FullMask(BoundProgram program, PrimitiveType type)
     {
@@ -5920,6 +6179,10 @@ public static partial class SemanticVerifier
         }
         if (expression is BoundIsInitialized initializationTest)
         {
+            if (state.IsNativeOutputReserved(initializationTest.Variable))
+            {
+                throw InvalidEffect(initializationTest.Span, "NativeImport");
+            }
             var possibilities = state.Possibilities(initializationTest.Variable);
             state.SetPossibilities(initializationTest.Variable,
                 result ? (byte)(possibilities & 2) : (byte)(possibilities & 5));
@@ -6116,6 +6379,8 @@ public static partial class SemanticVerifier
                 break;
             case BoundNativeStorageAddress address:
                 VacateNestedOutputs(address.Index, state, ref remaining);
+                break;
+            case BoundNativeOutputReservation:
                 break;
             case BoundNativePointerRead pointerRead:
                 VacateNestedOutputs(pointerRead.Address, state, ref remaining);
@@ -6561,6 +6826,10 @@ public static partial class SemanticVerifier
         if (expression is BoundIsInitialized initializationTest)
         {
             Count(ref remaining, 0);
+            if (initialized.IsNativeOutputReserved(initializationTest.Variable))
+            {
+                throw InvalidEffect(initializationTest.Span, "NativeImport");
+            }
             var possibilities = initialized.Possibilities(initializationTest.Variable);
             return result ? (possibilities & 2) != 0 : (possibilities & 5) != 0;
         }

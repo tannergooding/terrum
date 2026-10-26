@@ -124,20 +124,11 @@ internal static class TrRmConstantSourceValueValidator
         }
 
         var typeCode = typeSpecs.GetTypeSpecRef(expectedTypeSpecRef).TypeCode;
-        var type = typeCode switch
+        if (!TryGetBoundScalarType(typeCode, out var type))
         {
-            0x00 => PrimitiveType.Void,
-            0x01 => PrimitiveType.Bool,
-            0x03 => PrimitiveType.Char16,
-            0x08 => PrimitiveType.Int32,
-            0x09 => PrimitiveType.Int64,
-            0x0D => PrimitiveType.UInt32,
-            0x0E => PrimitiveType.UInt64,
-            0x14 => PrimitiveType.Float32,
-            0x15 => PrimitiveType.Float64,
-            _ => throw new NotSupportedException(
-                "The selected execution profile has no direct bound representation for this frozen scalar."),
-        };
+            throw new NotSupportedException(
+                "The selected execution profile has no direct bound representation for this frozen scalar.");
+        }
         var payload = frozenValueNodes.GetScalarPayload(
             checked((int)constantSources.GetPayloadReference(constantSourceRow)), blobs);
         var structures = Array.Empty<BoundStruct>();
@@ -149,19 +140,42 @@ internal static class TrRmConstantSourceValueValidator
                 "The selected target's scalar layout does not match the frozen representation.");
         }
 
-        var value = typeCode switch
+        return new BoundConstant(ScalarBits.FromPayload(type, payload), type, default);
+    }
+
+    internal static bool TryGetBoundScalarType(byte typeCode, out PrimitiveType type)
+    {
+        type = typeCode switch
         {
-            0x00 => 0,
-            0x01 => payload[0],
-            0x03 => BinaryPrimitives.ReadUInt16LittleEndian(payload),
-            0x08 => BinaryPrimitives.ReadInt32LittleEndian(payload),
-            0x09 => BinaryPrimitives.ReadInt64LittleEndian(payload),
-            0x0D => BinaryPrimitives.ReadUInt32LittleEndian(payload),
-            0x0E or 0x15 => unchecked((long)BinaryPrimitives.ReadUInt64LittleEndian(payload)),
-            0x14 => BinaryPrimitives.ReadUInt32LittleEndian(payload),
-            _ => throw new InvalidOperationException("The materialized scalar type is not mapped."),
+            0x00 => PrimitiveType.Void,
+            0x01 => PrimitiveType.Bool,
+            0x02 => PrimitiveType.Char8,
+            0x03 => PrimitiveType.Char16,
+            0x04 => PrimitiveType.Char32,
+            0x05 => PrimitiveType.Rune,
+            0x06 => PrimitiveType.Int8,
+            0x07 => PrimitiveType.Int16,
+            0x08 => PrimitiveType.Int32,
+            0x09 => PrimitiveType.Int64,
+            0x0A => PrimitiveType.Int128,
+            0x0B => PrimitiveType.UInt8,
+            0x0C => PrimitiveType.UInt16,
+            0x0D => PrimitiveType.UInt32,
+            0x0E => PrimitiveType.UInt64,
+            0x0F => PrimitiveType.UInt128,
+            0x12 => PrimitiveType.Float16,
+            0x13 => PrimitiveType.BFloat16,
+            0x14 => PrimitiveType.Float32,
+            0x15 => PrimitiveType.Float64,
+            0x16 => PrimitiveType.Float128,
+            0x17 => PrimitiveType.Decimal32,
+            0x18 => PrimitiveType.Decimal64,
+            0x19 => PrimitiveType.Decimal128,
+            _ => PrimitiveType.Void,
         };
-        return new BoundConstant(value, type, default);
+        return typeCode is 0x00 or 0x01 or 0x02 or 0x03 or 0x04 or 0x05
+            or 0x06 or 0x07 or 0x08 or 0x09 or 0x0A or 0x0B or 0x0C or 0x0D or 0x0E
+            or 0x0F or 0x12 or 0x13 or 0x14 or 0x15 or 0x16 or 0x17 or 0x18 or 0x19;
     }
 
     internal static void ValidateFrozenScalar(int constantSourceRow,
