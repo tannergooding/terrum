@@ -1,13 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
-using System.Collections.Immutable;
 using System.Linq;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Native.Jit;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
@@ -232,7 +233,7 @@ public sealed class TrRmFrozenScalarMaterializationTests
     }
 
     [Test]
-    public void WideScalarConstantsExecuteAcrossNativeCallCarriers()
+    public async Task WideScalarConstantsExecuteAcrossNativeCallCarriersAsync()
     {
         var values = new (byte TypeCode, PrimitiveType Type, byte[] Payload)[]
         {
@@ -281,9 +282,10 @@ public sealed class TrRmFrozenScalarMaterializationTests
                 EntryPoint = 2,
             };
 
-            Assert.That(NativeJit.Execute(executable, NativeRuntimePolicy.FailFast),
-                Is.EqualTo(42), value.Type.ToString());
-            Assert.That(NativeEmitter.Emit(executable, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+            await JitTests.AssertProgramExecutionAsync(
+                executable, 42, NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+            await JitTests.AssertProgramExecutionAsync(
+                executable, 42, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
         }
     }
 
