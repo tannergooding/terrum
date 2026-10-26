@@ -207,6 +207,8 @@ public static partial class ModuleCompiler
                             program.NativePointerTypes),
                         function, false) {
                         HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                        NativeOutputRole = function.NativeOutputRole,
+                        NativeOutputContracts = function.NativeOutputContracts,
                     });
                     continue;
                 }
@@ -226,6 +228,9 @@ public static partial class ModuleCompiler
                 if (!CompatibleContract(contract,
                     Contract(export, reference.Structures, reference.NativeFunctionPointerSignatures,
                         reference.NativePointerTypes))
+                    || !SameNativeOutputContracts(function.NativeOutputRole,
+                        function.NativeOutputContracts, export.NativeOutputRole,
+                        export.NativeOutputContracts, program.Structures, reference.Structures)
                     || !CompatibleImportedNativeVTableMethod(
                         function.ModuleImport is null ? null : function.NativeVTableMethod,
                         export.NativeVTableMethod))
@@ -242,6 +247,8 @@ public static partial class ModuleCompiler
                 declarations.Add(new ModuleFunction(function.Name, contract, function, true) {
                     HasOwnershipTransfer = hasOwnershipTransfer,
                     ImportedNativeVTableMethod = importedNativeVTableMethod,
+                    NativeOutputRole = function.NativeOutputRole,
+                    NativeOutputContracts = function.NativeOutputContracts,
                 });
             }
             else
@@ -250,6 +257,8 @@ public static partial class ModuleCompiler
                     Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
                         program.NativePointerTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                    NativeOutputRole = function.NativeOutputRole,
+                    NativeOutputContracts = function.NativeOutputContracts,
                 });
             }
         }
@@ -283,6 +292,8 @@ public static partial class ModuleCompiler
             functions.Add(declaration with {
                 Function = declaration.Import ? null : RemapFunction(declaration.Function
                     ?? throw new ModuleFormatException("Missing consumer function."), program.Structures, structures),
+                NativeOutputContracts = RemapNativeOutputContracts(
+                    declaration.NativeOutputContracts, program.Structures, structures),
             });
         }
         var classes = ImmutableArray.CreateBuilder<BoundClass>(program.Classes.Length);
@@ -355,6 +366,9 @@ public static partial class ModuleCompiler
             if (!exports.TryGetValue(imported.Name, out var actual)
                 || !CompatibleContract(imported.Contract, Contract(actual, reference.Structures,
                     reference.NativeFunctionPointerSignatures, reference.NativePointerTypes))
+                || !SameNativeOutputContracts(imported.NativeOutputRole,
+                    imported.NativeOutputContracts, actual.NativeOutputRole,
+                    actual.NativeOutputContracts, consumer.Structures, reference.Structures)
                 || !CompatibleImportedNativeVTableMethod(imported.ImportedNativeVTableMethod,
                     actual.NativeVTableMethod)
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))

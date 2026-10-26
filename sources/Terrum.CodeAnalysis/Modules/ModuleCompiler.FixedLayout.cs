@@ -18,10 +18,6 @@ public static partial class ModuleCompiler
         {
             return module;
         }
-        if (module.FormatVersion == PrivateSpanVersion)
-        {
-            return module with { FormatVersion = PrivateSpanFixedLayoutVersion };
-        }
         if (module.FormatVersion >= DirectNativeImportVersion)
         {
             return module;

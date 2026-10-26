@@ -20,6 +20,7 @@ using Terrum.CodeAnalysis.Text;
 using NUnit.Framework;
 
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules;
 
@@ -68,14 +69,14 @@ public sealed class ModuleTests
             """), policy);
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = library.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), ["Combine"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
 
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { return Combine(sixth: 2, fifth: 4, first: 0, second: 0, third: 0, fourth: 0); }"),
             ModuleCompiler.CreateReference(producer), policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = compilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(92));
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
@@ -1754,9 +1755,9 @@ public sealed class ModuleTests
             NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement))!;
     }
     [TestCase(
-        BoundRuntimePolicy.FailFast,        "[NoThrow] public int32 Read() { return 42; }",        "public int32 Read() { return 42; }",        "int32 Main() { return Read(); }",        "Read")]
+        BoundRuntimePolicy.FailFast,        " public int32 Read() { return 42; }",        "public int32 Read() { return 42; }",        "int32 Main() { return Read(); }",        "Read")]
     [TestCase(
-        BoundRuntimePolicy.CheckedExceptions,        "[NoThrow] public int32 Read() { return 42; }",        "public int32 Read() { return 42; }",        "int32 Main() { return Read(); }",        "Read")]
+        BoundRuntimePolicy.CheckedExceptions,        " public int32 Read() { return 42; }",        "public int32 Read() { return 42; }",        "int32 Main() { return Read(); }",        "Read")]
     [TestCase(
         BoundRuntimePolicy.FailFast,        "[DoesNotReturn] public void Stop() { require false; }",        "public void Stop() { }",        "void Main() { Stop(); }",        "Stop")]
     [TestCase(
@@ -1772,6 +1773,13 @@ public sealed class ModuleTests
             policy);
         Assert.That(initialCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, initialCompilation.Diagnostics));
         var initialProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual60 = initialCompilation.Program; Assert.That(__nunitActual60, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual60!; }))();
+        var retiredNoThrow = export == "Read";
+        if (retiredNoThrow)
+        {
+            var forgedProgram = BoundProgramTestHelpers.MarkNoThrow(initialProgram, export);
+            _ = Assert.Throws<ModuleContractException>(() =>
+                ModuleCompiler.CreateProducer(forgedProgram, [export]))!;
+        }
         var semanticProvider = ModuleCompiler.CreateProducer(initialProgram, [export]);
         var semanticCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
             ModuleCompiler.CreateReference(semanticProvider), policy);
@@ -1784,8 +1792,15 @@ public sealed class ModuleTests
         Assert.That(replacementCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
         var replacementProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual62 = replacementCompilation.Program; Assert.That(__nunitActual62, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual62!; }))();
         var semanticReplacement = ModuleCompiler.CreateProducer(replacementProgram, [export]);
-        _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.Link(semanticConsumer, semanticReplacement))!;
+        if (retiredNoThrow)
+        {
+            _ = ModuleCompiler.Link(semanticConsumer, semanticReplacement);
+        }
+        else
+        {
+            _ = Assert.Throws<ModuleContractException>(() =>
+                ModuleCompiler.Link(semanticConsumer, semanticReplacement))!;
+        }
 
         var nativePolicy = policy == BoundRuntimePolicy.FailFast
             ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
@@ -1798,8 +1813,15 @@ public sealed class ModuleTests
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual63 = nativeCompilation.Program; Assert.That(__nunitActual63, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual63!; }))(), nativeProvider, nativePolicy);
         var nativeReplacement = NativeModuleCompiler.CreateProducer(replacementProgram, [export],
             "EffectProvider", nativePolicy);
-        _ = Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement))!;
+        if (retiredNoThrow)
+        {
+            NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement);
+        }
+        else
+        {
+            _ = Assert.Throws<ModuleContractException>(() =>
+                NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement))!;
+        }
     }
 
     [Test]
@@ -1832,17 +1854,27 @@ public sealed class ModuleTests
         var modified = (byte[])producer.Clone();
         var formatVersion = BinaryPrimitives.ReadInt32LittleEndian(modified.AsSpan(sizeof(int), sizeof(int)));
         var name = Encoding.UTF8.GetBytes("Box.#ctor");
-        var functionName = modified.AsSpan().LastIndexOf(name);
-        Assert.That(functionName >= sizeof(int), Is.True);
+        var nameRecord = new byte[sizeof(int) + name.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(nameRecord, name.Length);
+        name.CopyTo(nameRecord, sizeof(int));
+        var functionNameRecord = modified.AsSpan().IndexOf(nameRecord);
+        Assert.That(functionNameRecord, Is.GreaterThanOrEqualTo(0));
         using var reader = new BinaryReader(new MemoryStream(modified));
-        reader.BaseStream.Position = functionName + name.Length;
-        _ = reader.ReadInt32();
+        reader.BaseStream.Position = functionNameRecord + nameRecord.Length;
+        var contractLength = reader.ReadInt32();
+        reader.BaseStream.Position += contractLength;
         Assert.That(reader.ReadBoolean(), Is.True);
-        for (var flag = 0; flag < 8; flag++)
+        Assert.That(reader.ReadBoolean(), Is.True);
+        _ = reader.ReadBoolean();
+        Assert.That(reader.ReadInt32(), Is.EqualTo(0));
+        Assert.That(reader.ReadBoolean(), Is.False);
+        var storedNameLength = reader.ReadInt32();
+        Assert.That(Encoding.UTF8.GetString(reader.ReadBytes(storedNameLength)), Is.EqualTo("Box.#ctor"));
+        _ = reader.ReadInt32();
+        for (var flag = 0; flag < 9; flag++)
         {
             _ = reader.ReadBoolean();
         }
-        Assert.That(reader.ReadBoolean(), Is.False);
         Assert.That(reader.ReadByte(), Is.EqualTo((byte)BoundIntrinsic.None));
         Assert.That(reader.ReadBoolean(), Is.False);
         _ = reader.ReadInt32();

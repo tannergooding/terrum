@@ -237,6 +237,9 @@ public static partial class ModuleCompiler
                             program.NativePointerTypes),
                         Contract(actual, dependencies.Structures,
                             dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes))
+                    || !SameNativeOutputContracts(function.NativeOutputRole,
+                        function.NativeOutputContracts, actual.NativeOutputRole,
+                        actual.NativeOutputContracts, program.Structures, dependencies.Structures)
                     || !CompatibleImportedNativeVTableMethod(
                         function.ModuleImport is null ? null : function.NativeVTableMethod,
                         actual.NativeVTableMethod))
@@ -307,6 +310,8 @@ public static partial class ModuleCompiler
                 isGraphImport ? null : remapped, isGraphImport) {
                 HasOwnershipTransfer = isGraphImport
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
+                NativeOutputRole = remapped.NativeOutputRole,
+                NativeOutputContracts = remapped.NativeOutputContracts,
             });
         }
         var immutableFunctions = functions.MoveToImmutable();
@@ -545,6 +550,9 @@ public static partial class ModuleCompiler
                 || !CompatibleContract(item.Contract,
                     Contract(actual, dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
                         dependencies.NativePointerTypes))
+                || !SameNativeOutputContracts(item.NativeOutputRole, item.NativeOutputContracts,
+                    actual.NativeOutputRole, actual.NativeOutputContracts,
+                    module.Structures, dependencies.Structures)
                 || !CompatibleImportedNativeVTableMethod(importedNativeVTableMethod,
                     actual.NativeVTableMethod)
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))

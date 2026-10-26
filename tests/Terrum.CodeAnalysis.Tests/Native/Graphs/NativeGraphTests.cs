@@ -31,7 +31,8 @@ public sealed class NativeGraphTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+        return NativeModuleCompiler.CreateProducer(program,
             ["Leaf"], "NodeB", policy);
     }
 
@@ -41,7 +42,8 @@ public sealed class NativeGraphTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
             NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(),
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
+        return NativeModuleCompiler.CreateGraphProducer(program,
             ["Middle"], "NodeA", [leaf], policy);
     }
 
@@ -50,7 +52,8 @@ public sealed class NativeGraphTests
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Middle() + 1; }"),
             NativeModuleCompiler.CreateGraphReference([middle]), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        return NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        return NativeModuleCompiler.CreateGraphConsumer(program,
             [middle], policy);
     }
 
@@ -120,7 +123,7 @@ public sealed class NativeGraphTests
     [Test]
     public void GraphPackagesUseCurrentVersionAndRejectPreviousVersion()
     {
-        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }");
+        var leaf = Leaf(" public int32 Leaf() { return 40; }");
         var middle = Middle("public int32 Middle() { return Leaf() + 1; }", leaf);
         var root = Consumer(middle);
         Assert.That(middle[4], Is.EqualTo(2));
@@ -139,7 +142,7 @@ public sealed class NativeGraphTests
     [Test]
     public void InspectingLeafGraphArtifactPreservesNativeProfile()
     {
-        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }");
+        var leaf = Leaf(" public int32 Leaf() { return 40; }");
 
         Assert.That(NativeModuleCompiler.InspectGraphArtifact(leaf).NativeProfileVersion, Is.EqualTo(NativeModuleCompiler.Inspect(leaf).NativeProfileVersion));
     }
@@ -242,13 +245,18 @@ public sealed class NativeGraphTests
     {
         var leaf = Leaf("public int32 Leaf() { return 40; }");
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Packet { public uint32 Value; }
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0, NonZero)]
-            extern int32 ReadValue(write ptr<int32> value);
+            extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Packet> value);
             public int32 ReadAndReturn() {
-                mut int32 value = 0;
+                init Packet value;
                 unsafe {
-                    if (ReadValue(&value) != 0) { return Leaf() + value; }
+                    if (ReadValue(&init value) != 0) {
+                        return Leaf() + int32(value.Value);
+                    }
                 }
                 return -1;
             }
@@ -264,14 +272,19 @@ public sealed class NativeGraphTests
         Assert.That(info.Exports, Is.EqualTo(["ReadAndReturn"]));
 
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Packet { public uint32 Value; }
             [Terrum.Interop.NativeImport("example.dll", "Adjust")]
-            [Terrum.Interop.NativeOutput(0, NonZero)]
-            extern int32 Adjust(write ptr<int32> value);
+            extern int32 Adjust(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Packet> value);
 
             int32 Main() {
-                mut int32 value = 1;
+                init Packet value;
                 unsafe {
-                    if (Adjust(&value) != 0) { return ReadAndReturn() + value; }
+                    if (Adjust(&init value) != 0) {
+                        return ReadAndReturn() + int32(value.Value);
+                    }
                 }
                 return -1;
             }
@@ -288,7 +301,7 @@ public sealed class NativeGraphTests
     public void GraphProvidersRejectCaseOnlyIdentityDuplicates()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] public int32 Leaf() { return 40; }"));
+            " public int32 Leaf() { return 40; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual10 = compilation.Program; Assert.That(__nunitActual10, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual10!; }))();
         var provider = NativeModuleCompiler.CreateProducer(program, ["Leaf"], "NodeB",
@@ -310,7 +323,7 @@ public sealed class NativeGraphTests
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task UnchangedRootAndMiddleExecuteCompatibleLeafReplacementAsync(NativeRuntimePolicy policy)
     {
-        var original = Leaf("[NoThrow] public int32 Leaf() { return 40; }", policy);
+        var original = Leaf(" public int32 Leaf() { return 40; }", policy);
         var middle = Middle("public int32 Middle() { return Leaf() + 1; }", original, policy);
         var root = Consumer(middle, policy);
         var originalRoot = root.ToArray();
@@ -318,7 +331,7 @@ public sealed class NativeGraphTests
         NativeModuleCompiler.ValidateGraph(root, [original, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, original],
             TimeSpan.FromSeconds(10), policy), Is.EqualTo(42));
-        var replacement = Leaf("[NoThrow] public int32 Leaf() { return 41; }", policy);
+        var replacement = Leaf(" public int32 Leaf() { return 41; }", policy);
         NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
             TimeSpan.FromSeconds(10), policy), Is.EqualTo(43));
@@ -331,7 +344,7 @@ public sealed class NativeGraphTests
     [Test]
     public void RejectsMissingExtraIncompatiblePolicyAndCyclicGraphs()
     {
-        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }");
+        var leaf = Leaf(" public int32 Leaf() { return 40; }");
         var middle = Middle("public int32 Middle() { return Leaf() + 1; }", leaf);
         var root = Consumer(middle);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [middle]))!;
@@ -341,10 +354,10 @@ public sealed class NativeGraphTests
                 ((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = Compilation.CreateLibrary(
                     SyntaxTree.Parse("public int32 Extra() { return 1; }")).Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))(),
                 ["Extra"], "Extra", NativeRuntimePolicy.FailFast)]))!;
+        NativeModuleCompiler.ValidateGraph(root, [
+            Leaf("public int32 Leaf() { return 40; }"), middle]);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
-            Leaf("public int32 Leaf() { return 40; }"), middle]))!;
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
-            Leaf("[NoThrow] public int32 Leaf() { return 40; }", NativeRuntimePolicy.CheckedExceptions), middle]))!;
+            Leaf(" public int32 Leaf() { return 40; }", NativeRuntimePolicy.CheckedExceptions), middle]))!;
         var damaged = middle.ToArray();
         damaged[^1] ^= 1;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root, [leaf, damaged]))!;
@@ -376,16 +389,17 @@ public sealed class NativeGraphTests
             public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             public Token New() { return new Token(20); }
-            [NoThrow] public int32 Take(Token value) { return value.Value; }
+             public int32 Take(Token value) { return value.Value; }
             """;
         static byte[] CompileLeaf(string source)
         {
             var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            return NativeModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))(),
+            var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual13 = compilation.Program; Assert.That(__nunitActual13, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual13!; }))();
+            return NativeModuleCompiler.CreateProducer(program,
                 ["New", "Take", "Token.Close"], "NodeB", NativeRuntimePolicy.FailFast);
         }
         var leaf = CompileLeaf(LeafSource);
@@ -410,9 +424,7 @@ public sealed class NativeGraphTests
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [replacement, middle],
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(43));
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
-            CompileLeaf(LeafSource.Replace("[NoThrow] public int32 Take", "public int32 Take",
-                StringComparison.Ordinal)), middle]))!;
+        NativeModuleCompiler.ValidateGraph(root, [CompileLeaf(LeafSource), middle]);
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateGraph(root, [
             CompileLeaf(LeafSource.Replace("public int32 Value;", "public int32 Other;", StringComparison.Ordinal)
                 .Replace("Value = value;", "Other = value;", StringComparison.Ordinal)
@@ -795,23 +807,16 @@ public sealed class NativeGraphTests
     }
 
     [Test]
-    public void PersistedLibraryAndRootBodiesKeepRecordedNoThrowPromise()
+    public void PersistedGraphContractsOmitNoThrowAndAllowBodyReplacement()
     {
-        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }");
-        var middle = Middle("[NoThrow] public int32 Middle() { return Leaf(); }", leaf);
-        var rootCompilation = Compilation.Create(SyntaxTree.Parse(
-            "[NoThrow] int32 Main() { return Middle(); }"),
-            NativeModuleCompiler.CreateGraphReference([middle]));
-        Assert.That(rootCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, rootCompilation.Diagnostics));
-        var root = NativeModuleCompiler.CreateGraphConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual32 = rootCompilation.Program; Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual32!; }))(),
-            [middle], NativeRuntimePolicy.FailFast);
+        var leaf = Leaf("public int32 Leaf() { return 40; }");
+        var middle = Middle("public int32 Middle() { return Leaf(); }", leaf);
+        var root = Consumer(middle);
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
-        var weakenedMiddle = WeakenRecordedImport(middle, "Leaf", "|NoThrow|MayReturn", "|MayThrow|MayReturn");
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root,
-            [leaf, weakenedMiddle]))!;
-        var weakenedRoot = WeakenRecordedImport(root, "Middle", "|NoThrow|MayReturn", "|MayThrow|MayReturn");
-        _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(weakenedRoot,
-            [leaf, middle]))!;
+        Assert.That(Encoding.UTF8.GetString(middle), Does.Not.Contain("|NoThrow"));
+        Assert.That(Encoding.UTF8.GetString(middle), Does.Not.Contain("|MayThrow"));
+        var replacement = Leaf("public int32 Leaf() { return 41; }");
+        NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
     }
 
     [Test]
@@ -829,7 +834,7 @@ public sealed class NativeGraphTests
             ["Middle"], "NodeA", [leaf], NativeRuntimePolicy.FailFast);
         var root = Consumer(middle);
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
-        var weakened = WeakenRecordedImport(middle, "Halt", "|MayThrow|DoesNotReturn", "|MayThrow|MayReturn");
+        var weakened = WeakenRecordedImport(middle, "Halt", "|DoesNotReturn", "|MayReturn");
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateGraph(root,
             [leaf, weakened]))!;
     }
@@ -851,16 +856,15 @@ public sealed class NativeGraphTests
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
-    public void GraphReplacementCannotWeakenNoThrowPromise(NativeRuntimePolicy policy)
+    public void GraphReplacementIgnoresRetiredNoThrowDimension(NativeRuntimePolicy policy)
     {
-        var leaf = Leaf("[NoThrow] public int32 Leaf() { return 40; }", policy);
+        var leaf = Leaf(" public int32 Leaf() { return 40; }", policy);
         var middle = Middle("public int32 Middle() { return Leaf() + 1; }", leaf, policy);
         var root = Consumer(middle, policy);
 
         NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
-        var replacement = Leaf("public int32 Leaf() { return 40; }", policy);
-        _ = Assert.Throws<ModuleContractException>(() =>
-            NativeModuleCompiler.ValidateGraph(root, [replacement, middle]))!;
+        var replacement = Leaf("public int32 Leaf() { return 41; }", policy);
+        NativeModuleCompiler.ValidateGraph(root, [replacement, middle]);
     }
 
     [Test]

@@ -136,9 +136,12 @@ public sealed class NativeModuleSetsTests
         var alpha = Producer(Alpha, "Alpha", "First");
         var beta = Producer(Beta, "Beta", "Second");
         var consumer = MakeConsumerSource("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Packet { public uint32 Value; }
             [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
-            [Terrum.Interop.NativeOutput(0, NonZero)]
-            extern int32 ReadValue(write ptr<int32> value);
+            extern int32 ReadValue(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Packet> value);
             [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             [Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
@@ -146,14 +149,14 @@ public sealed class NativeModuleSetsTests
                 ptr<char16> second, int32 secondLength, int32 ignoreCase);
 
             int32 Main() {
-                mut int32 value = 0;
+                init Packet value;
                 char16 first = 'A';
                 char16 second = 'A';
                 unsafe {
-                    if (ReadValue(&value) == 0) { return -1; }
+                    if (ReadValue(&init value) == 0) { return -1; }
                     if (CompareStringOrdinal(&first, 1, &second, 1, 0) != 2) { return -2; }
                 }
-                return Alpha() + Beta() + value;
+                return Alpha() + Beta() + int32(value.Value);
             }
             """, alpha, beta);
 
@@ -240,13 +243,13 @@ public sealed class NativeModuleSetsTests
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
-    public void ReplacementChecksRetainedEffectsUnderBothPolicies(NativeRuntimePolicy policy)
+    public void ReplacementIgnoresRetiredNoThrowDimensionUnderBothPolicies(NativeRuntimePolicy policy)
     {
         var beta = Producer(Beta, "Beta", "Second", policy);
-        var noThrow = Producer("[NoThrow] public int32 Alpha() { return 20; }", "Alpha", "First", policy);
-        var effectConsumer = MakeConsumerSource(Consumer, policy, noThrow, beta);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.ValidateConsumerSet(effectConsumer,
-            [Producer(Alpha, "Alpha", "First", policy), beta]))!;
+        var alpha = Producer(Alpha, "Alpha", "First", policy);
+        var consumer = MakeConsumerSource(Consumer, policy, alpha, beta);
+        NativeModuleCompiler.ValidateConsumerSet(consumer,
+            [Producer("public int32 Alpha() { return 21; }", "Alpha", "First", policy), beta]);
 
         var noReturn = Producer("[DoesNotReturn] public void Stop() { require false; }", "Stop", "First", policy);
         var noReturnConsumer = MakeConsumerSource("void Main() { Stop(); }", policy, noReturn, beta);
@@ -288,7 +291,7 @@ public sealed class NativeModuleSetsTests
             public unique struct Lease {
                 public int32 Value;
                 public Lease(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             public Lease Alpha() { return new Lease(20); }
             """;
@@ -306,7 +309,7 @@ public sealed class NativeModuleSetsTests
              unique struct Unused {
                  public int32 Value;
                  public Unused(int32 value) { Value = value; }
-                 [NoThrow] [Cleanup] public void Close() { }
+                  [Cleanup] public void Close() { }
              }
              """, "Alpha", "First");
         var unownedConsumer = MakeConsumer(unusedOwner, beta);
@@ -585,7 +588,7 @@ public sealed class NativeModuleSetsTests
             public unique struct Token {
                 public int32 Value;
                 public Token(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             public Token New() { return new Token(20); }
             public int32 Take(Token value) { return value.Value; }

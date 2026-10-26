@@ -17,15 +17,8 @@ public static partial class ModuleCompiler
 
     private static void RequirePrivateSpanRevision(BinaryReader reader)
     {
-        if (reader is not ModuleReader { FormatVersion:
-            PrivateSpanVersion or DirectNativeImportVersion or DirectNativeParameterVersion
-                or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion or NativePointerVersion
-            or NativeVTableVersion or NativeVTableOffsetVersion or NativeVTableContractVersion
-            or NativeVTableOutputVersion or NativeCallableEntryVersion or ArithmeticOperationVersion })
-        {
-            throw new ModuleFormatException(
-                "Private span IR requires a private-span semantic-module revision.");
-        }
+        _ = reader;
+        throw new ModuleFormatException("Compilation-local span expressions are not supported in semantic modules.");
     }
 
     private static void RequireNativePointerRevision(BinaryReader reader)
@@ -33,21 +26,6 @@ public static partial class ModuleCompiler
         if (reader is not ModuleReader { FormatVersion: >= NativePointerVersion })
         {
             throw new ModuleFormatException("Typed native pointers require semantic-module revision 83.");
-        }
-    }
-
-    private static void ValidatePrivateSpanDeclarations(BoundProgram program)
-    {
-        if (!program.RequiresSourceGrant
-            || program.Structures.Any(static structure =>
-                structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan))
-            || program.Functions.Any(static function => !function.CapturedParameters.IsDefaultOrEmpty
-                || function.ReturnsForwardedBacking || !function.ResultDependencyParameters.IsDefaultOrEmpty
-                || function.ReturnType == PrimitiveType.TokenSpan
-                || (function.IsExternal && function.Variables.Any(static variable =>
-                    variable.Type == PrimitiveType.TokenSpan))))
-        {
-            throw new ModuleContractException("Compilation-local span and capture metadata cannot be persisted.");
         }
     }
 
@@ -66,55 +44,20 @@ public static partial class ModuleCompiler
             NativeFunctionPointerSignatures = module.NativeFunctionPointerSignatures,
             NativePointerTypes = module.NativePointerTypes,
             RequiresSourceGrant = module.RequiresSourceGrant,
+            InvocationProfileId = module.InvocationProfileId,
         };
-        var hasSpans = TokenSpanContract.HasMetadata(program);
-        if (module.FormatVersion is Version or FixedLayoutVersion)
+        if ((!module.Structures.IsDefaultOrEmpty
+                && module.Structures.Any(static structure =>
+                    structure.TokenSpanRole != TokenSpanTypeRole.None
+                    || structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)))
+            || module.Functions.Any(static item => ContractContainsType(item.Contract, PrimitiveType.TokenSpan))
+            || module.Functions.Any(static item => item.Function is BoundFunction function
+                && (function.ReturnType == PrimitiveType.TokenSpan
+                    || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan)))
+            || TokenSpanContract.HasMetadata(program))
         {
-            if (hasSpans || module.Functions.Any(static item =>
-                ContractContainsType(item.Contract, PrimitiveType.TokenSpan)))
-            {
-                throw new ModuleFormatException("Revision 76 cannot retain span IR or contracts.");
-            }
-            return;
-        }
-        if (module.FormatVersion is not (PrivateSpanVersion or DirectNativeImportVersion
-                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
-                or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
-                or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                or ArithmeticOperationVersion)
-            || (module.FormatVersion == PrivateSpanVersion && !module.RequiresSourceGrant)
-            || (hasSpans && !module.RequiresSourceGrant)
-            || module.Functions.Any(static item => item.Import
-                && ContractContainsType(item.Contract, PrimitiveType.TokenSpan)))
-        {
-            throw new ModuleFormatException("Unsupported private-span module boundary.");
-        }
-        if (!hasSpans)
-        {
-            return;
-        }
-        try
-        {
-            ValidatePrivateSpanDeclarations(program);
-        }
-        catch (ModuleContractException exception)
-        {
-            throw new ModuleFormatException("Unsupported private-span declarations.", exception);
-        }
-        var hasSnapshotProjection = false;
-        foreach (var function in functions)
-        {
-            _ = Calls(function.Body, visitExpression: expression => {
-                hasSnapshotProjection |= expression is BoundSnapshotSpan;
-            });
-        }
-        if (hasSpans && (!TokenSpanContract.ValidTokenLayout(module.Structures)
-            || module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Token) != 1
-            || module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Range) != 1
-            || (hasSnapshotProjection
-                && module.Structures.Count(static structure => structure.TokenSpanRole == TokenSpanTypeRole.Snapshot) != 1)))
-        {
-            throw new ModuleFormatException("Private span IR requires explicit token and range type roles.");
+            throw new ModuleFormatException(
+                "Compilation-local spans are not supported in private semantic modules.");
         }
     }
 }

@@ -29,6 +29,7 @@ public static partial class ModuleCompiler
     private const int NativeVTableOutputVersion = 87;
     private const int NativeCallableEntryVersion = 88;
     private const int ArithmeticOperationVersion = 89;
+    private const int NativeOutputContractVersion = 92;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -664,6 +665,10 @@ public static partial class ModuleCompiler
             {
                 Add(variable.Type);
             }
+            foreach (var output in function.NativeOutputContracts)
+            {
+                Add(output.PointeeType);
+            }
             if (function.DirectNativeImport is DirectNativeImport import)
             {
                 foreach (var output in import.Outputs)
@@ -879,6 +884,7 @@ public static partial class ModuleCompiler
             && !buffer.IsWritable && buffer.IsInvocationScoped && buffer.InvocationProfileId is null;
 
     /// <summary>Creates an independently stored producer from named functions in a verified compilation.</summary>
+    /// <remarks>Tagged Host.Source profiles are test-only prototypes; compilation-local spans are never persisted.</remarks>
     public static byte[] CreateProducer(BoundProgram program, IEnumerable<string> exports)
     {
         ArgumentNullException.ThrowIfNull(exports);
@@ -1065,6 +1071,8 @@ public static partial class ModuleCompiler
                     nativePointerTypes), remapped,
                 names.Contains(remapped.Name)) {
                 HasOwnershipTransfer = Compilation.HasOwnershipTransfer(remapped, structures),
+                NativeOutputRole = remapped.NativeOutputRole,
+                NativeOutputContracts = remapped.NativeOutputContracts,
             });
         }
         var classes = ImmutableArray.CreateBuilder<BoundClass>(program.Classes.Length);
@@ -1194,6 +1202,8 @@ public static partial class ModuleCompiler
                     Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
                         program.NativePointerTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                    NativeOutputRole = function.NativeOutputRole,
+                    NativeOutputContracts = function.NativeOutputContracts,
                 });
                 functionCalls?[i] = null;
                 continue;
@@ -1216,6 +1226,13 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
                 }
+                if (!SameNativeOutputContracts(function.NativeOutputRole, function.NativeOutputContracts,
+                    imported.NativeOutputRole, imported.NativeOutputContracts,
+                    program.Structures, producer.Structures))
+                {
+                    throw new ModuleContractException(
+                        $"Reference native-output contract for '{function.Name}' differs from the producer.");
+                }
                 var importedNativeVTableMethod = function.ModuleImport is null
                     ? null : function.NativeVTableMethod;
                 if (!CompatibleImportedNativeVTableMethod(importedNativeVTableMethod,
@@ -1232,6 +1249,8 @@ public static partial class ModuleCompiler
                 declarations.Add(new ModuleFunction(function.Name, imported.Contract, null, true) {
                     HasOwnershipTransfer = hasOwnershipTransfer,
                     ImportedNativeVTableMethod = importedNativeVTableMethod,
+                    NativeOutputRole = function.NativeOutputRole,
+                    NativeOutputContracts = function.NativeOutputContracts,
                 });
                 functionCalls?[i] = null;
             }
@@ -1253,6 +1272,8 @@ public static partial class ModuleCompiler
                     Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
                         program.NativePointerTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
+                    NativeOutputRole = function.NativeOutputRole,
+                    NativeOutputContracts = function.NativeOutputContracts,
                 });
             }
         }
@@ -1299,7 +1320,16 @@ public static partial class ModuleCompiler
             }
         }
         var remapped = declarations.Select(declaration => declaration.Function is BoundFunction function
-            ? declaration with { Function = RemapFunction(function, program.Structures, structures) } : declaration).ToImmutableArray();
+            ? declaration with {
+                Function = RemapFunction(function, program.Structures, structures),
+                NativeOutputRole = function.NativeOutputRole,
+                NativeOutputContracts = RemapNativeOutputContracts(function.NativeOutputContracts,
+                    program.Structures, structures),
+            }
+            : declaration with {
+                NativeOutputContracts = RemapNativeOutputContracts(declaration.NativeOutputContracts,
+                    program.Structures, structures),
+            }).ToImmutableArray();
         return Write(new Module(true, entryPoint, structures, remapped) {
             Classes = [.. program.Classes.Select(@class => RemapClass(@class, program.Structures, structures))],
             ImportedStructures = importedTypes.ToImmutable(),
@@ -1433,6 +1463,9 @@ public static partial class ModuleCompiler
             {
                 if (!available.TryGetValue(declaration.Name, out var replacement)
                     || !CompatibleContract(declaration.Contract, replacement.Contract)
+                    || !SameNativeOutputContracts(declaration.NativeOutputRole,
+                        declaration.NativeOutputContracts, replacement.NativeOutputRole,
+                        replacement.NativeOutputContracts, consumer.Structures, producer.Structures)
                     || !CompatibleImportedNativeVTableMethod(
                         declaration.ImportedNativeVTableMethod,
                         replacement.Function?.NativeVTableMethod)
@@ -2960,6 +2993,66 @@ public static partial class ModuleCompiler
         return found;
     }
 
+    private static bool IsRoleNoThrowIntrinsic(BoundIntrinsic intrinsic) =>
+        NativeBufferIntrinsics.Functions.Any(function =>
+            function.Intrinsic == intrinsic && function.IsNoThrow)
+        || NativeManagedNodeIntrinsics.Functions.Any(function =>
+            function.Intrinsic == intrinsic && function.IsNoThrow);
+
+    private static bool HasOnlyRevision92NativeOutputDependencyContracts(BoundFunction function)
+    {
+        var dependencies = function.DependencyContracts;
+        var outputs = function.NativeOutputContracts;
+        if (dependencies.IsDefault || outputs.IsDefault)
+        {
+            return false;
+        }
+
+        if (dependencies.IsEmpty)
+        {
+            return true;
+        }
+
+        if (outputs.IsEmpty)
+        {
+            return false;
+        }
+
+        var outputFormals = new HashSet<int>();
+        foreach (var output in outputs)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || !outputFormals.Add(output.FormalOrdinal))
+            {
+                return false;
+            }
+        }
+        foreach (var dependency in dependencies)
+        {
+            if (dependency is null
+                || dependency.Destination != BoundDependencyDestination.InitializedOutput
+                || dependency.DestinationOrdinal is not int outputFormal
+                || !outputFormals.Contains(outputFormal)
+                || dependency.Relation is not (BoundDependencyRelation.DependsOn
+                    or BoundDependencyRelation.ForwardsBacking)
+                || dependency.Sources.IsDefault)
+            {
+                return false;
+            }
+        }
+        foreach (var output in outputs)
+        {
+            var projected = NativeOutputContractValidator.CreateDependencies(
+                dependencies, output.FormalOrdinal);
+            if (output.Dependencies.IsDefault || projected.IsDefault
+                || !projected.SequenceEqual(output.Dependencies))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
@@ -3038,19 +3131,8 @@ public static partial class ModuleCompiler
                     .Append((byte)parameter.Retention).Append(':')
                     .Append(parameter.Extent);
             }
-            foreach (var output in vtableMethod.Outputs.OrderBy(
-                static output => output.ParameterIndex))
-            {
-                _ = result.Append("|NativeVTableOutput:")
-                    .Append(output.ParameterIndex).Append(':')
-                    .Append(ContractType(output.PointeeType, structures,
-                        functionPointerSignatures, nativePointerTypes)).Append(':')
-                    .Append(output.ResultCondition).Append(':')
-                    .Append(output.FailureDisposition);
-            }
         }
-        _ = result.Append(function.IsNoThrow ? "|NoThrow" : "|MayThrow")
-            .Append(function.DoesNotReturn ? "|DoesNotReturn" : "|MayReturn");
+        _ = result.Append(function.DoesNotReturn ? "|DoesNotReturn" : "|MayReturn");
         if (function.RequiresUnsafeCaller)
         {
             _ = result.Append("|CallerUnsafe");
@@ -3059,14 +3141,35 @@ public static partial class ModuleCompiler
     }
 
     private static bool CompatibleContract(string expected, string actual) =>
-        TryContractPromises(expected.AsSpan(), out var expectedSignature, out var expectedNoThrow,
+        TryContractPromises(expected.AsSpan(), out var expectedSignature, out _,
             out var expectedNoReturn, out var expectedUnsafeCaller)
-        && TryContractPromises(actual.AsSpan(), out var actualSignature, out var actualNoThrow,
+        && TryContractPromises(actual.AsSpan(), out var actualSignature, out _,
             out var actualNoReturn, out var actualUnsafeCaller)
         && expectedSignature.SequenceEqual(actualSignature)
-        && (!expectedNoThrow || actualNoThrow)
         && (!expectedNoReturn || actualNoReturn)
         && (!actualUnsafeCaller || expectedUnsafeCaller);
+
+    private static bool ContainsRetiredNoThrowToken(ReadOnlySpan<char> contract)
+    {
+        var tokenIndex = 0;
+        while (true)
+        {
+            var separator = contract.IndexOf('|');
+            var token = separator < 0 ? contract : contract[..separator];
+            if (tokenIndex is not (0 or 5)
+                && (token.SequenceEqual("NoThrow".AsSpan())
+                    || token.SequenceEqual("MayThrow".AsSpan())))
+            {
+                return true;
+            }
+            if (separator < 0)
+            {
+                return false;
+            }
+            contract = contract[(separator + 1)..];
+            tokenIndex++;
+        }
+    }
 
     private static bool TryContractPromises(ReadOnlySpan<char> contract, out ReadOnlySpan<char> signature,
         out bool noThrow, out bool noReturn, out bool unsafeCaller)
@@ -3075,6 +3178,10 @@ public static partial class ModuleCompiler
         noThrow = false;
         noReturn = false;
         unsafeCaller = false;
+        if (ContainsRetiredNoThrowToken(contract))
+        {
+            return false;
+        }
         if (contract.EndsWith("|CallerUnsafe".AsSpan(), StringComparison.Ordinal))
         {
             unsafeCaller = true;
@@ -3093,15 +3200,7 @@ public static partial class ModuleCompiler
         {
             return false;
         }
-        if (contract.EndsWith("|NoThrow".AsSpan(), StringComparison.Ordinal))
-        {
-            noThrow = true;
-            signature = contract[..^"|NoThrow".Length];
-        }
-        else if (contract.EndsWith("|MayThrow".AsSpan(), StringComparison.Ordinal))
-        {
-            signature = contract[..^"|MayThrow".Length];
-        }
+        signature = contract;
         return !signature.IsEmpty;
     }
 
@@ -3944,6 +4043,10 @@ public static partial class ModuleCompiler
             ReturnType = RemapType(function.ReturnType, source, destination, classOffset, destinationTypes),
             NativeFunctionPointerType = function.NativeFunctionPointerType is PrimitiveType functionPointerType
                 ? RemapType(functionPointerType, source, destination, classOffset, destinationTypes) : null,
+            NativeOutputContracts = [.. function.NativeOutputContracts.Select(output => output with {
+                PointeeType = RemapType(output.PointeeType, source, destination,
+                    classOffset, destinationTypes),
+            })],
             DirectNativeImport = function.DirectNativeImport is DirectNativeImport import
                 ? import with {
                     Outputs = [.. import.Outputs.Select(output => output with {
@@ -4085,6 +4188,10 @@ public static partial class ModuleCompiler
                 Receiver = RemapExpression(field.Receiver, source, destination, classOffset, destinationTypes),
             },
             BoundOutArgument output => output with { Type = RemapType(output.Type, source, destination, classOffset, destinationTypes) },
+            BoundNativeOutputReservation reservation => reservation with {
+                PointeeType = RemapType(reservation.PointeeType, source, destination,
+                    classOffset, destinationTypes),
+            },
             BoundNativeStorageAddress address => address with {
                 Type = RemapType(address.Type, source, destination, classOffset, destinationTypes),
                 CarrierType = RemapType(address.CarrierType, source, destination, classOffset, destinationTypes),
@@ -4252,14 +4359,36 @@ public static partial class ModuleCompiler
 
     private static void RejectCompilationLocalSpans(BoundProgram program)
     {
-        if (TokenSpanContract.HasMetadata(program))
+        if ((!program.Structures.IsDefaultOrEmpty
+                && program.Structures.Any(static structure =>
+                    structure.TokenSpanRole != TokenSpanTypeRole.None))
+            || TokenSpanContract.HasMetadata(program))
         {
-            ValidatePrivateSpanDeclarations(program);
+            throw new ModuleContractException(
+                "Compilation-local spans are not supported in private semantic modules.");
         }
     }
 
     private static byte[] Write(Module module, BoundProgram program)
     {
+        if (program.Functions.Any(static function =>
+            function.IsNoThrow && !IsRoleNoThrowIntrinsic(function.Intrinsic)))
+        {
+            throw new ModuleContractException(
+                "General NoThrow declarations are not supported by structured-module revision 92.");
+        }
+        var persistedFunctionNames = module.Functions
+            .Select(static function => function.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var function in program.Functions)
+        {
+            if (persistedFunctionNames.Contains(function.Name)
+                && !HasOnlyRevision92NativeOutputDependencyContracts(function))
+            {
+                throw new ModuleContractException(
+                    $"Function '{function.Name}' has dependency contracts not represented by structured-module revision 92.");
+            }
+        }
         if (module.NativeFunctionPointerSignatures.IsDefault
             || !module.NativeFunctionPointerSignatures.SequenceEqual(program.NativeFunctionPointerSignatures)
             || !NativeFunctionPointerContract.IsValidTable(module.NativeFunctionPointerSignatures))
@@ -4301,19 +4430,7 @@ public static partial class ModuleCompiler
         var hasNativeCallableEntryNames = module.Functions.Any(static function =>
             function.Function?.NativeCallableEntryName is not null
             || function.Contract.Contains("|NativeCallableEntry:", StringComparison.Ordinal));
-        if (TokenSpanContract.HasMetadata(program)
-            || ScalarFrontendHost.IsInvocationProfileIdentity(module.InvocationProfileId))
-        {
-            module = module with {
-                FormatVersion = hasNativeFunctionPointers ? NativeFunctionPointerVersion
-                    : hasDirectNativeParameters ? DirectNativeParameterVersion
-                    : hasDirectNativeImports ? DirectNativeImportVersion : PrivateSpanVersion,
-                Structures = [.. module.Structures.Select(static structure => structure with {
-                    TokenSpanRole = TokenSpanContract.RoleOf(structure),
-                })],
-            };
-        }
-        else if (hasDirectNativeParameters)
+        if (hasDirectNativeParameters)
         {
             module = module with { FormatVersion = DirectNativeParameterVersion };
         }
@@ -4341,7 +4458,7 @@ public static partial class ModuleCompiler
         {
             module = module with { FormatVersion = NativeCallableEntryVersion };
         }
-        module = module with { FormatVersion = ArithmeticOperationVersion };
+        module = module with { FormatVersion = NativeOutputContractVersion };
         ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null
             ? !module.InvocationBuffers.IsEmpty
@@ -4390,11 +4507,11 @@ public static partial class ModuleCompiler
         foreach (var structure in module.Structures)
         {
             PutString(writer, structure.Name);
-            if (module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
-                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
+            if (module.FormatVersion is DirectNativeImportVersion
+                or DirectNativeParameterVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                or ArithmeticOperationVersion)
+                or ArithmeticOperationVersion or NativeOutputContractVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -4489,10 +4606,24 @@ public static partial class ModuleCompiler
             writer.Write(item.Import);
             writer.Write(item.Function is not null);
             writer.Write(item.HasOwnershipTransfer);
+            if (module.FormatVersion >= NativeOutputContractVersion)
+            {
+                var outputRole = item.NativeOutputRole;
+                var outputContracts = item.NativeOutputContracts;
+                if (item.Function is BoundFunction outputFunction
+                    && (outputRole != outputFunction.NativeOutputRole
+                        || !SameNativeOutputContracts(outputContracts, outputFunction.NativeOutputContracts,
+                            module.Structures, module.Structures)))
+                {
+                    throw new ModuleContractException(
+                        "Module native-output metadata differs from its function declaration.");
+                }
+                ValidateNativeOutputContracts(outputRole, outputContracts, item.Contract, module.Structures);
+                PutNativeOutputContracts(writer, outputRole, outputContracts);
+            }
             if (module.FormatVersion >= NativeVTableContractVersion)
             {
-                PutImportedNativeVTableMethod(writer, item.ImportedNativeVTableMethod,
-                    module.FormatVersion >= NativeVTableOutputVersion);
+                PutImportedNativeVTableMethod(writer, item.ImportedNativeVTableMethod);
             }
             if (item.Function is BoundFunction function)
             {
@@ -4503,7 +4634,7 @@ public static partial class ModuleCompiler
                     module.FormatVersion >= NativeCallableEntryVersion,
                     module.FormatVersion >= NativeVTableVersion,
                     module.FormatVersion >= NativeVTableOffsetVersion,
-                    module.FormatVersion >= NativeVTableOutputVersion, module.Structures,
+                    module.Structures,
                     module.NativeFunctionPointerSignatures, module.NativePointerTypes);
             }
         }
@@ -4597,11 +4728,11 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Module has trailing data or an imported entry point.");
             }
             if (hasPrivateManagedState || (!expectedConsumer
-                && module.FormatVersion is PrivateSpanVersion or DirectNativeImportVersion
-                    or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
+                && module.FormatVersion is DirectNativeImportVersion
+                    or DirectNativeParameterVersion or NativeFunctionPointerVersion
                     or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                     or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                    or ArithmeticOperationVersion))
+                    or ArithmeticOperationVersion or NativeOutputContractVersion))
             {
                 ValidateProducer(module);
             }
@@ -4623,11 +4754,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version is not (Version or PrivateSpanVersion or FixedLayoutVersion
-            or DirectNativeImportVersion or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
-            or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
-            or NativeVTableOffsetVersion or NativeVTableContractVersion or NativeVTableOutputVersion
-            or NativeCallableEntryVersion or ArithmeticOperationVersion)
+        if (version != NativeOutputContractVersion
             || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
@@ -4642,21 +4769,21 @@ public static partial class ModuleCompiler
         var requiresSourceGrant = GetBool(reader);
         var profileIdText = GetString(reader);
         var invocationProfileId = profileIdText.Length == 0 ? null : profileIdText;
-        var bufferCount = Count(reader, version is PrivateSpanVersion or DirectNativeImportVersion
-            or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
+        var bufferCount = Count(reader, version is DirectNativeImportVersion
+            or DirectNativeParameterVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-            or ArithmeticOperationVersion
+            or ArithmeticOperationVersion or NativeOutputContractVersion
                 ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
                     || (invocationProfileId != ScannerHost.InvocationProfileIdentity
-                        && (version is not (PrivateSpanVersion or DirectNativeImportVersion
-                                or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion
+                        && (version is not (DirectNativeImportVersion
+                                or DirectNativeParameterVersion
                                 or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
                                 or NativeVTableOffsetVersion or NativeVTableContractVersion
                                 or NativeVTableOutputVersion or NativeCallableEntryVersion
-                                or ArithmeticOperationVersion)
+                                or ArithmeticOperationVersion or NativeOutputContractVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId)))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -4752,11 +4879,11 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Duplicate or empty type identity.");
             }
             var role = reader is ModuleReader {
-                FormatVersion: PrivateSpanVersion or DirectNativeImportVersion
-                    or DirectNativeParameterVersion or PrivateSpanFixedLayoutVersion or NativeFunctionPointerVersion
+                FormatVersion: DirectNativeImportVersion
+                    or DirectNativeParameterVersion or NativeFunctionPointerVersion
                         or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                         or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                        or ArithmeticOperationVersion,
+                        or ArithmeticOperationVersion or NativeOutputContractVersion,
             }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
@@ -4859,6 +4986,292 @@ public static partial class ModuleCompiler
         return classes.MoveToImmutable();
     }
 
+    private static void PutNativeOutputContracts(BinaryWriter writer,
+        NativeOutputDeclarationRole? role, ImmutableArray<NativeOutputContract> outputs)
+    {
+        writer.Write(outputs.Length);
+        if (outputs.IsEmpty)
+        {
+            return;
+        }
+        writer.Write((byte)role!.Value);
+        writer.Write((byte)0);
+        writer.Write((ushort)0);
+        foreach (var output in outputs)
+        {
+            writer.Write(checked((uint)output.FormalOrdinal));
+            writer.Write((int)output.PointeeType);
+            writer.Write((byte)output.Formation);
+            writer.Write((byte)output.PublicationPhase);
+            writer.Write((byte)output.SuccessSelector);
+            writer.Write((byte)output.SuccessState);
+            writer.Write((byte)output.ComplementSelector);
+            writer.Write((byte)output.ComplementState);
+            writer.Write((ushort)0);
+            writer.Write(output.Dependencies.Length);
+            foreach (var dependency in output.Dependencies)
+            {
+                writer.Write(dependency.DestinationKind);
+                writer.Write((byte)dependency.SourceKind);
+                writer.Write((byte)dependency.Relationship);
+                writer.Write((byte)dependency.Phase);
+                writer.Write(checked((uint)dependency.DestinationOrdinal));
+                writer.Write(checked((uint)dependency.SourceOrdinal));
+            }
+        }
+    }
+
+    private static (NativeOutputDeclarationRole? Role, ImmutableArray<NativeOutputContract> Outputs)
+        ReadNativeOutputContracts(BinaryReader reader, string contract,
+            ImmutableArray<BoundStruct> structures)
+    {
+        var outputCount = Count(reader, MaximumSlots);
+        if (outputCount == 0)
+        {
+            return (null, []);
+        }
+        var role = (NativeOutputDeclarationRole)reader.ReadByte();
+        if (reader.ReadByte() != 0 || reader.ReadUInt16() != 0)
+        {
+            throw new ModuleFormatException("Native-output collection flags or reserved bits are invalid.");
+        }
+
+        var outputs = ImmutableArray.CreateBuilder<NativeOutputContract>(outputCount);
+        for (var index = 0; index < outputCount; index++)
+        {
+            var formalOrdinal = reader.ReadUInt32();
+            var pointeeType = GetType(reader);
+            var formation = (NativeOutputFormation)reader.ReadByte();
+            var publicationPhase = (NativeOutputPublicationPhase)reader.ReadByte();
+            var successSelector = (NativeOutputSelector)reader.ReadByte();
+            var successState = (NativeOutputState)reader.ReadByte();
+            var complementSelector = (NativeOutputSelector)reader.ReadByte();
+            var complementState = (NativeOutputState)reader.ReadByte();
+            var reserved = reader.ReadUInt16();
+            var dependencyCount = Count(reader, MaximumSlots);
+            var dependencies = ImmutableArray.CreateBuilder<NativeOutputDependency>(dependencyCount);
+            for (var dependencyIndex = 0; dependencyIndex < dependencyCount; dependencyIndex++)
+            {
+                var destinationKind = reader.ReadByte();
+                var sourceKind = (NativeOutputDependencySourceKind)reader.ReadByte();
+                var relationship = (NativeOutputDependencyRelationship)reader.ReadByte();
+                var phase = (NativeOutputPublicationPhase)reader.ReadByte();
+                var destinationOrdinal = reader.ReadUInt32();
+                var sourceOrdinal = reader.ReadUInt32();
+                if (destinationOrdinal > int.MaxValue || sourceOrdinal > int.MaxValue)
+                {
+                    throw new ModuleFormatException("Native-output dependency ordinal is invalid.");
+                }
+                dependencies.Add(new NativeOutputDependency(destinationKind, sourceKind,
+                    relationship, phase, (int)destinationOrdinal, (int)sourceOrdinal));
+            }
+            if (formalOrdinal > int.MaxValue || reserved != 0)
+            {
+                throw new ModuleFormatException("Native-output record ordinal or reserved bits are invalid.");
+            }
+            outputs.Add(new NativeOutputContract((int)formalOrdinal, pointeeType, formation,
+                publicationPhase, successSelector, successState, complementSelector,
+                complementState, dependencies.MoveToImmutable()));
+        }
+
+        var result = outputs.MoveToImmutable();
+        ValidateNativeOutputContracts(role, result, contract, structures);
+        return (role, result);
+    }
+
+    private static void ValidateNativeOutputContracts(NativeOutputDeclarationRole? role,
+        ImmutableArray<NativeOutputContract> outputs, string contract,
+        ImmutableArray<BoundStruct> structures)
+    {
+        if (outputs.IsDefault)
+        {
+            throw new ModuleFormatException("Native-output collection is missing.");
+        }
+        if (outputs.IsEmpty)
+        {
+            if (role is not null)
+            {
+                throw new ModuleFormatException("An empty native-output collection has a role.");
+            }
+            return;
+        }
+        if (role != NativeOutputDeclarationRole.DirectImport)
+        {
+            throw new ModuleFormatException("Native-output declaration role is unsupported.");
+        }
+
+        var parts = contract.Split('|');
+        var parameterCount = ContractParameterCount(parts);
+        if (outputs.Length > parameterCount)
+        {
+            throw new ModuleFormatException("Native-output count exceeds the explicit formal count.");
+        }
+        var resultType = parts[1] == ContractType(PrimitiveType.Int32, structures)
+            ? PrimitiveType.Int32
+            : parts[1] == ContractType(PrimitiveType.UInt32, structures)
+                ? PrimitiveType.UInt32
+                : PrimitiveType.Void;
+        var outputFormals = new HashSet<int>();
+        foreach (var output in outputs)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || output.FormalOrdinal >= parameterCount
+                || !outputFormals.Add(output.FormalOrdinal)
+                || output.Formation != NativeOutputFormation.VacantWholeObject
+                || output.PublicationPhase != NativeOutputPublicationPhase.NormalCompletion
+                || output.SuccessState != NativeOutputState.Live
+                || output.ComplementState != NativeOutputState.Vacant
+                || !DirectNativeImportContract.IsAggregateOutputPointee(output.PointeeType, structures))
+            {
+                throw new ModuleFormatException("Native-output record is invalid.");
+            }
+            var expectedFormalType = "in:write ptr<"
+                + TypeName(output.PointeeType, structures) + ">";
+            if (parts[8 + output.FormalOrdinal] != expectedFormalType)
+            {
+                throw new ModuleFormatException("Native-output formal differs from its writable pointer type.");
+            }
+            if (!ValidOutputSelectors(output, resultType)
+                || output.Dependencies.IsDefaultOrEmpty)
+            {
+                throw new ModuleFormatException("Native-output selector or dependency set is invalid.");
+            }
+        }
+
+        var previousFormal = -1;
+        foreach (var output in outputs)
+        {
+            if (output.FormalOrdinal <= previousFormal)
+            {
+                throw new ModuleFormatException("Native-output formals are duplicated or unordered.");
+            }
+            previousFormal = output.FormalOrdinal;
+            var previousSourceKind = 0;
+            var previousSourceOrdinal = -1;
+            var emptySource = false;
+            for (var index = 0; index < output.Dependencies.Length; index++)
+            {
+                var dependency = output.Dependencies[index];
+                if (dependency.DestinationKind != 2
+                    || dependency.Phase != NativeOutputPublicationPhase.NormalCompletion
+                    || dependency.DestinationOrdinal != output.FormalOrdinal)
+                {
+                    throw new ModuleFormatException("Native-output dependency destination is invalid.");
+                }
+                if (dependency.SourceKind == NativeOutputDependencySourceKind.Empty)
+                {
+                    if (output.Dependencies.Length != 1
+                        || dependency.Relationship != NativeOutputDependencyRelationship.Empty
+                        || dependency.SourceOrdinal != 0)
+                    {
+                        throw new ModuleFormatException("Native-output empty dependency is invalid.");
+                    }
+                    emptySource = true;
+                    continue;
+                }
+                if (emptySource
+                    || dependency.SourceKind != NativeOutputDependencySourceKind.Formal
+                    || dependency.Relationship is not (NativeOutputDependencyRelationship.Forward
+                        or NativeOutputDependencyRelationship.Union)
+                    || dependency.SourceOrdinal < 0
+                    || dependency.SourceOrdinal >= parameterCount
+                    || outputFormals.Contains(dependency.SourceOrdinal)
+                    || (byte)dependency.SourceKind < previousSourceKind
+                    || ((byte)dependency.SourceKind == previousSourceKind
+                        && dependency.SourceOrdinal <= previousSourceOrdinal))
+                {
+                    throw new ModuleFormatException("Native-output dependency source is invalid.");
+                }
+                previousSourceKind = (byte)dependency.SourceKind;
+                previousSourceOrdinal = dependency.SourceOrdinal;
+            }
+        }
+    }
+
+    private static bool ValidOutputSelectors(NativeOutputContract output, PrimitiveType resultType) =>
+        (output.SuccessSelector, output.ComplementSelector, resultType) switch {
+            (NativeOutputSelector.NonZero, NativeOutputSelector.Zero,
+                PrimitiveType.Int32 or PrimitiveType.UInt32) => true,
+            (NativeOutputSelector.NonNegative, NativeOutputSelector.Negative,
+                PrimitiveType.Int32) => true,
+            _ => false,
+        };
+
+    private static ImmutableArray<DirectNativeOutput> CreateLegacyNativeOutputs(
+        NativeOutputDeclarationRole? role, ImmutableArray<NativeOutputContract> outputs,
+        PrimitiveType resultType)
+    {
+        if (outputs.IsDefault || outputs.IsEmpty)
+        {
+            return [];
+        }
+        if (role != NativeOutputDeclarationRole.DirectImport)
+        {
+            throw new ModuleFormatException("Native-output declaration role is unsupported.");
+        }
+        var result = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputs.Length);
+        foreach (var output in outputs)
+        {
+            var resultCondition = output.SuccessSelector switch {
+                NativeOutputSelector.NonZero when resultType == PrimitiveType.UInt32 =>
+                    DirectNativeImportContract.UInt32NonZeroResultCondition,
+                NativeOutputSelector.NonZero =>
+                    DirectNativeImportContract.Int32NonZeroResultCondition,
+                NativeOutputSelector.NonNegative when resultType == PrimitiveType.Int32 =>
+                    DirectNativeImportContract.Int32NonNegativeResultCondition,
+                _ => throw new ModuleFormatException("Native-output result selector is invalid."),
+            };
+            result.Add(new DirectNativeOutput(output.FormalOrdinal, output.PointeeType,
+                resultCondition, 1));
+        }
+        return result.MoveToImmutable();
+    }
+
+    private static bool SameNativeOutputContracts(NativeOutputDeclarationRole? expectedRole,
+        ImmutableArray<NativeOutputContract> expected, NativeOutputDeclarationRole? actualRole,
+        ImmutableArray<NativeOutputContract> actual, ImmutableArray<BoundStruct> expectedStructures,
+        ImmutableArray<BoundStruct> actualStructures) =>
+        expectedRole == actualRole
+        && SameNativeOutputContracts(expected, actual, expectedStructures, actualStructures);
+
+    private static bool SameNativeOutputContracts(ImmutableArray<NativeOutputContract> expected,
+        ImmutableArray<NativeOutputContract> actual, ImmutableArray<BoundStruct> expectedStructures,
+        ImmutableArray<BoundStruct> actualStructures)
+    {
+        if (expected.IsDefault || actual.IsDefault || expected.Length != actual.Length)
+        {
+            return false;
+        }
+        for (var index = 0; index < expected.Length; index++)
+        {
+            var expectedOutput = expected[index];
+            var actualOutput = actual[index];
+            if (expectedOutput is null || actualOutput is null
+                || expectedOutput.FormalOrdinal != actualOutput.FormalOrdinal
+                || ContractType(expectedOutput.PointeeType, expectedStructures)
+                    != ContractType(actualOutput.PointeeType, actualStructures)
+                || expectedOutput.Formation != actualOutput.Formation
+                || expectedOutput.PublicationPhase != actualOutput.PublicationPhase
+                || expectedOutput.SuccessSelector != actualOutput.SuccessSelector
+                || expectedOutput.SuccessState != actualOutput.SuccessState
+                || expectedOutput.ComplementSelector != actualOutput.ComplementSelector
+                || expectedOutput.ComplementState != actualOutput.ComplementState
+                || expectedOutput.Dependencies.IsDefault || actualOutput.Dependencies.IsDefault
+                || !expectedOutput.Dependencies.SequenceEqual(actualOutput.Dependencies))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static ImmutableArray<NativeOutputContract> RemapNativeOutputContracts(
+        ImmutableArray<NativeOutputContract> outputs, ImmutableArray<BoundStruct> source,
+        ImmutableArray<BoundStruct> destination) =>
+        outputs.IsDefault ? default : [.. outputs.Select(output => output with {
+            PointeeType = RemapType(output.PointeeType, source, destination),
+        })];
+
     private static ImmutableArray<ModuleFunction> ReadFunctions(BinaryReader reader, int count, bool expectedConsumer,
         ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
@@ -4872,19 +5285,27 @@ public static partial class ModuleCompiler
         {
             var name = GetString(reader);
             var contract = GetString(reader);
+            if (!TryContractPromises(contract.AsSpan(), out _, out _, out _, out _))
+            {
+                throw new ModuleFormatException(
+                    "Module declaration contains an invalid or retired effect token.");
+            }
             var import = GetBool(reader);
             var hasBody = GetBool(reader);
             var ownershipTransfer = GetBool(reader);
+            var (nativeOutputRole, nativeOutputContracts) =
+                ReadNativeOutputContracts(reader, contract, structures);
             var importedNativeVTableMethod =
                 reader is ModuleReader { FormatVersion: >= NativeVTableContractVersion }
-                    ? GetImportedNativeVTableMethod(reader, import, hasBody, contract, structures,
-                        reader is ModuleReader { FormatVersion: >= NativeVTableOutputVersion })
+                    ? GetImportedNativeVTableMethod(reader, import, hasBody, contract, structures)
                     : null;
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
             }
-            var function = hasBody ? GetFunction(reader, ref remaining) : null;
+            var function = hasBody
+                ? GetFunction(reader, ref remaining, nativeOutputRole, nativeOutputContracts)
+                : null;
             if (!expectedConsumer && import && function is BoundFunction exported
                 && !Exportable(exported, structures, nativePointerTypes))
             {
@@ -4917,6 +5338,23 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException("Direct native import metadata is invalid.");
             }
+            if (function is not null
+                && !SameNativeOutputContracts(nativeOutputRole, nativeOutputContracts,
+                    function.NativeOutputRole, function.NativeOutputContracts, structures, structures))
+            {
+                throw new ModuleFormatException("Function body contradicts its native-output metadata.");
+            }
+            if (function is not null && !HasOnlyRevision92NativeOutputDependencyContracts(function))
+            {
+                throw new ModuleFormatException(
+                    "Function dependency contracts exceed structured-module revision 92 output metadata.");
+            }
+            if (function is not null && !nativeOutputContracts.IsEmpty
+                && function.DirectNativeImport is null)
+            {
+                throw new ModuleFormatException(
+                    "Native-output contracts require a supported direct native import.");
+            }
             if ((function?.IsOperator == true || HasOperatorContractMarker(contract))
                 && !IsSupportedModuleOperatorContract(contract, structures, valueTypes, import))
             {
@@ -4925,6 +5363,8 @@ public static partial class ModuleCompiler
             var item = new ModuleFunction(name, contract, function, import) {
                 HasOwnershipTransfer = ownershipTransfer,
                 ImportedNativeVTableMethod = importedNativeVTableMethod,
+                NativeOutputRole = nativeOutputRole,
+                NativeOutputContracts = nativeOutputContracts,
             };
             if (HasUnsupportedModuleCallerUnsafeContract(item, structures, valueTypes))
             {
@@ -4937,7 +5377,7 @@ public static partial class ModuleCompiler
 
     private static NativeVTableMethodDefinition? GetImportedNativeVTableMethod(
         BinaryReader reader, bool import, bool hasBody, string contract,
-        ImmutableArray<BoundStruct> structures, bool supportsOutputs)
+        ImmutableArray<BoundStruct> structures)
     {
         if (!GetBool(reader))
         {
@@ -4984,41 +5424,14 @@ public static partial class ModuleCompiler
                 access, retention, extent));
             previousParameterIndex = parameterIndex;
         }
-        var outputs = ImmutableArray<DirectNativeOutput>.Empty;
-        if (supportsOutputs)
-        {
-            var outputCount = Count(reader, MaximumSlots);
-            var outputBuilder = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputCount);
-            var previousOutputIndex = 0;
-            for (var index = 0; index < outputCount; index++)
-            {
-                var parameterIndex = reader.ReadInt32();
-                var pointeeType = (PrimitiveType)reader.ReadInt32();
-                var resultCondition = reader.ReadUInt32();
-                var failureDisposition = reader.ReadUInt32();
-                if (parameterIndex <= previousOutputIndex
-                    || parameterIndex >= functionParameterCount
-                    || !DirectNativeImportContract.IsOutputPointee(pointeeType)
-                    || resultCondition is < DirectNativeImportContract.Int32NonZeroResultCondition
-                        or > DirectNativeImportContract.Int32NonNegativeResultCondition
-                    || failureDisposition != 1)
-                {
-                    throw new ModuleFormatException("Imported native vtable output is invalid.");
-                }
-                outputBuilder.Add(new DirectNativeOutput(parameterIndex, pointeeType,
-                    resultCondition, failureDisposition));
-                previousOutputIndex = parameterIndex;
-            }
-            outputs = outputBuilder.MoveToImmutable();
-        }
         return new NativeVTableMethodDefinition(slot, parameters.MoveToImmutable(), vtableByteOffset)
         {
-            Outputs = outputs,
+            Outputs = [],
         };
     }
 
     private static void PutImportedNativeVTableMethod(BinaryWriter writer,
-        NativeVTableMethodDefinition? method, bool supportsOutputs)
+        NativeVTableMethodDefinition? method)
     {
         writer.Write(method is not null);
         if (method is null)
@@ -5041,28 +5454,17 @@ public static partial class ModuleCompiler
             writer.Write((byte)parameter.Retention);
             writer.Write(parameter.Extent);
         }
-        if (supportsOutputs)
+        if (!method.Outputs.IsDefaultOrEmpty)
         {
-            if (method.Outputs.IsDefault)
-            {
-                throw new ModuleFormatException("Imported native vtable outputs are missing.");
-            }
-            writer.Write(method.Outputs.Length);
-            foreach (var output in method.Outputs.OrderBy(
-                static output => output.ParameterIndex))
-            {
-                writer.Write(output.ParameterIndex);
-                writer.Write((int)output.PointeeType);
-                writer.Write(output.ResultCondition);
-                writer.Write(output.FailureDisposition);
-            }
+            throw new ModuleFormatException(
+                "Native vtable output tuples are not supported by structured-module revision 92.");
         }
     }
 
     private static void PutFunction(BinaryWriter writer, BoundFunction function, string[] names,
         ref int remaining, bool supportsDirectNativeImports, bool supportsDirectNativeParameters,
         bool supportsNativeFunctionPointers, bool supportsNativeCallableEntries, bool supportsNativeVTableMethods,
-        bool supportsNativeVTableOffsets, bool supportsNativeVTableOutputs,
+        bool supportsNativeVTableOffsets,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
@@ -5074,7 +5476,6 @@ public static partial class ModuleCompiler
         writer.Write(function.IsInternal);
         writer.Write(function.IsStatic);
         writer.Write(function.IsOperator);
-        writer.Write(function.IsNoThrow);
         writer.Write(function.DoesNotReturn);
         writer.Write(function.RequiresUnsafeCaller);
         writer.Write(function.IsCleanup);
@@ -5141,21 +5542,10 @@ public static partial class ModuleCompiler
                     writer.Write((byte)parameter.Retention);
                     writer.Write(parameter.Extent);
                 }
-                if (supportsNativeVTableOutputs)
+                if (!method.Outputs.IsDefaultOrEmpty)
                 {
-                    if (method.Outputs.IsDefault)
-                    {
-                        throw new ModuleFormatException("Native vtable outputs are missing.");
-                    }
-                    writer.Write(method.Outputs.Length);
-                    foreach (var output in method.Outputs.OrderBy(
-                        static output => output.ParameterIndex))
-                    {
-                        writer.Write(output.ParameterIndex);
-                        writer.Write((int)output.PointeeType);
-                        writer.Write(output.ResultCondition);
-                        writer.Write(output.FailureDisposition);
-                    }
+                    throw new ModuleContractException(
+                        "Native vtable output tuples are not supported by structured-module revision 92.");
                 }
             }
         }
@@ -5177,14 +5567,6 @@ public static partial class ModuleCompiler
                 }
                 PutString(writer, import.LibraryName);
                 PutString(writer, import.ExportName);
-                writer.Write(import.Outputs.Length);
-                foreach (var output in import.Outputs)
-                {
-                    writer.Write(output.ParameterIndex);
-                    writer.Write((int)output.PointeeType);
-                    writer.Write(output.ResultCondition);
-                    writer.Write(output.FailureDisposition);
-                }
                 if (supportsDirectNativeParameters)
                 {
                     writer.Write(import.Parameters.Length);
@@ -5214,7 +5596,9 @@ public static partial class ModuleCompiler
         PutStatement(writer, function.Body, names, ref remaining, 0);
     }
 
-    private static BoundFunction GetFunction(BinaryReader reader, ref int remaining)
+    private static BoundFunction GetFunction(BinaryReader reader, ref int remaining,
+        NativeOutputDeclarationRole? outputRole,
+        ImmutableArray<NativeOutputContract> outputContracts)
     {
         var name = GetString(reader);
         var type = GetType(reader);
@@ -5223,7 +5607,6 @@ public static partial class ModuleCompiler
         var isInternal = GetBool(reader);
         var isStatic = GetBool(reader);
         var isOperator = GetBool(reader);
-        var isNoThrow = GetBool(reader);
         var doesNotReturn = GetBool(reader);
         var requiresUnsafeCaller = GetBool(reader);
         var isCleanup = GetBool(reader);
@@ -5264,22 +5647,10 @@ public static partial class ModuleCompiler
                     (PrimitiveType)reader.ReadInt32(), (NativeParameterAccess)reader.ReadByte(),
                     (NativeParameterRetention)reader.ReadByte(), reader.ReadInt32()));
             }
-            var vtableOutputs = ImmutableArray<DirectNativeOutput>.Empty;
-            if (reader is ModuleReader { FormatVersion: >= NativeVTableOutputVersion })
-            {
-                var outputCount = Count(reader, MaximumSlots);
-                var outputBuilder = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputCount);
-                for (var index = 0; index < outputCount; index++)
-                {
-                    outputBuilder.Add(new DirectNativeOutput(reader.ReadInt32(),
-                        (PrimitiveType)reader.ReadInt32(), reader.ReadUInt32(), reader.ReadUInt32()));
-                }
-                vtableOutputs = outputBuilder.MoveToImmutable();
-            }
             nativeVTableMethod = new NativeVTableMethodDefinition(slot,
                 vtableParameters.MoveToImmutable(), vtableByteOffset)
             {
-                Outputs = vtableOutputs,
+                Outputs = [],
             };
         }
         if (reader is ModuleReader { FormatVersion: >= DirectNativeImportVersion })
@@ -5289,13 +5660,7 @@ public static partial class ModuleCompiler
             {
                 var libraryName = GetString(reader);
                 var exportName = GetString(reader);
-                var outputCount = Count(reader, MaximumSlots);
-                var outputs = ImmutableArray.CreateBuilder<DirectNativeOutput>(outputCount);
-                for (var outputIndex = 0; outputIndex < outputCount; outputIndex++)
-                {
-                    outputs.Add(new DirectNativeOutput(reader.ReadInt32(),
-                        (PrimitiveType)reader.ReadInt32(), reader.ReadUInt32(), reader.ReadUInt32()));
-                }
+                var outputs = CreateLegacyNativeOutputs(outputRole, outputContracts, type);
                 var directParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>();
                 if (reader is ModuleReader { FormatVersion: >= DirectNativeParameterVersion })
                 {
@@ -5307,7 +5672,7 @@ public static partial class ModuleCompiler
                             (NativeParameterRetention)reader.ReadByte(), reader.ReadInt32()));
                     }
                 }
-                directNativeImport = new DirectNativeImport(libraryName, exportName, outputs.MoveToImmutable()) {
+                directNativeImport = new DirectNativeImport(libraryName, exportName, outputs) {
                     Parameters = directParameters.ToImmutable(),
                 };
             }
@@ -5350,7 +5715,7 @@ public static partial class ModuleCompiler
             IsInternal = isInternal,
             IsStatic = isStatic,
             IsOperator = isOperator,
-            IsNoThrow = isNoThrow,
+            IsNoThrow = IsRoleNoThrowIntrinsic(intrinsic),
             DoesNotReturn = doesNotReturn,
             RequiresUnsafeCaller = requiresUnsafeCaller,
             IsCleanup = isCleanup,
@@ -5364,6 +5729,9 @@ public static partial class ModuleCompiler
             IsExternal = isExternal,
             DirectNativeImport = directNativeImport,
             NativeVTableMethod = nativeVTableMethod,
+            NativeOutputRole = outputRole,
+            NativeOutputContracts = outputContracts,
+            DependencyContracts = NativeOutputContractValidator.RestoreDependencyContracts(outputContracts),
         };
     }
 
@@ -5389,7 +5757,8 @@ public static partial class ModuleCompiler
             BoundUnsafe => (byte)11,
             BoundTryCatch => (byte)12,
             BoundDrop => (byte)13,
-            BoundDropSpan => (byte)28,
+            BoundDropSpan => throw new ModuleContractException(
+                "Compilation-local span statements are not supported in semantic modules."),
             BoundOwnerDeclaration => (byte)14,
             BoundVacantLocal => (byte)24,
             BoundLifetimeEnd => (byte)26,
@@ -5452,9 +5821,6 @@ public static partial class ModuleCompiler
                 break;
             case BoundOwnerDeclaration declaration:
                 writer.Write(declaration.Variable);
-                break;
-            case BoundDropSpan dropSpan:
-                writer.Write(dropSpan.Variable);
                 break;
             case BoundVacantLocal vacant:
                 writer.Write(vacant.Variable);
@@ -5760,15 +6126,16 @@ public static partial class ModuleCompiler
             BoundIsInitialized => (byte)28,
             BoundBufferLength => (byte)29,
             BoundBufferRead => (byte)30,
-            BoundSnapshotSpan => (byte)32,
-            BoundSpanLength => (byte)33,
-            BoundSpanRead => (byte)34,
+            BoundSnapshotSpan or BoundSpanLength or BoundSpanRead =>
+                throw new ModuleContractException(
+                    "Compilation-local span expressions are not supported in semantic modules."),
             BoundNativeStorageAddress => (byte)35,
             BoundNativeFunctionAddress => (byte)36,
             BoundIndirectCall => (byte)37,
             BoundNativePointerAddress => (byte)38,
             BoundNativePointerRead => (byte)39,
             BoundNativePointerWrite => (byte)40,
+            BoundNativeOutputReservation => (byte)41,
             BoundNativeFixedArrayInitialization or BoundNativeFixedArrayElement
                 or BoundNativeFixedArrayPointerAddress or BoundNativeFixedArrayWrite =>
                     throw new ModuleContractException(
@@ -5800,17 +6167,6 @@ public static partial class ModuleCompiler
             case BoundBufferLength bufferLength:
                 writer.Write(bufferLength.Buffer);
                 break;
-            case BoundSnapshotSpan snapshot:
-                writer.Write(snapshot.Variable);
-                writer.Write(snapshot.SourceBuffer);
-                break;
-            case BoundSpanLength length:
-                PutExpression(writer, length.View, names, ref remaining, depth + 1, inUnsafe);
-                break;
-            case BoundSpanRead read:
-                PutExpression(writer, read.View, names, ref remaining, depth + 1, inUnsafe);
-                PutExpression(writer, read.Index, names, ref remaining, depth + 1, inUnsafe);
-                break;
             case BoundNativeStorageAddress address:
                 writer.Write(address.Variable);
                 writer.Write((int)address.CarrierType);
@@ -5827,6 +6183,15 @@ public static partial class ModuleCompiler
                     throw new ModuleContractException("Native pointer address authorization requires an unsafe scope.");
                 }
                 writer.Write(address.Variable);
+                break;
+            case BoundNativeOutputReservation reservation:
+                if (reservation.Type != PrimitiveType.Void
+                    || reservation.Variable < 0)
+                {
+                    throw new ModuleContractException("Native output reservation is invalid.");
+                }
+                writer.Write(reservation.Variable);
+                writer.Write((int)reservation.PointeeType);
                 break;
             case BoundNativePointerRead pointerRead:
                 if (!pointerRead.IsUnsafeAuthorized || !inUnsafe)
@@ -6246,6 +6611,20 @@ public static partial class ModuleCompiler
                 return new BoundNativePointerWrite(
                     GetExpression(reader, ref remaining, depth + 1),
                     GetExpression(reader, ref remaining, depth + 1), span);
+            case 41:
+                if (reader is not ModuleReader {
+                    FormatVersion: >= NativeOutputContractVersion,
+                } || type != PrimitiveType.Void)
+                {
+                    throw new ModuleFormatException("Native output reservation expression is invalid.");
+                }
+                var reservationVariable = reader.ReadInt32();
+                var reservationPointeeType = GetType(reader);
+                if (reservationVariable < 0)
+                {
+                    throw new ModuleFormatException("Native output reservation local is invalid.");
+                }
+                return new BoundNativeOutputReservation(reservationVariable, reservationPointeeType, span);
             default:
                 throw new ModuleFormatException("Unknown expression kind.");
         }
@@ -6618,6 +6997,8 @@ public static partial class ModuleCompiler
     {
         public bool HasOwnershipTransfer { get; init; }
         public NativeVTableMethodDefinition? ImportedNativeVTableMethod { get; init; }
+        public NativeOutputDeclarationRole? NativeOutputRole { get; init; }
+        public ImmutableArray<NativeOutputContract> NativeOutputContracts { get; init; } = [];
     }
     private sealed record SymbolicCall(string Name, ImmutableArray<BoundExpression> Arguments, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
     {
