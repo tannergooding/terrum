@@ -92,9 +92,14 @@ internal sealed partial class Binder
     private sealed record SwitchBinding(int StateVariable, int DispatchLoopIndex,
         PrimitiveType SelectorType, ImmutableArray<SwitchTarget> Targets, int DefaultArm);
 
+    private readonly record struct SwitchPatternCondition(
+        BoundExpression Test, bool IsWildcard, bool IsIrrefutable);
+
+    private readonly record struct SwitchPatternBinding(int Variable, string Name);
+
     private sealed record SwitchArmBinding(SyntaxNode Syntax, SyntaxNode BodySyntax,
         BoundConstant? Value, bool IsWildcard, BoundExpression? Guard, int Ordinal, bool IsFallback,
-        BoundExpression? PatternTest, int PatternVariable, string? PatternName);
+        BoundExpression? PatternTest, ImmutableArray<SwitchPatternBinding> PatternBindings);
 
     private readonly record struct BindingContext(
         SyntaxTree Tree, string Namespace, ImmutableArray<string> Usings);
@@ -4065,6 +4070,165 @@ internal sealed partial class Binder
         return FoldScalarConstant(rewritten);
     }
 
+    private SwitchPatternCondition BindSwitchPatternCondition(BoundRead selector, SyntaxNode pattern)
+    {
+        switch (pattern.Kind)
+        {
+            case SyntaxKind.SwitchConstantPattern:
+            {
+                var patternExpression = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
+                if (patternExpression is null)
+                {
+                    Report("TRM3001", "A switch constant pattern requires an expression.", pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                var expression = BindExpression(patternExpression, selector.Type);
+                if (FoldSwitchConstantLocals(expression) is not BoundConstant constant
+                    || constant.Type != selector.Type)
+                {
+                    Report("TRM3007",
+                        "A switch constant pattern must be a compile-time scalar of the selector type.",
+                        pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                return new(new BoundBinary(TokenKind.EqualsEquals, selector, constant,
+                    PrimitiveType.Bool, pattern.Span), false, false);
+            }
+
+            case SyntaxKind.SwitchWildcardPattern:
+                return new(new BoundConstant(1, PrimitiveType.Bool, pattern.Span), true, true);
+
+            case SyntaxKind.SwitchInferredBindingPattern:
+            {
+                var patternTokens = pattern.Children.OfType<SyntaxTokenElement>().ToArray();
+                if (patternTokens.Length == 0)
+                {
+                    Report("TRM3001", "An inferred switch pattern requires a binding.", pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                var nameToken = patternTokens[^1].Token;
+                var isMutable = patternTokens.Any(static token => token.Token.Kind == TokenKind.MutKeyword);
+                var includeNull = patternTokens.Any(static token => token.Token.Kind == TokenKind.Question);
+                if (includeNull)
+                {
+                    Report("TRM3007", "A nullable inferred pattern requires an optional managed selector.",
+                        pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+                if (nameToken.Kind == TokenKind.Underscore)
+                {
+                    return new(new BoundConstant(1, PrimitiveType.Bool, pattern.Span), false, true);
+                }
+
+                var variable = AddVariable(nameToken.Name, selector.Type, isMutable, nameToken.Span);
+                return new(new BoundIsVariablePattern(selector, variable, false, pattern.Span), false, true);
+            }
+
+            case SyntaxKind.SwitchTypedBindingPattern:
+            {
+                var typeNode = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
+                if (typeNode is null || typeNode.Kind != SyntaxKind.TypeName)
+                {
+                    Report("TRM3007", "This bounded switch path binds only simple scalar type patterns.",
+                        pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                var diagnosticsBeforeType = DiagnosticCount;
+                var patternType = BindType(typeNode, allowVoid: false);
+                if (DiagnosticCount != diagnosticsBeforeType)
+                {
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+                if (patternType != selector.Type)
+                {
+                    Report("TRM3007",
+                        "A scalar switch type pattern must match the selector's exact type in this bounded path.",
+                        pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                var patternTokens = pattern.Children.OfType<SyntaxTokenElement>().ToArray();
+                var isMutable = patternTokens.Any(static token => token.Token.Kind == TokenKind.MutKeyword);
+                var bindingToken = patternTokens.Length > 0
+                    && patternTokens[^1].Token.Kind == TokenKind.Identifier
+                        ? patternTokens[^1].Token : null;
+                if (isMutable && bindingToken is null)
+                {
+                    Report("TRM3007", "A mutable switch type pattern requires a named value binding.",
+                        pattern.Span);
+                }
+                if (bindingToken is null)
+                {
+                    return new(new BoundConstant(1, PrimitiveType.Bool, pattern.Span), false, true);
+                }
+
+                var variable = AddVariable(bindingToken.Name, selector.Type,
+                    isMutable, bindingToken.Span);
+                return new(new BoundIsVariablePattern(selector, variable, false, pattern.Span), false, true);
+            }
+
+            case SyntaxKind.SwitchNullPattern:
+                return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+
+            case SyntaxKind.SwitchParenthesizedPattern:
+            {
+                var nestedPattern = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
+                if (nestedPattern is null)
+                {
+                    Report("TRM3001", "A parenthesized switch pattern requires a pattern.", pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+                return BindSwitchPatternCondition(selector, nestedPattern);
+            }
+
+            case SyntaxKind.SwitchNotPattern:
+            {
+                var nestedPattern = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
+                if (nestedPattern is null)
+                {
+                    Report("TRM3001", "A not-pattern requires a nested pattern.", pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                var nested = BindSwitchPatternCondition(selector, nestedPattern);
+                var test = FoldScalarConstant(new BoundUnary(TokenKind.Bang, nested.Test,
+                    PrimitiveType.Bool, pattern.Span));
+                return new(test, false, test is BoundConstant { Type: PrimitiveType.Bool, Value: 1 });
+            }
+
+            case SyntaxKind.SwitchAndPattern:
+            case SyntaxKind.SwitchOrPattern:
+            {
+                var nestedPatterns = pattern.Children.OfType<SyntaxNode>().ToArray();
+                if (nestedPatterns.Length != 2)
+                {
+                    Report("TRM3001", "A composed switch pattern requires two nested patterns.", pattern.Span);
+                    return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+                }
+
+                var left = BindSwitchPatternCondition(selector, nestedPatterns[0]);
+                var right = BindSwitchPatternCondition(selector, nestedPatterns[1]);
+                var operation = pattern.Kind == SyntaxKind.SwitchAndPattern
+                    ? TokenKind.AmpersandAmpersand : TokenKind.PipePipe;
+                var test = FoldScalarConstant(new BoundBinary(operation, left.Test, right.Test,
+                    PrimitiveType.Bool, pattern.Span));
+                var isIrrefutable = pattern.Kind == SyntaxKind.SwitchAndPattern
+                    ? left.IsIrrefutable && right.IsIrrefutable
+                    : left.IsIrrefutable || right.IsIrrefutable;
+                return new(test, false, isIrrefutable);
+            }
+
+            default:
+                Report("TRM3007", "This switch pattern is not supported by the scalar pattern binder.",
+                    pattern.Span);
+                return new(new BoundConstant(0, PrimitiveType.Bool, pattern.Span), false, false);
+        }
+    }
+
     private BoundExpression BindBufferCount(BoundExpression owner, TextSpan span)
     {
         if (!TryFindFunction(NativeBufferIntrinsics.TypeName + ".Count", out var count))
@@ -4329,8 +4493,10 @@ internal sealed partial class Binder
                 var armNode = armNodes[armIndex];
                 var pattern = armNode.Children.OfType<SyntaxNode>().FirstOrDefault(static child =>
                     child.Kind is SyntaxKind.SwitchConstantPattern or SyntaxKind.SwitchWildcardPattern
-                        or SyntaxKind.SwitchInferredBindingPattern
-                        or SyntaxKind.SwitchParenthesizedPattern);
+                        or SyntaxKind.SwitchInferredBindingPattern or SyntaxKind.SwitchTypedBindingPattern
+                        or SyntaxKind.SwitchParenthesizedPattern or SyntaxKind.SwitchNotPattern
+                        or SyntaxKind.SwitchAndPattern or SyntaxKind.SwitchOrPattern
+                        or SyntaxKind.SwitchNullPattern);
                 while (pattern?.Kind == SyntaxKind.SwitchParenthesizedPattern
                     && pattern.Children.OfType<SyntaxNode>().FirstOrDefault() is SyntaxNode nestedPattern)
                 {
@@ -4353,37 +4519,26 @@ internal sealed partial class Binder
                     .FirstOrDefault(static child => child.Kind == SyntaxKind.SwitchWhenClause);
                 BoundExpression? guard = null;
                 BoundExpression? patternTest = null;
-                var patternVariable = -1;
-                string? patternName = null;
+                var patternBindings = ImmutableArray<SwitchPatternBinding>.Empty;
                 var isIrrefutable = isWildcard;
-                if (pattern.Kind == SyntaxKind.SwitchInferredBindingPattern)
+                if (pattern.Kind is SyntaxKind.SwitchInferredBindingPattern
+                    or SyntaxKind.SwitchTypedBindingPattern or SyntaxKind.SwitchNotPattern
+                    or SyntaxKind.SwitchAndPattern or SyntaxKind.SwitchOrPattern
+                    or SyntaxKind.SwitchNullPattern)
                 {
-                    var patternTokens = pattern.Children.OfType<SyntaxTokenElement>().ToArray();
-                    var nameToken = patternTokens[^1].Token;
-                    isIrrefutable = true;
-                    if (nameToken.Kind == TokenKind.Underscore)
+                    _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+                    try
                     {
-                        patternTest = new BoundConstant(1, PrimitiveType.Bool, pattern.Span);
+                        var condition = BindSwitchPatternCondition(selectorRead, pattern);
+                        patternTest = condition.Test;
+                        isWildcard = condition.IsWildcard;
+                        isIrrefutable = condition.IsIrrefutable;
+                        patternBindings = [.. _scopes[^1].Select(static binding =>
+                            new SwitchPatternBinding(binding.Value, binding.Key))];
                     }
-                    else
+                    finally
                     {
-                        var isMutable = patternTokens.Any(static token =>
-                            token.Token.Kind == TokenKind.MutKeyword);
-                        var includeNull = patternTokens.Any(static token =>
-                            token.Token.Kind == TokenKind.Question);
-                        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
-                        try
-                        {
-                            patternVariable = AddVariable(nameToken.Name, selector.Type,
-                                isMutable, nameToken.Span);
-                        }
-                        finally
-                        {
-                            _scopes.RemoveAt(_scopes.Count - 1);
-                        }
-                        patternName = nameToken.Name;
-                        patternTest = new BoundIsVariablePattern(selectorRead, patternVariable,
-                            includeNull, pattern.Span);
+                        _scopes.RemoveAt(_scopes.Count - 1);
                     }
                 }
                 if (guardClause is not null)
@@ -4395,11 +4550,11 @@ internal sealed partial class Binder
                     }
                     else
                     {
-                        if (patternVariable >= 0)
+                        if (!patternBindings.IsEmpty)
                         {
-                            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal) {
-                                [patternName!] = patternVariable,
-                            });
+                            _scopes.Add(patternBindings.ToDictionary(
+                                static binding => binding.Name, static binding => binding.Variable,
+                                StringComparer.Ordinal));
                         }
                         var firstGuardVariable = _variables.Count;
                         try
@@ -4414,7 +4569,7 @@ internal sealed partial class Binder
                         }
                         finally
                         {
-                            if (patternVariable >= 0)
+                            if (!patternBindings.IsEmpty)
                             {
                                 _scopes.RemoveAt(_scopes.Count - 1);
                             }
@@ -4423,7 +4578,7 @@ internal sealed partial class Binder
                 }
 
                 BoundConstant? value = null;
-                if (!isWildcard && pattern.Kind != SyntaxKind.SwitchInferredBindingPattern)
+                if (pattern.Kind == SyntaxKind.SwitchConstantPattern)
                 {
                     var patternExpression = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
                     if (patternExpression is null)
@@ -4493,7 +4648,7 @@ internal sealed partial class Binder
                 }
                 hasIrrefutablePattern |= isIrrefutable && guard is null;
                 arms.Add(new SwitchArmBinding(armNode, body, value, isWildcard, guard,
-                    ordinal, isFallback, patternTest, patternVariable, patternName));
+                    ordinal, isFallback, patternTest, patternBindings));
             }
 
             var boolTrue = arms.Any(static arm => !arm.IsWildcard && arm.Guard is null
@@ -4600,18 +4755,14 @@ internal sealed partial class Binder
 
     private BoundBlock BindSwitchArmBody(SwitchArmBinding arm)
     {
-        if (arm.PatternVariable < 0)
+        if (arm.PatternBindings.IsEmpty)
         {
             return BindBlock(arm.BodySyntax);
         }
-        if (arm.PatternName is not string name)
-        {
-            throw new InvalidOperationException("A switch pattern variable has no source name.");
-        }
 
-        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal) {
-            [name] = arm.PatternVariable,
-        });
+        _scopes.Add(arm.PatternBindings.ToDictionary(
+            static binding => binding.Name, static binding => binding.Variable,
+            StringComparer.Ordinal));
         try
         {
             return BindBlock(arm.BodySyntax);

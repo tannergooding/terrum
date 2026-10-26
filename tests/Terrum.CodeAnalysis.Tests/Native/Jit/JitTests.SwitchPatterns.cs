@@ -16,8 +16,40 @@ public sealed partial class JitTests
                     var item => { return item; },
                 }
             }
+            int32 MatchTyped(int32 selector) {
+                switch (selector) {
+                    mut int32 item when item == 42 => {
+                        item += 1;
+                        return item;
+                    },
+                    _ => { return 0; },
+                }
+            }
+            int32 MatchComposite(int32 selector) {
+                switch (selector) {
+                    1 or 2 => { return 11; },
+                    not 3 => { return selector; },
+                    _ => { return 0; },
+                }
+            }
+            int32 MatchAnd(int32 selector) {
+                switch (selector) {
+                    1 and 1 => { return 1; },
+                    _ => { return 0; },
+                }
+            }
+            int32 MatchAndBinding(int32 selector) {
+                switch (selector) {
+                    var item and 1 when item == selector => { return item; },
+                    _ => { return 0; },
+                }
+            }
             int32 Main() {
-                if (MatchOnly() != 42) {
+                if (MatchOnly() != 42 || MatchTyped(42) != 43
+                    || MatchComposite(1) != 11 || MatchComposite(2) != 11
+                    || MatchComposite(3) != 0 || MatchComposite(42) != 42
+                    || MatchAnd(1) != 1 || MatchAnd(2) != 0
+                    || MatchAndBinding(1) != 1 || MatchAndBinding(2) != 0) {
                     return 0;
                 }
                 int32 selector = 42;
