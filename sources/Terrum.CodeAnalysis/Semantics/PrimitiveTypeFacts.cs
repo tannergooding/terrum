@@ -8,8 +8,17 @@ internal static class PrimitiveTypeFacts
         or PrimitiveType.Int32 or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16
         or PrimitiveType.UInt32 or PrimitiveType.UInt64;
 
+    internal static bool IsWideInteger(PrimitiveType type) =>
+        type is PrimitiveType.Int128 or PrimitiveType.UInt128;
+
+    internal static bool IsIntegerOrWide(PrimitiveType type) =>
+        IsInteger(type) || IsWideInteger(type);
+
     internal static bool IsSignedInteger(PrimitiveType type) => type is PrimitiveType.Int8 or PrimitiveType.Int16
         or PrimitiveType.Int32 or PrimitiveType.Int64;
+
+    internal static bool IsSignedIntegerOrWide(PrimitiveType type) =>
+        IsSignedInteger(type) || type == PrimitiveType.Int128;
 
     internal static int IntegerWidth(PrimitiveType type) => type switch {
         PrimitiveType.Int8 or PrimitiveType.UInt8 => 8,
@@ -18,6 +27,9 @@ internal static class PrimitiveTypeFacts
         PrimitiveType.Int64 or PrimitiveType.UInt64 => 64,
         _ => 0,
     };
+
+    internal static int IntegerWidthOrWide(PrimitiveType type) =>
+        IsWideInteger(type) ? 128 : IntegerWidth(type);
 
     internal static int ScalarWidth(PrimitiveType type) => type switch {
         PrimitiveType.Void => 0,

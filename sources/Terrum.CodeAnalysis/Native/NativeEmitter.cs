@@ -1753,16 +1753,25 @@ internal sealed partial class PeCompiler
             case BoundConstant constant:
                 return IsIndirect(constant.Type) ? Math.Max(1, (Size(constant.Type) + 15) / 16) : 0;
             case BoundUnary unary:
-                return ExpressionSpills(unary.Operand, ref maximumArguments);
+                return Math.Max(PrimitiveTypeFacts.IsWideInteger(unary.Type) ? 2 : 0,
+                    ExpressionSpills(unary.Operand, ref maximumArguments));
             case BoundUpdate update:
-                return Math.Max(3, update.Place switch {
+                return Math.Max(PrimitiveTypeFacts.IsWideInteger(update.Type) ? 5 : 3, update.Place switch {
                     BoundFieldRead field => ExpressionSpills(field.Receiver, ref maximumArguments),
                     BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
                     _ => 0,
                 });
             case BoundCompoundAssignment compound:
-                return Math.Max(4 + ExpressionSpills(compound.Right, ref maximumArguments),
-                    Math.Max(3, compound.Place switch {
+                var requiredCompoundSpills = PrimitiveTypeFacts.IsWideInteger(compound.Type)
+                    ? CompoundOperators.Binary(compound.Operator) switch {
+                        TokenKind.Star => 7,
+                        TokenKind.Slash or TokenKind.Percent => 9,
+                        _ => 3,
+                    }
+                    : 3;
+                return Math.Max(requiredCompoundSpills,
+                    Math.Max(4 + ExpressionSpills(compound.Right, ref maximumArguments),
+                        compound.Place switch {
                         BoundFieldRead field => ExpressionSpills(field.Receiver, ref maximumArguments),
                         BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
                         _ => 0,
@@ -1816,8 +1825,16 @@ internal sealed partial class PeCompiler
             case BoundSpanAdvance advance:
                 return Math.Max(1, ExpressionSpills(advance.View, ref maximumArguments));
             case BoundBinary binary:
-                return Math.Max(3, Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
-                    1 + ExpressionSpills(binary.Right, ref maximumArguments)));
+                var requiredBinarySpills = PrimitiveTypeFacts.IsWideInteger(binary.Left.Type)
+                    ? binary.Operator switch {
+                        TokenKind.Star => 5,
+                        TokenKind.Slash or TokenKind.Percent => 7,
+                        _ => 3,
+                    }
+                    : 3;
+                return Math.Max(requiredBinarySpills,
+                    Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
+                        1 + ExpressionSpills(binary.Right, ref maximumArguments)));
             case BoundConditional conditional:
                 return Math.Max(ExpressionSpills(conditional.Condition, ref maximumArguments),
                     Math.Max(ExpressionSpills(conditional.WhenTrue, ref maximumArguments),
@@ -4080,6 +4097,17 @@ internal sealed partial class PeCompiler
                 break;
             case BoundUnary unary:
                 Expression(unary.Operand, spill);
+                if (PrimitiveTypeFacts.IsWideInteger(unary.Type))
+                {
+                    if (unary.Operator != TokenKind.Plus)
+                    {
+                        StoreValue(Spill(spill), unary.Type);
+                        EmitWideIntegerUnary(unary.Operator, unary.Type,
+                            unary.OverflowBehavior, Spill(spill));
+                        _code.Address(Spill(spill));
+                    }
+                    break;
+                }
                 switch (unary.Operator)
                 {
                     case TokenKind.Minus:
@@ -4126,9 +4154,18 @@ internal sealed partial class PeCompiler
             case BoundUpdate update:
                 var rootedUpdate = UpdateAddress(update.Place, spill);
                 _code.Store64(Spill(spill + 1));
-                _code.LoadPointerField(0, Size(update.Type));
-                NormalizeNarrowInteger(update.Type, checkRange: false);
-                StoreValue(Spill(spill + 2), update.Type);
+                if (PrimitiveTypeFacts.IsWideInteger(update.Type))
+                {
+                    _code.Load64(Spill(spill + 1));
+                    _code.AddressToRdx(Spill(spill + 2));
+                    _code.CopyMemory(Size(update.Type));
+                }
+                else
+                {
+                    _code.LoadPointerField(0, Size(update.Type));
+                    NormalizeNarrowInteger(update.Type, checkRange: false);
+                    StoreValue(Spill(spill + 2), update.Type);
+                }
                 var updateBegin = _code.Position;
                 var updateFunclet = -1;
                 if (rootedUpdate && _checkedExceptions && !_emittingFunclet)
@@ -4137,23 +4174,41 @@ internal sealed partial class PeCompiler
                     _funclets.Add((new BoundBlock([], update.Span), _currentFunction, 0, 0));
                     _managedStagedRoots.Add(updateFunclet, [Spill(spill)]);
                 }
-                if (IsWide(update.Type))
+                if (PrimitiveTypeFacts.IsWideInteger(update.Type))
+                {
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(1);
+                    _code.Store64(Spill(spill + 3));
+                    _code.Bytes(0x31, 0xC0);
+                    _code.Store64(Spill(spill + 3 + sizeof(ulong)));
+                    EmitWideIntegerBinary(update.Operator == TokenKind.PlusPlus
+                        ? TokenKind.Plus : TokenKind.Minus, update.Type,
+                        update.OverflowBehavior, Spill(spill + 2), Spill(spill + 3),
+                        update.Type, Spill(spill + 4));
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.Address(Spill(spill + 4));
+                    _code.CopyMemory(Size(update.Type));
+                }
+                else if (IsWide(update.Type))
                 {
                     _code.Byte(0x48);
                 }
-                _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
-                if (IsNarrowInteger(update.Type))
+                if (!PrimitiveTypeFacts.IsWideInteger(update.Type))
                 {
-                    NormalizeNarrowInteger(update.Type,
-                        checkRange: update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked);
+                    _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
+                    if (IsNarrowInteger(update.Type))
+                    {
+                        NormalizeNarrowInteger(update.Type,
+                            checkRange: update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked);
+                    }
+                    else if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                    {
+                        RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
+                            ? (byte)0x82 : (byte)0x80, 0);
+                    }
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
                 }
-                else if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
-                {
-                    RuntimeBranch(update.Type is PrimitiveType.UInt32 or PrimitiveType.UInt64
-                        ? (byte)0x82 : (byte)0x80, 0);
-                }
-                _code.Load64(Spill(spill + 1), destinationRegister: true);
-                _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
                 if (updateFunclet >= 0)
                 {
                     _code.Byte(0x90);
@@ -4166,16 +4221,36 @@ internal sealed partial class PeCompiler
                 }
                 if (!update.IsPrefix)
                 {
-                    LoadValue(Spill(spill + 2), update.Type);
+                    if (PrimitiveTypeFacts.IsWideInteger(update.Type))
+                    {
+                        _code.Address(Spill(spill + 2));
+                    }
+                    else
+                    {
+                        LoadValue(Spill(spill + 2), update.Type);
+                    }
+                }
+                else if (PrimitiveTypeFacts.IsWideInteger(update.Type))
+                {
+                    _code.Address(Spill(spill + 4));
                 }
                 break;
             case BoundCompoundAssignment compound:
             {
                 var rooted = UpdateAddress(compound.Place, spill);
                 _code.Store64(Spill(spill + 1));
-                _code.LoadPointerField(0, Size(compound.Type));
-                NormalizeNarrowInteger(compound.Type, checkRange: false);
-                StoreValue(Spill(spill + 2), compound.Type);
+                if (PrimitiveTypeFacts.IsWideInteger(compound.Type))
+                {
+                    _code.Load64(Spill(spill + 1));
+                    _code.AddressToRdx(Spill(spill + 2));
+                    _code.CopyMemory(Size(compound.Type));
+                }
+                else
+                {
+                    _code.LoadPointerField(0, Size(compound.Type));
+                    NormalizeNarrowInteger(compound.Type, checkRange: false);
+                    StoreValue(Spill(spill + 2), compound.Type);
+                }
                 var begin = _code.Position;
                 var funclet = -1;
                 if (rooted && _checkedExceptions && !_emittingFunclet)
@@ -4185,18 +4260,31 @@ internal sealed partial class PeCompiler
                     _managedStagedRoots.Add(funclet, [Spill(spill)]);
                 }
                 Expression(compound.Right, spill + 4);
-                if (IsWide(compound.Right.Type) || CompoundOperators.IsShift(compound.Operator))
+                if (PrimitiveTypeFacts.IsWideInteger(compound.Type))
                 {
-                    _code.Bytes(0x48, 0x89, 0xC1);
+                    StoreValue(Spill(spill + 4), compound.Right.Type);
+                    EmitWideIntegerBinary(CompoundOperators.Binary(compound.Operator),
+                        compound.Type, compound.OverflowBehavior, Spill(spill + 2),
+                        Spill(spill + 4), compound.Right.Type, Spill(spill + 2));
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.Address(Spill(spill + 2));
+                    _code.CopyMemory(Size(compound.Type));
                 }
                 else
                 {
-                    _code.Bytes(0x89, 0xC1);
+                    if (IsWide(compound.Right.Type) || CompoundOperators.IsShift(compound.Operator))
+                    {
+                        _code.Bytes(0x48, 0x89, 0xC1);
+                    }
+                    else
+                    {
+                        _code.Bytes(0x89, 0xC1);
+                    }
+                    LoadValue(Spill(spill + 2), compound.Type);
+                    Binary(CompoundOperators.Binary(compound.Operator), compound.Type, compound.OverflowBehavior);
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
                 }
-                LoadValue(Spill(spill + 2), compound.Type);
-                Binary(CompoundOperators.Binary(compound.Operator), compound.Type, compound.OverflowBehavior);
-                _code.Load64(Spill(spill + 1), destinationRegister: true);
-                _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
                 if (funclet >= 0)
                 {
                     _code.Byte(0x90);
@@ -4308,6 +4396,17 @@ internal sealed partial class PeCompiler
                     Expression(binary.Right, spill);
                     _code.PatchRelative(skip, _code.Position);
                     return;
+                }
+                if (PrimitiveTypeFacts.IsWideInteger(binary.Left.Type))
+                {
+                    Expression(binary.Left, spill);
+                    StoreValue(Spill(spill), binary.Left.Type);
+                    Expression(binary.Right, spill + 1);
+                    StoreValue(Spill(spill + 1), binary.Right.Type);
+                    EmitWideIntegerBinary(binary.Operator, binary.Left.Type,
+                        binary.OverflowBehavior, Spill(spill), Spill(spill + 1),
+                        binary.Right.Type, Spill(spill + 2));
+                    break;
                 }
                 var floating = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
                 Expression(binary.Left, spill);
@@ -5442,6 +5541,10 @@ internal sealed partial class PeCompiler
     private void Binary(TokenKind op, PrimitiveType type,
         BoundIntegerOverflowBehavior overflowBehavior = BoundIntegerOverflowBehavior.Checked)
     {
+        if (PrimitiveTypeFacts.IsWideInteger(type))
+        {
+            throw new InvalidOperationException("Wide integer operations require their 128-bit operands.");
+        }
         if (IsWide(type))
         {
             BinaryWide(op, type == PrimitiveType.UInt64, overflowBehavior);
@@ -5599,6 +5702,572 @@ internal sealed partial class PeCompiler
             }
             _code.Bytes(0x0F, width == 8 ? (byte)0xB6 : (byte)0xB7, 0xC0);
         }
+    }
+
+    private void EmitWideIntegerUnary(TokenKind operation, PrimitiveType type,
+        BoundIntegerOverflowBehavior overflowBehavior, int valueOffset)
+    {
+        if (operation == TokenKind.Minus && overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+        {
+            if (type == PrimitiveType.Int128)
+            {
+                _code.Load64ToRegister(valueOffset + sizeof(ulong), 0);
+                _code.Bytes(0x48, 0xB9);
+                _code.Int64(long.MinValue);
+                _code.Bytes(0x48, 0x39, 0xC8);
+                var notMinimumHigh = _code.JumpIf(0x85);
+                _code.Load64(valueOffset);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                RuntimeBranch(0x84, 0);
+                _code.PatchRelative(notMinimumHigh, _code.Position);
+            }
+            else
+            {
+                _code.Load64(valueOffset);
+                _code.Bytes(0x48, 0x85, 0xC0);
+                RuntimeBranch(0x85, 0);
+                _code.Load64(valueOffset + sizeof(ulong));
+                _code.Bytes(0x48, 0x85, 0xC0);
+                RuntimeBranch(0x85, 0);
+            }
+        }
+
+        switch (operation)
+        {
+            case TokenKind.Plus:
+                return;
+            case TokenKind.Minus:
+                NegateWideIntegerAt(valueOffset);
+                return;
+            case TokenKind.Tilde:
+                _code.Load64(valueOffset);
+                _code.Bytes(0x48, 0xF7, 0xD0);
+                _code.Store64(valueOffset);
+                _code.Load64(valueOffset + sizeof(ulong), destinationRegister: true);
+                _code.Bytes(0x48, 0xF7, 0xD2);
+                _code.Store64FromRegister(valueOffset + sizeof(ulong), 2);
+                return;
+            default:
+                throw new InvalidOperationException("The verifier admitted an unsupported 128-bit unary operator.");
+        }
+    }
+
+    private void EmitWideIntegerBinary(TokenKind operation, PrimitiveType type,
+        BoundIntegerOverflowBehavior overflowBehavior, int leftOffset, int rightOffset,
+        PrimitiveType rightType, int resultOffset)
+    {
+        if (operation is TokenKind.EqualsEquals or TokenKind.BangEquals
+            or TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals)
+        {
+            EmitWideIntegerComparison(operation, type, leftOffset, rightOffset);
+            return;
+        }
+
+        if (operation is TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
+        {
+            EmitWideIntegerShift(operation, type, leftOffset, rightOffset, rightType, resultOffset);
+            return;
+        }
+
+        if (operation == TokenKind.Star)
+        {
+            EmitWideIntegerMultiply(type, overflowBehavior, leftOffset, rightOffset, resultOffset);
+            return;
+        }
+        if (operation is TokenKind.Slash or TokenKind.Percent)
+        {
+            EmitWideIntegerDivide(operation, type, leftOffset, rightOffset, resultOffset);
+            return;
+        }
+
+        var unsigned = type == PrimitiveType.UInt128;
+        switch (operation)
+        {
+            case TokenKind.Plus:
+            case TokenKind.Minus:
+                _code.Load64ToRegister(leftOffset, 0);
+                _code.Load64ToRegister(rightOffset, 1);
+                _code.Bytes(0x48, operation == TokenKind.Plus ? (byte)0x01 : (byte)0x29, 0xC8);
+                _code.Load64ToRegister(leftOffset + sizeof(ulong), 2);
+                _code.Load64ToRegister(rightOffset + sizeof(ulong), 1);
+                _code.Bytes(0x48, operation == TokenKind.Plus ? (byte)0x11 : (byte)0x19, 0xCA);
+                if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                {
+                    RuntimeBranch(unsigned ? (byte)0x82 : (byte)0x80, 0);
+                }
+                break;
+            case TokenKind.Ampersand:
+            case TokenKind.Pipe:
+            case TokenKind.Caret:
+                var bitwiseOpcode = operation switch {
+                    TokenKind.Ampersand => (byte)0x21,
+                    TokenKind.Pipe => (byte)0x09,
+                    _ => (byte)0x31,
+                };
+                _code.Load64ToRegister(leftOffset, 0);
+                _code.Load64ToRegister(rightOffset, 1);
+                _code.Bytes(0x48, bitwiseOpcode, 0xC8);
+                _code.Store64(resultOffset);
+                _code.Load64ToRegister(leftOffset + sizeof(ulong), 2);
+                _code.Load64ToRegister(rightOffset + sizeof(ulong), 1);
+                _code.Bytes(0x48, bitwiseOpcode, 0xCA);
+                _code.Store64FromRegister(resultOffset + sizeof(ulong), 2);
+                _code.Address(resultOffset);
+                return;
+            default:
+                throw new InvalidOperationException("The verifier admitted an unsupported 128-bit operator.");
+        }
+
+        _code.Store64(resultOffset);
+        _code.Store64FromRegister(resultOffset + sizeof(ulong), 2);
+        _code.Address(resultOffset);
+    }
+
+    private void EmitWideIntegerMultiply(PrimitiveType type,
+        BoundIntegerOverflowBehavior overflowBehavior, int leftOffset, int rightOffset, int resultOffset)
+    {
+        // Magnitudes use shift/add so checked overflow observes every discarded product bit.
+        var scratchA = Math.Max(Math.Max(leftOffset, rightOffset), resultOffset) + 16;
+        var scratchB = scratchA + 16;
+        var isSigned = type == PrimitiveType.Int128;
+
+        if (isSigned)
+        {
+            _code.Load64(leftOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0xC1, 0xE8, 0x3F, 0x41, 0x89, 0xC2);
+            _code.Load64(rightOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0xC1, 0xE8, 0x3F, 0x41, 0x89, 0xC3);
+        }
+
+        _code.Load64(leftOffset);
+        _code.Store64(scratchA);
+        _code.Load64(leftOffset + sizeof(ulong));
+        _code.Store64(scratchA + sizeof(ulong));
+        _code.Load64(rightOffset);
+        _code.Store64(scratchB);
+        _code.Load64(rightOffset + sizeof(ulong));
+        _code.Store64(scratchB + sizeof(ulong));
+
+        if (isSigned)
+        {
+            _code.Bytes(0x45, 0x85, 0xD2);
+            var leftNonnegative = _code.JumpIf(0x84);
+            NegateWideIntegerAt(scratchA);
+            _code.PatchRelative(leftNonnegative, _code.Position);
+
+            _code.Bytes(0x45, 0x85, 0xDB);
+            var rightNonnegative = _code.JumpIf(0x84);
+            NegateWideIntegerAt(scratchB);
+            _code.PatchRelative(rightNonnegative, _code.Position);
+
+            _code.Bytes(0x45, 0x31, 0xDA);
+        }
+
+        _code.Bytes(0x31, 0xC0);
+        _code.Store64(resultOffset);
+        _code.Store64(resultOffset + sizeof(ulong));
+        _code.Bytes(0x41, 0xB9);
+        _code.Int32(128);
+        var loop = _code.Position;
+
+        _code.Load64(scratchB);
+        _code.Bytes(0x48, 0x83, 0xE0, 0x01, 0x48, 0x85, 0xC0);
+        var skipAdd = _code.JumpIf(0x84);
+        _code.Load64(resultOffset);
+        _code.Load64ToRegister(scratchA, 1);
+        _code.Bytes(0x48, 0x01, 0xC8);
+        _code.Store64(resultOffset);
+        _code.Load64(resultOffset + sizeof(ulong), destinationRegister: true);
+        _code.Load64ToRegister(scratchA + sizeof(ulong), 1);
+        _code.Bytes(0x48, 0x11, 0xCA);
+        if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+        {
+            RuntimeBranch(0x82, 0);
+        }
+        _code.Store64FromRegister(resultOffset + sizeof(ulong), 2);
+        _code.PatchRelative(skipAdd, _code.Position);
+
+        _code.Bytes(0x41, 0x83, 0xF9, 0x01);
+        var lastMultiplierBit = _code.JumpIf(0x84);
+        _code.Load64(scratchB + sizeof(ulong), destinationRegister: true);
+        _code.Bytes(0x48, 0xD1, 0xEA);
+        _code.Store64FromRegister(scratchB + sizeof(ulong), 2);
+        _code.Load64(scratchB);
+        _code.Bytes(0x48, 0xD1, 0xD8);
+        _code.Store64(scratchB);
+
+        _code.Load64(scratchA);
+        _code.Bytes(0x48, 0xD1, 0xE0);
+        _code.Store64(scratchA);
+        _code.Load64(scratchA + sizeof(ulong), destinationRegister: true);
+        _code.Bytes(0x48, 0xD1, 0xD2, 0x41, 0x0F, 0x92, 0xC0);
+        _code.Store64FromRegister(scratchA + sizeof(ulong), 2);
+        if (overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+        {
+            _code.Load64(scratchB);
+            _code.Load64ToRegister(scratchB + sizeof(ulong), 1);
+            _code.Bytes(0x48, 0x09, 0xC8, 0x48, 0x85, 0xC0);
+            var noMultiplierBitsRemain = _code.JumpIf(0x84);
+            _code.Bytes(0x41, 0xF6, 0xC0, 0x01);
+            RuntimeBranch(0x85, 0);
+            _code.PatchRelative(noMultiplierBitsRemain, _code.Position);
+        }
+        _code.Bytes(0x41, 0xFF, 0xC9);
+        var repeat = _code.JumpIf(0x85);
+        _code.PatchRelative(repeat, loop);
+        _code.PatchRelative(lastMultiplierBit, _code.Position);
+
+        if (isSigned && overflowBehavior == BoundIntegerOverflowBehavior.Checked)
+        {
+            _code.Bytes(0x45, 0x85, 0xD2);
+            var positiveResult = _code.JumpIf(0x84);
+
+            _code.Load64(resultOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0xB9);
+            _code.Int64(long.MinValue);
+            _code.Bytes(0x48, 0x39, 0xC8);
+            RuntimeBranch(0x87, 0);
+            var magnitudeBelowMinimum = _code.JumpIf(0x82);
+            _code.Load64(resultOffset);
+            _code.Bytes(0x48, 0x85, 0xC0);
+            RuntimeBranch(0x85, 0);
+            _code.PatchRelative(magnitudeBelowMinimum, _code.Position);
+            var negativeChecked = _code.Jump();
+
+            _code.PatchRelative(positiveResult, _code.Position);
+            _code.Load64(resultOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0xB9);
+            _code.Int64(long.MinValue);
+            _code.Bytes(0x48, 0x39, 0xC8);
+            RuntimeBranch(0x83, 0);
+            _code.PatchRelative(negativeChecked, _code.Position);
+        }
+
+        if (isSigned)
+        {
+            _code.Bytes(0x45, 0x85, 0xD2);
+            var nonnegativeResult = _code.JumpIf(0x84);
+            NegateWideIntegerAt(resultOffset);
+            _code.PatchRelative(nonnegativeResult, _code.Position);
+        }
+
+        _code.Address(resultOffset);
+    }
+
+    private void EmitWideIntegerDivide(TokenKind operation, PrimitiveType type,
+        int leftOffset, int rightOffset, int resultOffset)
+    {
+        // Restoring division keeps the transient 129th remainder bit separate from the two-word value.
+        var scratchNumerator = Math.Max(Math.Max(leftOffset, rightOffset), resultOffset) + 16;
+        var scratchDivisor = scratchNumerator + 16;
+        var scratchRemainder = scratchDivisor + 16;
+        var scratchSigns = scratchRemainder + 16;
+        var isSigned = type == PrimitiveType.Int128;
+        var skipSpecialCases = new List<int>();
+        var specialRemainder = -1;
+
+        _code.Load64(rightOffset);
+        _code.Load64ToRegister(rightOffset + sizeof(ulong), 1);
+        _code.Bytes(0x48, 0x09, 0xC8, 0x48, 0x85, 0xC0);
+        RuntimeBranch(0x84, 1);
+
+        if (isSigned)
+        {
+            _code.Load64ToRegister(leftOffset + sizeof(ulong), 0);
+            _code.Bytes(0x48, 0xB9);
+            _code.Int64(long.MinValue);
+            _code.Bytes(0x48, 0x39, 0xC8);
+            skipSpecialCases.Add(_code.JumpIf(0x85));
+            _code.Load64(leftOffset);
+            _code.Bytes(0x48, 0x85, 0xC0);
+            skipSpecialCases.Add(_code.JumpIf(0x85));
+            _code.Load64ToRegister(rightOffset + sizeof(ulong), 0);
+            _code.Bytes(0x48, 0x83, 0xF8, 0xFF);
+            skipSpecialCases.Add(_code.JumpIf(0x85));
+            _code.Load64(rightOffset);
+            _code.Bytes(0x48, 0x83, 0xF8, 0xFF);
+            skipSpecialCases.Add(_code.JumpIf(0x85));
+
+            if (operation == TokenKind.Slash)
+            {
+                _runtimeCalls.Add((_code.RelativeCall(), 0));
+                _code.Byte(0xCC);
+            }
+            else
+            {
+                _code.Bytes(0x31, 0xC0);
+                _code.Store64(resultOffset);
+                _code.Store64(resultOffset + sizeof(ulong));
+                _code.Address(resultOffset);
+                specialRemainder = _code.Jump();
+            }
+        }
+
+        var normalDivision = _code.Position;
+        foreach (var offset in skipSpecialCases)
+        {
+            _code.PatchRelative(offset, normalDivision);
+        }
+
+        _code.Load64(leftOffset);
+        _code.Store64(scratchNumerator);
+        _code.Load64(leftOffset + sizeof(ulong));
+        _code.Store64(scratchNumerator + sizeof(ulong));
+        _code.Load64(rightOffset);
+        _code.Store64(scratchDivisor);
+        _code.Load64(rightOffset + sizeof(ulong));
+        _code.Store64(scratchDivisor + sizeof(ulong));
+
+        if (isSigned)
+        {
+            _code.Load64(leftOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0xC1, 0xE8, 0x3F);
+            _code.Store(scratchSigns);
+            _code.Load64(rightOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0xC1, 0xE8, 0x3F);
+            _code.Store(scratchSigns + sizeof(int));
+
+            _code.Load(scratchSigns);
+            _code.Bytes(0x85, 0xC0);
+            var numeratorNonnegative = _code.JumpIf(0x84);
+            NegateWideIntegerAt(scratchNumerator);
+            _code.PatchRelative(numeratorNonnegative, _code.Position);
+
+            _code.Load(scratchSigns + sizeof(int));
+            _code.Bytes(0x85, 0xC0);
+            var divisorNonnegative = _code.JumpIf(0x84);
+            NegateWideIntegerAt(scratchDivisor);
+            _code.PatchRelative(divisorNonnegative, _code.Position);
+        }
+        else
+        {
+            _code.Bytes(0x31, 0xC0);
+            _code.Store(scratchSigns);
+            _code.Store(scratchSigns + sizeof(int));
+        }
+
+        _code.Bytes(0x31, 0xC0);
+        _code.Store64(resultOffset);
+        _code.Store64(resultOffset + sizeof(ulong));
+        _code.Store64(scratchRemainder);
+        _code.Store64(scratchRemainder + sizeof(ulong));
+        _code.Bytes(0x41, 0xB9);
+        _code.Int32(128);
+        var loop = _code.Position;
+
+        _code.Load64(scratchNumerator + sizeof(ulong));
+        _code.Bytes(0x48, 0xC1, 0xE8, 0x3F, 0x41, 0x89, 0xC3);
+        _code.Load64(scratchNumerator);
+        _code.Load64(scratchNumerator + sizeof(ulong), destinationRegister: true);
+        _code.Bytes(0x48, 0x0F, 0xA4, 0xC2, 0x01, 0x48, 0xD1, 0xE0);
+        _code.Store64(scratchNumerator);
+        _code.Store64FromRegister(scratchNumerator + sizeof(ulong), 2);
+
+        _code.Load64(scratchRemainder + sizeof(ulong));
+        _code.Bytes(0x48, 0xC1, 0xE8, 0x3F, 0x41, 0x89, 0xC0);
+        _code.Load64(scratchRemainder);
+        _code.Load64(scratchRemainder + sizeof(ulong), destinationRegister: true);
+        _code.Bytes(0x48, 0x0F, 0xA4, 0xC2, 0x01, 0x48, 0xD1, 0xE0, 0x4C, 0x09, 0xD8);
+        _code.Store64(scratchRemainder);
+        _code.Store64FromRegister(scratchRemainder + sizeof(ulong), 2);
+
+        _code.Bytes(0x45, 0x85, 0xC0);
+        var remainderCarry = _code.JumpIf(0x85);
+        _code.Load64ToRegister(scratchRemainder + sizeof(ulong), 0);
+        _code.Load64ToRegister(scratchDivisor + sizeof(ulong), 1);
+        _code.Bytes(0x48, 0x39, 0xC8);
+        var highGreater = _code.JumpIf(0x87);
+        var highLess = _code.JumpIf(0x82);
+        _code.Load64ToRegister(scratchRemainder, 0);
+        _code.Load64ToRegister(scratchDivisor, 1);
+        _code.Bytes(0x48, 0x39, 0xC8);
+        var lowAtLeast = _code.JumpIf(0x83);
+        var lowLess = _code.JumpIf(0x82);
+
+        var noSubtract = _code.Position;
+        _code.Bytes(0x45, 0x31, 0xDB);
+        var noSubtractDone = _code.Jump();
+
+        var subtract = _code.Position;
+        _code.PatchRelative(remainderCarry, subtract);
+        _code.PatchRelative(highGreater, subtract);
+        _code.PatchRelative(lowAtLeast, subtract);
+        _code.Load64(scratchRemainder);
+        _code.Load64ToRegister(scratchDivisor, 1);
+        _code.Bytes(0x48, 0x29, 0xC8);
+        _code.Store64(scratchRemainder);
+        _code.Load64(scratchRemainder + sizeof(ulong), destinationRegister: true);
+        _code.Load64ToRegister(scratchDivisor + sizeof(ulong), 1);
+        _code.Bytes(0x48, 0x19, 0xCA);
+        _code.Store64FromRegister(scratchRemainder + sizeof(ulong), 2);
+        _code.Bytes(0x41, 0xBB, 0x01, 0x00, 0x00, 0x00);
+        var subtractDone = _code.Jump();
+
+        var quotientBit = _code.Position;
+        _code.PatchRelative(highLess, noSubtract);
+        _code.PatchRelative(lowLess, noSubtract);
+        _code.PatchRelative(noSubtractDone, quotientBit);
+        _code.PatchRelative(subtractDone, quotientBit);
+        _code.Load64(resultOffset);
+        _code.Load64(resultOffset + sizeof(ulong), destinationRegister: true);
+        _code.Bytes(0x48, 0x0F, 0xA4, 0xC2, 0x01, 0x48, 0xD1, 0xE0, 0x4C, 0x09, 0xD8);
+        _code.Store64(resultOffset);
+        _code.Store64FromRegister(resultOffset + sizeof(ulong), 2);
+
+        _code.Bytes(0x41, 0xFF, 0xC9);
+        var repeat = _code.JumpIf(0x85);
+        _code.PatchRelative(repeat, loop);
+
+        if (isSigned)
+        {
+            if (operation == TokenKind.Slash)
+            {
+                _code.Load(scratchSigns);
+                _code.Bytes(0x41, 0x89, 0xC2);
+                _code.Load(scratchSigns + sizeof(int));
+                _code.Bytes(0x41, 0x31, 0xC2, 0x45, 0x85, 0xD2);
+                var nonnegativeQuotient = _code.JumpIf(0x84);
+                NegateWideIntegerAt(resultOffset);
+                _code.PatchRelative(nonnegativeQuotient, _code.Position);
+            }
+            else
+            {
+                _code.Load(scratchSigns);
+                _code.Bytes(0x85, 0xC0);
+                var nonnegativeRemainder = _code.JumpIf(0x84);
+                NegateWideIntegerAt(scratchRemainder);
+                _code.PatchRelative(nonnegativeRemainder, _code.Position);
+                _code.AddressToRdx(resultOffset);
+                _code.Address(scratchRemainder);
+                _code.CopyMemory(2 * sizeof(ulong));
+            }
+        }
+        else if (operation == TokenKind.Percent)
+        {
+            _code.AddressToRdx(resultOffset);
+            _code.Address(scratchRemainder);
+            _code.CopyMemory(2 * sizeof(ulong));
+        }
+
+        _code.Address(resultOffset);
+        if (specialRemainder >= 0)
+        {
+            _code.PatchRelative(specialRemainder, _code.Position);
+        }
+    }
+
+    private void NegateWideIntegerAt(int offset)
+    {
+        _code.Load64(offset);
+        _code.Bytes(0x48, 0xF7, 0xD0, 0x48, 0x83, 0xC0, 0x01);
+        _code.Store64(offset);
+        _code.Load64(offset + sizeof(ulong), destinationRegister: true);
+        _code.Bytes(0x48, 0xF7, 0xD2, 0x48, 0x83, 0xD2, 0x00);
+        _code.Store64FromRegister(offset + sizeof(ulong), 2);
+    }
+
+    private void EmitWideIntegerShift(TokenKind operation, PrimitiveType type, int valueOffset,
+        int countOffset, PrimitiveType countType, int resultOffset)
+    {
+        if (PrimitiveTypeFacts.IsWideInteger(countType))
+        {
+            _code.Load64(countOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0x85, 0xC0);
+            RuntimeBranch(0x85, 2);
+            _code.Load64(countOffset);
+        }
+        else
+        {
+            LoadValue(countOffset, countType);
+        }
+        _code.Bytes(0x48, 0x3D);
+        _code.Int32(128);
+        RuntimeBranch(0x83, 2);
+        _code.Bytes(0x48, 0x89, 0xC1);
+        _code.Bytes(0x48, 0x83, 0xF9, 0x40);
+
+        var atLeast64 = _code.JumpIf(0x83);
+        _code.Load64(valueOffset);
+        _code.Load64(valueOffset + sizeof(ulong), destinationRegister: true);
+        if (operation == TokenKind.ShiftLeft)
+        {
+            _code.Bytes(0x48, 0x0F, 0xA5, 0xC2, 0x48, 0xD3, 0xE0);
+        }
+        else
+        {
+            _code.Bytes(0x48, 0x0F, 0xAD, 0xD0);
+            _code.Bytes(0x48, 0xD3, operation == TokenKind.ShiftRight
+                && type == PrimitiveType.Int128 ? (byte)0xFA : (byte)0xEA);
+        }
+        var done = _code.Jump();
+        _code.PatchRelative(atLeast64, _code.Position);
+        _code.Bytes(0x48, 0x83, 0xE9, 0x40);
+        if (operation == TokenKind.ShiftLeft)
+        {
+            _code.Load64(valueOffset);
+            _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0xD3, 0xE2, 0x31, 0xC0);
+        }
+        else
+        {
+            _code.Load64(valueOffset + sizeof(ulong));
+            _code.Bytes(0x48, 0x89, 0xC2);
+            _code.Bytes(0x48, 0xD3, operation == TokenKind.ShiftRight
+                && type == PrimitiveType.Int128 ? (byte)0xFA : (byte)0xEA);
+            _code.Bytes(0x48, 0x89, 0xD0);
+            if (operation == TokenKind.ShiftRight && type == PrimitiveType.Int128)
+            {
+                _code.Bytes(0x48, 0xC1, 0xFA, 0x3F);
+            }
+            else
+            {
+                _code.Bytes(0x31, 0xD2);
+            }
+        }
+        _code.PatchRelative(done, _code.Position);
+        _code.Store64(resultOffset);
+        _code.Store64FromRegister(resultOffset + sizeof(ulong), 2);
+        _code.Address(resultOffset);
+    }
+
+    private void EmitWideIntegerComparison(TokenKind operation, PrimitiveType type,
+        int leftOffset, int rightOffset)
+    {
+        var unsigned = type == PrimitiveType.UInt128;
+        _code.Load64ToRegister(leftOffset + sizeof(ulong), 0);
+        _code.Load64ToRegister(rightOffset + sizeof(ulong), 1);
+        _code.Bytes(0x48, 0x39, 0xC8);
+        var highLess = _code.JumpIf(unsigned ? (byte)0x82 : (byte)0x8C);
+        var highGreater = _code.JumpIf(unsigned ? (byte)0x87 : (byte)0x8F);
+
+        _code.Load64ToRegister(leftOffset, 0);
+        _code.Load64ToRegister(rightOffset, 1);
+        _code.Bytes(0x48, 0x39, 0xC8);
+        var lowCondition = operation switch {
+            TokenKind.EqualsEquals => (byte)0x94,
+            TokenKind.BangEquals => (byte)0x95,
+            TokenKind.Less => (byte)0x92,
+            TokenKind.LessEquals => (byte)0x96,
+            TokenKind.Greater => (byte)0x97,
+            TokenKind.GreaterEquals => (byte)0x93,
+            _ => throw new InvalidOperationException("The verifier admitted an unsupported 128-bit comparison."),
+        };
+        _code.Bytes(0x0F, lowCondition, 0xC0, 0x0F, 0xB6, 0xC0);
+        var lowDone = _code.Jump();
+
+        _code.PatchRelative(highLess, _code.Position);
+        _code.Bytes(0xB8);
+        _code.Int32(operation is TokenKind.Less or TokenKind.LessEquals or TokenKind.BangEquals ? 1 : 0);
+        var lessDone = _code.Jump();
+
+        _code.PatchRelative(highGreater, _code.Position);
+        _code.Bytes(0xB8);
+        _code.Int32(operation is TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.BangEquals ? 1 : 0);
+        var greaterDone = _code.Jump();
+
+        var end = _code.Position;
+        _code.PatchRelative(lowDone, end);
+        _code.PatchRelative(lessDone, end);
+        _code.PatchRelative(greaterDone, end);
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
@@ -5830,6 +6499,20 @@ internal sealed class MachineCode
             Load(offset);
         }
     }
+    internal void Load64ToRegister(int offset, byte register)
+    {
+        Byte((byte)(0x48 | (((register >> 3) & 1) << 2)));
+        Byte(0x8B);
+        if (UseFramePointer)
+        {
+            Byte((byte)(0x85 | ((register & 7) << 3)));
+        }
+        else
+        {
+            Bytes((byte)(0x84 | ((register & 7) << 3)), 0x24);
+        }
+        Int32(offset);
+    }
     internal void LoadUnsigned(int offset, int width)
     {
         Bytes(0x0F, width == 1 ? (byte)0xB6 : (byte)0xB7, UseFramePointer ? (byte)0x85 : (byte)0x84);
@@ -5957,6 +6640,20 @@ internal sealed class MachineCode
     {
         Byte(0x48);
         Store(offset);
+    }
+    internal void Store64FromRegister(int offset, byte register)
+    {
+        Byte((byte)(0x48 | (((register >> 3) & 1) << 2)));
+        Byte(0x89);
+        if (UseFramePointer)
+        {
+            Byte((byte)(0x85 | ((register & 7) << 3)));
+        }
+        else
+        {
+            Bytes((byte)(0x84 | ((register & 7) << 3)), 0x24);
+        }
+        Int32(offset);
     }
     internal void StoreField(int offset, int width)
     {

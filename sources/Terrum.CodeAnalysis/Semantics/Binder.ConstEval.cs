@@ -2448,8 +2448,11 @@ internal sealed partial class Binder
             case BoundUpdate { Place: BoundRead read } update when slots[read.Variable] is BoundConstant old:
             {
                 var operation = update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus;
+                var one = PrimitiveTypeFacts.IsWideInteger(update.Type)
+                    ? new BoundConstant(new ScalarBits(1, 0), update.Type, update.Span)
+                    : new BoundConstant(1, update.Type, update.Span);
                 var next = FoldScalarConstant(new BoundBinary(operation, old,
-                    new BoundConstant(1, update.Type, update.Span), update.Type, update.Span) {
+                    one, update.Type, update.Span) {
                     OverflowBehavior = update.OverflowBehavior,
                 }) as BoundConstant ?? throw new ConstEvalFailure("ConstEval update arithmetic failed.");
                 slots[read.Variable] = next;

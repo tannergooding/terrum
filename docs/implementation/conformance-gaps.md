@@ -851,10 +851,12 @@ the absence of serialized sort-key fields are approved.
 
 **Current/evidence:** `Binder.ConstEval` retains private depth 64/work 4096
 limits and admits the returnable fixed scalar set except `nint`/`nuint`; wide
-scalar operator support is still incomplete. `ConstEvalTests`,
-`WideScalarLiteralTests`, and supervised wide-literal PE/JIT coverage exercise
-the current boundaries. The [implementation inventory](../implementation.md)
-explicitly does not claim the complete portable floor.
+integer source operators now bind, verify, fold and execute through Windows
+x64 JIT/AOT; wide static-proof facts and floating/BID operators remain
+incomplete. `ConstEvalTests`, `WideScalarLiteralTests`, and supervised wide
+integer/literal PE/JIT coverage exercise the current boundaries. The
+[implementation inventory](../implementation.md) explicitly does not claim
+the complete portable floor.
 
 **Routes/gate:** implement selected proof facts, executed-path ordinary/pure/
 constant forms, actual failure/effects and the minimum admitted value domain.

@@ -159,7 +159,7 @@ internal sealed partial class Binder
         SourceArithmeticProfile sourceArithmeticProfile, TokenKind operation, PrimitiveType type, bool unary = false)
     {
         if (sourceArithmeticProfile != SourceArithmeticProfile.Release
-            || !PrimitiveTypeFacts.IsInteger(type))
+            || !PrimitiveTypeFacts.IsIntegerOrWide(type))
         {
             return BoundIntegerOverflowBehavior.Checked;
         }
@@ -4990,7 +4990,7 @@ internal sealed partial class Binder
                 }
                 var op = ((SyntaxTokenElement)node.Children[1]).Token;
                 var place = BindExpression(target, null);
-                if (!PrimitiveTypeFacts.IsInteger(place.Type))
+                if (!PrimitiveTypeFacts.IsIntegerOrWide(place.Type))
                 {
                     Report("TRM3007", "Built-in compound assignment requires an integer place; nominal compound operators are unsupported.", op.Span);
                 }
@@ -5004,7 +5004,7 @@ internal sealed partial class Binder
                     : place.Type;
                 var right = BindExpression(rightNode, rightContext);
                 if ((!isShift && right.Type != place.Type)
-                    || (isShift && !PrimitiveTypeFacts.IsInteger(right.Type)))
+                    || (isShift && !PrimitiveTypeFacts.IsIntegerOrWide(right.Type)))
                 {
                     Report("TRM3007", "Compound assignment requires an exact operand type.", op.Span);
                 }
@@ -6110,10 +6110,12 @@ internal sealed partial class Binder
                     : expected is PrimitiveType.Int8 or PrimitiveType.Int16
                         or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
                         or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.Int128 or PrimitiveType.UInt128
                         or PrimitiveType.Float32 or PrimitiveType.Float64
                         || KnownType(operandNode) is PrimitiveType.Int8 or PrimitiveType.Int16
                             or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
                             or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                            or PrimitiveType.Int128 or PrimitiveType.UInt128
                             or PrimitiveType.Float32 or PrimitiveType.Float64
                         ? operandType : (PrimitiveType?)null;
                 var operand = BindExpression(operandNode, operandContext);
@@ -6122,11 +6124,11 @@ internal sealed partial class Binder
                     Report("TRM3007", $"Unary operator requires {TypeName(operandType)}.", op.Span);
                 }
                 if (op.Kind is not (TokenKind.Plus or TokenKind.Minus or TokenKind.Tilde or TokenKind.Bang)
-                    || (op.Kind == TokenKind.Minus && !PrimitiveTypeFacts.IsInteger(operandType)
+                    || (op.Kind == TokenKind.Minus && !PrimitiveTypeFacts.IsIntegerOrWide(operandType)
                         && operandType is not (PrimitiveType.Float32 or PrimitiveType.Float64))
-                    || (op.Kind == TokenKind.Plus && !PrimitiveTypeFacts.IsInteger(operandType)
+                    || (op.Kind == TokenKind.Plus && !PrimitiveTypeFacts.IsIntegerOrWide(operandType)
                         && operandType is not (PrimitiveType.Float32 or PrimitiveType.Float64))
-                    || (op.Kind == TokenKind.Tilde && !PrimitiveTypeFacts.IsInteger(operandType)))
+                    || (op.Kind == TokenKind.Tilde && !PrimitiveTypeFacts.IsIntegerOrWide(operandType)))
                 {
                     Report("TRM3001", "Unsupported unary operator.", op.Span);
                 }
@@ -6148,7 +6150,7 @@ internal sealed partial class Binder
                 }
                 var place = BindExpression(updateTarget, null);
                 var nominal = IsStruct(place.Type) && !IsUnique(place.Type);
-                if (!nominal && !PrimitiveTypeFacts.IsInteger(place.Type))
+                if (!nominal && !PrimitiveTypeFacts.IsIntegerOrWide(place.Type))
                 {
                     Report("TRM3007", "Increment and decrement require a Copy integer or Copy struct place.", updateTarget.Span);
                 }
@@ -6416,12 +6418,12 @@ internal sealed partial class Binder
             case TokenKind.Percent:
                 operandType = leftKnown ?? rightKnown
                     ?? (expected is PrimitiveType expectedArithmeticType
-                        && (PrimitiveTypeFacts.IsInteger(expectedArithmeticType)
+                        && (PrimitiveTypeFacts.IsIntegerOrWide(expectedArithmeticType)
                             || expectedArithmeticType is PrimitiveType.Float32 or PrimitiveType.Float64) ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
                 var floatingArithmetic = operandType is PrimitiveType.Float32 or PrimitiveType.Float64
                     && op.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash;
-                if (!(operandType is PrimitiveType integerType && PrimitiveTypeFacts.IsInteger(integerType))
+                if (!(operandType is PrimitiveType integerType && PrimitiveTypeFacts.IsIntegerOrWide(integerType))
                     && !floatingArithmetic)
                 {
                     Report("TRM3007", "Arithmetic requires same-type integer operands or float32/float64 operands "
@@ -6433,9 +6435,9 @@ internal sealed partial class Binder
             case TokenKind.ShiftRight:
             case TokenKind.ShiftRightUnsigned:
                 operandType = leftKnown ?? (expected is PrimitiveType expectedShiftType
-                    && PrimitiveTypeFacts.IsInteger(expectedShiftType) ? expected : null);
+                    && PrimitiveTypeFacts.IsIntegerOrWide(expectedShiftType) ? expected : null);
                 resultType = operandType ?? PrimitiveType.Int32;
-                if (operandType is not PrimitiveType shiftType || !PrimitiveTypeFacts.IsInteger(shiftType))
+                if (operandType is not PrimitiveType shiftType || !PrimitiveTypeFacts.IsIntegerOrWide(shiftType))
                 {
                     Report("TRM3007", "Shifts require a known integer left operand.", op.Span);
                 }
@@ -6447,7 +6449,7 @@ internal sealed partial class Binder
             case TokenKind.GreaterEquals:
                 operandType = leftKnown ?? rightKnown;
                 resultType = PrimitiveType.Bool;
-                if (!(operandType is PrimitiveType orderedType && (PrimitiveTypeFacts.IsInteger(orderedType)
+                if (!(operandType is PrimitiveType orderedType && (PrimitiveTypeFacts.IsIntegerOrWide(orderedType)
                     || PrimitiveTypeFacts.IsCodeUnitOrRune(orderedType)
                     || orderedType is PrimitiveType.Float32 or PrimitiveType.Float64)))
                 {
@@ -6467,7 +6469,8 @@ internal sealed partial class Binder
                 operandType = leftKnown ?? rightKnown ?? expected;
                 resultType = operandType ?? PrimitiveType.Int32;
                 if (operandType != PrimitiveType.Bool
-                    && (operandType is not PrimitiveType bitwiseType || !PrimitiveTypeFacts.IsInteger(bitwiseType)))
+                    && (operandType is not PrimitiveType bitwiseType
+                        || !PrimitiveTypeFacts.IsIntegerOrWide(bitwiseType)))
                 {
                     Report("TRM3007", "Bitwise operands must both be int32 or both be bool.", op.Span);
                 }
@@ -6479,7 +6482,7 @@ internal sealed partial class Binder
                 resultType = PrimitiveType.Bool;
                 if (!(operandType == PrimitiveType.Bool
                     || (operandType is PrimitiveType equalityType
-                        && (PrimitiveTypeFacts.IsInteger(equalityType)
+                        && (PrimitiveTypeFacts.IsIntegerOrWide(equalityType)
                             || PrimitiveTypeFacts.IsCodeUnitOrRune(equalityType)
                             || equalityType is PrimitiveType.Float32 or PrimitiveType.Float64))))
                 {
@@ -6501,7 +6504,7 @@ internal sealed partial class Binder
             : operandType;
         var right = BindExpression(rightNode, rightContext);
         if (operandType is null || left.Type != operandType
-            || (shift ? !PrimitiveTypeFacts.IsInteger(right.Type) : right.Type != operandType)
+            || (shift ? !PrimitiveTypeFacts.IsIntegerOrWide(right.Type) : right.Type != operandType)
             || operandType == PrimitiveType.Void)
         {
             Report("TRM3007", "Binary operands must have the same supported type.", op.Span);

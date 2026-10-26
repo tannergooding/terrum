@@ -53,6 +53,24 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
         return true;
     }
 
+    internal bool TryGetIntegerValue(PrimitiveType type, out BigInteger value)
+    {
+        if (type is not (PrimitiveType.Int128 or PrimitiveType.UInt128)
+            || !IsCanonicalFor(type))
+        {
+            value = BigInteger.Zero;
+            return false;
+        }
+
+        var raw = (new BigInteger(High) << 64) | Low;
+        if (type == PrimitiveType.Int128 && (High & 0x8000_0000_0000_0000UL) != 0)
+        {
+            raw -= BigInteger.One << 128;
+        }
+        value = raw;
+        return true;
+    }
+
     internal bool IsCanonicalFor(PrimitiveType type)
     {
         var width = PrimitiveTypeFacts.ScalarWidth(type);
