@@ -642,6 +642,11 @@ public sealed class Lexer
 
     private TokenKind ReadString()
     {
+        if (Peek(1) == '"' && Peek(2) == '"')
+        {
+            return ReadRawText();
+        }
+
         var start = _position++;
         var terminated = false;
         while (!AtEnd && !IsNewline(Current))
@@ -713,6 +718,48 @@ public sealed class Lexer
         if (!terminated)
         {
             Report("TRM0002", "Unterminated string literal.", start, _position - start);
+        }
+
+        return TokenKind.StringLiteral;
+    }
+
+    private TokenKind ReadRawText()
+    {
+        var start = _position;
+        _ = StringLiteralDecoder.TryReadRawText(_source.Text.AsSpan(start), false, _cancellationToken,
+            out var consumedLength, out _, out var error, out var errorStart, out var errorLength);
+        _position += consumedLength;
+
+        var invalidSurrogate = error == StringLiteralDecoder.RawTextErrorKind.Invalid
+            && errorStart >= 0 && errorStart < consumedLength && errorLength == 1
+            && char.IsSurrogate(_source.Text[start + errorStart]);
+        if (error == StringLiteralDecoder.RawTextErrorKind.Invalid && !invalidSurrogate)
+        {
+            Report("TRM0001", "Invalid raw text literal.", start + errorStart, errorLength);
+        }
+        else if (error == StringLiteralDecoder.RawTextErrorKind.Unterminated)
+        {
+            Report("TRM0002", "Unterminated raw text literal.", start + errorStart, errorLength);
+        }
+
+        for (var position = start; position < _position; position++)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (char.IsHighSurrogate(_source.Text[position]))
+            {
+                if (position + 1 < _position && char.IsLowSurrogate(_source.Text[position + 1]))
+                {
+                    position++;
+                }
+                else
+                {
+                    Report("TRM0001", "Unpaired UTF-16 surrogate.", position, 1);
+                }
+            }
+            else if (char.IsLowSurrogate(_source.Text[position]))
+            {
+                Report("TRM0001", "Unpaired UTF-16 surrogate.", position, 1);
+            }
         }
 
         return TokenKind.StringLiteral;

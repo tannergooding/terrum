@@ -26,7 +26,9 @@ public sealed class SwitchPatternSyntaxTests
             ("var item", [SyntaxKind.SwitchInferredBindingPattern]),
             ("mut var? item", [SyntaxKind.SwitchInferredBindingPattern]),
             ("int32 item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("mut int32", [SyntaxKind.SwitchTypedBindingPattern]),
             ("mut int32 item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("write int32", [SyntaxKind.SwitchTypedBindingPattern]),
             ("Box<int32> item", [SyntaxKind.SwitchTypedBindingPattern]),
             ("T? item", [SyntaxKind.SwitchTypedBindingPattern]),
             ("List<_> items", [
@@ -48,6 +50,10 @@ public sealed class SwitchPatternSyntaxTests
                 SyntaxKind.SwitchPatternTypeArgument,
             ]),
             ("List<(1 + 2)> items", [
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("List<\"\"\"raw\"\"\"> items", [
                 SyntaxKind.SwitchGenericTypePattern,
                 SyntaxKind.SwitchPatternTypeArgument,
             ]),
