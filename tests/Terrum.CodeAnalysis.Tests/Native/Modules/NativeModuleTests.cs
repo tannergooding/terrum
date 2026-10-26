@@ -219,7 +219,7 @@ public sealed class NativeModuleTests
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var provider = NativeModuleCompiler.CreateProducer(CompileLibrary("""
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             public int32 Identity(int32 value) { return value; }
             """), ["Identity"], "AddressOnlyProvider", NativeRuntimePolicy.FailFast);
@@ -269,6 +269,48 @@ public sealed class NativeModuleTests
         Assert.That(await NativeModuleCompiler.RunAsync(failed, original, TimeSpan.FromSeconds(10)).ConfigureAwait(true), Is.EqualTo(unchecked((int)0xE0540003)));
     }
 
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task AggregateNativeOutputExecutesThroughPersistedPackageImagesAsync(
+        NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var boundPolicy = policy == NativeRuntimePolicy.CheckedExceptions
+            ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
+        const string Source = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Counter { public int64 Value; }
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Counter> counter);
+
+            public int32 ReadCounter() {
+                init Counter counter;
+                unsafe {
+                    if (QueryPerformanceCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value < 0) { return -2; }
+                return 42;
+            }
+            """;
+        var provider = NativeModuleCompiler.CreateProducer(
+            CompileLibrary(Source, boundPolicy), ["ReadCounter"], "CounterOutput", policy);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return ReadCounter(); }"),
+            NativeModuleCompiler.CreateReference(provider), boundPolicy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, provider, policy);
+
+        NativeModuleCompiler.Validate(consumer, provider);
+        Assert.That(await NativeModuleCompiler.RunAsync(consumer, provider,
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(42));
+    }
+
     [Test]
     public void PrivateModuleDependenciesCanReuseOneNativeImportUnderDifferentNames()
     {
@@ -276,7 +318,7 @@ public sealed class NativeModuleTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
-            [NoThrow]
+
             extern unsafe uint32 ProviderThreadId();
 
             public uint32 ReadProviderThreadId() {
@@ -289,7 +331,7 @@ public sealed class NativeModuleTests
             ["ReadProviderThreadId"]);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
-            [NoThrow]
+
             extern unsafe uint32 ConsumerThreadId();
 
             int32 Main() {
@@ -313,7 +355,7 @@ public sealed class NativeModuleTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentThreadId")]
-            [NoThrow]
+
             public extern unsafe uint32 ThreadId();
 
             public uint32 ReadThreadId() {
@@ -353,7 +395,7 @@ public sealed class NativeModuleTests
     public async Task PersistedConsumerExecutesReplacementCleanupFuncletsAsync(NativeRuntimePolicy policy)
     {
         const string Source = """
-            [NoThrow] int32 Value() { return 42; }
+             int32 Value() { return 42; }
             public bool Take(out int32 result) {
                 try { return true; }
                 finally { result = Value(); }
@@ -385,7 +427,7 @@ public sealed class NativeModuleTests
     public async Task CurrentNativeConsumerRunsSavedFrameProducerAsync()
     {
         const string Original = """
-            [NoThrow] void Disturb() { }
+             void Disturb() { }
             public int32 Read() {
                 mut int32 value = 42;
                 try { return value; }
@@ -393,7 +435,7 @@ public sealed class NativeModuleTests
             }
             """;
         const string Replacement = """
-            [NoThrow] void Disturb() { }
+             void Disturb() { }
             public int32 Read() {
                 mut int32 value = 43;
                 try { return value; }
