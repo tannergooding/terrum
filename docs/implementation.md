@@ -71,15 +71,20 @@ wide integer bits, binary rounding and subnormals, and BID decimal cohorts.
 `nint`/`nuint` remain outside the fixed-scalar value-registration candidate.
 Eligible `[ConstEval]` bodies support scalar locals, assignments, branches,
 loops, returns, and calls to other `[ConstEval]` functions, subject to the
-currently implemented operation matrix. Hosted `int128`/`uint128` binding,
-verification, checked/wrapping folding, ConstEval and Windows x64 JIT/AOT
-execution now cover the accepted integer operators. Standard register-Body
-execution, wide static-proof facts, and binary16, `bfloat16`, binary128 and BID
-operator support remain incomplete. The evaluator limits are 4,096 interpreted
-statement steps and a call-depth limit of 64; these are not portable
-guarantees. Static proof support does not yet implement a general built-in
-predicate-refinement catalog for runtime values, so it does not fulfill the
-accepted v1 proof-floor scope.
+currently implemented operation matrix. Hosted `int128`/`uint128` binding, verification, checked/wrapping folding,
+ConstEval and Windows x64 JIT/AOT execution cover the accepted integer
+operators. Hosted binding, verification, exact folding and ConstEval also
+cover the binary and BID floating operator matrix, including truncating
+remainder and decimal preferred cohorts; native `float128` and BID lowering
+remain incomplete. Windows x64 lowering covers the `float16`, `bfloat16`,
+`float32` and `float64` operator matrices, including truncating remainder,
+updates and compound assignments.
+Standard register-Body execution remains a separate gap. The evaluator limits
+are 4,096 interpreted statement steps and a call-depth limit of 64; these are
+not portable guarantees. Wide scalar static-proof facts now preserve 128-bit
+integer payloads and target-format floating values/classes; the broader
+built-in predicate-refinement catalog for runtime values remains incomplete,
+so the accepted v1 proof floor is not yet fulfilled.
 
 Current profile markers are syntax language version 46, semantic-module base
 revision 76, the provisionally implemented but unapproved private arithmetic

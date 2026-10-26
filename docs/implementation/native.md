@@ -157,9 +157,13 @@ signatures remain unsupported. Source binding now constructs exact wide integer,
 binary floating and BID decimal literals, including explicit `T(literal)`
 target selection and fixed-scalar `ConstEval` values. Hosted `int128`/`uint128`
 operators also lower to exact 16-byte Windows x64 code and execute through JIT
-and PE under both runtime policies. Wide static-proof facts, floating/BID
-operators and conversions, standard register-Body CallSite execution, and
-independent module-call replacement conformance remain separate gaps.
+and PE under both runtime policies. Hosted floating/BID operator semantics now
+bind and fold exactly. Windows x64 lowering covers float16, bfloat16, float32
+and float64 arithmetic, comparisons, sign operations, updates, compound
+assignments and truncating remainder. Native float128 and BID operations and
+full cross-format floating conversions remain incomplete. Standard register-Body
+CallSite execution and independent module-call replacement conformance remain
+separate gaps.
 
 The hosted compiler supports internal scalar `[ConstEval]` functions,
 required `const T name = expression;` locals and nested scalar `const`
