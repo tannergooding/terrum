@@ -10,6 +10,7 @@ using System.Numerics;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 
 namespace Terrum.CodeAnalysis.Native;
 
@@ -757,6 +758,10 @@ internal sealed partial class PeCompiler
     // 32 bytes of outgoing home space and all outgoing stack arguments stay at the bottom of each frame.
     private const int MaximumFrame = 0xF00;
     private const int MaximumText = 8 * 1024 * 1024;
+    private sealed record Binary128Runtime(NativeCode Code,
+        ImmutableDictionary<string, int> FunctionOffsets);
+    private static readonly Lazy<Binary128Runtime> s_binary128Runtime = new(
+        CreateBinary128Runtime, LazyThreadSafetyMode.ExecutionAndPublication);
     private readonly BoundProgram _program;
     private readonly bool _library;
     private readonly IReadOnlyDictionary<int, NativeImportBinding>? _nativeImports;
@@ -776,6 +781,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _replacementSlots;
     private readonly int[] _cleanupArgumentSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
+    private readonly List<(int Offset, string Function)> _binary128Calls = [];
     private readonly List<(int Offset, int Target)> _functionAddressFixups = [];
     private readonly HashSet<int> _externalFunctionAddresses = [];
     private readonly Dictionary<int, int> _externalFunctionAddressStarts = [];
@@ -969,6 +975,49 @@ internal sealed partial class PeCompiler
         EmitManagedCollector();
         EmitManagedDescriptors();
 
+        var binary128FunctionRanges = ImmutableArray<NativeFunctionRange>.Empty;
+        if (_binary128Calls.Count != 0)
+        {
+            var runtime = s_binary128Runtime.Value;
+            var runtimeStart = _code.Position;
+            _code.Bytes(runtime.Code.Code);
+            foreach (var (offset, function) in _binary128Calls)
+            {
+                _code.PatchRelative(offset, runtimeStart + runtime.FunctionOffsets[function]);
+            }
+            foreach (var offset in runtime.Code.ExitProcessFixups)
+            {
+                _imports.Add(runtimeStart + offset);
+            }
+            foreach (var import in runtime.Code.NativeImports)
+            {
+                _nativeImportFixups.Add(import with {
+                    DisplacementOffset = runtimeStart + import.DisplacementOffset,
+                });
+            }
+            foreach (var fixup in runtime.Code.DataFixups)
+            {
+                _dataFixups.Add(fixup with {
+                    DisplacementOffset = runtimeStart + fixup.DisplacementOffset,
+                });
+            }
+            binary128FunctionRanges = [
+                .. runtime.Code.Functions.Select(function => function with {
+                    Start = runtimeStart + function.Start,
+                    End = runtimeStart + function.End,
+                    ExceptionHandler = function.ExceptionHandler == 0
+                        ? 0 : runtimeStart + function.ExceptionHandler,
+                    ExceptionScopes = [
+                        .. function.ExceptionScopes.Select(scope => scope with {
+                            Begin = runtimeStart + scope.Begin,
+                            End = runtimeStart + scope.End,
+                            Handler = scope.Handler == 0 ? 0 : runtimeStart + scope.Handler,
+                        }),
+                    ],
+                }),
+            ];
+        }
+
         foreach (var (offset, target) in _calls)
         {
             _code.PatchRelative(offset, _starts[target]);
@@ -1002,7 +1051,8 @@ internal sealed partial class PeCompiler
         {
             throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
         }
-        var functionCount = checked((_library ? 0 : 2) + _failureStarts.Length + _funclets.Count
+        var functionCount = checked(binary128FunctionRanges.Length
+            + (_library ? 0 : 2) + _failureStarts.Length + _funclets.Count
             + (_managedNodes ? 1 : 0));
         var sourceFunctionOffsets = ImmutableArray.CreateBuilder<int>(_program.Functions.Length);
         for (var i = 0; i < _program.Functions.Length; i++)
@@ -1051,6 +1101,7 @@ internal sealed partial class PeCompiler
         {
             functions.Add(new NativeFunctionRange(_managedCollectorStart, _managedCollectorEnd, 120));
         }
+        functions.AddRange(binary128FunctionRanges);
 
         return new NativeCode(_code.ToArray(), _entryStart,
             functions.MoveToImmutable(),
@@ -1773,7 +1824,8 @@ internal sealed partial class PeCompiler
                     }
                     : compound.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16 ? 18
                     : PrimitiveTypeFacts.IsFloating(compound.Type)
-                        ? CompoundOperators.Binary(compound.Operator) == TokenKind.Percent ? 6 : 5
+                        ? compound.Type == PrimitiveType.Float128 ? 5
+                            : CompoundOperators.Binary(compound.Operator) == TokenKind.Percent ? 6 : 5
                         : 3;
                 return Math.Max(requiredCompoundSpills,
                     Math.Max(4 + ExpressionSpills(compound.Right, ref maximumArguments),
@@ -1841,6 +1893,7 @@ internal sealed partial class PeCompiler
                         ? IsFloatingComparison(binary.Operator) ? 6
                             : binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
                                 or TokenKind.Slash or TokenKind.Percent ? 16 : 3
+                        : binary.Left.Type == PrimitiveType.Float128 ? 3
                         : binary.Operator == TokenKind.Percent
                             && PrimitiveTypeFacts.IsFloating(binary.Left.Type) ? 4 : 3;
                 return Math.Max(requiredBinarySpills,
@@ -2294,25 +2347,505 @@ internal sealed partial class PeCompiler
         Math.Max(8, ValueLayout.Alignment(type, _program.Structures));
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
+
+    private static Binary128Runtime CreateBinary128Runtime()
+    {
+        const string source = """
+            uint128 F128Zero(bool negative) {
+                if (negative) {
+                    return uint128(1) << 127;
+                }
+                return uint128(0);
+            }
+            uint128 F128Infinity(bool negative) {
+                mut uint128 value = uint128(32767) << 112;
+                if (negative) {
+                    value = value | (uint128(1) << 127);
+                }
+                return value;
+            }
+            uint128 F128NaN() {
+                return (uint128(32767) << 112) | (uint128(1) << 111);
+            }
+            bool F128Sign(uint128 bits) {
+                return ((bits >> 127) & uint128(1)) != 0;
+            }
+            uint128 F128Fraction(uint128 bits) {
+                return bits & ((uint128(1) << 112) - uint128(1));
+            }
+            uint128 F128Class(uint128 bits) {
+                uint128 encodedExponent = (bits >> 112) & uint128(32767);
+                uint128 fraction = F128Fraction(bits);
+                if (encodedExponent == uint128(32767)) {
+                    if (fraction == 0) {
+                        return uint128(1);
+                    }
+                    return uint128(2);
+                }
+                if (encodedExponent == 0 && fraction == 0) {
+                    return uint128(0);
+                }
+                return uint128(3);
+            }
+            uint128 F128Significand(uint128 bits) {
+                uint128 encodedExponent = (bits >> 112) & uint128(32767);
+                mut uint128 significand = F128Fraction(bits);
+                uint128 hiddenBit = uint128(1) << 112;
+                if (encodedExponent == 0) {
+                    while (significand != 0 && significand < hiddenBit) {
+                        significand = significand << 1;
+                    }
+                    return significand;
+                }
+                return significand | hiddenBit;
+            }
+            uint128 F128Exponent(uint128 bits) {
+                uint128 encodedExponent = (bits >> 112) & uint128(32767);
+                if (encodedExponent != 0) {
+                    return encodedExponent + uint128(16607);
+                }
+                mut uint128 significand = F128Fraction(bits);
+                mut uint128 exponent = uint128(16608);
+                uint128 hiddenBit = uint128(1) << 112;
+                while (significand != 0 && significand < hiddenBit) {
+                    significand = significand << 1;
+                    exponent = exponent - uint128(1);
+                }
+                return exponent;
+            }
+            uint128 F128ShiftRightJam(uint128 value, uint128 distance) {
+                if (distance == 0) {
+                    return value;
+                }
+                if (distance >= uint128(128)) {
+                    if (value == 0) {
+                        return 0;
+                    }
+                    return 1;
+                }
+                uint128 discardedMask = (uint128(1) << distance) - uint128(1);
+                bool sticky = (value & discardedMask) != 0;
+                mut uint128 shifted = value >> distance;
+                if (sticky) {
+                    shifted = shifted | uint128(1);
+                }
+                return shifted;
+            }
+            uint128 F128Pack(bool negative, uint128 exponent, uint128 extended) {
+                if (extended == 0) {
+                    return F128Zero(negative);
+                }
+                mut uint128 resultExtended = extended;
+                mut uint128 resultExponent = exponent;
+                uint128 hiddenBit = uint128(1) << 112;
+                uint128 extendedHiddenBit = hiddenBit << 3;
+                while (resultExtended >= (extendedHiddenBit << 1)) {
+                    resultExtended = F128ShiftRightJam(resultExtended, uint128(1));
+                    resultExponent = resultExponent + uint128(1);
+                }
+                while (resultExtended < extendedHiddenBit && resultExponent > uint128(16496)) {
+                    resultExtended = resultExtended << 1;
+                    resultExponent = resultExponent - uint128(1);
+                }
+                if (resultExponent < uint128(16608)) {
+                    resultExtended = F128ShiftRightJam(
+                        resultExtended, uint128(16608) - resultExponent);
+                    resultExponent = uint128(16608);
+                }
+                mut uint128 significand = resultExtended >> 3;
+                uint128 rounding = resultExtended & uint128(7);
+                if (rounding > uint128(4)
+                    || (rounding == uint128(4) && (significand & uint128(1)) != 0)) {
+                    significand = significand + uint128(1);
+                }
+                if (significand >= (uint128(1) << 113)) {
+                    significand = significand >> 1;
+                    resultExponent = resultExponent + uint128(1);
+                }
+                if (resultExponent > uint128(49373)) {
+                    return F128Infinity(negative);
+                }
+                mut uint128 exponentField = uint128(0);
+                if (significand >= hiddenBit) {
+                    exponentField = resultExponent - uint128(16607);
+                }
+                mut uint128 bits = (exponentField << 112)
+                    | (significand & (hiddenBit - uint128(1)));
+                if (negative) {
+                    bits = bits | (uint128(1) << 127);
+                }
+                return bits;
+            }
+            uint128 F128AddCore(uint128 left, uint128 right, bool subtract) {
+                mut uint128 adjustedRight = right;
+                if (subtract) {
+                    adjustedRight = adjustedRight ^ (uint128(1) << 127);
+                }
+                mut bool signA = F128Sign(left);
+                mut bool signB = F128Sign(adjustedRight);
+                uint128 classA = F128Class(left);
+                uint128 classB = F128Class(adjustedRight);
+                if (classA == uint128(2) || classB == uint128(2)) {
+                    return F128NaN();
+                }
+                if (classA == uint128(1) && classB == uint128(1)) {
+                    if (signA == signB) {
+                        return F128Infinity(signA);
+                    }
+                    return F128NaN();
+                }
+                if (classA == uint128(1)) {
+                    return F128Infinity(signA);
+                }
+                if (classB == uint128(1)) {
+                    return F128Infinity(signB);
+                }
+                if (classA == uint128(0) && classB == uint128(0)) {
+                    if (signA == signB) {
+                        return F128Zero(signA);
+                    }
+                    return F128Zero(false);
+                }
+                if (classA == uint128(0)) {
+                    return adjustedRight;
+                }
+                if (classB == uint128(0)) {
+                    return left;
+                }
+                mut uint128 exponentA = F128Exponent(left);
+                mut uint128 exponentB = F128Exponent(adjustedRight);
+                mut uint128 significandA = F128Significand(left);
+                mut uint128 significandB = F128Significand(adjustedRight);
+                if (exponentA < exponentB
+                    || (exponentA == exponentB && significandA < significandB)) {
+                    mut uint128 temporarySignificand = significandA;
+                    significandA = significandB;
+                    significandB = temporarySignificand;
+                    mut uint128 temporaryExponent = exponentA;
+                    exponentA = exponentB;
+                    exponentB = temporaryExponent;
+                    mut bool temporarySign = signA;
+                    signA = signB;
+                    signB = temporarySign;
+                }
+                uint128 extendedA = significandA << 3;
+                uint128 extendedB = F128ShiftRightJam(
+                    significandB << 3, exponentA - exponentB);
+                if (signA == signB) {
+                    mut uint128 sum = extendedA + extendedB;
+                    mut uint128 resultExponent = exponentA;
+                    if (sum >= (uint128(1) << 116)) {
+                        sum = F128ShiftRightJam(sum, uint128(1));
+                        resultExponent = resultExponent + uint128(1);
+                    }
+                    return F128Pack(signA, resultExponent, sum);
+                }
+                mut uint128 difference = extendedA - extendedB;
+                if (difference == 0) {
+                    return F128Zero(false);
+                }
+                mut uint128 differenceExponent = exponentA;
+                uint128 normalizedBit = uint128(1) << 115;
+                while (difference < normalizedBit && differenceExponent > uint128(16496)) {
+                    difference = difference << 1;
+                    differenceExponent = differenceExponent - uint128(1);
+                }
+                return F128Pack(signA, differenceExponent, difference);
+            }
+            uint128 F128Add(uint128 left, uint128 right) {
+                return F128AddCore(left, right, false);
+            }
+            uint128 F128Subtract(uint128 left, uint128 right) {
+                return F128AddCore(left, right, true);
+            }
+            uint128 F128MultiplyLow(uint128 left, uint128 right) {
+                uint128 mask = (uint128(1) << 64) - uint128(1);
+                uint128 leftLow = left & mask;
+                uint128 leftHigh = left >> 64;
+                uint128 rightLow = right & mask;
+                uint128 rightHigh = right >> 64;
+                uint128 lowLow = leftLow * rightLow;
+                uint128 lowHigh = leftLow * rightHigh;
+                uint128 highLow = leftHigh * rightLow;
+                return lowLow + ((lowHigh & mask) << 64)
+                    + ((highLow & mask) << 64);
+            }
+            uint128 F128MultiplyHigh(uint128 left, uint128 right) {
+                uint128 mask = (uint128(1) << 64) - uint128(1);
+                uint128 leftLow = left & mask;
+                uint128 leftHigh = left >> 64;
+                uint128 rightLow = right & mask;
+                uint128 rightHigh = right >> 64;
+                uint128 lowLow = leftLow * rightLow;
+                uint128 lowHigh = leftLow * rightHigh;
+                uint128 highLow = leftHigh * rightLow;
+                uint128 highHigh = leftHigh * rightHigh;
+                uint128 firstCross = (lowHigh & mask) << 64;
+                uint128 secondCross = (highLow & mask) << 64;
+                mut uint128 firstSum = lowLow + firstCross;
+                bool carryFirst = firstSum < lowLow;
+                mut uint128 lowResult = firstSum + secondCross;
+                bool carrySecond = lowResult < firstSum;
+                mut uint128 highResult = (lowHigh >> 64) + (highLow >> 64) + highHigh;
+                if (carryFirst) {
+                    highResult = highResult + uint128(1);
+                }
+                if (carrySecond) {
+                    highResult = highResult + uint128(1);
+                }
+                return highResult;
+            }
+            uint128 F128Multiply(uint128 left, uint128 right) {
+                bool negative = F128Sign(left) != F128Sign(right);
+                uint128 classA = F128Class(left);
+                uint128 classB = F128Class(right);
+                if (classA == uint128(2) || classB == uint128(2)
+                    || (classA == uint128(1) && classB == uint128(0))
+                    || (classA == uint128(0) && classB == uint128(1))) {
+                    return F128NaN();
+                }
+                if (classA == uint128(1) || classB == uint128(1)) {
+                    return F128Infinity(negative);
+                }
+                if (classA == uint128(0) || classB == uint128(0)) {
+                    return F128Zero(negative);
+                }
+                uint128 leftSignificand = F128Significand(left);
+                uint128 rightSignificand = F128Significand(right);
+                uint128 low = F128MultiplyLow(leftSignificand, rightSignificand);
+                uint128 high = F128MultiplyHigh(leftSignificand, rightSignificand);
+                bool highProduct = (high & (uint128(1) << 97)) != 0;
+                uint128 shift = highProduct ? uint128(110) : uint128(109);
+                mut uint128 extended = (high << (uint128(128) - shift)) | (low >> shift);
+                uint128 discardedMask = (uint128(1) << shift) - uint128(1);
+                if ((low & discardedMask) != 0) {
+                    extended = extended | uint128(1);
+                }
+                mut uint128 exponent = F128Exponent(left) + F128Exponent(right)
+                    - uint128(32990);
+                if (highProduct) {
+                    exponent = exponent + uint128(1);
+                }
+                return F128Pack(negative, exponent, extended);
+            }
+            uint128 F128Divide(uint128 left, uint128 right) {
+                bool negative = F128Sign(left) != F128Sign(right);
+                uint128 classA = F128Class(left);
+                uint128 classB = F128Class(right);
+                if (classA == uint128(2) || classB == uint128(2)
+                    || (classA == uint128(0) && classB == uint128(0))
+                    || (classA == uint128(1) && classB == uint128(1))) {
+                    return F128NaN();
+                }
+                if (classA == uint128(1) || classB == uint128(0)) {
+                    return F128Infinity(negative);
+                }
+                if (classA == uint128(0) || classB == uint128(1)) {
+                    return F128Zero(negative);
+                }
+                mut uint128 numerator = F128Significand(left);
+                uint128 denominator = F128Significand(right);
+                mut uint128 exponent = F128Exponent(left) + uint128(32990)
+                    - F128Exponent(right);
+                if (numerator < denominator) {
+                    numerator = numerator << 1;
+                    exponent = exponent - uint128(1);
+                }
+                mut uint128 remainder = numerator - denominator;
+                mut uint128 quotient = uint128(1);
+                for (mut int32 index = 0; index < 115; index++) {
+                    remainder = remainder << 1;
+                    quotient = quotient << 1;
+                    if (remainder >= denominator) {
+                        remainder = remainder - denominator;
+                        quotient = quotient | uint128(1);
+                    }
+                }
+                if (remainder != 0) {
+                    quotient = quotient | uint128(1);
+                }
+                return F128Pack(negative, exponent, quotient);
+            }
+            uint128 F128Remainder(uint128 left, uint128 right) {
+                bool negative = F128Sign(left);
+                uint128 classA = F128Class(left);
+                uint128 classB = F128Class(right);
+                if (classA == uint128(2) || classB == uint128(2)
+                    || classA == uint128(1) || classB == uint128(0)) {
+                    return F128NaN();
+                }
+                if (classB == uint128(1) || classA == uint128(0)) {
+                    return left;
+                }
+                mut uint128 exponentA = F128Exponent(left);
+                uint128 exponentB = F128Exponent(right);
+                if (exponentA < exponentB) {
+                    return left;
+                }
+                uint128 denominator = F128Significand(right);
+                mut uint128 remainder = F128Significand(left);
+                if (remainder >= denominator) {
+                    remainder = remainder - denominator;
+                }
+                mut uint128 exponentGap = exponentA - exponentB;
+                while (exponentGap > uint128(0)) {
+                    remainder = remainder << 1;
+                    if (remainder >= denominator) {
+                        remainder = remainder - denominator;
+                    }
+                    exponentGap = exponentGap - uint128(1);
+                }
+                if (remainder == 0) {
+                    return F128Zero(negative);
+                }
+                return F128Pack(negative, exponentB, remainder << 3);
+            }
+            int32 F128Compare(uint128 left, uint128 right) {
+                uint128 classA = F128Class(left);
+                uint128 classB = F128Class(right);
+                if (classA == uint128(2) || classB == uint128(2)) {
+                    return 2;
+                }
+                if (classA == uint128(0) && classB == uint128(0)) {
+                    return 0;
+                }
+                bool negativeA = F128Sign(left);
+                bool negativeB = F128Sign(right);
+                if (negativeA != negativeB) {
+                    if (negativeA) {
+                        return -1;
+                    }
+                    return 1;
+                }
+                uint128 magnitudeMask = (uint128(1) << 127) - uint128(1);
+                uint128 leftMagnitude = left & magnitudeMask;
+                uint128 rightMagnitude = right & magnitudeMask;
+                if (leftMagnitude == rightMagnitude) {
+                    return 0;
+                }
+                if (leftMagnitude < rightMagnitude) {
+                    if (negativeA) {
+                        return 1;
+                    }
+                    return -1;
+                }
+                if (negativeA) {
+                    return -1;
+                }
+                return 1;
+            }
+            bool F128Equal(uint128 left, uint128 right) {
+                return F128Compare(left, right) == 0;
+            }
+            bool F128NotEqual(uint128 left, uint128 right) {
+                return F128Compare(left, right) != 0;
+            }
+            bool F128Less(uint128 left, uint128 right) {
+                return F128Compare(left, right) == -1;
+            }
+            bool F128LessOrEqual(uint128 left, uint128 right) {
+                int32 comparison = F128Compare(left, right);
+                return comparison == -1 || comparison == 0;
+            }
+            bool F128Greater(uint128 left, uint128 right) {
+                return F128Compare(left, right) == 1;
+            }
+            bool F128GreaterOrEqual(uint128 left, uint128 right) {
+                int32 comparison = F128Compare(left, right);
+                return comparison == 1 || comparison == 0;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            });
+        if (compilation.HasErrors || compilation.Program is not BoundProgram program)
+        {
+            throw new InvalidOperationException(
+                "The compiler-owned binary128 integer helper failed semantic verification: "
+                + string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+        var code = new PeCompiler(program, managedNodes: false, library: true).Compile();
+        if (code.Data.Length != 0 || !code.DataFixups.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "The compiler-owned binary128 integer helper must not depend on image data.");
+        }
+        var functionOffsets = ImmutableDictionary.CreateBuilder<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            var function = program.Functions[index];
+            if (!function.IsExternal)
+            {
+                functionOffsets.Add(function.Name, code.SourceFunctionOffsets[index]);
+            }
+        }
+        return new Binary128Runtime(code, functionOffsets.ToImmutable());
+    }
+
+    private void EmitBinary128Call(string function, int left, int right, int result)
+    {
+        _code.Address(result);
+        _code.MoveArgument(0, true);
+        _code.Address(left);
+        _code.MoveArgument(1, true);
+        _code.Address(right);
+        _code.MoveArgument(2, true);
+        _binary128Calls.Add((_code.RelativeCall(), function));
+        _code.Address(result);
+    }
+
+    private void EmitBinary128Comparison(TokenKind operation, int left, int right)
+    {
+        var function = operation switch {
+            TokenKind.EqualsEquals => "F128Equal",
+            TokenKind.BangEquals => "F128NotEqual",
+            TokenKind.Less => "F128Less",
+            TokenKind.LessEquals => "F128LessOrEqual",
+            TokenKind.Greater => "F128Greater",
+            TokenKind.GreaterEquals => "F128GreaterOrEqual",
+            _ => throw new InvalidOperationException("The verifier admitted an unsupported binary128 comparison."),
+        };
+        _code.Address(left);
+        _code.MoveArgument(0, true);
+        _code.Address(right);
+        _code.MoveArgument(1, true);
+        _binary128Calls.Add((_code.RelativeCall(), function));
+    }
+
+    private void EmitBinary128Arithmetic(TokenKind operation, int left, int right, int result)
+    {
+        var function = operation switch {
+            TokenKind.Plus => "F128Add",
+            TokenKind.Minus => "F128Subtract",
+            TokenKind.Star => "F128Multiply",
+            TokenKind.Slash => "F128Divide",
+            TokenKind.Percent => "F128Remainder",
+            _ => throw new InvalidOperationException("The verifier admitted an unsupported binary128 operator."),
+        };
+        EmitBinary128Call(function, left, right, result);
+    }
+
     private static void EnsureSupportedNativeFloatingOperator(PrimitiveType type)
     {
         if (PrimitiveTypeFacts.IsFloating(type)
             && type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
-                or PrimitiveType.Float32 or PrimitiveType.Float64))
+                or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128))
         {
             throw new NotSupportedException(
-                "Native floating operator lowering currently supports binary16/bfloat16/float32/float64 only.");
+                "Native floating operator lowering currently supports binary16/bfloat16/float32/float64/float128 only.");
         }
     }
     private static void EnsureSupportedNativeFloatingUnary(PrimitiveType type, TokenKind operation)
     {
         if (PrimitiveTypeFacts.IsFloating(type)
             && (type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
-                or PrimitiveType.Float32 or PrimitiveType.Float64)
+                or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128)
                 || operation is not (TokenKind.Plus or TokenKind.Minus)))
         {
             throw new NotSupportedException(
-                "Native floating unary lowering currently supports sign operations for binary16/bfloat16/float32/float64.");
+                "Native floating unary lowering currently supports sign operations for binary16/bfloat16/float32/float64/float128.");
         }
     }
     private static bool IsFloatingComparison(TokenKind operation) =>
@@ -2332,13 +2865,19 @@ internal sealed partial class PeCompiler
             && operation == TokenKind.Slash;
         var narrowRemainder = type is PrimitiveType.Float16 or PrimitiveType.BFloat16
             && operation == TokenKind.Percent;
+        var binary128Operator = type == PrimitiveType.Float128
+            && operation is TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                or TokenKind.Slash or TokenKind.Percent;
+        var binary128Comparison = type == PrimitiveType.Float128
+            && IsFloatingComparison(operation);
         if (PrimitiveTypeFacts.IsFloating(type)
             && type is not (PrimitiveType.Float32 or PrimitiveType.Float64)
             && !narrowComparison && !narrowAddOrSubtract && !narrowMultiply
-            && !narrowDivide && !narrowRemainder)
+            && !narrowDivide && !narrowRemainder
+            && !binary128Operator && !binary128Comparison)
         {
             throw new NotSupportedException(
-                "Native floating binary lowering currently supports float16/bfloat16 comparisons and arithmetic, plus float32/float64 operators.");
+                "Native floating binary lowering currently supports float16/bfloat16 comparisons and arithmetic, float32/float64 operators, and float128 arithmetic and comparisons.");
         }
     }
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
@@ -4156,6 +4695,18 @@ internal sealed partial class PeCompiler
             case BoundUnary unary:
                 EnsureSupportedNativeFloatingUnary(unary.Type, unary.Operator);
                 Expression(unary.Operand, spill);
+                if (unary.Type == PrimitiveType.Float128)
+                {
+                    if (unary.Operator == TokenKind.Minus)
+                    {
+                        StoreValue(Spill(spill), unary.Type);
+                        _code.Load64(Spill(spill) + sizeof(ulong));
+                        _code.Bytes(0x48, 0x0F, 0xBA, 0xF8, 0x3F); // btc rax,63
+                        _code.Store64(Spill(spill) + sizeof(ulong));
+                        _code.Address(Spill(spill));
+                    }
+                    break;
+                }
                 if (PrimitiveTypeFacts.IsWideInteger(unary.Type))
                 {
                     if (unary.Operator != TokenKind.Plus)
@@ -4219,7 +4770,8 @@ internal sealed partial class PeCompiler
                 EnsureSupportedNativeFloatingOperator(update.Type);
                 var rootedUpdate = UpdateAddress(update.Place, spill);
                 _code.Store64(Spill(spill + 1));
-                if (PrimitiveTypeFacts.IsWideInteger(update.Type))
+                if (PrimitiveTypeFacts.IsWideInteger(update.Type)
+                    || update.Type == PrimitiveType.Float128)
                 {
                     _code.Load64(Spill(spill + 1));
                     _code.AddressToRdx(Spill(spill + 2));
@@ -4279,13 +4831,27 @@ internal sealed partial class PeCompiler
                     _code.Load64(Spill(spill + 1), destinationRegister: true);
                     _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
                 }
+                else if (update.Type == PrimitiveType.Float128)
+                {
+                    _code.Bytes(0x31, 0xC0);
+                    _code.Store64(Spill(spill + 3));
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(0x3FFF_0000_0000_0000);
+                    _code.Store64(Spill(spill + 3) + sizeof(ulong));
+                    EmitBinary128Arithmetic(update.Operator == TokenKind.PlusPlus
+                            ? TokenKind.Plus : TokenKind.Minus,
+                        Spill(spill + 2), Spill(spill + 3), Spill(spill + 4));
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.Address(Spill(spill + 4));
+                    _code.CopyMemory(Size(update.Type));
+                }
                 else if (IsWide(update.Type))
                 {
                     _code.Byte(0x48);
                 }
                 if (!PrimitiveTypeFacts.IsWideInteger(update.Type)
                     && update.Type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
-                        or PrimitiveType.Float32 or PrimitiveType.Float64))
+                        or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128))
                 {
                     _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
                     if (IsNarrowInteger(update.Type))
@@ -4322,6 +4888,10 @@ internal sealed partial class PeCompiler
                         LoadValue(Spill(spill + 2), update.Type);
                     }
                 }
+                else if (update.Type == PrimitiveType.Float128)
+                {
+                    _code.Address(Spill(spill + 4));
+                }
                 else if (PrimitiveTypeFacts.IsWideInteger(update.Type))
                 {
                     _code.Address(Spill(spill + 4));
@@ -4332,7 +4902,8 @@ internal sealed partial class PeCompiler
                 EnsureSupportedNativeFloatingOperator(compound.Type);
                 var rooted = UpdateAddress(compound.Place, spill);
                 _code.Store64(Spill(spill + 1));
-                if (PrimitiveTypeFacts.IsWideInteger(compound.Type))
+                if (PrimitiveTypeFacts.IsWideInteger(compound.Type)
+                    || compound.Type == PrimitiveType.Float128)
                 {
                     _code.Load64(Spill(spill + 1));
                     _code.AddressToRdx(Spill(spill + 2));
@@ -4376,6 +4947,14 @@ internal sealed partial class PeCompiler
                         compound.Type, spill + 2);
                     _code.Load64(Spill(spill + 1), destinationRegister: true);
                     _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
+                }
+                else if (compound.Type == PrimitiveType.Float128)
+                {
+                    EmitBinary128Arithmetic(CompoundOperators.Binary(compound.Operator),
+                        Spill(spill + 2), Spill(spill + 4), Spill(spill + 2));
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.Address(Spill(spill + 2));
+                    _code.CopyMemory(Size(compound.Type));
                 }
                 else
                 {
@@ -4518,6 +5097,7 @@ internal sealed partial class PeCompiler
                 }
                 var floating = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
                 var narrowFloating = binary.Left.Type is PrimitiveType.Float16 or PrimitiveType.BFloat16;
+                var binary128Floating = binary.Left.Type == PrimitiveType.Float128;
                 Expression(binary.Left, spill);
                 if (!floating && (TryEmitUnsignedPowerOfTwoBinary(binary) || TryEmitSignedPowerOfTwoBinary(binary)))
                 {
@@ -4532,6 +5112,19 @@ internal sealed partial class PeCompiler
                 else if (narrowFloating)
                 {
                     FloatingNarrowBinary(binary.Operator, binary.Left.Type, spill);
+                }
+                else if (binary128Floating)
+                {
+                    StoreValue(Spill(spill + 1), binary.Right.Type);
+                    if (IsFloatingComparison(binary.Operator))
+                    {
+                        EmitBinary128Comparison(binary.Operator, Spill(spill), Spill(spill + 1));
+                    }
+                    else
+                    {
+                        EmitBinary128Arithmetic(binary.Operator,
+                            Spill(spill), Spill(spill + 1), Spill(spill + 2));
+                    }
                 }
                 else
                 {
