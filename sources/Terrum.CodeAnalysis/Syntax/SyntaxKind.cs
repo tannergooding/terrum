@@ -161,4 +161,30 @@ public enum SyntaxKind
     ExternalBody,
     /// <summary>A source-ordered collection spread element beginning with <c>..</c>.</summary>
     CollectionSpreadElement,
+    /// <summary>A multi-arm statement dispatching on one evaluated value.</summary>
+    SwitchStatement,
+    /// <summary>One arm of a switch statement.</summary>
+    SwitchArm,
+    /// <summary>A switch arm matched by a constant expression.</summary>
+    SwitchConstantPattern,
+    /// <summary>A switch arm matched by the wildcard pattern.</summary>
+    SwitchWildcardPattern,
+    /// <summary>A switch pattern matching null.</summary>
+    SwitchNullPattern,
+    /// <summary>A switch pattern that introduces an inferred value binding.</summary>
+    SwitchInferredBindingPattern,
+    /// <summary>A parenthesized switch pattern.</summary>
+    SwitchParenthesizedPattern,
+    /// <summary>A structural tuple switch pattern.</summary>
+    SwitchTuplePattern,
+    /// <summary>A negated switch pattern.</summary>
+    SwitchNotPattern,
+    /// <summary>A conjunction of switch patterns.</summary>
+    SwitchAndPattern,
+    /// <summary>A disjunction of switch patterns.</summary>
+    SwitchOrPattern,
+    /// <summary>A switch arm's optional constant-pattern guard.</summary>
+    SwitchWhenClause,
+    /// <summary>A continue transfer to a switch constant or wildcard arm.</summary>
+    SwitchTransferStatement,
 }

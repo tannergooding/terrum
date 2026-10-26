@@ -958,7 +958,7 @@ public sealed record BoundIsSome(BoundExpression Value, int Variable, TextSpan S
 /// <summary>Tests whether a named local or parameter currently contains an initialized value.</summary>
 public sealed record BoundIsInitialized(int Variable, TextSpan Span) : BoundExpression(PrimitiveType.Bool, Span);
 
-/// <summary>Tests optional-handle presence, including named-storage initialization, and captures the match.</summary>
+/// <summary>Tests optional-handle presence or captures a supported inferred value on a successful match.</summary>
 public sealed record BoundIsVariablePattern(BoundExpression Value, int Variable, bool IncludeNull, TextSpan Span)
     : BoundExpression(PrimitiveType.Bool, Span)
 {

@@ -849,6 +849,11 @@ internal sealed class Parser
                 node = Node(isIf ? SyntaxKind.IfStatement : SyntaxKind.WhileStatement, children);
                 break;
             }
+            case TokenKind.SwitchKeyword:
+            {
+                node = ParseSwitchStatement();
+                break;
+            }
             case TokenKind.DoKeyword:
             {
                 node = Node(SyntaxKind.DoStatement,
@@ -1000,6 +1005,162 @@ internal sealed class Parser
         _depth--;
 
         return node;
+    }
+
+    private SyntaxNode ParseSwitchStatement()
+    {
+        var children = new List<SyntaxElement> {
+            Take(), Expect(TokenKind.OpenParen), ParseExpression(), Expect(TokenKind.CloseParen),
+            Expect(TokenKind.OpenBrace),
+        };
+        while (Current.Kind is not (TokenKind.CloseBrace or TokenKind.EndOfFile))
+        {
+            var start = _position;
+            children.Add(ParseSwitchArm());
+            if (Current.Kind == TokenKind.Comma)
+            {
+                children.Add(Take());
+                if (Current.Kind == TokenKind.CloseBrace)
+                {
+                    break;
+                }
+            }
+            else if (Current.Kind != TokenKind.CloseBrace)
+            {
+                Report("TRM1001", "Switch statement arms must be comma-separated.", Current.Span);
+            }
+            EnsureProgress(start, children);
+        }
+        children.Add(Expect(TokenKind.CloseBrace));
+        return Node(SyntaxKind.SwitchStatement, children);
+    }
+
+    private SyntaxNode ParseSwitchArm()
+    {
+        var children = new List<SyntaxElement>();
+        while (Current.Kind == TokenKind.OpenBracket)
+        {
+            children.Add(ParseAttribute());
+        }
+        children.Add(ParseSwitchPattern());
+        if (Current.Kind == TokenKind.Identifier && Current.Text == "when")
+        {
+            children.Add(Node(SyntaxKind.SwitchWhenClause, [Take(), ParseExpression()]));
+        }
+        children.Add(Expect(TokenKind.Arrow));
+        children.Add(ParseBlock());
+        return Node(SyntaxKind.SwitchArm, children);
+    }
+
+    private SyntaxNode ParseSwitchPattern() => ParseSwitchPatternOr();
+
+    private SyntaxNode ParseSwitchPatternOr()
+    {
+        var left = ParseSwitchPatternAnd();
+        while (Current.Kind == TokenKind.Identifier && Current.Text == "or")
+        {
+            var op = Take();
+            left = Node(SyntaxKind.SwitchOrPattern,
+                [left, op, ParseSwitchPatternAnd()]);
+        }
+        return left;
+    }
+
+    private SyntaxNode ParseSwitchPatternAnd()
+    {
+        var left = ParseSwitchPatternNot();
+        while (Current.Kind == TokenKind.Identifier && Current.Text == "and")
+        {
+            var op = Take();
+            left = Node(SyntaxKind.SwitchAndPattern,
+                [left, op, ParseSwitchPatternNot()]);
+        }
+        return left;
+    }
+
+    private SyntaxNode ParseSwitchPatternNot()
+    {
+        var operators = new List<SyntaxElement>();
+        while (Current.Kind == TokenKind.Identifier && Current.Text == "not")
+        {
+            operators.Add(Take());
+        }
+
+        var pattern = ParseSwitchPatternAtom();
+        for (var index = operators.Count - 1; index >= 0; index--)
+        {
+            pattern = Node(SyntaxKind.SwitchNotPattern, [operators[index], pattern]);
+        }
+        return pattern;
+    }
+
+    private SyntaxNode ParseSwitchPatternAtom()
+    {
+        if (Current.Kind == TokenKind.Underscore)
+        {
+            return Node(SyntaxKind.SwitchWildcardPattern, [Take()]);
+        }
+        if (Current.Kind == TokenKind.NullKeyword)
+        {
+            return Node(SyntaxKind.SwitchNullPattern, [Take()]);
+        }
+        if (Current.Kind == TokenKind.VarKeyword
+            || (Current.Kind == TokenKind.MutKeyword && Peek(1).Kind == TokenKind.VarKeyword))
+        {
+            var children = new List<SyntaxElement>();
+            if (Current.Kind == TokenKind.MutKeyword)
+            {
+                children.Add(Take());
+            }
+            children.Add(Take());
+            if (Current.Kind == TokenKind.Question && IsAttachedToPrevious())
+            {
+                children.Add(Take());
+            }
+            children.Add(Current.Kind == TokenKind.Underscore
+                ? Take() : Expect(TokenKind.Identifier));
+            return Node(SyntaxKind.SwitchInferredBindingPattern, children);
+        }
+        if (Current.Kind == TokenKind.OpenParen)
+        {
+            var children = new List<SyntaxElement> { Take(), ParseSwitchPattern() };
+            if (Current.Kind != TokenKind.Comma)
+            {
+                children.Add(Expect(TokenKind.CloseParen));
+                return Node(SyntaxKind.SwitchParenthesizedPattern, children);
+            }
+
+            children.Add(Take());
+            children.Add(ParseSwitchPattern());
+            while (Current.Kind == TokenKind.Comma)
+            {
+                children.Add(Take());
+                children.Add(ParseSwitchPattern());
+            }
+            children.Add(Expect(TokenKind.CloseParen));
+            return Node(SyntaxKind.SwitchTuplePattern, children);
+        }
+
+        return Node(SyntaxKind.SwitchConstantPattern, [ParseExpression()]);
+    }
+
+    private SyntaxNode ParseSwitchTransferStatement()
+    {
+        var children = new List<SyntaxElement> { Take() };
+        if (Current.Kind == TokenKind.Underscore)
+        {
+            children.Add(Take());
+        }
+        else if (Current.Kind == TokenKind.NumericLiteral)
+        {
+            children.Add(ParsePrimary());
+        }
+        else
+        {
+            children.Add(ParseExpression());
+        }
+        children.Add(Expect(TokenKind.Semicolon));
+        return Node(SyntaxKind.SwitchTransferStatement, children);
     }
 
     private SyntaxNode ParseExpressionStatement(bool semicolon = true)

@@ -5782,6 +5782,13 @@ internal sealed partial class PeCompiler
                 _code.PatchRelative(patternDone, _code.Position);
                 break;
             case BoundIsVariablePattern pattern:
+                if (!ManagedClassTypes.IsOptional(pattern.Value.Type))
+                {
+                    Expression(pattern.Value, spill);
+                    StoreValue(Slot(pattern.Variable), pattern.Value.Type);
+                    _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+                    break;
+                }
                 if (pattern.Value is not BoundRead source)
                 {
                     Expression(pattern.Value, spill);

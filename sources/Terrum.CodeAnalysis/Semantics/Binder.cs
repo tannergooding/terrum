@@ -93,7 +93,8 @@ internal sealed partial class Binder
         PrimitiveType SelectorType, ImmutableArray<SwitchTarget> Targets, int DefaultArm);
 
     private sealed record SwitchArmBinding(SyntaxNode Syntax, SyntaxNode BodySyntax,
-        BoundConstant? Value, bool IsWildcard, BoundExpression? Guard, int Ordinal, bool IsFallback);
+        BoundConstant? Value, bool IsWildcard, BoundExpression? Guard, int Ordinal, bool IsFallback,
+        BoundExpression? PatternTest, int PatternVariable, string? PatternName);
 
     private readonly record struct BindingContext(
         SyntaxTree Tree, string Namespace, ImmutableArray<string> Usings);
@@ -4321,12 +4322,20 @@ internal sealed partial class Binder
             var nextOrdinal = 0;
             var defaultArm = -1;
             var sawFallback = false;
+            var hasIrrefutablePattern = false;
 
             for (var armIndex = 0; armIndex < armNodes.Length; armIndex++)
             {
                 var armNode = armNodes[armIndex];
                 var pattern = armNode.Children.OfType<SyntaxNode>().FirstOrDefault(static child =>
-                    child.Kind is SyntaxKind.SwitchConstantPattern or SyntaxKind.SwitchWildcardPattern);
+                    child.Kind is SyntaxKind.SwitchConstantPattern or SyntaxKind.SwitchWildcardPattern
+                        or SyntaxKind.SwitchInferredBindingPattern
+                        or SyntaxKind.SwitchParenthesizedPattern);
+                while (pattern?.Kind == SyntaxKind.SwitchParenthesizedPattern
+                    && pattern.Children.OfType<SyntaxNode>().FirstOrDefault() is SyntaxNode nestedPattern)
+                {
+                    pattern = nestedPattern;
+                }
                 var body = armNode.Children.OfType<SyntaxNode>()
                     .LastOrDefault(static child => child.Kind == SyntaxKind.Block);
                 if (pattern is null || body is null)
@@ -4334,6 +4343,7 @@ internal sealed partial class Binder
                     Report("TRM3001", "A switch arm requires a supported pattern and braced body.", armNode.Span);
                     continue;
                 }
+                var isWildcard = pattern.Kind == SyntaxKind.SwitchWildcardPattern;
                 if (armNode.Children.OfType<SyntaxNode>()
                     .Any(static child => child.Kind == SyntaxKind.Attribute))
                 {
@@ -4342,6 +4352,40 @@ internal sealed partial class Binder
                 var guardClause = armNode.Children.OfType<SyntaxNode>()
                     .FirstOrDefault(static child => child.Kind == SyntaxKind.SwitchWhenClause);
                 BoundExpression? guard = null;
+                BoundExpression? patternTest = null;
+                var patternVariable = -1;
+                string? patternName = null;
+                var isIrrefutable = isWildcard;
+                if (pattern.Kind == SyntaxKind.SwitchInferredBindingPattern)
+                {
+                    var patternTokens = pattern.Children.OfType<SyntaxTokenElement>().ToArray();
+                    var nameToken = patternTokens[^1].Token;
+                    isIrrefutable = true;
+                    if (nameToken.Kind == TokenKind.Underscore)
+                    {
+                        patternTest = new BoundConstant(1, PrimitiveType.Bool, pattern.Span);
+                    }
+                    else
+                    {
+                        var isMutable = patternTokens.Any(static token =>
+                            token.Token.Kind == TokenKind.MutKeyword);
+                        var includeNull = patternTokens.Any(static token =>
+                            token.Token.Kind == TokenKind.Question);
+                        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+                        try
+                        {
+                            patternVariable = AddVariable(nameToken.Name, selector.Type,
+                                isMutable, nameToken.Span);
+                        }
+                        finally
+                        {
+                            _scopes.RemoveAt(_scopes.Count - 1);
+                        }
+                        patternName = nameToken.Name;
+                        patternTest = new BoundIsVariablePattern(selectorRead, patternVariable,
+                            includeNull, pattern.Span);
+                    }
+                }
                 if (guardClause is not null)
                 {
                     var guardExpression = guardClause.Children.OfType<SyntaxNode>().FirstOrDefault();
@@ -4351,20 +4395,35 @@ internal sealed partial class Binder
                     }
                     else
                     {
-                        var firstGuardVariable = _variables.Count;
-                        guard = BindExpression(guardExpression, PrimitiveType.Bool);
-                        if (_variables.Count != firstGuardVariable)
+                        if (patternVariable >= 0)
                         {
-                            Report("TRM3007",
-                                "Switch guards cannot introduce output bindings in this compiler path.",
-                                guardExpression.Span);
+                            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal) {
+                                [patternName!] = patternVariable,
+                            });
+                        }
+                        var firstGuardVariable = _variables.Count;
+                        try
+                        {
+                            guard = BindExpression(guardExpression, PrimitiveType.Bool);
+                            if (_variables.Count != firstGuardVariable)
+                            {
+                                Report("TRM3007",
+                                    "Switch guards cannot introduce output bindings in this compiler path.",
+                                    guardExpression.Span);
+                            }
+                        }
+                        finally
+                        {
+                            if (patternVariable >= 0)
+                            {
+                                _scopes.RemoveAt(_scopes.Count - 1);
+                            }
                         }
                     }
                 }
 
-                var isWildcard = pattern.Kind == SyntaxKind.SwitchWildcardPattern;
                 BoundConstant? value = null;
-                if (!isWildcard)
+                if (!isWildcard && pattern.Kind != SyntaxKind.SwitchInferredBindingPattern)
                 {
                     var patternExpression = pattern.Children.OfType<SyntaxNode>().FirstOrDefault();
                     if (patternExpression is null)
@@ -4432,14 +4491,17 @@ internal sealed partial class Binder
                         Report("TRM3007", "A guarded switch arm follows an unguarded matching arm.", armNode.Span);
                     }
                 }
-                arms.Add(new SwitchArmBinding(armNode, body, value, isWildcard, guard, ordinal, isFallback));
+                hasIrrefutablePattern |= isIrrefutable && guard is null;
+                arms.Add(new SwitchArmBinding(armNode, body, value, isWildcard, guard,
+                    ordinal, isFallback, patternTest, patternVariable, patternName));
             }
 
             var boolTrue = arms.Any(static arm => !arm.IsWildcard && arm.Guard is null
                 && arm.Value is { Type: PrimitiveType.Bool, Value: 1 });
             var boolFalse = arms.Any(static arm => !arm.IsWildcard && arm.Guard is null
                 && arm.Value is { Type: PrimitiveType.Bool, Value: 0 });
-            if (defaultArm < 0 && !(selector.Type == PrimitiveType.Bool && boolTrue && boolFalse))
+            if (defaultArm < 0 && !hasIrrefutablePattern
+                && !(selector.Type == PrimitiveType.Bool && boolTrue && boolFalse))
             {
                 Report("TRM3007", "A switch statement requires complete scalar coverage or an unguarded wildcard.",
                     node.Span);
@@ -4475,7 +4537,7 @@ internal sealed partial class Binder
                 _switches.Add(binding);
                 try
                 {
-                    boundBodies = [.. arms.Select(arm => BindBlock(arm.BodySyntax))];
+                    boundBodies = [.. arms.Select(BindSwitchArmBody)];
                 }
                 finally
                 {
@@ -4508,7 +4570,7 @@ internal sealed partial class Binder
             }
             else
             {
-                boundBodies = [.. arms.Select(arm => BindBlock(arm.BodySyntax))];
+                boundBodies = [.. arms.Select(BindSwitchArmBody)];
                 var fallbackIndex = arms.FindIndex(static arm => arm.IsFallback);
                 BoundStatement alternate = fallbackIndex >= 0
                     ? boundBodies[fallbackIndex]
@@ -4533,6 +4595,30 @@ internal sealed partial class Binder
             {
                 _scopes.RemoveAt(_scopes.Count - 1);
             }
+        }
+    }
+
+    private BoundBlock BindSwitchArmBody(SwitchArmBinding arm)
+    {
+        if (arm.PatternVariable < 0)
+        {
+            return BindBlock(arm.BodySyntax);
+        }
+        if (arm.PatternName is not string name)
+        {
+            throw new InvalidOperationException("A switch pattern variable has no source name.");
+        }
+
+        _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal) {
+            [name] = arm.PatternVariable,
+        });
+        try
+        {
+            return BindBlock(arm.BodySyntax);
+        }
+        finally
+        {
+            _scopes.RemoveAt(_scopes.Count - 1);
         }
     }
 
@@ -4621,11 +4707,11 @@ internal sealed partial class Binder
 
     private static BoundExpression SwitchArmCondition(BoundRead selector, SwitchArmBinding arm)
     {
-        BoundExpression match = arm.IsWildcard
+        var match = arm.PatternTest ?? (arm.IsWildcard
             ? new BoundConstant(1, PrimitiveType.Bool, arm.Syntax.Span)
             : new BoundBinary(TokenKind.EqualsEquals, selector, arm.Value
                 ?? new BoundConstant(0, selector.Type, arm.Syntax.Span),
-                PrimitiveType.Bool, arm.Syntax.Span);
+                PrimitiveType.Bool, arm.Syntax.Span));
         return arm.Guard is null ? match
             : new BoundBinary(TokenKind.AmpersandAmpersand, match, arm.Guard,
                 PrimitiveType.Bool, arm.Syntax.Span);

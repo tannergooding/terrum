@@ -1022,7 +1022,15 @@ public static partial class SemanticVerifier
                     break;
                 case BoundIsVariablePattern pattern:
                     Expression(pattern.Value, scope, depth + 1);
-                    Declare(pattern.Variable, scope, pattern.Span);
+                    if (pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                        || pattern.Variable < 0 || pattern.Variable >= function.Variables.Length)
+                    {
+                        throw InvalidEffect(pattern.Span, "Ownership");
+                    }
+                    if (ManagedClassTypes.IsManaged(function.Variables[pattern.Variable].Type))
+                    {
+                        Declare(pattern.Variable, scope, pattern.Span);
+                    }
                     break;
                 case BoundUnary unary:
                     Expression(unary.Operand, scope, depth + 1);
@@ -4497,14 +4505,18 @@ public static partial class SemanticVerifier
                 _ = declarations.Add(pattern.Variable);
                 break;
             case BoundIsVariablePattern pattern:
-                if (pattern.Value is null || !ManagedClassTypes.IsOptional(pattern.Value.Type)
-                    || (!pattern.IncludeNull && pattern.Value is not BoundRead)
+                var optionalPattern = pattern.Value is not null
+                    && ManagedClassTypes.IsOptional(pattern.Value.Type);
+                var supportedValuePattern = pattern.Value?.Type is PrimitiveType.Bool
+                    or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64;
+                if (pattern.Value is null || (!optionalPattern && !supportedValuePattern)
+                    || (optionalPattern && !pattern.IncludeNull && pattern.Value is not BoundRead)
                     || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || pattern.Variable < 0 || pattern.Variable >= initialized.Length
-                    || function.Variables[pattern.Variable].Type != (pattern.IncludeNull
-                        ? pattern.Value.Type : ManagedClassTypes.Required(pattern.Value.Type))
+                    || function.Variables[pattern.Variable].Type != (optionalPattern && !pattern.IncludeNull
+                        ? ManagedClassTypes.Required(pattern.Value.Type) : pattern.Value.Type)
                     || function.Variables[pattern.Variable].IsOut
-                    || function.Variables[pattern.Variable].IsMutable
                     || function.Variables[pattern.Variable].IsInitializationLocal
                     || declarations.Contains(pattern.Variable))
                 {
@@ -6925,6 +6937,10 @@ public static partial class SemanticVerifier
         if (expression is BoundIsVariablePattern pattern)
         {
             Count(ref remaining, 0);
+            if (!ManagedClassTypes.IsOptional(pattern.Value.Type))
+            {
+                return result;
+            }
             if (pattern.Value is BoundRead sourceRead)
             {
                 var possibilities = initialized.Possibilities(sourceRead.Variable);
