@@ -1052,7 +1052,13 @@ internal sealed class Parser
         return Node(SyntaxKind.SwitchArm, children);
     }
 
-    private SyntaxNode ParseSwitchPattern() => ParseSwitchPatternOr();
+    private SyntaxNode ParseSwitchPattern()
+    {
+        Enter();
+        var pattern = ParseSwitchPatternOr();
+        _depth--;
+        return pattern;
+    }
 
     private SyntaxNode ParseSwitchPatternOr()
     {
@@ -1104,9 +1110,12 @@ internal sealed class Parser
         {
             return Node(SyntaxKind.SwitchNullPattern, [Take()]);
         }
-        if (Current.Kind is TokenKind.RefKeyword or TokenKind.WriteKeyword
+        if (Current.Kind == TokenKind.RefKeyword
+            || (Current.Kind == TokenKind.WriteKeyword && Peek(1).Kind == TokenKind.RefKeyword)
             || (Current.Kind == TokenKind.MutKeyword
-                && Peek(1).Kind is TokenKind.RefKeyword or TokenKind.WriteKeyword))
+                && (Peek(1).Kind == TokenKind.RefKeyword
+                    || (Peek(1).Kind == TokenKind.WriteKeyword
+                        && Peek(2).Kind == TokenKind.RefKeyword))))
         {
             return ParseSwitchReferenceTypePattern();
         }
@@ -1129,6 +1138,37 @@ internal sealed class Parser
         }
         var mutable = Current.Kind == TokenKind.MutKeyword;
         var typeOffset = mutable ? 1 : 0;
+        if (LooksLikeSwitchGenericTypePattern(typeOffset))
+        {
+            var children = new List<SyntaxElement>();
+            if (mutable)
+            {
+                children.Add(Take());
+            }
+            var genericType = ParseSwitchGenericTypePattern();
+            if (Current.Kind == TokenKind.Dot)
+            {
+                return ParseSwitchQualifiedPattern(genericType, includeCaseName: true);
+            }
+            children.Add(genericType);
+            if (Current.Kind == TokenKind.Identifier
+                && Current.Text is not ("when" or "and" or "or"))
+            {
+                children.Add(Take());
+            }
+            return Node(SyntaxKind.SwitchTypedBindingPattern, children);
+        }
+        if (Current.Kind == TokenKind.Identifier && Peek(1).Kind == TokenKind.Dot)
+        {
+            var qualifiedType = ParseType();
+            if (Current.Kind == TokenKind.Identifier
+                && Current.Text is not ("when" or "and" or "or"))
+            {
+                return Node(SyntaxKind.SwitchTypedBindingPattern,
+                    [qualifiedType, Take()]);
+            }
+            return ParseSwitchQualifiedPattern(qualifiedType, includeCaseName: false);
+        }
         var typeStart = Peek(typeOffset).Kind is TokenKind.Identifier
             or TokenKind.WriteKeyword or TokenKind.VoidKeyword;
         var afterType = Peek(typeOffset + (Peek(typeOffset).Kind == TokenKind.WriteKeyword ? 2 : 1)).Kind;
@@ -1170,6 +1210,169 @@ internal sealed class Parser
         return Node(SyntaxKind.SwitchConstantPattern, [ParseExpression()]);
     }
 
+    private SyntaxNode ParseSwitchQualifiedPattern(SyntaxNode type, bool includeCaseName)
+    {
+        var children = new List<SyntaxElement> { type };
+        if (includeCaseName)
+        {
+            children.Add(TakeDot(qualified: true));
+            children.Add(Expect(TokenKind.Identifier));
+        }
+        if (Current.Kind == TokenKind.OpenParen)
+        {
+            children.Add(Take());
+            if (Current.Kind != TokenKind.CloseParen)
+            {
+                children.Add(ParseSwitchPattern());
+                while (Current.Kind == TokenKind.Comma)
+                {
+                    children.Add(Take());
+                    children.Add(ParseSwitchPattern());
+                }
+            }
+            children.Add(Expect(TokenKind.CloseParen));
+        }
+        return Node(SyntaxKind.SwitchQualifiedPattern, children);
+    }
+
+    private bool LooksLikeSwitchGenericTypePattern(int offset)
+    {
+        if (Peek(offset).Kind == TokenKind.WriteKeyword)
+        {
+            offset++;
+        }
+        if (Peek(offset).Kind != TokenKind.Identifier)
+        {
+            return false;
+        }
+        offset++;
+        while (Peek(offset).Kind == TokenKind.Dot && Peek(offset + 1).Kind == TokenKind.Identifier)
+        {
+            if ((offset & 63) == 0)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+            }
+            offset += 2;
+        }
+        if (Peek(offset).Kind != TokenKind.Less)
+        {
+            return false;
+        }
+
+        var depth = 0;
+        for (; offset < _tokens.Length - _position; offset++)
+        {
+            if ((offset & 63) == 0)
+            {
+                _cancellationToken.ThrowIfCancellationRequested();
+            }
+            var kind = Peek(offset).Kind;
+            if (kind == TokenKind.Less)
+            {
+                if (++depth > MaximumDepth)
+                {
+                    return false;
+                }
+            }
+            else if (kind == TokenKind.Greater)
+            {
+                if (--depth == 0)
+                {
+                    return true;
+                }
+                if (depth < 0)
+                {
+                    return false;
+                }
+            }
+            else if (kind is TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned)
+            {
+                depth -= kind == TokenKind.ShiftRight ? 2 : 3;
+                if (depth <= 0)
+                {
+                    return true;
+                }
+            }
+            else if (kind is TokenKind.EndOfFile or TokenKind.Arrow
+                or TokenKind.CloseBrace or TokenKind.Comma)
+            {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    private SyntaxNode ParseSwitchGenericTypePattern()
+    {
+        Enter();
+        var children = new List<SyntaxElement>();
+        if (Current.Kind == TokenKind.WriteKeyword)
+        {
+            children.Add(Take());
+        }
+        children.Add(Expect(TokenKind.Identifier));
+        while (Current.Kind == TokenKind.Dot)
+        {
+            children.Add(TakeDot(qualified: true));
+            children.Add(Expect(TokenKind.Identifier));
+        }
+        var missing = _missingTokens;
+        children.Add(ExpectAttached(TokenKind.Less));
+        children.Add(ParseSwitchPatternTypeArgument());
+        while (Current.Kind == TokenKind.Comma)
+        {
+            children.Add(Take());
+            children.Add(ParseSwitchPatternTypeArgument());
+        }
+        children.Add(ExpectTypeCloser(missing));
+        if (Current.Kind == TokenKind.Question && IsAttachedToPrevious())
+        {
+            children.Add(Take());
+        }
+        var pattern = Node(SyntaxKind.SwitchGenericTypePattern, children);
+        _depth--;
+        return pattern;
+    }
+
+    private SyntaxNode ParseSwitchPatternTypeArgument()
+    {
+        if (Current.Kind == TokenKind.Underscore)
+        {
+            return Node(SyntaxKind.SwitchPatternTypeArgument, [Take()]);
+        }
+        if (Current.Kind == TokenKind.VarKeyword)
+        {
+            var children = new List<SyntaxElement> { Take() };
+            if (Current.Kind == TokenKind.Question && IsAttachedToPrevious())
+            {
+                children.Add(Take());
+            }
+            if (Current.Kind is TokenKind.Identifier or TokenKind.Underscore)
+            {
+                children.Add(Take());
+            }
+            return Node(SyntaxKind.SwitchPatternTypeArgument, children);
+        }
+        if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral
+            or TokenKind.CharacterLiteral or TokenKind.TrueKeyword
+            or TokenKind.FalseKeyword or TokenKind.NullKeyword)
+        {
+            return Node(SyntaxKind.SwitchPatternTypeArgument, [ParsePrimary()]);
+        }
+        if (Current.Kind == TokenKind.OpenParen)
+        {
+            var children = new List<SyntaxElement> {
+                Take(), ParseExpression(), Expect(TokenKind.CloseParen),
+            };
+            return Node(SyntaxKind.SwitchPatternTypeArgument, children);
+        }
+        if (LooksLikeSwitchGenericTypePattern(offset: 0))
+        {
+            return Node(SyntaxKind.SwitchPatternTypeArgument, [ParseSwitchGenericTypePattern()]);
+        }
+        return Node(SyntaxKind.SwitchPatternTypeArgument, [ParseType()]);
+    }
+
     private SyntaxNode ParseSwitchReferenceTypePattern()
     {
         var children = new List<SyntaxElement>();
@@ -1184,27 +1387,7 @@ internal sealed class Parser
         children.Add(Expect(TokenKind.RefKeyword));
         var missing = _missingTokens;
         children.Add(ExpectAttached(TokenKind.Less));
-        if (Current.Kind == TokenKind.Underscore)
-        {
-            children.Add(Node(SyntaxKind.SwitchPatternTypeArgument, [Take()]));
-        }
-        else if (Current.Kind == TokenKind.VarKeyword)
-        {
-            var argument = new List<SyntaxElement> { Take() };
-            if (Current.Kind == TokenKind.Question && IsAttachedToPrevious())
-            {
-                argument.Add(Take());
-            }
-            if (Current.Kind == TokenKind.Identifier)
-            {
-                argument.Add(Take());
-            }
-            children.Add(Node(SyntaxKind.SwitchPatternTypeArgument, argument));
-        }
-        else
-        {
-            children.Add(Node(SyntaxKind.SwitchPatternTypeArgument, [ParseType()]));
-        }
+        children.Add(ParseSwitchPatternTypeArgument());
         children.Add(ExpectTypeCloser(missing));
         children.Add(Current.Kind == TokenKind.Underscore
             ? Take() : Expect(TokenKind.Identifier));
@@ -1433,14 +1616,15 @@ internal sealed class Parser
                         left = Node(SyntaxKind.IsSomeExpression, [left, keyword, variable, Expect(TokenKind.Identifier)]);
                     }
                 }
-                else
+                else if (Current.Kind == TokenKind.Identifier && Current.Text == "some")
                 {
                     var some = Expect(TokenKind.Identifier);
-                    if (some.Token.Text != "some")
-                    {
-                        Report("TRM1001", "Expected 'some' or 'null' after 'is'.", some.Span);
-                    }
                     left = Node(SyntaxKind.IsSomeExpression, [left, keyword, some, Expect(TokenKind.Identifier)]);
+                }
+                else
+                {
+                    left = Node(SyntaxKind.IsPatternExpression,
+                        [left, keyword, ParseSwitchPattern()]);
                 }
                 continue;
             }

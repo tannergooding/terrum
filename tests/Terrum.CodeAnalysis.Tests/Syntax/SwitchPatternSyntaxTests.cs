@@ -29,6 +29,61 @@ public sealed class SwitchPatternSyntaxTests
             ("mut int32 item", [SyntaxKind.SwitchTypedBindingPattern]),
             ("Box<int32> item", [SyntaxKind.SwitchTypedBindingPattern]),
             ("T? item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("List<_> items", [
+                SyntaxKind.SwitchTypedBindingPattern,
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("List<var T> items", [
+                SyntaxKind.SwitchTypedBindingPattern,
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("List<var? T> items", [
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("List<42> items", [
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("List<(1 + 2)> items", [
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("write List<var T> items", [
+                SyntaxKind.SwitchTypedBindingPattern,
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("List<Color.Red> items", [
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("Box<List<_>> item", [
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("Color.Red", [SyntaxKind.SwitchQualifiedPattern]),
+            ("Color.Found(var item, _)", [
+                SyntaxKind.SwitchQualifiedPattern,
+                SyntaxKind.SwitchInferredBindingPattern,
+                SyntaxKind.SwitchWildcardPattern,
+            ]),
+            ("Lookup<int32>.Missing", [
+                SyntaxKind.SwitchQualifiedPattern,
+                SyntaxKind.SwitchGenericTypePattern,
+            ]),
+            ("Lookup<int32>.Found(var item)", [
+                SyntaxKind.SwitchQualifiedPattern,
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchInferredBindingPattern,
+            ]),
+            ("Lookup<Box<int32>>.Found(var item)", [
+                SyntaxKind.SwitchQualifiedPattern,
+                SyntaxKind.SwitchGenericTypePattern,
+                SyntaxKind.SwitchInferredBindingPattern,
+            ]),
             ("ref<int32> item", [
                 SyntaxKind.SwitchReferenceTypePattern,
                 SyntaxKind.SwitchPatternTypeArgument,
@@ -75,5 +130,26 @@ public sealed class SwitchPatternSyntaxTests
 
         Assert.That(tree.Diagnostics, Is.Not.Empty, source);
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+    }
+
+    [TestCase("value is not null", SyntaxKind.SwitchNotPattern, SyntaxKind.SwitchNullPattern)]
+    [TestCase("value is int32 item", SyntaxKind.SwitchTypedBindingPattern)]
+    [TestCase("value is Lookup<int32>.Found(var item)",
+        SyntaxKind.SwitchQualifiedPattern, SyntaxKind.SwitchGenericTypePattern,
+        SyntaxKind.SwitchInferredBindingPattern)]
+    public void IsExpressionsParseTheSharedPatternGrammar(
+        string expression, params SyntaxKind[] expectedKinds)
+    {
+        var source = $"void Main() {{ int32 value = 1; bool matched = {expression}; }}";
+        var tree = SyntaxTree.Parse(source);
+
+        Assert.That(tree.Diagnostics, Is.Empty, source);
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(source));
+        var actualKinds = tree.Root.DescendantNodes().Select(static node => node.Kind);
+        Assert.That(actualKinds, Does.Contain(SyntaxKind.IsPatternExpression), source);
+        foreach (var kind in expectedKinds)
+        {
+            Assert.That(actualKinds, Does.Contain(kind), source);
+        }
     }
 }

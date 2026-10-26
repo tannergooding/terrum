@@ -81,6 +81,12 @@ internal static class PunctuationRun
             }
         }
         tokenKind = TokenKind.Bad;
+        if (text.Length > 1 && text[^1] == '.'
+            && text[..^1].IndexOfAnyExcept('>') < 0)
+        {
+            // Each generic closer and the qualified-name dot are consumed separately by the parser.
+            return PunctuationRunKind.TypeBoundary;
+        }
         if (text.Length > 1)
         {
             foreach (var unit in text)
@@ -99,6 +105,11 @@ internal static class PunctuationRun
 
     internal static TokenKind TypeBoundaryToken(ReadOnlySpan<char> text, out int width)
     {
+        if (text[0] == '.')
+        {
+            width = 1;
+            return TokenKind.Dot;
+        }
         if (text[0] == '>')
         {
             width = text.StartsWith(">>>") ? 3 : text.StartsWith(">>") ? 2 : 1;

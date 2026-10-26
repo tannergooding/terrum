@@ -133,6 +133,8 @@ public enum SyntaxKind
     IsNullExpression,
     /// <summary>A test that binds a non-null managed-handle snapshot on success.</summary>
     IsSomeExpression,
+    /// <summary>A general source pattern test.</summary>
+    IsPatternExpression,
     /// <summary>Exits an enclosing loop.</summary>
     BreakStatement,
     /// <summary>Continues an enclosing loop.</summary>
@@ -177,6 +179,10 @@ public enum SyntaxKind
     SwitchTypedBindingPattern,
     /// <summary>A switch pattern matching an existing reference.</summary>
     SwitchReferenceTypePattern,
+    /// <summary>A generic type pattern.</summary>
+    SwitchGenericTypePattern,
+    /// <summary>A qualified constant or union-case switch pattern.</summary>
+    SwitchQualifiedPattern,
     /// <summary>A type argument within a switch reference pattern.</summary>
     SwitchPatternTypeArgument,
     /// <summary>A parenthesized switch pattern.</summary>
