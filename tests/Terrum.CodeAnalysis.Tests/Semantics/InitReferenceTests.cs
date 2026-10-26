@@ -269,7 +269,7 @@ public sealed class InitReferenceTests
         var fill = global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Fill");
         Assert.That(fill.Variables[1].IsOut, Is.True);
         Assert.That(fill.Variables[1].IsInit, Is.True);
-        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-46"));
+        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
     }
     [TestCase("if (Fill(false, init var value)) { return 1; }","require Fill(true, init var value);","TRM3016")]
     [TestCase("require Fill(true, init value);","require Fill(true, out value);","TRM3011")]

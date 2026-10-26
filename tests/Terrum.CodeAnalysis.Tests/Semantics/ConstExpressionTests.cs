@@ -25,7 +25,7 @@ public sealed class ConstExpressionTests
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
         Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
         var version = ((global::System.Func<System.Reflection.FieldInfo>)(() => { var __nunitActual0 = typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)); Assert.That(__nunitActual0, Is.InstanceOf<System.Reflection.FieldInfo>()); return (System.Reflection.FieldInfo)__nunitActual0!; }))();
-        Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-46"));
+        Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-47"));
         Assert.That(tree.Root.DescendantNodes().Count(node => node.Kind == SyntaxKind.ConstExpression), Is.EqualTo(2));
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));

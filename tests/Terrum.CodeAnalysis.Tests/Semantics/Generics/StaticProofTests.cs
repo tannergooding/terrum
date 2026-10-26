@@ -29,7 +29,7 @@ public sealed class StaticProofTests
         _ = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticRequireStatement);
         _ = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), node => node.Kind == SyntaxKind.StaticEnsureStatement);
         var version = ((global::System.Func<System.Reflection.FieldInfo>)(() => { var __nunitActual0 = typeof(SyntaxTree).GetField(nameof(SyntaxTree.LanguageVersion)); Assert.That(__nunitActual0, Is.InstanceOf<System.Reflection.FieldInfo>()); return (System.Reflection.FieldInfo)__nunitActual0!; }))();
-        Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-46"));
+        Assert.That(version.GetRawConstantValue(), Is.EqualTo("syntax-47"));
 
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));

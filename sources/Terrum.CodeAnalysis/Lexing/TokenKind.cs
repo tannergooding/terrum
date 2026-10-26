@@ -221,4 +221,14 @@ public enum TokenKind
     QuestionDot,
     /// <summary>The <c>extern</c> linkage keyword.</summary>
     ExternKeyword,
+    /// <summary>The opening delimiter and header of raw interpolated text.</summary>
+    InterpolatedRawTextStart,
+    /// <summary>A literal source segment within raw interpolated text.</summary>
+    InterpolatedRawTextSegment,
+    /// <summary>An opening brace delimiter for a raw interpolation hole.</summary>
+    InterpolationHoleStart,
+    /// <summary>A closing brace delimiter for a raw interpolation hole.</summary>
+    InterpolationHoleEnd,
+    /// <summary>The closing delimiter of raw interpolated text.</summary>
+    InterpolatedRawTextEnd,
 }

@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Text;
 using System.Threading;
@@ -22,9 +23,26 @@ public sealed class Lexer
 
     private readonly SourceText _source;
     private readonly CancellationToken _cancellationToken;
+    private readonly Stack<RawInterpolationFrame> _rawInterpolations = new();
     private ImmutableArray<Diagnostic>.Builder? _diagnostics;
     private int _position;
     private int _deferredRunEnd;
+
+    private sealed class RawInterpolationFrame(int openingStart, int dollarCount, int fenceLength,
+        bool isMultiline)
+    {
+        internal int OpeningStart { get; } = openingStart;
+        internal int DollarCount { get; } = dollarCount;
+        internal int FenceLength { get; } = fenceLength;
+        internal bool IsMultiline { get; } = isMultiline;
+        internal bool IsInHole { get; set; }
+        internal bool IsAtLineStart { get; set; } = isMultiline;
+        internal bool HasFirstContentItem { get; set; }
+        internal bool FirstContentItemStartsWithQuote { get; set; }
+        internal bool LastContentItemEndsWithQuote { get; set; }
+        internal bool IsInvalid { get; set; }
+        internal int ExpressionBraceDepth { get; set; }
+    }
 
     private Lexer(SourceText source, CancellationToken cancellationToken)
     {
@@ -102,6 +120,11 @@ public sealed class Lexer
 
     private ImmutableArray<SyntaxTrivia> ReadTrivia()
     {
+        if (_rawInterpolations.TryPeek(out var frame) && !frame.IsInHole)
+        {
+            return [];
+        }
+
         ImmutableArray<SyntaxTrivia>.Builder? trivia = null;
 
         while (!AtEnd)
@@ -221,11 +244,344 @@ public sealed class Lexer
         }
     }
 
+    private bool TryGetRawInterpolationOpening(out int dollarCount, out int fenceLength)
+    {
+        dollarCount = CountRepeated('$', _position);
+        fenceLength = 0;
+        if (dollarCount == 0)
+        {
+            return false;
+        }
+
+        fenceLength = CountRepeated('"', _position + dollarCount);
+        return fenceLength >= 3;
+    }
+
+    private TokenKind ReadRawInterpolatedTextStart(int dollarCount, int fenceLength)
+    {
+        var start = _position;
+        var quoteStart = start + dollarCount;
+        var headerKind = StringLiteralDecoder.ReadOpeningHeader(
+            _source.Text.AsSpan(quoteStart), fenceLength, out var bodyOffset,
+            out _, out var headerErrorStart, out var headerErrorLength);
+        var bodyStart = quoteStart + (headerKind == StringLiteralDecoder.RawTextHeaderKind.None
+            ? fenceLength : bodyOffset);
+        var frame = new RawInterpolationFrame(start, dollarCount, fenceLength,
+            headerKind != StringLiteralDecoder.RawTextHeaderKind.None);
+        _rawInterpolations.Push(frame);
+        if (headerKind == StringLiteralDecoder.RawTextHeaderKind.Invalid)
+        {
+            ReportRawInterpolationInvalid(frame, "Invalid raw interpolated-text header.",
+                quoteStart + headerErrorStart, headerErrorLength);
+        }
+        _position = bodyStart;
+        return TokenKind.InterpolatedRawTextStart;
+    }
+
+    private TokenKind ReadRawInterpolatedText(RawInterpolationFrame frame)
+    {
+        var start = _position;
+        while (!AtEnd)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            if (frame.IsMultiline && frame.IsAtLineStart)
+            {
+                var fenceStart = _position;
+                while (fenceStart < _source.Length
+                    && StringLiteralDecoder.IsHorizontalWhitespace(_source.Text[fenceStart]))
+                {
+                    fenceStart++;
+                }
+                if (CountRepeated('"', fenceStart) == frame.FenceLength)
+                {
+                    if (_position != start)
+                    {
+                        return TokenKind.InterpolatedRawTextSegment;
+                    }
+
+                    _position = fenceStart + frame.FenceLength;
+                    _ = _rawInterpolations.Pop();
+                    return TokenKind.InterpolatedRawTextEnd;
+                }
+            }
+
+            if (!frame.IsMultiline && IsNewline(Current))
+            {
+                ReportRawInterpolationUnterminated(frame);
+                _ = _rawInterpolations.Pop();
+                if (_position == start)
+                {
+                    _position += LineBreakLength(_position);
+                    return TokenKind.InterpolatedRawTextSegment;
+                }
+                return TokenKind.InterpolatedRawTextSegment;
+            }
+
+            if (Current == '"')
+            {
+                var quoteRun = CountRepeated('"', _position);
+                if (quoteRun == frame.FenceLength && (!frame.IsMultiline || frame.IsAtLineStart))
+                {
+                    if (_position != start)
+                    {
+                        return TokenKind.InterpolatedRawTextSegment;
+                    }
+
+                    if (!frame.IsMultiline
+                        && (frame.FirstContentItemStartsWithQuote || frame.LastContentItemEndsWithQuote))
+                    {
+                        ReportRawInterpolationInvalid(frame,
+                            "Single-line interpolated raw text cannot begin or end with a quote beside its fence.",
+                            frame.OpeningStart, _position + quoteRun - frame.OpeningStart);
+                    }
+                    _position += quoteRun;
+                    _ = _rawInterpolations.Pop();
+                    return TokenKind.InterpolatedRawTextEnd;
+                }
+                if (quoteRun >= frame.FenceLength)
+                {
+                    ReportRawInterpolationInvalid(frame, "A raw interpolated-text quote run reaches its fence length.",
+                        _position, quoteRun);
+                    for (var index = 0; index < quoteRun; index++)
+                    {
+                        ObserveRawInterpolationText(frame, '"');
+                    }
+                    _position += quoteRun;
+                    frame.IsAtLineStart = false;
+                    continue;
+                }
+            }
+
+            if (Current == '{')
+            {
+                var braceRun = CountRepeated('{', _position);
+                if (braceRun >= frame.DollarCount)
+                {
+                    if (braceRun - frame.DollarCount >= frame.DollarCount)
+                    {
+                        ReportRawInterpolationInvalid(frame,
+                            "An interpolated raw-text opening brace run is too long for its dollar delimiter.",
+                            _position, braceRun);
+                        for (var index = 0; index < braceRun; index++)
+                        {
+                            ObserveRawInterpolationText(frame, '{');
+                        }
+                        _position += braceRun;
+                        frame.IsAtLineStart = false;
+                        continue;
+                    }
+
+                    var literalCount = braceRun - frame.DollarCount;
+                    for (var index = 0; index < literalCount; index++)
+                    {
+                        ObserveRawInterpolationText(frame, '{');
+                    }
+                    _position += literalCount;
+                    if (literalCount != 0)
+                    {
+                        frame.IsAtLineStart = false;
+                        return TokenKind.InterpolatedRawTextSegment;
+                    }
+
+                    _position += frame.DollarCount;
+                    frame.IsInHole = true;
+                    frame.ExpressionBraceDepth = 0;
+                    frame.IsAtLineStart = false;
+                    ObserveRawInterpolationHole(frame);
+                    return TokenKind.InterpolationHoleStart;
+                }
+
+                for (var index = 0; index < braceRun; index++)
+                {
+                    ObserveRawInterpolationText(frame, '{');
+                }
+                _position += braceRun;
+                frame.IsAtLineStart = false;
+                continue;
+            }
+
+            if (Current == '}')
+            {
+                var braceRun = CountRepeated('}', _position);
+                if (braceRun >= frame.DollarCount)
+                {
+                    ReportRawInterpolationInvalid(frame,
+                        "A raw interpolated-text closing brace run has no open hole.",
+                        _position, braceRun);
+                }
+                for (var index = 0; index < braceRun; index++)
+                {
+                    ObserveRawInterpolationText(frame, '}');
+                }
+                _position += braceRun;
+                frame.IsAtLineStart = false;
+                continue;
+            }
+
+            ConsumeRawInterpolationTextCharacter(frame);
+        }
+
+        ReportRawInterpolationUnterminated(frame);
+        _ = _rawInterpolations.Pop();
+        return _position == start
+            ? TokenKind.EndOfFile
+            : TokenKind.InterpolatedRawTextSegment;
+    }
+
+    private TokenKind ReadRawInterpolationHoleEnd(RawInterpolationFrame frame)
+    {
+        var braceRun = CountRepeated('}', _position);
+        var required = frame.DollarCount;
+        if (braceRun < required || braceRun - required >= required)
+        {
+            ReportRawInterpolationInvalid(frame,
+                "A raw interpolation hole must close with its selected brace delimiter length.",
+                _position, braceRun);
+        }
+
+        _position += braceRun < required || braceRun - required >= required
+            ? braceRun : required;
+        frame.IsInHole = false;
+        frame.IsAtLineStart = false;
+        frame.LastContentItemEndsWithQuote = false;
+        return TokenKind.InterpolationHoleEnd;
+    }
+
+    private void ReportUnterminatedRawInterpolation()
+    {
+        while (_rawInterpolations.TryPop(out var frame))
+        {
+            ReportRawInterpolationUnterminated(frame);
+        }
+    }
+
+    private void ReportRawInterpolationUnterminated(RawInterpolationFrame frame)
+    {
+        if (!frame.IsInvalid)
+        {
+            Report("TRM0002", "Unterminated interpolated raw-text literal.",
+                frame.OpeningStart, _position - frame.OpeningStart);
+            frame.IsInvalid = true;
+        }
+    }
+
+    private void ReportRawInterpolationInvalid(RawInterpolationFrame frame, string message, int start, int length)
+    {
+        if (!frame.IsInvalid)
+        {
+            Report("TRM0001", message, start, length);
+            frame.IsInvalid = true;
+        }
+    }
+
+    private void ConsumeRawInterpolationTextCharacter(RawInterpolationFrame frame)
+    {
+        var character = Current;
+        if (IsNewline(character))
+        {
+            var lineBreakLength = LineBreakLength(_position);
+            for (var index = 0; index < lineBreakLength; index++)
+            {
+                ObserveRawInterpolationText(frame, _source.Text[_position + index]);
+            }
+            _position += lineBreakLength;
+            frame.IsAtLineStart = true;
+            return;
+        }
+
+        if (!TryScalar(_position, out _, out var width))
+        {
+            Report("TRM0001", "Unpaired UTF-16 surrogate.", _position, 1);
+            width = 1;
+        }
+        ObserveRawInterpolationText(frame, character);
+        _position += width;
+        if (!StringLiteralDecoder.IsHorizontalWhitespace(character) || !frame.IsAtLineStart)
+        {
+            frame.IsAtLineStart = false;
+        }
+    }
+
+    private static void ObserveRawInterpolationText(RawInterpolationFrame frame, char character)
+    {
+        if (!frame.HasFirstContentItem)
+        {
+            frame.HasFirstContentItem = true;
+            frame.FirstContentItemStartsWithQuote = character == '"';
+        }
+        frame.LastContentItemEndsWithQuote = character == '"';
+    }
+
+    private static void ObserveRawInterpolationHole(RawInterpolationFrame frame)
+    {
+        frame.HasFirstContentItem = true;
+        frame.LastContentItemEndsWithQuote = false;
+    }
+
+    private int CountRepeated(char value, int position)
+    {
+        var end = position;
+        while (end < _source.Length && _source.Text[end] == value)
+        {
+            _cancellationToken.ThrowIfCancellationRequested();
+            end++;
+        }
+        return end - position;
+    }
+
+    private static int LineBreakLength(int position, ReadOnlySpan<char> text)
+        => text[position] == '\r' && position + 1 < text.Length && text[position + 1] == '\n' ? 2 : 1;
+
+    private int LineBreakLength(int position)
+        => LineBreakLength(position, _source.Text.AsSpan());
+
     private TokenKind ReadToken()
+    {
+        if (_rawInterpolations.TryPeek(out var frame))
+        {
+            if (!frame.IsInHole)
+            {
+                return ReadRawInterpolatedText(frame);
+            }
+            if (AtEnd)
+            {
+                ReportUnterminatedRawInterpolation();
+                return TokenKind.EndOfFile;
+            }
+            if (Current == '}' && frame.ExpressionBraceDepth == 0)
+            {
+                return ReadRawInterpolationHoleEnd(frame);
+            }
+
+            var kind = ReadTokenCore();
+            if (_rawInterpolations.TryPeek(out var activeFrame)
+                && ReferenceEquals(activeFrame, frame) && frame.IsInHole)
+            {
+                if (kind == TokenKind.OpenBrace)
+                {
+                    frame.ExpressionBraceDepth++;
+                }
+                else if (kind == TokenKind.CloseBrace && frame.ExpressionBraceDepth > 0)
+                {
+                    frame.ExpressionBraceDepth--;
+                }
+            }
+            return kind;
+        }
+
+        return ReadTokenCore();
+    }
+
+    private TokenKind ReadTokenCore()
     {
         if (AtEnd)
         {
             return TokenKind.EndOfFile;
+        }
+
+        if (Current == '$' && TryGetRawInterpolationOpening(out var dollarCount, out var fenceLength))
+        {
+            return ReadRawInterpolatedTextStart(dollarCount, fenceLength);
         }
 
         var start = _position;

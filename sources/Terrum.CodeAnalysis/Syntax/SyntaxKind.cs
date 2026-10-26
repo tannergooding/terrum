@@ -163,6 +163,10 @@ public enum SyntaxKind
     ExternalBody,
     /// <summary>A source-ordered collection spread element beginning with <c>..</c>.</summary>
     CollectionSpreadElement,
+    /// <summary>A call-only reservation of a vacant local for a native output formal.</summary>
+    NativeOutputAddressExpression,
+    /// <summary>A braced namespace declaration containing file-scope declarations.</summary>
+    NamespaceBlockDeclaration,
     /// <summary>A multi-arm statement dispatching on one evaluated value.</summary>
     SwitchStatement,
     /// <summary>One arm of a switch statement.</summary>
@@ -199,4 +203,12 @@ public enum SyntaxKind
     SwitchWhenClause,
     /// <summary>A continue transfer to a switch constant or wildcard arm.</summary>
     SwitchTransferStatement,
+    /// <summary>A raw interpolated text construction with ordered literal segments and holes.</summary>
+    InterpolatedRawTextExpression,
+    /// <summary>A literal segment of raw interpolated text.</summary>
+    InterpolatedRawTextSegment,
+    /// <summary>An expression hole with optional alignment and format.</summary>
+    InterpolationHole,
+    /// <summary>A format specifier within an interpolation hole.</summary>
+    InterpolationFormatSpecifier,
 }

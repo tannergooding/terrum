@@ -15,7 +15,7 @@ internal static class StringLiteralDecoder
         Unterminated,
     }
 
-    private enum RawTextHeaderKind
+    internal enum RawTextHeaderKind
     {
         None,
         Valid,
@@ -345,7 +345,7 @@ internal static class StringLiteralDecoder
         return !invalid;
     }
 
-    private static RawTextHeaderKind ReadOpeningHeader(ReadOnlySpan<char> source, int position,
+    internal static RawTextHeaderKind ReadOpeningHeader(ReadOnlySpan<char> source, int position,
         out int bodyStart, out string? newlineDirective, out int errorStart, out int errorLength)
     {
         bodyStart = 0;
@@ -571,7 +571,7 @@ internal static class StringLiteralDecoder
 
     private static bool IsNewline(char value) => value is '\r' or '\n' or '\u0085' or '\u2028' or '\u2029';
 
-    private static bool IsHorizontalWhitespace(char value) =>
+    internal static bool IsHorizontalWhitespace(char value) =>
         value is '\t' or ' ' or '\u00A0' or '\u1680'
             or (>= '\u2000' and <= '\u200A') or '\u202F' or '\u205F' or '\u3000';
 

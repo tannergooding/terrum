@@ -38,7 +38,7 @@ public sealed class OptionalManagedCoreTests
     {
         var syntax = SyntaxTree.Parse(Source);
         Assert.That(syntax.HasErrors, Is.False);
-        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-46"));
+        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
         Assert.That(global::System.Linq.Enumerable.Any(syntax.Tokens,static token => token is { Kind: TokenKind.Identifier, Text: "is" }),Is.True);
         Assert.That(global::System.Linq.Enumerable.Any(syntax.Tokens,static token => token is { Kind: TokenKind.Identifier, Text: "some" }),Is.True);
         var identifiers = SyntaxTree.Parse("int32 Main() { int32 is = 20; int32 some = 22; return is + some; }");

@@ -18,7 +18,7 @@ public sealed class ParserTests
         const string Source = "int32 Main() { _ /* destination */ = int32(42); return 42; }";
         var tree = SyntaxTree.Parse(Source);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-46"));
+        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
         var discard = global::System.Linq.Enumerable.Single(tree.Root.DescendantNodes(), static node => node.Kind == SyntaxKind.DiscardStatement);
         Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual0 = discard.Children[0]; Assert.That(__nunitActual0, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual0!; }))().Token.Kind, Is.EqualTo(TokenKind.Underscore));
         Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual1 = discard.Children[1]; Assert.That(__nunitActual1, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual1!; }))().Token.Kind, Is.EqualTo(TokenKind.Equals));
@@ -32,7 +32,7 @@ public sealed class ParserTests
         const string Source = "public alias Count = int32;";
         var tree = SyntaxTree.Parse(Source);
         Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
-        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-46"));
+        Assert.That(SyntaxTree.LanguageVersion, Is.EqualTo("syntax-47"));
         var alias = global::System.Linq.Enumerable.Single(tree.Root.Children.OfType<SyntaxNode>(), static node => node.Kind == SyntaxKind.AliasDeclaration);
         Assert.That(((global::System.Func<SyntaxTokenElement>)(() => { var __nunitActual3 = alias.Children[2]; Assert.That(__nunitActual3, Is.TypeOf<SyntaxTokenElement>()); return (SyntaxTokenElement)__nunitActual3!; }))().Token.Name, Is.EqualTo("Count"));
         Assert.That(((global::System.Func<SyntaxNode>)(() => { var __nunitActual4 = alias.Children[4]; Assert.That(__nunitActual4, Is.TypeOf<SyntaxNode>()); return (SyntaxNode)__nunitActual4!; }))().Kind, Is.EqualTo(SyntaxKind.TypeName));

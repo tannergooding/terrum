@@ -1657,7 +1657,11 @@ internal sealed class Parser
     {
         SyntaxNode expression;
 
-        if (Current.Kind == TokenKind.UnsafeKeyword && Peek(1).Kind == TokenKind.OpenParen)
+        if (Current.Kind == TokenKind.InterpolatedRawTextStart)
+        {
+            expression = ParseInterpolatedRawTextExpression();
+        }
+        else if (Current.Kind == TokenKind.UnsafeKeyword && Peek(1).Kind == TokenKind.OpenParen)
         {
             expression = Node(SyntaxKind.UnsafeExpression,
                 [Take(), Expect(TokenKind.OpenParen), ParseExpression(), Expect(TokenKind.CloseParen)]);
@@ -1804,6 +1808,80 @@ internal sealed class Parser
 
         var caret = TakePrefix();
         return Node(SyntaxKind.EndRelativeIndexBound, [caret, ParseExpression(13)]);
+    }
+
+    private SyntaxNode ParseInterpolatedRawTextExpression()
+    {
+        var children = new List<SyntaxElement> { Take() };
+        while (Current.Kind is not (TokenKind.InterpolatedRawTextEnd or TokenKind.EndOfFile))
+        {
+            if (Current.Kind == TokenKind.InterpolatedRawTextSegment)
+            {
+                children.Add(Node(SyntaxKind.InterpolatedRawTextSegment, [Take()]));
+            }
+            else if (Current.Kind == TokenKind.InterpolationHoleStart)
+            {
+                children.Add(ParseInterpolationHole());
+            }
+            else
+            {
+                Report("TRM1001", "Expected a raw interpolated-text segment or hole.", Current.Span);
+                children.Add(Take());
+            }
+        }
+        children.Add(Expect(TokenKind.InterpolatedRawTextEnd));
+        return Node(SyntaxKind.InterpolatedRawTextExpression, children);
+    }
+
+    private SyntaxNode ParseInterpolationHole()
+    {
+        var children = new List<SyntaxElement> { Take() };
+        if (Current.Kind is TokenKind.Comma or TokenKind.Colon or TokenKind.InterpolationHoleEnd)
+        {
+            Report("TRM1001", "An interpolation hole requires an expression.", Current.Span);
+            children.Add(Node(SyntaxKind.MissingExpression, [Missing(TokenKind.Identifier)]));
+        }
+        else
+        {
+            children.Add(ParseExpression());
+        }
+
+        if (Current.Kind == TokenKind.Comma)
+        {
+            children.Add(Take());
+            if (Current.Kind is TokenKind.Colon or TokenKind.InterpolationHoleEnd)
+            {
+                Report("TRM1001", "An interpolation alignment requires an expression.", Current.Span);
+                children.Add(Node(SyntaxKind.MissingExpression, [Missing(TokenKind.Identifier)]));
+            }
+            else
+            {
+                children.Add(ParseExpression());
+            }
+        }
+
+        if (Current.Kind == TokenKind.Colon)
+        {
+            var colon = Take();
+            if (Current.Kind is TokenKind.Identifier or TokenKind.StringLiteral)
+            {
+                children.Add(Node(SyntaxKind.InterpolationFormatSpecifier, [colon, Take()]));
+            }
+            else if (Current.Kind == TokenKind.OpenParen)
+            {
+                children.Add(Node(SyntaxKind.InterpolationFormatSpecifier, [colon, ParsePrimary()]));
+            }
+            else
+            {
+                Report("TRM1001", "An interpolation format requires an identifier, string, or parenthesized expression.",
+                    Current.Span);
+                children.Add(Node(SyntaxKind.InterpolationFormatSpecifier,
+                    [colon, Missing(TokenKind.Identifier)]));
+            }
+        }
+
+        children.Add(Expect(TokenKind.InterpolationHoleEnd));
+        return Node(SyntaxKind.InterpolationHole, children);
     }
 
     private SyntaxNode ParseArguments()
