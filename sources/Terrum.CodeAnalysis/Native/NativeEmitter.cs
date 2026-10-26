@@ -760,8 +760,12 @@ internal sealed partial class PeCompiler
     private const int MaximumText = 8 * 1024 * 1024;
     private sealed record Binary128Runtime(NativeCode Code,
         ImmutableDictionary<string, int> FunctionOffsets);
+    private sealed record BidDecimalRuntime(NativeCode Code,
+        ImmutableDictionary<string, int> FunctionOffsets);
     private static readonly Lazy<Binary128Runtime> s_binary128Runtime = new(
         CreateBinary128Runtime, LazyThreadSafetyMode.ExecutionAndPublication);
+    private static readonly Lazy<BidDecimalRuntime> s_bidDecimalRuntime = new(
+        CreateBidDecimalRuntime, LazyThreadSafetyMode.ExecutionAndPublication);
     private readonly BoundProgram _program;
     private readonly bool _library;
     private readonly IReadOnlyDictionary<int, NativeImportBinding>? _nativeImports;
@@ -782,6 +786,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _cleanupArgumentSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, string Function)> _binary128Calls = [];
+    private readonly List<(int Offset, string Function)> _bidDecimalCalls = [];
     private readonly List<(int Offset, int Target)> _functionAddressFixups = [];
     private readonly HashSet<int> _externalFunctionAddresses = [];
     private readonly Dictionary<int, int> _externalFunctionAddressStarts = [];
@@ -1018,6 +1023,49 @@ internal sealed partial class PeCompiler
             ];
         }
 
+        var bidDecimalFunctionRanges = ImmutableArray<NativeFunctionRange>.Empty;
+        if (_bidDecimalCalls.Count != 0)
+        {
+            var runtime = s_bidDecimalRuntime.Value;
+            var runtimeStart = _code.Position;
+            _code.Bytes(runtime.Code.Code);
+            foreach (var (offset, function) in _bidDecimalCalls)
+            {
+                _code.PatchRelative(offset, runtimeStart + runtime.FunctionOffsets[function]);
+            }
+            foreach (var offset in runtime.Code.ExitProcessFixups)
+            {
+                _imports.Add(runtimeStart + offset);
+            }
+            foreach (var import in runtime.Code.NativeImports)
+            {
+                _nativeImportFixups.Add(import with {
+                    DisplacementOffset = runtimeStart + import.DisplacementOffset,
+                });
+            }
+            foreach (var fixup in runtime.Code.DataFixups)
+            {
+                _dataFixups.Add(fixup with {
+                    DisplacementOffset = runtimeStart + fixup.DisplacementOffset,
+                });
+            }
+            bidDecimalFunctionRanges = [
+                .. runtime.Code.Functions.Select(function => function with {
+                    Start = runtimeStart + function.Start,
+                    End = runtimeStart + function.End,
+                    ExceptionHandler = function.ExceptionHandler == 0
+                        ? 0 : runtimeStart + function.ExceptionHandler,
+                    ExceptionScopes = [
+                        .. function.ExceptionScopes.Select(scope => scope with {
+                            Begin = runtimeStart + scope.Begin,
+                            End = runtimeStart + scope.End,
+                            Handler = scope.Handler == 0 ? 0 : runtimeStart + scope.Handler,
+                        }),
+                    ],
+                }),
+            ];
+        }
+
         foreach (var (offset, target) in _calls)
         {
             _code.PatchRelative(offset, _starts[target]);
@@ -1051,7 +1099,7 @@ internal sealed partial class PeCompiler
         {
             throw new NotSupportedException("Native text exceeds the 8 MiB image ceiling.");
         }
-        var functionCount = checked(binary128FunctionRanges.Length
+        var functionCount = checked(binary128FunctionRanges.Length + bidDecimalFunctionRanges.Length
             + (_library ? 0 : 2) + _failureStarts.Length + _funclets.Count
             + (_managedNodes ? 1 : 0));
         var sourceFunctionOffsets = ImmutableArray.CreateBuilder<int>(_program.Functions.Length);
@@ -1102,6 +1150,7 @@ internal sealed partial class PeCompiler
             functions.Add(new NativeFunctionRange(_managedCollectorStart, _managedCollectorEnd, 120));
         }
         functions.AddRange(binary128FunctionRanges);
+        functions.AddRange(bidDecimalFunctionRanges);
 
         return new NativeCode(_code.ToArray(), _entryStart,
             functions.MoveToImmutable(),
@@ -1804,6 +1853,10 @@ internal sealed partial class PeCompiler
             case BoundConstant constant:
                 return IsIndirect(constant.Type) ? Math.Max(1, (Size(constant.Type) + 15) / 16) : 0;
             case BoundUnary unary:
+                if (IsBidDecimal(unary.Type))
+                {
+                    return Math.Max(3, 1 + ExpressionSpills(unary.Operand, ref maximumArguments));
+                }
                 return Math.Max(PrimitiveTypeFacts.IsWideInteger(unary.Type) ? 2 : 0,
                     ExpressionSpills(unary.Operand, ref maximumArguments));
             case BoundUpdate update:
@@ -1883,6 +1936,11 @@ internal sealed partial class PeCompiler
             case BoundSpanAdvance advance:
                 return Math.Max(1, ExpressionSpills(advance.View, ref maximumArguments));
             case BoundBinary binary:
+                if (IsBidDecimal(binary.Left.Type))
+                {
+                    return Math.Max(3, Math.Max(1 + ExpressionSpills(binary.Left, ref maximumArguments),
+                        2 + ExpressionSpills(binary.Right, ref maximumArguments)));
+                }
                 var requiredBinarySpills = PrimitiveTypeFacts.IsWideInteger(binary.Left.Type)
                     ? binary.Operator switch {
                         TokenKind.Star => 5,
@@ -2784,6 +2842,1130 @@ internal sealed partial class PeCompiler
         return new Binary128Runtime(code, functionOffsets.ToImmutable());
     }
 
+    private static BidDecimalRuntime CreateBidDecimalRuntime()
+    {
+        const string source = """
+            [Blittable] [Layout(LayoutKind.Sequential)] struct D256 {
+                public uint128 Low;
+                public uint128 High;
+                public uint128 Remainder;
+                public D256(uint128 low, uint128 high, uint128 remainder) {
+                    this.Low = low;
+                    this.High = high;
+                    this.Remainder = remainder;
+                }
+            }
+            uint128 DPower10(int32 exponent) {
+                mut uint128 value = uint128(1);
+                for (mut int32 index = 0; index < exponent; index++) {
+                    value = value * uint128(10);
+                }
+                return value;
+            }
+            int32 DDecimalDigits(uint128 value) {
+                if (value == uint128(0)) {
+                    return 1;
+                }
+                mut int32 digits = 0;
+                mut uint128 remaining = value;
+                while (remaining != uint128(0)) {
+                    remaining = remaining / uint128(10);
+                    digits++;
+                }
+                return digits;
+            }
+            uint128 D128Scale10(uint128 value, int32 exponent) {
+                mut uint128 result = value;
+                for (mut int32 index = 0; index < exponent; index++) {
+                    result = result * uint128(10);
+                }
+                return result;
+            }
+            D256 D256Divide10(D256 value) {
+                uint128 mask = (uint128(1) << 64) - uint128(1);
+                mut uint128 quotient3 = value.High >> 64;
+                mut uint128 remainder = quotient3 % uint128(10);
+                quotient3 = quotient3 / uint128(10);
+                mut uint128 current = (remainder << 64) | (value.High & mask);
+                uint128 quotient2 = current / uint128(10);
+                remainder = current % uint128(10);
+                current = (remainder << 64) | (value.Low >> 64);
+                uint128 quotient1 = current / uint128(10);
+                remainder = current % uint128(10);
+                current = (remainder << 64) | (value.Low & mask);
+                uint128 quotient0 = current / uint128(10);
+                remainder = current % uint128(10);
+                return new D256((quotient1 << 64) | quotient0,
+                    (quotient3 << 64) | quotient2, remainder);
+            }
+            D256 D256Multiply10(D256 value) {
+                uint128 mask = (uint128(1) << 64) - uint128(1);
+                uint128 lowProduct = (value.Low & mask) * uint128(10);
+                uint128 middleProduct = (value.Low >> 64) * uint128(10)
+                    + (lowProduct >> 64);
+                uint128 low = ((middleProduct & mask) << 64) | (lowProduct & mask);
+                uint128 high = value.High * uint128(10) + (middleProduct >> 64);
+                return new D256(low, high, uint128(0));
+            }
+            D256 D256Scale10(D256 value, int32 exponent) {
+                mut D256 result = value;
+                for (mut int32 index = 0; index < exponent; index++) {
+                    result = D256Multiply10(result);
+                }
+                return result;
+            }
+            D256 D256Add(D256 left, D256 right) {
+                mut uint128 low = left.Low + right.Low;
+                mut uint128 high = left.High + right.High;
+                if (low < left.Low) {
+                    high = high + uint128(1);
+                }
+                return new D256(low, high, uint128(0));
+            }
+            D256 D256Subtract(D256 left, D256 right) {
+                mut uint128 low = left.Low - right.Low;
+                mut uint128 high = left.High - right.High;
+                if (left.Low < right.Low) {
+                    high = high - uint128(1);
+                }
+                return new D256(low, high, uint128(0));
+            }
+            int32 D256Compare(D256 left, D256 right) {
+                if (left.High < right.High) {
+                    return -1;
+                }
+                if (left.High > right.High) {
+                    return 1;
+                }
+                if (left.Low < right.Low) {
+                    return -1;
+                }
+                if (left.Low > right.Low) {
+                    return 1;
+                }
+                return 0;
+            }
+            bool D256IsZero(D256 value) {
+                return value.Low == uint128(0) && value.High == uint128(0);
+            }
+            int32 D256Digits(D256 value) {
+                if (D256IsZero(value)) {
+                    return 0;
+                }
+                mut int32 digits = 0;
+                mut D256 remaining = value;
+                while (!D256IsZero(remaining)) {
+                    remaining = D256Divide10(remaining);
+                    digits++;
+                }
+                return digits;
+            }
+            D256 D256Multiply128(uint128 left, uint128 right) {
+                uint128 mask = (uint128(1) << 64) - uint128(1);
+                uint128 leftLow = left & mask;
+                uint128 leftHigh = left >> 64;
+                uint128 rightLow = right & mask;
+                uint128 rightHigh = right >> 64;
+                uint128 lowLow = leftLow * rightLow;
+                uint128 lowHigh = leftLow * rightHigh;
+                uint128 highLow = leftHigh * rightLow;
+                uint128 highHigh = leftHigh * rightHigh;
+                uint128 firstCross = (lowHigh & mask) << 64;
+                uint128 secondCross = (highLow & mask) << 64;
+                mut uint128 low = lowLow + firstCross;
+                bool carryFirst = low < lowLow;
+                mut uint128 lowResult = low + secondCross;
+                bool carrySecond = lowResult < low;
+                mut uint128 highResult = (lowHigh >> 64) + (highLow >> 64) + highHigh;
+                if (carryFirst) {
+                    highResult = highResult + uint128(1);
+                }
+                if (carrySecond) {
+                    highResult = highResult + uint128(1);
+                }
+                return new D256(lowResult, highResult, uint128(0));
+            }
+            D256 D256RoundDrop(D256 value, int32 droppedDigits) {
+                if (droppedDigits <= 0) {
+                    return D256Scale10(value, -droppedDigits);
+                }
+                if (droppedDigits > D256Digits(value)) {
+                    return new D256(uint128(0), uint128(0), uint128(0));
+                }
+                mut D256 quotient = value;
+                mut uint128 guard = uint128(0);
+                mut bool sticky = false;
+                for (mut int32 index = 0; index < droppedDigits; index++) {
+                    quotient = D256Divide10(quotient);
+                    guard = quotient.Remainder;
+                    if (index + 1 < droppedDigits && guard != uint128(0)) {
+                        sticky = true;
+                    }
+                }
+                if (guard > uint128(5)
+                    || (guard == uint128(5)
+                        && (sticky || (quotient.Low & uint128(1)) != uint128(0)))) {
+                    quotient = D256Add(quotient, new D256(uint128(1), uint128(0), uint128(0)));
+                }
+                return quotient;
+            }
+            uint128 DInfinity(bool negative, int32 width) {
+                mut uint128 value = uint128(30) << uint128(width - 6);
+                if (negative) {
+                    value = value | (uint128(1) << uint128(width - 1));
+                }
+                return value;
+            }
+            uint128 DNaN(int32 width) {
+                return uint128(31) << uint128(width - 6);
+            }
+            uint128 DDecodeCoefficient(uint128 bits, int32 width) {
+                mut int32 precision = 0;
+                mut int32 coefficientBits = 0;
+                if (width == 32) {
+                    precision = 7;
+                    coefficientBits = 23;
+                } else if (width == 64) {
+                    precision = 16;
+                    coefficientBits = 53;
+                } else {
+                    precision = 34;
+                    coefficientBits = 113;
+                }
+                uint128 special = (bits >> uint128(width - 6)) & uint128(31);
+                if (special == uint128(30) || special == uint128(31)) {
+                    return uint128(0);
+                }
+                bool steering = ((bits >> uint128(width - 3)) & uint128(3)) == uint128(3);
+                mut uint128 coefficient = uint128(0);
+                if (steering) {
+                    coefficient = (uint128(1) << uint128(coefficientBits))
+                        | (bits & ((uint128(1) << uint128(coefficientBits - 2)) - uint128(1)));
+                } else {
+                    coefficient = bits & ((uint128(1) << uint128(coefficientBits)) - uint128(1));
+                }
+                if (coefficient >= DPower10(precision)) {
+                    coefficient = uint128(0);
+                }
+                return coefficient;
+            }
+            uint128 D32Coefficient(uint128 bits) {
+                uint128 special = (bits >> uint128(26)) & uint128(31);
+                if (special == uint128(30) || special == uint128(31)) {
+                    return uint128(0);
+                }
+                bool steering = ((bits >> uint128(29)) & uint128(3)) == uint128(3);
+                mut uint128 coefficient = uint128(0);
+                if (steering) {
+                    coefficient = (uint128(1) << uint128(23))
+                        | (bits & ((uint128(1) << uint128(21)) - uint128(1)));
+                } else {
+                    coefficient = bits & ((uint128(1) << uint128(23)) - uint128(1));
+                }
+                mut uint128 limit = uint128(1);
+                for (mut int32 index = 0; index < 7; index++) {
+                    limit = limit * uint128(10);
+                }
+                return coefficient >= limit ? uint128(0) : coefficient;
+            }
+            uint128 D64Coefficient(uint128 bits) {
+                uint128 special = (bits >> uint128(58)) & uint128(31);
+                if (special == uint128(30) || special == uint128(31)) {
+                    return uint128(0);
+                }
+                bool steering = ((bits >> uint128(61)) & uint128(3)) == uint128(3);
+                mut uint128 coefficient = uint128(0);
+                if (steering) {
+                    coefficient = (uint128(1) << uint128(53))
+                        | (bits & ((uint128(1) << uint128(51)) - uint128(1)));
+                } else {
+                    coefficient = bits & ((uint128(1) << uint128(53)) - uint128(1));
+                }
+                mut uint128 limit = uint128(1);
+                for (mut int32 index = 0; index < 16; index++) {
+                    limit = limit * uint128(10);
+                }
+                return coefficient >= limit ? uint128(0) : coefficient;
+            }
+            uint128 D128Coefficient(uint128 bits) {
+                uint128 special = (bits >> uint128(122)) & uint128(31);
+                if (special == uint128(30) || special == uint128(31)) {
+                    return uint128(0);
+                }
+                bool steering = ((bits >> uint128(125)) & uint128(3)) == uint128(3);
+                mut uint128 coefficient = uint128(0);
+                if (steering) {
+                    coefficient = (uint128(1) << uint128(113))
+                        | (bits & ((uint128(1) << uint128(111)) - uint128(1)));
+                } else {
+                    coefficient = bits & ((uint128(1) << uint128(113)) - uint128(1));
+                }
+                mut uint128 limit = uint128(1);
+                for (mut int32 index = 0; index < 34; index++) {
+                    limit = limit * uint128(10);
+                }
+                return coefficient >= limit ? uint128(0) : coefficient;
+            }
+            uint128 DClass(uint128 bits, int32 width) {
+                mut int32 precision = 0;
+                mut int32 coefficientBits = 0;
+                if (width == 32) {
+                    precision = 7;
+                    coefficientBits = 23;
+                } else if (width == 64) {
+                    precision = 16;
+                    coefficientBits = 53;
+                } else {
+                    precision = 34;
+                    coefficientBits = 113;
+                }
+                uint128 special = (bits >> uint128(width - 6)) & uint128(31);
+                if (special == uint128(30)) {
+                    return uint128(2);
+                }
+                if (special == uint128(31)) {
+                    return uint128(3);
+                }
+                bool steering = ((bits >> uint128(width - 3)) & uint128(3)) == uint128(3);
+                mut uint128 coefficient = uint128(0);
+                if (steering) {
+                    coefficient = (uint128(1) << uint128(coefficientBits))
+                        | (bits & ((uint128(1) << uint128(coefficientBits - 2)) - uint128(1)));
+                } else {
+                    coefficient = bits & ((uint128(1) << uint128(coefficientBits)) - uint128(1));
+                }
+                mut uint128 precisionLimit = uint128(1);
+                for (mut int32 index = 0; index < precision; index++) {
+                    precisionLimit = precisionLimit * uint128(10);
+                }
+                return coefficient == uint128(0) || coefficient >= precisionLimit
+                    ? uint128(0) : uint128(1);
+            }
+            bool DNegative(uint128 bits, int32 width) {
+                return (bits & (uint128(1) << uint128(width - 1))) != uint128(0);
+            }
+            int32 DExponent(uint128 bits, int32 width) {
+                mut int32 coefficientBits = 0;
+                mut int32 exponentBits = 0;
+                mut int32 bias = 0;
+                if (width == 32) {
+                    coefficientBits = 23;
+                    exponentBits = 8;
+                    bias = 101;
+                } else if (width == 64) {
+                    coefficientBits = 53;
+                    exponentBits = 10;
+                    bias = 398;
+                } else {
+                    coefficientBits = 113;
+                    exponentBits = 14;
+                    bias = 6176;
+                }
+                bool steering = ((bits >> uint128(width - 3)) & uint128(3)) == uint128(3);
+                uint128 exponentMask = (uint128(1) << uint128(exponentBits)) - uint128(1);
+                uint128 encodedExponent = steering
+                    ? (bits >> uint128(coefficientBits - 2)) & exponentMask
+                    : (bits >> uint128(coefficientBits)) & exponentMask;
+                mut int32 decodedExponent = 0;
+                mut int32 exponentPower = 1;
+                for (mut int32 bit = 0; bit < exponentBits; bit++) {
+                    if ((encodedExponent & uint128(exponentPower)) != uint128(0)) {
+                        decodedExponent = decodedExponent + exponentPower;
+                    }
+                    exponentPower = exponentPower * 2;
+                }
+                return decodedExponent - bias;
+            }
+            int32 DCompareMagnitude(uint128 leftCoefficient, int32 leftExponent,
+                uint128 rightCoefficient, int32 rightExponent) {
+                if (leftCoefficient == uint128(0)) {
+                    return rightCoefficient == uint128(0) ? 0 : -1;
+                }
+                if (rightCoefficient == uint128(0)) {
+                    return 1;
+                }
+                mut uint128 leftRemaining = leftCoefficient;
+                mut uint128 rightRemaining = rightCoefficient;
+                mut int32 leftDigits = 0;
+                mut int32 rightDigits = 0;
+                while (leftRemaining != uint128(0)) {
+                    leftRemaining = leftRemaining / uint128(10);
+                    leftDigits++;
+                }
+                while (rightRemaining != uint128(0)) {
+                    rightRemaining = rightRemaining / uint128(10);
+                    rightDigits++;
+                }
+                int32 leftAdjusted = leftExponent + leftDigits - 1;
+                int32 rightAdjusted = rightExponent + rightDigits - 1;
+                if (leftAdjusted < rightAdjusted) {
+                    return -1;
+                }
+                if (leftAdjusted > rightAdjusted) {
+                    return 1;
+                }
+                int32 commonExponent = leftExponent < rightExponent
+                    ? leftExponent : rightExponent;
+                mut uint128 scaledLeft = leftCoefficient;
+                mut uint128 scaledRight = rightCoefficient;
+                for (mut int32 index = 0; index < leftExponent - commonExponent; index++) {
+                    scaledLeft = scaledLeft * uint128(10);
+                }
+                for (mut int32 index = 0; index < rightExponent - commonExponent; index++) {
+                    scaledRight = scaledRight * uint128(10);
+                }
+                if (scaledLeft < scaledRight) {
+                    return -1;
+                }
+                if (scaledLeft > scaledRight) {
+                    return 1;
+                }
+                return 0;
+            }
+            int32 DCompare(uint128 leftBits, uint128 rightBits, int32 width) {
+                mut uint128 leftCoefficient = uint128(0);
+                mut uint128 rightCoefficient = uint128(0);
+                if (width == 32) {
+                    leftCoefficient = D32Coefficient(leftBits);
+                    rightCoefficient = D32Coefficient(rightBits);
+                } else if (width == 64) {
+                    leftCoefficient = D64Coefficient(leftBits);
+                    rightCoefficient = D64Coefficient(rightBits);
+                } else {
+                    leftCoefficient = D128Coefficient(leftBits);
+                    rightCoefficient = D128Coefficient(rightBits);
+                }
+                uint128 leftClass = DClass(leftBits, width);
+                uint128 rightClass = DClass(rightBits, width);
+                bool leftNegative = DNegative(leftBits, width);
+                bool rightNegative = DNegative(rightBits, width);
+                if (leftClass == uint128(3) || rightClass == uint128(3)) {
+                    return 2;
+                }
+                if (leftClass == uint128(2) && rightClass == uint128(2)) {
+                    return leftNegative == rightNegative ? 0
+                        : leftNegative ? -1 : 1;
+                }
+                if (leftClass == uint128(2)) {
+                    return leftNegative ? -1 : 1;
+                }
+                if (rightClass == uint128(2)) {
+                    return rightNegative ? 1 : -1;
+                }
+                if (leftClass == uint128(0) && rightClass == uint128(0)) {
+                    return 0;
+                }
+                if (leftNegative != rightNegative) {
+                    return leftNegative ? -1 : 1;
+                }
+                int32 leftExponent = DExponent(leftBits, width);
+                int32 rightExponent = DExponent(rightBits, width);
+                if (leftCoefficient == uint128(0)) {
+                    return rightCoefficient == uint128(0) ? 0
+                        : leftNegative ? 1 : -1;
+                }
+                if (rightCoefficient == uint128(0)) {
+                    return leftNegative ? -1 : 1;
+                }
+                mut uint128 leftRemaining = leftCoefficient;
+                mut uint128 rightRemaining = rightCoefficient;
+                mut int32 leftDigits = 0;
+                mut int32 rightDigits = 0;
+                while (leftRemaining != uint128(0)) {
+                    leftRemaining = leftRemaining / uint128(10);
+                    leftDigits++;
+                }
+                while (rightRemaining != uint128(0)) {
+                    rightRemaining = rightRemaining / uint128(10);
+                    rightDigits++;
+                }
+                int32 leftAdjusted = leftExponent + leftDigits - 1;
+                int32 rightAdjusted = rightExponent + rightDigits - 1;
+                if (leftAdjusted < rightAdjusted) {
+                    return leftNegative ? 1 : -1;
+                }
+                if (leftAdjusted > rightAdjusted) {
+                    return leftNegative ? -1 : 1;
+                }
+                int32 commonExponent = leftExponent < rightExponent
+                    ? leftExponent : rightExponent;
+                mut uint128 scaledLeft = leftCoefficient;
+                mut uint128 scaledRight = rightCoefficient;
+                for (mut int32 index = 0; index < leftExponent - commonExponent; index++) {
+                    scaledLeft = scaledLeft * uint128(10);
+                }
+                for (mut int32 index = 0; index < rightExponent - commonExponent; index++) {
+                    scaledRight = scaledRight * uint128(10);
+                }
+                mut int32 magnitude = 0;
+                if (scaledLeft < scaledRight) {
+                    magnitude = -1;
+                } else if (scaledLeft > scaledRight) {
+                    magnitude = 1;
+                }
+                return leftNegative ? -magnitude : magnitude;
+            }
+            uint128 DEncodeRaw(uint128 coefficient, int32 exponent, bool negative,
+                int32 width, int32 coefficientBits, int32 bias) {
+                uint128 sign = negative
+                    ? uint128(1) << uint128(width - 1) : uint128(0);
+                uint128 encodedExponent = uint128(exponent + bias);
+                uint128 shortLimit = uint128(1) << uint128(coefficientBits);
+                if (coefficient < shortLimit) {
+                    return sign | (encodedExponent << uint128(coefficientBits)) | coefficient;
+                }
+                uint128 steering = uint128(3) << uint128(width - 3);
+                return sign | steering
+                    | (encodedExponent << uint128(coefficientBits - 2))
+                    | (coefficient - shortLimit);
+            }
+            uint128 DEncode(D256 coefficient, int32 exponent, int32 preferredExponent,
+                bool negative, int32 width, int32 precision, int32 coefficientBits,
+                int32 bias, int32 minimumQuantum, int32 maximumQuantum,
+                int32 maximumAdjusted) {
+                if (D256IsZero(coefficient)) {
+                    mut int32 zeroExponent = preferredExponent;
+                    if (zeroExponent < minimumQuantum) {
+                        zeroExponent = minimumQuantum;
+                    } else if (zeroExponent > maximumQuantum) {
+                        zeroExponent = maximumQuantum;
+                    }
+                    return DEncodeRaw(uint128(0), zeroExponent, negative,
+                        width, coefficientBits, bias);
+                }
+                int32 adjustedExponent = exponent + D256Digits(coefficient) - 1;
+                if (adjustedExponent > maximumAdjusted) {
+                    return DInfinity(negative, width);
+                }
+                if (adjustedExponent < minimumQuantum - 1) {
+                    return DEncodeRaw(uint128(0), minimumQuantum, negative,
+                        width, coefficientBits, bias);
+                }
+                mut int32 outputExponent = adjustedExponent - precision + 1;
+                if (preferredExponent > outputExponent) {
+                    outputExponent = preferredExponent;
+                }
+                if (outputExponent < minimumQuantum) {
+                    outputExponent = minimumQuantum;
+                } else if (outputExponent > maximumQuantum) {
+                    outputExponent = maximumQuantum;
+                }
+                int32 shift = exponent - outputExponent;
+                mut D256 rounded = D256RoundDrop(coefficient, -shift);
+                uint128 precisionLimit = DPower10(precision);
+                if (rounded.Low >= precisionLimit) {
+                    rounded = D256Divide10(rounded);
+                    outputExponent++;
+                    if (outputExponent > maximumQuantum) {
+                        return DInfinity(negative, width);
+                    }
+                }
+                return DEncodeRaw(rounded.Low, outputExponent, negative,
+                    width, coefficientBits, bias);
+            }
+            int32 DFloorLog10Rational(uint128 numerator, uint128 denominator) {
+                mut uint128 numeratorRemaining = numerator;
+                mut uint128 denominatorRemaining = denominator;
+                mut int32 numeratorDigits = 0;
+                mut int32 denominatorDigits = 0;
+                while (numeratorRemaining != uint128(0)) {
+                    numeratorRemaining = numeratorRemaining / uint128(10);
+                    numeratorDigits++;
+                }
+                while (denominatorRemaining != uint128(0)) {
+                    denominatorRemaining = denominatorRemaining / uint128(10);
+                    denominatorDigits++;
+                }
+                mut int32 exponent = numeratorDigits - denominatorDigits;
+                if (exponent >= 0) {
+                    mut uint128 scaledDenominator = denominator;
+                    for (mut int32 index = 0; index < exponent; index++) {
+                        scaledDenominator = scaledDenominator * uint128(10);
+                    }
+                    if (numerator < scaledDenominator) {
+                        exponent--;
+                    }
+                } else {
+                    mut uint128 scaledNumerator = numerator;
+                    for (mut int32 index = 0; index < -exponent; index++) {
+                        scaledNumerator = scaledNumerator * uint128(10);
+                    }
+                    if (scaledNumerator < denominator) {
+                        exponent--;
+                    }
+                }
+                return exponent;
+            }
+            uint128 D128Gcd(uint128 left, uint128 right) {
+                mut uint128 a = left;
+                mut uint128 b = right;
+                while (b != uint128(0)) {
+                    mut uint128 remainder = a % b;
+                    a = b;
+                    b = remainder;
+                }
+                return a;
+            }
+            uint128 DRoundRationalPositive(uint128 numerator, uint128 denominator,
+                uint128 shift) {
+                mut uint128 quotient = numerator / denominator;
+                mut uint128 remainder = numerator % denominator;
+                for (mut uint128 index = uint128(0); index < shift; index++) {
+                    remainder = remainder * uint128(10);
+                    uint128 digit = remainder / denominator;
+                    remainder = remainder % denominator;
+                    quotient = quotient * uint128(10) + digit;
+                }
+                if (remainder * uint128(2) > denominator
+                    || (remainder * uint128(2) == denominator
+                        && (quotient & uint128(1)) != uint128(0))) {
+                    quotient = quotient + uint128(1);
+                }
+                return quotient;
+            }
+            uint128 DRoundRationalNegative(uint128 numerator, uint128 denominator,
+                uint128 droppedDigits) {
+                mut uint128 quotient = numerator / denominator;
+                mut uint128 remainder = numerator % denominator;
+                if (droppedDigits > uint128(DDecimalDigits(quotient))) {
+                    return uint128(0);
+                }
+                mut uint128 guard = uint128(0);
+                mut bool sticky = false;
+                for (mut uint128 index = uint128(0); index < droppedDigits; index++) {
+                    guard = quotient % uint128(10);
+                    quotient = quotient / uint128(10);
+                    if (index + uint128(1) < droppedDigits && guard != uint128(0)) {
+                        sticky = true;
+                    }
+                }
+                sticky = sticky || remainder != uint128(0);
+                if (guard > uint128(5)
+                    || (guard == uint128(5)
+                        && (sticky || (quotient & uint128(1)) != uint128(0)))) {
+                    quotient = quotient + uint128(1);
+                }
+                return quotient;
+            }
+            uint128 DEncodeRational(uint128 numerator, uint128 denominator,
+                uint128 metadata) {
+                uint128 encodedExponent = metadata & uint128(32767);
+                mut int32 exponent = 0;
+                mut int32 exponentPower = 1;
+                for (mut int32 bit = 0; bit < 15; bit++) {
+                    if ((encodedExponent & uint128(exponentPower)) != uint128(0)) {
+                        exponent = exponent + exponentPower;
+                    }
+                    exponentPower = exponentPower * 2;
+                }
+                exponent = exponent - 16384;
+                bool negative = (metadata & (uint128(1) << uint128(15))) != uint128(0);
+                uint128 format = (metadata >> uint128(16)) & uint128(3);
+                mut int32 width = 32;
+                mut int32 precision = 7;
+                mut int32 coefficientBits = 23;
+                mut int32 bias = 101;
+                mut int32 minimumQuantum = -101;
+                mut int32 maximumQuantum = 90;
+                mut int32 maximumAdjusted = 96;
+                if (format == uint128(1)) {
+                    width = 64;
+                    precision = 16;
+                    coefficientBits = 53;
+                    bias = 398;
+                    minimumQuantum = -398;
+                    maximumQuantum = 369;
+                    maximumAdjusted = 384;
+                } else if (format == uint128(2)) {
+                    width = 128;
+                    precision = 34;
+                    coefficientBits = 113;
+                    bias = 6176;
+                    minimumQuantum = -6176;
+                    maximumQuantum = 6111;
+                    maximumAdjusted = 6144;
+                }
+                mut uint128 numeratorDigitsValue = numerator;
+                mut uint128 denominatorDigitsValue = denominator;
+                mut int32 numeratorDigits = 0;
+                mut int32 denominatorDigits = 0;
+                while (numeratorDigitsValue != uint128(0)) {
+                    numeratorDigitsValue = numeratorDigitsValue / uint128(10);
+                    numeratorDigits++;
+                }
+                while (denominatorDigitsValue != uint128(0)) {
+                    denominatorDigitsValue = denominatorDigitsValue / uint128(10);
+                    denominatorDigits++;
+                }
+                mut int32 adjustedExponent = numeratorDigits - denominatorDigits;
+                if (adjustedExponent >= 0) {
+                    mut uint128 scaledDenominator = denominator;
+                    for (mut int32 index = 0; index < adjustedExponent; index++) {
+                        scaledDenominator = scaledDenominator * uint128(10);
+                    }
+                    if (numerator < scaledDenominator) {
+                        adjustedExponent--;
+                    }
+                } else {
+                    mut uint128 scaledNumerator = numerator;
+                    for (mut int32 index = 0; index < -adjustedExponent; index++) {
+                        scaledNumerator = scaledNumerator * uint128(10);
+                    }
+                    if (scaledNumerator < denominator) {
+                        adjustedExponent--;
+                    }
+                }
+                adjustedExponent = adjustedExponent + exponent;
+                if (adjustedExponent > maximumAdjusted) {
+                    return DInfinity(negative, width);
+                }
+                if (adjustedExponent < minimumQuantum - 1) {
+                    return DEncodeRaw(uint128(0), minimumQuantum, negative,
+                        width, coefficientBits, bias);
+                }
+                uint128 precisionLimit = DPower10(precision);
+                mut int32 outputExponent = adjustedExponent - precision + 1;
+                if (outputExponent < minimumQuantum) {
+                    outputExponent = minimumQuantum;
+                } else if (outputExponent > maximumQuantum) {
+                    outputExponent = maximumQuantum;
+                }
+                mut uint128 rounded = numerator / denominator;
+                mut uint128 remainder = numerator - rounded * denominator;
+                int32 outputShift = exponent - outputExponent;
+                if (outputShift >= 0) {
+                    for (mut int32 index = 0; index < outputShift; index++) {
+                        remainder = remainder * uint128(10);
+                        uint128 digit = remainder / denominator;
+                        remainder = remainder - digit * denominator;
+                        rounded = rounded * uint128(10) + digit;
+                    }
+                    if (remainder * uint128(2) > denominator
+                        || (remainder * uint128(2) == denominator
+                            && (rounded & uint128(1)) != uint128(0))) {
+                        rounded = rounded + uint128(1);
+                    }
+                } else {
+                    int32 droppedDigits = -outputShift;
+                    mut uint128 valueDigits = rounded;
+                    mut int32 digitCount = 0;
+                    while (valueDigits != uint128(0)) {
+                        valueDigits = valueDigits / uint128(10);
+                        digitCount++;
+                    }
+                    if (droppedDigits > digitCount) {
+                        rounded = uint128(0);
+                    } else {
+                        mut uint128 guard = uint128(0);
+                        mut bool sticky = false;
+                        for (mut int32 index = 0; index < droppedDigits; index++) {
+                            uint128 quotient = rounded / uint128(10);
+                            guard = rounded - quotient * uint128(10);
+                            rounded = quotient;
+                            if (index + 1 < droppedDigits && guard != uint128(0)) {
+                                sticky = true;
+                            }
+                        }
+                        sticky = sticky || remainder != uint128(0);
+                        if (guard > uint128(5)
+                            || (guard == uint128(5)
+                                && (sticky || (rounded & uint128(1)) != uint128(0)))) {
+                            rounded = rounded + uint128(1);
+                        }
+                    }
+                }
+                if (rounded >= precisionLimit) {
+                    rounded = rounded / uint128(10);
+                    outputExponent++;
+                    if (outputExponent > maximumQuantum) {
+                        return DInfinity(negative, width);
+                    }
+                }
+                mut uint128 encoded = negative
+                    ? uint128(1) << uint128(width - 1) : uint128(0);
+                while (outputExponent < exponent && rounded != uint128(0)
+                    && (rounded / uint128(10)) * uint128(10) == rounded) {
+                    rounded = rounded / uint128(10);
+                    outputExponent++;
+                }
+                uint128 resultExponentField = uint128(outputExponent + bias);
+                uint128 shortCoefficientLimit = uint128(1) << uint128(coefficientBits);
+                if (rounded < shortCoefficientLimit) {
+                    return encoded
+                        | (resultExponentField << uint128(coefficientBits))
+                        | rounded;
+                }
+                return encoded | (uint128(3) << uint128(width - 3))
+                    | (resultExponentField << uint128(coefficientBits - 2))
+                    | (rounded - shortCoefficientLimit);
+            }
+            uint128 DAddCore(uint128 leftBits, uint128 rightBits, bool subtract,
+                int32 width, int32 precision, int32 coefficientBits,
+                int32 exponentBits, int32 bias, int32 minimumQuantum,
+                int32 maximumQuantum, int32 maximumAdjusted) {
+                uint128 leftCoefficient = DDecodeCoefficient(leftBits, width);
+                uint128 rightCoefficient = DDecodeCoefficient(rightBits, width);
+                uint128 leftClass = DClass(leftBits, width);
+                uint128 rightClass = DClass(rightBits, width);
+                bool leftNegative = DNegative(leftBits, width);
+                bool rightNegative = DNegative(rightBits, width) != subtract;
+                int32 leftExponent = DExponent(leftBits, width);
+                int32 rightExponent = DExponent(rightBits, width);
+                if (leftClass == uint128(3) || rightClass == uint128(3)) {
+                    return DNaN(width);
+                }
+                if (leftClass == uint128(2) && rightClass == uint128(2)) {
+                    return leftNegative == rightNegative
+                        ? DInfinity(leftNegative, width) : DNaN(width);
+                }
+                if (leftClass == uint128(2)) {
+                    return DInfinity(leftNegative, width);
+                }
+                if (rightClass == uint128(2)) {
+                    return DInfinity(rightNegative, width);
+                }
+                int32 preferredExponent = leftExponent < rightExponent
+                    ? leftExponent : rightExponent;
+                if (leftClass == uint128(0) && rightClass == uint128(0)) {
+                    bool negativeZero = leftNegative && rightNegative;
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        preferredExponent, preferredExponent, negativeZero, width,
+                        precision, coefficientBits, bias, minimumQuantum,
+                        maximumQuantum, maximumAdjusted);
+                }
+                if (leftClass == uint128(0)) {
+                    return DEncode(new D256(rightCoefficient, uint128(0), uint128(0)),
+                        rightExponent, preferredExponent, rightNegative, width,
+                        precision, coefficientBits, bias, minimumQuantum,
+                        maximumQuantum, maximumAdjusted);
+                }
+                if (rightClass == uint128(0)) {
+                    return DEncode(new D256(leftCoefficient, uint128(0), uint128(0)),
+                        leftExponent, preferredExponent, leftNegative, width,
+                        precision, coefficientBits, bias, minimumQuantum,
+                        maximumQuantum, maximumAdjusted);
+                }
+                int32 leftAdjusted = leftExponent + DDecimalDigits(leftCoefficient) - 1;
+                int32 rightAdjusted = rightExponent + DDecimalDigits(rightCoefficient) - 1;
+                int32 adjustedGap = leftAdjusted > rightAdjusted
+                    ? leftAdjusted - rightAdjusted : rightAdjusted - leftAdjusted;
+                if (adjustedGap >= precision + 2) {
+                    if (leftAdjusted > rightAdjusted) {
+                        return DEncode(new D256(leftCoefficient, uint128(0), uint128(0)),
+                            leftExponent, preferredExponent, leftNegative, width,
+                            precision, coefficientBits, bias, minimumQuantum,
+                            maximumQuantum, maximumAdjusted);
+                    }
+                    return DEncode(new D256(rightCoefficient, uint128(0), uint128(0)),
+                        rightExponent, preferredExponent, rightNegative, width,
+                        precision, coefficientBits, bias, minimumQuantum,
+                        maximumQuantum, maximumAdjusted);
+                }
+                int32 commonExponent = preferredExponent;
+                D256 leftScaledCoefficient = D256Scale10(
+                    new D256(leftCoefficient, uint128(0), uint128(0)),
+                    leftExponent - commonExponent);
+                D256 rightScaledCoefficient = D256Scale10(
+                    new D256(rightCoefficient, uint128(0), uint128(0)),
+                    rightExponent - commonExponent);
+                mut D256 result = new D256(uint128(0), uint128(0), uint128(0));
+                mut bool negativeResult = false;
+                if (leftNegative == rightNegative) {
+                    result = D256Add(leftScaledCoefficient, rightScaledCoefficient);
+                    negativeResult = leftNegative;
+                } else {
+                    int32 magnitude = D256Compare(leftScaledCoefficient, rightScaledCoefficient);
+                    if (magnitude == 0) {
+                        return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                            commonExponent, preferredExponent, false, width,
+                            precision, coefficientBits, bias, minimumQuantum,
+                            maximumQuantum, maximumAdjusted);
+                    }
+                    if (magnitude > 0) {
+                        result = D256Subtract(leftScaledCoefficient, rightScaledCoefficient);
+                        negativeResult = leftNegative;
+                    } else {
+                        result = D256Subtract(rightScaledCoefficient, leftScaledCoefficient);
+                        negativeResult = rightNegative;
+                    }
+                }
+                return DEncode(result, commonExponent, preferredExponent,
+                    negativeResult, width, precision, coefficientBits, bias,
+                    minimumQuantum, maximumQuantum, maximumAdjusted);
+            }
+            uint128 DMultiplyCore(uint128 leftBits, uint128 rightBits,
+                int32 width, int32 precision, int32 coefficientBits,
+                int32 exponentBits, int32 bias, int32 minimumQuantum,
+                int32 maximumQuantum, int32 maximumAdjusted) {
+                uint128 leftCoefficient = DDecodeCoefficient(leftBits, width);
+                uint128 rightCoefficient = DDecodeCoefficient(rightBits, width);
+                uint128 leftClass = DClass(leftBits, width);
+                uint128 rightClass = DClass(rightBits, width);
+                bool negative = DNegative(leftBits, width) != DNegative(rightBits, width);
+                int32 exponent = DExponent(leftBits, width) + DExponent(rightBits, width);
+                if (leftClass == uint128(3) || rightClass == uint128(3)
+                    || (leftClass == uint128(2) && rightClass == uint128(0))
+                    || (rightClass == uint128(2) && leftClass == uint128(0))) {
+                    return DNaN(width);
+                }
+                if (leftClass == uint128(2) || rightClass == uint128(2)) {
+                    return DInfinity(negative, width);
+                }
+                if (leftClass == uint128(0) || rightClass == uint128(0)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        exponent, exponent, negative, width, precision,
+                        coefficientBits, bias, minimumQuantum,
+                        maximumQuantum, maximumAdjusted);
+                }
+                D256 product = D256Multiply128(leftCoefficient, rightCoefficient);
+                return DEncode(product, exponent, exponent, negative,
+                    width, precision, coefficientBits, bias, minimumQuantum,
+                    maximumQuantum, maximumAdjusted);
+            }
+            uint128 D32DivideCore(uint128 leftBits, uint128 rightBits) {
+                uint128 leftCoefficient = D32Coefficient(leftBits);
+                uint128 rightCoefficient = D32Coefficient(rightBits);
+                uint128 leftClass = DClass(leftBits, 32);
+                uint128 rightClass = DClass(rightBits, 32);
+                bool negative = DNegative(leftBits, 32) != DNegative(rightBits, 32);
+                int32 leftExponent = DExponent(leftBits, 32);
+                int32 rightExponent = DExponent(rightBits, 32);
+                if (leftClass == uint128(3) || rightClass == uint128(3)
+                    || (leftClass == uint128(2) && rightClass == uint128(2))
+                    || (leftClass == uint128(0) && rightClass == uint128(0))) {
+                    return DNaN(32);
+                }
+                if (leftClass == uint128(2)) {
+                    return DInfinity(negative, 32);
+                }
+                if (rightClass == uint128(2)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        -101, -101, negative, 32, 7, 23, 101, -101, 90, 96);
+                }
+                if (rightClass == uint128(0)) {
+                    return DInfinity(negative, 32);
+                }
+                int32 exponent = leftExponent - rightExponent;
+                if (leftClass == uint128(0)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        exponent, exponent, negative, 32, 7, 23, 101, -101, 90, 96);
+                }
+                mut uint128 metadata = uint128(exponent + 16384);
+                if (negative) {
+                    metadata = metadata | (uint128(1) << uint128(15));
+                }
+                return DEncodeRational(leftCoefficient, rightCoefficient, metadata);
+            }
+            uint128 D64DivideCore(uint128 leftBits, uint128 rightBits) {
+                uint128 leftCoefficient = D64Coefficient(leftBits);
+                uint128 rightCoefficient = D64Coefficient(rightBits);
+                uint128 leftClass = DClass(leftBits, 64);
+                uint128 rightClass = DClass(rightBits, 64);
+                bool negative = DNegative(leftBits, 64) != DNegative(rightBits, 64);
+                int32 leftExponent = DExponent(leftBits, 64);
+                int32 rightExponent = DExponent(rightBits, 64);
+                if (leftClass == uint128(3) || rightClass == uint128(3)
+                    || (leftClass == uint128(2) && rightClass == uint128(2))
+                    || (leftClass == uint128(0) && rightClass == uint128(0))) {
+                    return DNaN(64);
+                }
+                if (leftClass == uint128(2)) {
+                    return DInfinity(negative, 64);
+                }
+                if (rightClass == uint128(2)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        -398, -398, negative, 64, 16, 53, 398, -398, 369, 384);
+                }
+                if (rightClass == uint128(0)) {
+                    return DInfinity(negative, 64);
+                }
+                int32 exponent = leftExponent - rightExponent;
+                if (leftClass == uint128(0)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        exponent, exponent, negative, 64, 16, 53, 398, -398, 369, 384);
+                }
+                mut uint128 metadata = uint128(exponent + 16384)
+                    | (uint128(1) << uint128(16));
+                if (negative) {
+                    metadata = metadata | (uint128(1) << uint128(15));
+                }
+                return DEncodeRational(leftCoefficient, rightCoefficient, metadata);
+            }
+            uint128 D128DivideCore(uint128 leftBits, uint128 rightBits) {
+                uint128 leftCoefficient = D128Coefficient(leftBits);
+                uint128 rightCoefficient = D128Coefficient(rightBits);
+                uint128 leftClass = DClass(leftBits, 128);
+                uint128 rightClass = DClass(rightBits, 128);
+                bool negative = DNegative(leftBits, 128) != DNegative(rightBits, 128);
+                int32 leftExponent = DExponent(leftBits, 128);
+                int32 rightExponent = DExponent(rightBits, 128);
+                if (leftClass == uint128(3) || rightClass == uint128(3)
+                    || (leftClass == uint128(2) && rightClass == uint128(2))
+                    || (leftClass == uint128(0) && rightClass == uint128(0))) {
+                    return DNaN(128);
+                }
+                if (leftClass == uint128(2)) {
+                    return DInfinity(negative, 128);
+                }
+                if (rightClass == uint128(2)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        -6176, -6176, negative, 128, 34, 113, 6176, -6176, 6111, 6144);
+                }
+                if (rightClass == uint128(0)) {
+                    return DInfinity(negative, 128);
+                }
+                int32 exponent = leftExponent - rightExponent;
+                if (leftClass == uint128(0)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        exponent, exponent, negative, 128, 34, 113, 6176, -6176, 6111, 6144);
+                }
+                mut uint128 metadata = uint128(exponent + 16384)
+                    | (uint128(2) << uint128(16));
+                if (negative) {
+                    metadata = metadata | (uint128(1) << uint128(15));
+                }
+                return DEncodeRational(leftCoefficient, rightCoefficient, metadata);
+            }
+            uint128 DRemainderCore(uint128 leftBits, uint128 rightBits,
+                int32 width, int32 precision, int32 coefficientBits,
+                int32 exponentBits, int32 bias, int32 minimumQuantum,
+                int32 maximumQuantum, int32 maximumAdjusted) {
+                uint128 leftCoefficient = DDecodeCoefficient(leftBits, width);
+                uint128 rightCoefficient = DDecodeCoefficient(rightBits, width);
+                uint128 leftClass = DClass(leftBits, width);
+                uint128 rightClass = DClass(rightBits, width);
+                int32 leftExponent = DExponent(leftBits, width);
+                int32 rightExponent = DExponent(rightBits, width);
+                bool leftNegative = DNegative(leftBits, width);
+                if (leftClass == uint128(3) || rightClass == uint128(3)
+                    || leftClass == uint128(2) || rightClass == uint128(0)) {
+                    return DNaN(width);
+                }
+                if (rightClass == uint128(2)) {
+                    return leftBits;
+                }
+                int32 preferredExponent = leftExponent < rightExponent
+                    ? leftExponent : rightExponent;
+                if (leftClass == uint128(0)) {
+                    return DEncode(new D256(uint128(0), uint128(0), uint128(0)),
+                        preferredExponent, preferredExponent, leftNegative,
+                        width, precision, coefficientBits, bias, minimumQuantum,
+                        maximumQuantum, maximumAdjusted);
+                }
+                mut uint128 remainder = uint128(0);
+                if (leftExponent >= rightExponent) {
+                    remainder = leftCoefficient % rightCoefficient;
+                    int32 exponentGap = leftExponent - rightExponent;
+                    for (mut int32 index = 0; index < exponentGap; index++) {
+                        remainder = (remainder * uint128(10)) % rightCoefficient;
+                    }
+                } else {
+                    if (DCompareMagnitude(leftCoefficient, leftExponent,
+                        rightCoefficient, rightExponent) < 0) {
+                        return DEncode(new D256(leftCoefficient, uint128(0), uint128(0)),
+                            leftExponent, preferredExponent, leftNegative,
+                            width, precision, coefficientBits, bias, minimumQuantum,
+                            maximumQuantum, maximumAdjusted);
+                    }
+                    uint128 scaledDivisor = D128Scale10(rightCoefficient,
+                        rightExponent - leftExponent);
+                    remainder = leftCoefficient % scaledDivisor;
+                }
+                return DEncode(new D256(remainder, uint128(0), uint128(0)),
+                    preferredExponent, preferredExponent, leftNegative, width,
+                    precision, coefficientBits, bias, minimumQuantum,
+                    maximumQuantum, maximumAdjusted);
+            }
+            uint128 DNegate(uint128 bits, int32 width) {
+                return bits ^ (uint128(1) << uint128(width - 1));
+            }
+            uint128 D32Add(uint128 left, uint128 right) {
+                return DAddCore(left, right, false, 32, 7, 23, 8, 101, -101, 90, 96);
+            }
+            uint128 D32Subtract(uint128 left, uint128 right) {
+                return DAddCore(left, right, true, 32, 7, 23, 8, 101, -101, 90, 96);
+            }
+            uint128 D32Multiply(uint128 left, uint128 right) {
+                return DMultiplyCore(left, right, 32, 7, 23, 8, 101, -101, 90, 96);
+            }
+            uint128 D32Divide(uint128 left, uint128 right) {
+                return D32DivideCore(left, right);
+            }
+            uint128 D32Remainder(uint128 left, uint128 right) {
+                return DRemainderCore(left, right, 32, 7, 23, 8, 101, -101, 90, 96);
+            }
+            int32 D32Compare(uint128 left, uint128 right) {
+                return DCompare(left, right, 32);
+            }
+            uint128 D32Negate(uint128 bits) { return DNegate(bits, 32); }
+            uint128 D64Add(uint128 left, uint128 right) {
+                return DAddCore(left, right, false, 64, 16, 53, 10, 398, -398, 369, 384);
+            }
+            uint128 D64Subtract(uint128 left, uint128 right) {
+                return DAddCore(left, right, true, 64, 16, 53, 10, 398, -398, 369, 384);
+            }
+            uint128 D64Multiply(uint128 left, uint128 right) {
+                return DMultiplyCore(left, right, 64, 16, 53, 10, 398, -398, 369, 384);
+            }
+            uint128 D64Divide(uint128 left, uint128 right) {
+                return D64DivideCore(left, right);
+            }
+            uint128 D64Remainder(uint128 left, uint128 right) {
+                return DRemainderCore(left, right, 64, 16, 53, 10, 398, -398, 369, 384);
+            }
+            int32 D64Compare(uint128 left, uint128 right) {
+                return DCompare(left, right, 64);
+            }
+            uint128 D64Negate(uint128 bits) { return DNegate(bits, 64); }
+            uint128 D128Add(uint128 left, uint128 right) {
+                return DAddCore(left, right, false, 128, 34, 113, 14, 6176, -6176, 6111, 6144);
+            }
+            uint128 D128Subtract(uint128 left, uint128 right) {
+                return DAddCore(left, right, true, 128, 34, 113, 14, 6176, -6176, 6111, 6144);
+            }
+            uint128 D128Multiply(uint128 left, uint128 right) {
+                return DMultiplyCore(left, right, 128, 34, 113, 14, 6176, -6176, 6111, 6144);
+            }
+            uint128 D128Divide(uint128 left, uint128 right) {
+                return D128DivideCore(left, right);
+            }
+            uint128 D128Remainder(uint128 left, uint128 right) {
+                return DRemainderCore(left, right, 128, 34, 113, 14, 6176, -6176, 6111, 6144);
+            }
+            int32 D128Compare(uint128 left, uint128 right) {
+                return DCompare(left, right, 128);
+            }
+            uint128 D128Negate(uint128 bits) { return DNegate(bits, 128); }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                SourceArithmeticProfile = SourceArithmeticProfile.Release,
+            });
+        if (compilation.HasErrors || compilation.Program is not BoundProgram program)
+        {
+            throw new InvalidOperationException(
+                "The compiler-owned BID decimal integer helper failed semantic verification: "
+                + string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+        var code = new PeCompiler(program, managedNodes: false, library: true).Compile();
+        if (code.Data.Length != 0 || !code.DataFixups.IsEmpty)
+        {
+            throw new InvalidOperationException(
+                "The compiler-owned BID decimal integer helper must not depend on image data.");
+        }
+        var functionOffsets = ImmutableDictionary.CreateBuilder<string, int>(StringComparer.Ordinal);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            var function = program.Functions[index];
+            if (!function.IsExternal)
+            {
+                functionOffsets.Add(function.Name, code.SourceFunctionOffsets[index]);
+            }
+        }
+        return new BidDecimalRuntime(code, functionOffsets.ToImmutable());
+    }
+
     private void EmitBinary128Call(string function, int left, int right, int result)
     {
         _code.Address(result);
@@ -2827,30 +4009,137 @@ internal sealed partial class PeCompiler
         EmitBinary128Call(function, left, right, result);
     }
 
+    private void EmitBidDecimalArithmetic(PrimitiveType type, TokenKind operation,
+        int left, int right, int result)
+    {
+        var prefix = type switch {
+            PrimitiveType.Decimal32 => "D32",
+            PrimitiveType.Decimal64 => "D64",
+            PrimitiveType.Decimal128 => "D128",
+            _ => throw new InvalidOperationException("The verifier admitted a non-BID decimal type."),
+        };
+        var suffix = operation switch {
+            TokenKind.Plus => "Add",
+            TokenKind.Minus => "Subtract",
+            TokenKind.Star => "Multiply",
+            TokenKind.Slash => "Divide",
+            TokenKind.Percent => "Remainder",
+            _ => throw new InvalidOperationException("The verifier admitted an unsupported BID decimal operator."),
+        };
+        EmitBidDecimalCall(prefix + suffix, left, right, result);
+    }
+
+    private void EmitBidDecimalCall(string function, int left, int right, int result)
+    {
+        _code.Address(result);
+        _code.MoveArgument(0, true);
+        _code.Address(left);
+        _code.MoveArgument(1, true);
+        _code.Address(right);
+        _code.MoveArgument(2, true);
+        _bidDecimalCalls.Add((_code.RelativeCall(), function));
+        _code.Address(result);
+    }
+
+    private void EmitBidDecimalComparison(TokenKind operation, PrimitiveType type,
+        int left, int right)
+    {
+        var function = type switch {
+            PrimitiveType.Decimal32 => "D32Compare",
+            PrimitiveType.Decimal64 => "D64Compare",
+            PrimitiveType.Decimal128 => "D128Compare",
+            _ => throw new InvalidOperationException("The verifier admitted a non-BID decimal comparison."),
+        };
+        _code.Address(left);
+        _code.MoveArgument(0, true);
+        _code.Address(right);
+        _code.MoveArgument(1, true);
+        _bidDecimalCalls.Add((_code.RelativeCall(), function));
+        _code.Bytes(0x83, 0xF8, 0x02);
+        var ordered = _code.JumpIf(0x85);
+        _code.Bytes(0xB8);
+        _code.Int32(operation == TokenKind.BangEquals ? 1 : 0);
+        var unordered = _code.Jump();
+        _code.PatchRelative(ordered, _code.Position);
+        _code.Bytes(0x83, 0xF8, 0x00);
+        var condition = operation switch {
+            TokenKind.EqualsEquals => (byte)0x94,
+            TokenKind.BangEquals => (byte)0x95,
+            TokenKind.Less => (byte)0x9C,
+            TokenKind.LessEquals => (byte)0x9E,
+            TokenKind.Greater => (byte)0x9F,
+            TokenKind.GreaterEquals => (byte)0x9D,
+            _ => throw new InvalidOperationException("The verifier admitted an unsupported BID comparison."),
+        };
+        _code.Bytes(0x0F, condition, 0xC0, 0x0F, 0xB6, 0xC0);
+        _code.PatchRelative(unordered, _code.Position);
+    }
+
+    private void EmitBidDecimalNegate(PrimitiveType type, int value, int result)
+    {
+        var function = type switch {
+            PrimitiveType.Decimal32 => "D32Negate",
+            PrimitiveType.Decimal64 => "D64Negate",
+            PrimitiveType.Decimal128 => "D128Negate",
+            _ => throw new InvalidOperationException("The verifier admitted a non-BID decimal sign operation."),
+        };
+        _code.Address(result);
+        _code.MoveArgument(0, true);
+        _code.Address(value);
+        _code.MoveArgument(1, true);
+        _bidDecimalCalls.Add((_code.RelativeCall(), function));
+    }
+
+    private void EmitBidDecimalOperand(PrimitiveType type, int destination) =>
+        StoreValue(Spill(destination), type);
+
+    private void EmitBidDecimalResult(PrimitiveType type, int result)
+    {
+        if (type == PrimitiveType.Decimal128)
+        {
+            _code.Address(Spill(result));
+        }
+        else
+        {
+            LoadValue(Spill(result), type);
+        }
+    }
+
+    private static (ulong Low, ulong High) BidDecimalOne(PrimitiveType type) => type switch {
+        PrimitiveType.Decimal32 => (0x3280_0001, 0),
+        PrimitiveType.Decimal64 => (0x31C0_0000_0000_0001, 0),
+        PrimitiveType.Decimal128 => (1, 0x3040_0000_0000_0000),
+        _ => throw new InvalidOperationException("A BID decimal one requires a decimal format."),
+    };
+
     private static void EnsureSupportedNativeFloatingOperator(PrimitiveType type)
     {
         if (PrimitiveTypeFacts.IsFloating(type)
             && type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
-                or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128))
+                or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128
+                or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128))
         {
             throw new NotSupportedException(
-                "Native floating operator lowering currently supports binary16/bfloat16/float32/float64/float128 only.");
+                "Native floating operator lowering does not support this floating format.");
         }
     }
     private static void EnsureSupportedNativeFloatingUnary(PrimitiveType type, TokenKind operation)
     {
         if (PrimitiveTypeFacts.IsFloating(type)
             && (type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
-                or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128)
+                or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128
+                or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128)
                 || operation is not (TokenKind.Plus or TokenKind.Minus)))
         {
             throw new NotSupportedException(
-                "Native floating unary lowering currently supports sign operations for binary16/bfloat16/float32/float64/float128.");
+                "Native floating unary lowering does not support this format or operation.");
         }
     }
     private static bool IsFloatingComparison(TokenKind operation) =>
         operation is TokenKind.EqualsEquals or TokenKind.BangEquals or TokenKind.Less
             or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals;
+    private static bool IsBidDecimal(PrimitiveType type) =>
+        type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128;
 
     private static void EnsureSupportedNativeFloatingBinary(
         PrimitiveType type, TokenKind operation)
@@ -2870,14 +4159,22 @@ internal sealed partial class PeCompiler
                 or TokenKind.Slash or TokenKind.Percent;
         var binary128Comparison = type == PrimitiveType.Float128
             && IsFloatingComparison(operation);
+        var bidDecimalOperator = type is (PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                or PrimitiveType.Decimal128)
+            && operation is (TokenKind.Plus or TokenKind.Minus or TokenKind.Star
+                or TokenKind.Slash or TokenKind.Percent);
+        var bidDecimalComparison = type is (PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                or PrimitiveType.Decimal128)
+            && IsFloatingComparison(operation);
         if (PrimitiveTypeFacts.IsFloating(type)
             && type is not (PrimitiveType.Float32 or PrimitiveType.Float64)
             && !narrowComparison && !narrowAddOrSubtract && !narrowMultiply
             && !narrowDivide && !narrowRemainder
-            && !binary128Operator && !binary128Comparison)
+            && !binary128Operator && !binary128Comparison
+            && !bidDecimalOperator && !bidDecimalComparison)
         {
             throw new NotSupportedException(
-                "Native floating binary lowering currently supports float16/bfloat16 comparisons and arithmetic, float32/float64 operators, and float128 arithmetic and comparisons.");
+                "Native floating binary lowering does not support this format or operation.");
         }
     }
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
@@ -4694,9 +5991,9 @@ internal sealed partial class PeCompiler
                 break;
             case BoundUnary unary:
                 EnsureSupportedNativeFloatingUnary(unary.Type, unary.Operator);
-                Expression(unary.Operand, spill);
                 if (unary.Type == PrimitiveType.Float128)
                 {
+                    Expression(unary.Operand, spill);
                     if (unary.Operator == TokenKind.Minus)
                     {
                         StoreValue(Spill(spill), unary.Type);
@@ -4707,6 +6004,24 @@ internal sealed partial class PeCompiler
                     }
                     break;
                 }
+                if (unary.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    if (unary.Operator == TokenKind.Minus)
+                    {
+                        ZeroStruct(Spill(spill), 2 * sizeof(ulong));
+                        Expression(unary.Operand, spill + 1);
+                        EmitBidDecimalOperand(unary.Type, spill);
+                        EmitBidDecimalNegate(unary.Type, Spill(spill), Spill(spill + 2));
+                        EmitBidDecimalResult(unary.Type, spill + 2);
+                    }
+                    else
+                    {
+                        Expression(unary.Operand, spill);
+                    }
+                    break;
+                }
+                Expression(unary.Operand, spill);
                 if (PrimitiveTypeFacts.IsWideInteger(unary.Type))
                 {
                     if (unary.Operator != TokenKind.Plus)
@@ -4773,6 +6088,14 @@ internal sealed partial class PeCompiler
                 if (PrimitiveTypeFacts.IsWideInteger(update.Type)
                     || update.Type == PrimitiveType.Float128)
                 {
+                    _code.Load64(Spill(spill + 1));
+                    _code.AddressToRdx(Spill(spill + 2));
+                    _code.CopyMemory(Size(update.Type));
+                }
+                else if (update.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    ZeroStruct(Spill(spill + 2), 2 * sizeof(ulong));
                     _code.Load64(Spill(spill + 1));
                     _code.AddressToRdx(Spill(spill + 2));
                     _code.CopyMemory(Size(update.Type));
@@ -4845,13 +6168,40 @@ internal sealed partial class PeCompiler
                     _code.Address(Spill(spill + 4));
                     _code.CopyMemory(Size(update.Type));
                 }
+                else if (update.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    ZeroStruct(Spill(spill + 3), 2 * sizeof(ulong));
+                    var one = BidDecimalOne(update.Type);
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(unchecked((long)one.Low));
+                    _code.Store64(Spill(spill + 3));
+                    _code.Bytes(0x48, 0xB8);
+                    _code.Int64(unchecked((long)one.High));
+                    _code.Store64(Spill(spill + 3) + sizeof(ulong));
+                    EmitBidDecimalArithmetic(update.Type,
+                        update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus,
+                        Spill(spill + 2), Spill(spill + 3), Spill(spill + 4));
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    if (update.Type == PrimitiveType.Decimal128)
+                    {
+                        _code.Address(Spill(spill + 4));
+                        _code.CopyMemory(Size(update.Type));
+                    }
+                    else
+                    {
+                        LoadValue(Spill(spill + 4), update.Type);
+                        _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
+                    }
+                }
                 else if (IsWide(update.Type))
                 {
                     _code.Byte(0x48);
                 }
                 if (!PrimitiveTypeFacts.IsWideInteger(update.Type)
                     && update.Type is not (PrimitiveType.Float16 or PrimitiveType.BFloat16
-                        or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128))
+                        or PrimitiveType.Float32 or PrimitiveType.Float64 or PrimitiveType.Float128
+                        or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128))
                 {
                     _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
                     if (IsNarrowInteger(update.Type))
@@ -4896,6 +6246,11 @@ internal sealed partial class PeCompiler
                 {
                     _code.Address(Spill(spill + 4));
                 }
+                else if (update.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    EmitBidDecimalResult(update.Type, spill + 4);
+                }
                 break;
             case BoundCompoundAssignment compound:
             {
@@ -4905,6 +6260,14 @@ internal sealed partial class PeCompiler
                 if (PrimitiveTypeFacts.IsWideInteger(compound.Type)
                     || compound.Type == PrimitiveType.Float128)
                 {
+                    _code.Load64(Spill(spill + 1));
+                    _code.AddressToRdx(Spill(spill + 2));
+                    _code.CopyMemory(Size(compound.Type));
+                }
+                else if (compound.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    ZeroStruct(Spill(spill + 2), 2 * sizeof(ulong));
                     _code.Load64(Spill(spill + 1));
                     _code.AddressToRdx(Spill(spill + 2));
                     _code.CopyMemory(Size(compound.Type));
@@ -4922,6 +6285,11 @@ internal sealed partial class PeCompiler
                     funclet = _funclets.Count;
                     _funclets.Add((new BoundBlock([], compound.Span), _currentFunction, 0, 0));
                     _managedStagedRoots.Add(funclet, [Spill(spill)]);
+                }
+                if (compound.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    ZeroStruct(Spill(spill), 2 * sizeof(ulong));
                 }
                 Expression(compound.Right, spill + 4);
                 if (PrimitiveTypeFacts.IsWideInteger(compound.Type))
@@ -4955,6 +6323,25 @@ internal sealed partial class PeCompiler
                     _code.Load64(Spill(spill + 1), destinationRegister: true);
                     _code.Address(Spill(spill + 2));
                     _code.CopyMemory(Size(compound.Type));
+                }
+                else if (compound.Type is PrimitiveType.Decimal32 or PrimitiveType.Decimal64
+                    or PrimitiveType.Decimal128)
+                {
+                    EmitBidDecimalOperand(compound.Type, spill);
+                    EmitBidDecimalArithmetic(compound.Type, CompoundOperators.Binary(compound.Operator),
+                        Spill(spill + 2), Spill(spill), Spill(spill + 4));
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    if (compound.Type == PrimitiveType.Decimal128)
+                    {
+                        _code.Address(Spill(spill + 4));
+                        _code.CopyMemory(Size(compound.Type));
+                    }
+                    else
+                    {
+                        LoadValue(Spill(spill + 4), compound.Type);
+                        _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
+                    }
+                    EmitBidDecimalResult(compound.Type, spill + 4);
                 }
                 else
                 {
@@ -5093,6 +6480,27 @@ internal sealed partial class PeCompiler
                     EmitWideIntegerBinary(binary.Operator, binary.Left.Type,
                         binary.OverflowBehavior, Spill(spill), Spill(spill + 1),
                         binary.Right.Type, Spill(spill + 2));
+                    break;
+                }
+                if (IsBidDecimal(binary.Left.Type))
+                {
+                    ZeroStruct(Spill(spill), 2 * sizeof(ulong));
+                    Expression(binary.Left, spill + 1);
+                    EmitBidDecimalOperand(binary.Left.Type, spill);
+                    ZeroStruct(Spill(spill + 1), 2 * sizeof(ulong));
+                    Expression(binary.Right, spill + 2);
+                    EmitBidDecimalOperand(binary.Right.Type, spill + 1);
+                    if (IsFloatingComparison(binary.Operator))
+                    {
+                        EmitBidDecimalComparison(binary.Operator, binary.Left.Type,
+                            Spill(spill), Spill(spill + 1));
+                    }
+                    else
+                    {
+                        EmitBidDecimalArithmetic(binary.Left.Type, binary.Operator,
+                            Spill(spill), Spill(spill + 1), Spill(spill + 2));
+                        EmitBidDecimalResult(binary.Left.Type, spill + 2);
+                    }
                     break;
                 }
                 var floating = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
