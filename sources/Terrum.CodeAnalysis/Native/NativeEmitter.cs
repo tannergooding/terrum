@@ -1756,7 +1756,8 @@ internal sealed partial class PeCompiler
                 return Math.Max(PrimitiveTypeFacts.IsWideInteger(unary.Type) ? 2 : 0,
                     ExpressionSpills(unary.Operand, ref maximumArguments));
             case BoundUpdate update:
-                return Math.Max(PrimitiveTypeFacts.IsWideInteger(update.Type) ? 5 : 3, update.Place switch {
+                return Math.Max(PrimitiveTypeFacts.IsWideInteger(update.Type) ? 5
+                    : PrimitiveTypeFacts.IsFloating(update.Type) ? 5 : 3, update.Place switch {
                     BoundFieldRead field => ExpressionSpills(field.Receiver, ref maximumArguments),
                     BoundBufferRead buffer => ExpressionSpills(buffer.Index, ref maximumArguments),
                     _ => 0,
@@ -1768,7 +1769,9 @@ internal sealed partial class PeCompiler
                         TokenKind.Slash or TokenKind.Percent => 9,
                         _ => 3,
                     }
-                    : 3;
+                    : PrimitiveTypeFacts.IsFloating(compound.Type)
+                        ? CompoundOperators.Binary(compound.Operator) == TokenKind.Percent ? 6 : 5
+                        : 3;
                 return Math.Max(requiredCompoundSpills,
                     Math.Max(4 + ExpressionSpills(compound.Right, ref maximumArguments),
                         compound.Place switch {
@@ -1831,7 +1834,8 @@ internal sealed partial class PeCompiler
                         TokenKind.Slash or TokenKind.Percent => 7,
                         _ => 3,
                     }
-                    : 3;
+                    : binary.Operator == TokenKind.Percent
+                        && PrimitiveTypeFacts.IsFloating(binary.Left.Type) ? 4 : 3;
                 return Math.Max(requiredBinarySpills,
                     Math.Max(ExpressionSpills(binary.Left, ref maximumArguments),
                         1 + ExpressionSpills(binary.Right, ref maximumArguments)));
@@ -2283,6 +2287,15 @@ internal sealed partial class PeCompiler
         Math.Max(8, ValueLayout.Alignment(type, _program.Structures));
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
+    private static void EnsureSupportedNativeFloatingOperator(PrimitiveType type)
+    {
+        if (PrimitiveTypeFacts.IsFloating(type)
+            && type is not (PrimitiveType.Float32 or PrimitiveType.Float64))
+        {
+            throw new NotSupportedException(
+                "Native floating operator lowering currently supports float32 and float64 only.");
+        }
+    }
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
         || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
             or PrimitiveType.Decimal128
@@ -4096,6 +4109,7 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundUnary unary:
+                EnsureSupportedNativeFloatingOperator(unary.Type);
                 Expression(unary.Operand, spill);
                 if (PrimitiveTypeFacts.IsWideInteger(unary.Type))
                 {
@@ -4152,6 +4166,7 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundUpdate update:
+                EnsureSupportedNativeFloatingOperator(update.Type);
                 var rootedUpdate = UpdateAddress(update.Place, spill);
                 _code.Store64(Spill(spill + 1));
                 if (PrimitiveTypeFacts.IsWideInteger(update.Type))
@@ -4189,11 +4204,28 @@ internal sealed partial class PeCompiler
                     _code.Address(Spill(spill + 4));
                     _code.CopyMemory(Size(update.Type));
                 }
+                else if (update.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                {
+                    if (update.Type == PrimitiveType.Float32)
+                    {
+                        _code.Bytes(0xB8, 0x00, 0x00, 0x80, 0x3F);
+                    }
+                    else
+                    {
+                        _code.Bytes(0x48, 0xB8);
+                        _code.Int64(0x3FF0_0000_0000_0000);
+                    }
+                    FloatingBinary(update.Operator == TokenKind.PlusPlus
+                        ? TokenKind.Plus : TokenKind.Minus, update.Type, spill + 2);
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.StorePointerField(UpdateStoreWidth(update.Place, update.Type));
+                }
                 else if (IsWide(update.Type))
                 {
                     _code.Byte(0x48);
                 }
-                if (!PrimitiveTypeFacts.IsWideInteger(update.Type))
+                if (!PrimitiveTypeFacts.IsWideInteger(update.Type)
+                    && update.Type is not (PrimitiveType.Float32 or PrimitiveType.Float64))
                 {
                     _code.Bytes(0x83, update.Operator == TokenKind.PlusPlus ? (byte)0xC0 : (byte)0xE8, 0x01);
                     if (IsNarrowInteger(update.Type))
@@ -4237,6 +4269,7 @@ internal sealed partial class PeCompiler
                 break;
             case BoundCompoundAssignment compound:
             {
+                EnsureSupportedNativeFloatingOperator(compound.Type);
                 var rooted = UpdateAddress(compound.Place, spill);
                 _code.Store64(Spill(spill + 1));
                 if (PrimitiveTypeFacts.IsWideInteger(compound.Type))
@@ -4269,6 +4302,13 @@ internal sealed partial class PeCompiler
                     _code.Load64(Spill(spill + 1), destinationRegister: true);
                     _code.Address(Spill(spill + 2));
                     _code.CopyMemory(Size(compound.Type));
+                }
+                else if (compound.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                {
+                    FloatingBinary(CompoundOperators.Binary(compound.Operator),
+                        compound.Type, spill + 2);
+                    _code.Load64(Spill(spill + 1), destinationRegister: true);
+                    _code.StorePointerField(UpdateStoreWidth(compound.Place, compound.Type));
                 }
                 else
                 {
@@ -4388,6 +4428,7 @@ internal sealed partial class PeCompiler
                 EmitOptionalEquality(equality, spill);
                 break;
             case BoundBinary binary:
+                EnsureSupportedNativeFloatingOperator(binary.Left.Type);
                 if (binary.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
                 {
                     Expression(binary.Left, spill);
@@ -5455,6 +5496,12 @@ internal sealed partial class PeCompiler
 
     private void FloatingBinary(TokenKind op, PrimitiveType type, int spill)
     {
+        if (op == TokenKind.Percent)
+        {
+            FloatingRemainder(type, spill);
+            return;
+        }
+
         var isSingle = type == PrimitiveType.Float32;
         if (isSingle)
         {
@@ -5534,6 +5581,37 @@ internal sealed partial class PeCompiler
             _code.Bytes(0x0F, 0xB6, 0xC0); // movzx eax,al
         }
         _code.LoadMxcsr(savedMxcsr);
+    }
+
+    private void FloatingRemainder(PrimitiveType type, int spill)
+    {
+        var isSingle = type == PrimitiveType.Float32;
+        var right = Spill(spill + 3);
+        var savedControlWord = Spill(spill + 1);
+        var controlledControlWord = Spill(spill + 2);
+        StoreValue(right, type);
+
+        _code.StoreX87ControlWord(savedControlWord);
+        _code.Load(savedControlWord);
+        _code.Byte(0x25);
+        _code.Int32(~0x0F3F);
+        _code.Byte(0x0D);
+        _code.Int32(0x033F);
+        _code.Store(controlledControlWord);
+        _code.LoadX87ControlWord(controlledControlWord);
+
+        _code.LoadX87Value(right, isSingle);
+        _code.LoadX87Value(Spill(spill), isSingle);
+        var repeat = _code.Position;
+        _code.Bytes(0xD9, 0xF8); // fprem
+        _code.Bytes(0xDF, 0xE0); // fnstsw ax
+        _code.Bytes(0xF6, 0xC4, 0x04); // test ah, C2
+        var incomplete = _code.JumpIf(0x85);
+        _code.PatchRelative(incomplete, repeat);
+        _code.StoreX87Value(Spill(spill), isSingle);
+        _code.Bytes(0xDD, 0xD8); // fstp st0
+        _code.LoadX87ControlWord(savedControlWord);
+        LoadValue(Spill(spill), type);
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier restricts binary operators to the supported native profile.")]
@@ -6473,6 +6551,22 @@ internal sealed class MachineCode
     internal void LoadMxcsr(int offset)
     {
         Bytes(0x0F, 0xAE, UseFramePointer ? (byte)0x95 : (byte)0x94);
+        if (!UseFramePointer)
+        {
+            Byte(0x24);
+        }
+        Int32(offset);
+    }
+    internal void StoreX87ControlWord(int offset) => X87Memory(0xD9, 0xBD, 0xBC, offset);
+    internal void LoadX87ControlWord(int offset) => X87Memory(0xD9, 0xAD, 0xAC, offset);
+    internal void LoadX87Value(int offset, bool single) =>
+        X87Memory(single ? (byte)0xD9 : (byte)0xDD, 0x85, 0x84, offset);
+    internal void StoreX87Value(int offset, bool single) =>
+        X87Memory(single ? (byte)0xD9 : (byte)0xDD, 0x9D, 0x9C, offset);
+    private void X87Memory(byte opcode, byte framePointerModRm, byte stackPointerModRm, int offset)
+    {
+        Byte(opcode);
+        Byte(UseFramePointer ? framePointerModRm : stackPointerModRm);
         if (!UseFramePointer)
         {
             Byte(0x24);

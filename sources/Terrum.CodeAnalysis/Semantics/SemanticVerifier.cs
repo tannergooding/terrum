@@ -4875,7 +4875,7 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var integerOperand = PrimitiveTypeFacts.IsIntegerOrWide(unary.Operand.Type);
-                var floatingOperand = unary.Operand.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
+                var floatingOperand = PrimitiveTypeFacts.IsFloating(unary.Operand.Type);
                 var unaryValid = unary.Operator switch {
                     TokenKind.Plus => (integerOperand || floatingOperand) && unary.Type == unary.Operand.Type,
                     TokenKind.Tilde => integerOperand && unary.Type == unary.Operand.Type,
@@ -4917,10 +4917,13 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundUpdate update:
+                var integerUpdate = PrimitiveTypeFacts.IsIntegerOrWide(update.Type);
+                var floatingUpdate = PrimitiveTypeFacts.IsFloating(update.Type);
                 if (update.Place is null || update.Operator is not (TokenKind.PlusPlus or TokenKind.MinusMinus)
-                    || !PrimitiveTypeFacts.IsIntegerOrWide(update.Type)
+                    || (!integerUpdate && !floatingUpdate)
                     || update.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
                         or BoundIntegerOverflowBehavior.Wrapping)
+                    || (floatingUpdate && update.OverflowBehavior != BoundIntegerOverflowBehavior.Checked)
                     || update.Place.Type != update.Type
                     || (update.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
                         && !function.IsStatic))
@@ -4933,12 +4936,13 @@ public static partial class SemanticVerifier
                 {
                     break;
                 }
-                if (RequiresNoFailureProof(function)
-                    && update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                var updateCanFail = integerUpdate
+                    && update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked;
+                if (RequiresNoFailureProof(function) && updateCanFail)
                 {
                     throw InvalidNoFailureEffect(function, update.Span);
                 }
-                if (update.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+                if (updateCanFail)
                 {
                     failures?.Add(initialized, fieldMasks);
                 }
@@ -4949,14 +4953,22 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundCompoundAssignment compound:
+                var compoundOperation = CompoundOperators.Binary(compound.Operator);
+                var integerCompound = PrimitiveTypeFacts.IsIntegerOrWide(compound.Type);
+                var floatingCompound = PrimitiveTypeFacts.IsFloating(compound.Type);
+                var floatingArithmeticOperator = compoundOperation is TokenKind.Plus or TokenKind.Minus
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent;
+                var integerShift = CompoundOperators.IsShift(compound.Operator);
                 if (!statementCompound || compound.Place is null || compound.Right is null
                     || !CompoundOperators.IsSupported(compound.Operator)
-                    || !PrimitiveTypeFacts.IsIntegerOrWide(compound.Type)
+                    || (!integerCompound && !floatingCompound)
+                    || (floatingCompound && !floatingArithmeticOperator)
                     || compound.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
                         or BoundIntegerOverflowBehavior.Wrapping)
+                    || (floatingCompound && compound.OverflowBehavior != BoundIntegerOverflowBehavior.Checked)
                     || compound.Place.Type != compound.Type
-                    || (CompoundOperators.IsShift(compound.Operator)
-                        ? !PrimitiveTypeFacts.IsIntegerOrWide(compound.Right.Type)
+                    || (integerShift
+                        ? !integerCompound || !PrimitiveTypeFacts.IsIntegerOrWide(compound.Right.Type)
                         : compound.Right.Type != compound.Type)
                     || (compound.Place is BoundRead { Variable: 0 } && function.DeclaringStruct is not null
                         && !function.IsStatic))
@@ -4986,14 +4998,14 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(compound.Right.Span, "Ownership");
                 }
-                var compoundOperation = CompoundOperators.Binary(compound.Operator);
-                var compoundUsesProfile = compoundOperation is TokenKind.Plus or TokenKind.Minus or TokenKind.Star;
+                var compoundUsesProfile = integerCompound
+                    && compoundOperation is TokenKind.Plus or TokenKind.Minus or TokenKind.Star;
                 if (compound.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping && !compoundUsesProfile)
                 {
                     throw Invalid();
                 }
-                var compoundCanFail = !compoundUsesProfile
-                    || compound.OverflowBehavior == BoundIntegerOverflowBehavior.Checked;
+                var compoundCanFail = integerCompound && (!compoundUsesProfile
+                    || compound.OverflowBehavior == BoundIntegerOverflowBehavior.Checked);
                 if (compoundOperation is not (TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret)
                     && compoundCanFail)
                 {
@@ -5064,10 +5076,10 @@ public static partial class SemanticVerifier
                 }
                 var operands = binary.Left.Type == binary.Right.Type && binary.Left.Type != PrimitiveType.Void;
                 var integerOperands = PrimitiveTypeFacts.IsIntegerOrWide(binary.Left.Type);
-                var floatingOperands = binary.Left.Type is PrimitiveType.Float32 or PrimitiveType.Float64;
+                var floatingOperands = PrimitiveTypeFacts.IsFloating(binary.Left.Type);
                 var codeUnitOperands = PrimitiveTypeFacts.IsCodeUnitOrRune(binary.Left.Type);
                 var floatingArithmetic = floatingOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
-                    or TokenKind.Star or TokenKind.Slash);
+                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
                 var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
                     or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
                 var integerOverflowOperation = integerOperands

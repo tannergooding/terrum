@@ -2448,9 +2448,7 @@ internal sealed partial class Binder
             case BoundUpdate { Place: BoundRead read } update when slots[read.Variable] is BoundConstant old:
             {
                 var operation = update.Operator == TokenKind.PlusPlus ? TokenKind.Plus : TokenKind.Minus;
-                var one = PrimitiveTypeFacts.IsWideInteger(update.Type)
-                    ? new BoundConstant(new ScalarBits(1, 0), update.Type, update.Span)
-                    : new BoundConstant(1, update.Type, update.Span);
+                var one = CreateConstEvalOne(update.Type, update.Span);
                 var next = FoldScalarConstant(new BoundBinary(operation, old,
                     one, update.Type, update.Span) {
                     OverflowBehavior = update.OverflowBehavior,
@@ -2520,6 +2518,30 @@ internal sealed partial class Binder
             default:
                 throw new ConstEvalFailure("A required constant needs scalar values and ConstEval calls only.");
         }
+    }
+
+    private static BoundConstant CreateConstEvalOne(PrimitiveType type, TextSpan span)
+    {
+        if (PrimitiveTypeFacts.IsWideInteger(type))
+        {
+            return new BoundConstant(new ScalarBits(1, 0), type, span);
+        }
+        if (PrimitiveTypeFacts.IsInteger(type))
+        {
+            return new BoundConstant(1, type, span);
+        }
+        if (type is PrimitiveType.Float32 or PrimitiveType.Float64
+            && FloatingLiteralParser.TryParse("1".AsSpan(), type, out var floatingBits))
+        {
+            return new BoundConstant(floatingBits, type, span);
+        }
+        if (type is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128
+                or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128
+            && FloatingLiteralParser.TryParseWide("1".AsSpan(), type, out var wideFloatingBits))
+        {
+            return new BoundConstant(wideFloatingBits, type, span);
+        }
+        throw new ConstEvalFailure("The scalar update identity is not supported by ConstEval.");
     }
 
     private ConstResult EvaluateConstStatement(BoundStatement statement, BoundConstant?[] slots,

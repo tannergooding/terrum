@@ -27,6 +27,7 @@ numbers do not save bytes.
 | Proposal | Review boundary |
 |---|---|
 | [Core-library reference](core-library-reference.md) | Broad candidate APIs and dependency layers; accepted members/protocols link to the adopted inventory rather than being redefined. |
+| [Decimal division by infinity: zero cohort](decimal-division-infinity-cohort.md) | Provisional minimum-quantum signed-zero rule for finite decimal/infinity division; preserves finite/finite preferred exponents and remains pending normative adoption. |
 | [Explicit char16-to-fixed-integer conversion](char16-fixed-integer-conversions.md) | Unapproved, provisionally actionable ten-pair unsigned-code-unit extraction direction; compares the lossless approved floating bridge and four-pair compatibility amendment, fixes narrow checked boundaries, and preserves character identity and separate persistence/lowering gates. |
 | [Source arithmetic profile selection](source-arithmetic-profile-selection.md) | Unapproved, provisional per-compilation options and CLI selection with a deterministic Development default; preserves accepted arithmetic and explicit compiled policies without a profile wire field. |
 | [Private arithmetic operation persistence](source-arithmetic-private-persistence.md) | Unapproved private revision 89 and per-operation mode-byte candidate for resolved checked/wrapping operations; distinguishes retained semantic bodies, already-lowered images, development executable encodings, and standard register Bodies. |

@@ -71,6 +71,19 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
         return true;
     }
 
+    internal ScalarBits ToggleSign(PrimitiveType type)
+    {
+        var width = PrimitiveTypeFacts.ScalarWidth(type);
+        if (!PrimitiveTypeFacts.IsFloating(type) || width is not (2 or 4 or 8 or 16))
+        {
+            throw new ArgumentException("The complete type is not a supported floating format.", nameof(type));
+        }
+
+        return width == 16
+            ? this with { High = High ^ 0x8000_0000_0000_0000UL }
+            : this with { Low = Low ^ (1UL << ((width * 8) - 1)) };
+    }
+
     internal bool IsCanonicalFor(PrimitiveType type)
     {
         var width = PrimitiveTypeFacts.ScalarWidth(type);

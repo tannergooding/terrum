@@ -30,6 +30,12 @@ internal sealed partial class Binder
                     firstValue = boolLeft.Value;
                     secondValue = boolRight.Value;
                 }
+                else if (PrimitiveTypeFacts.IsFloating(boolLeft.Type)
+                    && FloatingLiteralParser.TryFoldBinary(comparison.Operator, boolLeft.Type,
+                        boolLeft.Bits, boolRight.Bits, out var floatingComparison))
+                {
+                    return new BoundConstant(floatingComparison, PrimitiveType.Bool, expression.Span);
+                }
                 else if (!TryScalarValue(boolLeft, out firstValue) || !TryScalarValue(boolRight, out secondValue))
                 {
                     return expression;
@@ -69,6 +75,13 @@ internal sealed partial class Binder
                 }
                 return new BoundConstant(result ? 1 : 0, PrimitiveType.Bool, expression.Span);
 
+            case BoundBinary { Left: BoundConstant left, Right: BoundConstant right } binary
+                when left.Type == right.Type && binary.Type == left.Type
+                    && PrimitiveTypeFacts.IsFloating(left.Type)
+                    && FloatingLiteralParser.TryFoldBinary(binary.Operator, left.Type,
+                        left.Bits, right.Bits, out var binaryFloatingBits):
+                return new BoundConstant(binaryFloatingBits, binary.Type, expression.Span);
+
             case BoundCast { Operand: BoundConstant operand } cast
                 when TryConvertToFloatingConstant(operand, cast.Type, out var floatingBits):
                 return new BoundConstant(floatingBits, cast.Type, expression.Span);
@@ -89,13 +102,10 @@ internal sealed partial class Binder
                 break;
 
             case BoundUnary { Operand: BoundConstant operand } unary
-                when unary.Type == operand.Type && unary.Type is PrimitiveType.Float32 or PrimitiveType.Float64
+                when unary.Type == operand.Type && PrimitiveTypeFacts.IsFloating(unary.Type)
                     && unary.Operator is TokenKind.Plus or TokenKind.Minus:
-            {
-                var signMask = unary.Type == PrimitiveType.Float32 ? 0x8000_0000L : long.MinValue;
-                var resultBits = unary.Operator == TokenKind.Minus ? operand.Value ^ signMask : operand.Value;
-                return new BoundConstant(resultBits, unary.Type, expression.Span);
-            }
+                return new BoundConstant(unary.Operator == TokenKind.Minus
+                    ? operand.Bits.ToggleSign(unary.Type) : operand.Bits, unary.Type, expression.Span);
 
             case BoundUnary { Operand: BoundConstant operand } unary
                 when unary.Type == operand.Type && TryScalarValue(operand, out var input):

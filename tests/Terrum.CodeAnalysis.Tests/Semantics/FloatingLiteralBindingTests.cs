@@ -2,7 +2,9 @@
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -606,15 +608,35 @@ public sealed class FloatingLiteralBindingTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
     [TestCase("public char16 Convert(float32 value) { return char16(value); }")]
-    [TestCase("public float32 Remainder(float32 left, float32 right) { return left % right; }")]
     [TestCase("public bool Mixed(float32 left, float64 right) { return left == right; }")]
     [TestCase("public float32 Mixed(float32 left, int32 right) { return left + right; }")]
-    [TestCase("public float32 Compound(float32 value) { mut float32 current = value; current += 1.0; return current; }")]
-    public void KeepsUnspecifiedFloatingOperationsUnsupported(string source)
+    public void RejectsUnassignedAndMixedFloatingOperations(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
 
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+    }
+
+    [TestCase("float16")]
+    [TestCase("bfloat16")]
+    [TestCase("float32")]
+    [TestCase("float64")]
+    [TestCase("float128")]
+    [TestCase("decimal32")]
+    [TestCase("decimal64")]
+    [TestCase("decimal128")]
+    public void BindsSameFormatFloatingRemainder(string type)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            $"public {type} Remainder({type} left, {type} right) {{ return left % right; }}"));
+
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var function = compilation.Program!.Functions.Single();
+        var result = (BoundReturn)function.Body.Statements.Single();
+        var remainder = (BoundBinary)result.Value!;
+        Assert.That(remainder.Operator, Is.EqualTo(TokenKind.Percent));
+        Assert.That(remainder.Left.Type, Is.EqualTo(function.ReturnType));
+        Assert.That(remainder.Right.Type, Is.EqualTo(function.ReturnType));
     }
 
     [Test]

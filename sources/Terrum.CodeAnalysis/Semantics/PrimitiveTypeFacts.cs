@@ -20,6 +20,11 @@ internal static class PrimitiveTypeFacts
     internal static bool IsSignedIntegerOrWide(PrimitiveType type) =>
         IsSignedInteger(type) || type == PrimitiveType.Int128;
 
+    internal static bool IsFloating(PrimitiveType type) =>
+        type is PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float32
+            or PrimitiveType.Float64 or PrimitiveType.Float128 or PrimitiveType.Decimal32
+            or PrimitiveType.Decimal64 or PrimitiveType.Decimal128;
+
     internal static int IntegerWidth(PrimitiveType type) => type switch {
         PrimitiveType.Int8 or PrimitiveType.UInt8 => 8,
         PrimitiveType.Int16 or PrimitiveType.UInt16 => 16,
