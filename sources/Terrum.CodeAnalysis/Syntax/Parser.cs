@@ -1104,6 +1104,12 @@ internal sealed class Parser
         {
             return Node(SyntaxKind.SwitchNullPattern, [Take()]);
         }
+        if (Current.Kind is TokenKind.RefKeyword or TokenKind.WriteKeyword
+            || (Current.Kind == TokenKind.MutKeyword
+                && Peek(1).Kind is TokenKind.RefKeyword or TokenKind.WriteKeyword))
+        {
+            return ParseSwitchReferenceTypePattern();
+        }
         if (Current.Kind == TokenKind.VarKeyword
             || (Current.Kind == TokenKind.MutKeyword && Peek(1).Kind == TokenKind.VarKeyword))
         {
@@ -1120,6 +1126,26 @@ internal sealed class Parser
             children.Add(Current.Kind == TokenKind.Underscore
                 ? Take() : Expect(TokenKind.Identifier));
             return Node(SyntaxKind.SwitchInferredBindingPattern, children);
+        }
+        var mutable = Current.Kind == TokenKind.MutKeyword;
+        var typeOffset = mutable ? 1 : 0;
+        var typeStart = Peek(typeOffset).Kind is TokenKind.Identifier
+            or TokenKind.WriteKeyword or TokenKind.VoidKeyword;
+        var afterType = Peek(typeOffset + (Peek(typeOffset).Kind == TokenKind.WriteKeyword ? 2 : 1)).Kind;
+        if (typeStart && afterType is TokenKind.Identifier or TokenKind.Question
+            or TokenKind.QuestionQuestion or TokenKind.Less)
+        {
+            var children = new List<SyntaxElement>();
+            if (mutable)
+            {
+                children.Add(Take());
+            }
+            children.Add(ParseType());
+            if (Current.Kind == TokenKind.Identifier)
+            {
+                children.Add(Take());
+            }
+            return Node(SyntaxKind.SwitchTypedBindingPattern, children);
         }
         if (Current.Kind == TokenKind.OpenParen)
         {
@@ -1142,6 +1168,47 @@ internal sealed class Parser
         }
 
         return Node(SyntaxKind.SwitchConstantPattern, [ParseExpression()]);
+    }
+
+    private SyntaxNode ParseSwitchReferenceTypePattern()
+    {
+        var children = new List<SyntaxElement>();
+        if (Current.Kind == TokenKind.MutKeyword)
+        {
+            children.Add(Take());
+        }
+        if (Current.Kind == TokenKind.WriteKeyword)
+        {
+            children.Add(Take());
+        }
+        children.Add(Expect(TokenKind.RefKeyword));
+        var missing = _missingTokens;
+        children.Add(ExpectAttached(TokenKind.Less));
+        if (Current.Kind == TokenKind.Underscore)
+        {
+            children.Add(Node(SyntaxKind.SwitchPatternTypeArgument, [Take()]));
+        }
+        else if (Current.Kind == TokenKind.VarKeyword)
+        {
+            var argument = new List<SyntaxElement> { Take() };
+            if (Current.Kind == TokenKind.Question && IsAttachedToPrevious())
+            {
+                argument.Add(Take());
+            }
+            if (Current.Kind == TokenKind.Identifier)
+            {
+                argument.Add(Take());
+            }
+            children.Add(Node(SyntaxKind.SwitchPatternTypeArgument, argument));
+        }
+        else
+        {
+            children.Add(Node(SyntaxKind.SwitchPatternTypeArgument, [ParseType()]));
+        }
+        children.Add(ExpectTypeCloser(missing));
+        children.Add(Current.Kind == TokenKind.Underscore
+            ? Take() : Expect(TokenKind.Identifier));
+        return Node(SyntaxKind.SwitchReferenceTypePattern, children);
     }
 
     private SyntaxNode ParseSwitchTransferStatement()

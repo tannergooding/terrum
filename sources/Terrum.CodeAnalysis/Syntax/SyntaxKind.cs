@@ -173,6 +173,12 @@ public enum SyntaxKind
     SwitchNullPattern,
     /// <summary>A switch pattern that introduces an inferred value binding.</summary>
     SwitchInferredBindingPattern,
+    /// <summary>A switch type pattern with an optional value binding.</summary>
+    SwitchTypedBindingPattern,
+    /// <summary>A switch pattern matching an existing reference.</summary>
+    SwitchReferenceTypePattern,
+    /// <summary>A type argument within a switch reference pattern.</summary>
+    SwitchPatternTypeArgument,
     /// <summary>A parenthesized switch pattern.</summary>
     SwitchParenthesizedPattern,
     /// <summary>A structural tuple switch pattern.</summary>

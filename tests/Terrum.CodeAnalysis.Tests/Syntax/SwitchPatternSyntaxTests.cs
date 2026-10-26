@@ -25,6 +25,22 @@ public sealed class SwitchPatternSyntaxTests
             ("(1, _)", [SyntaxKind.SwitchTuplePattern, SyntaxKind.SwitchWildcardPattern]),
             ("var item", [SyntaxKind.SwitchInferredBindingPattern]),
             ("mut var? item", [SyntaxKind.SwitchInferredBindingPattern]),
+            ("int32 item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("mut int32 item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("Box<int32> item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("T? item", [SyntaxKind.SwitchTypedBindingPattern]),
+            ("ref<int32> item", [
+                SyntaxKind.SwitchReferenceTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("mut write ref<var T> item", [
+                SyntaxKind.SwitchReferenceTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
+            ("write ref<_> item", [
+                SyntaxKind.SwitchReferenceTypePattern,
+                SyntaxKind.SwitchPatternTypeArgument,
+            ]),
         };
 
         foreach (var (pattern, expectedKinds) in cases)
