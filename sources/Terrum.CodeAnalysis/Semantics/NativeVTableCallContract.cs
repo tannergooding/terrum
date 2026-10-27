@@ -91,7 +91,6 @@ internal static class NativeVTableCallContract
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention is not (NativeParameterRetention.NoEscape
                     or NativeParameterRetention.MayEscape)
-                || parameter.Extent < 0
                 || !DirectNativeImportContract.IsInputPointee(parameter.PointeeType, program.Structures)
                 || function.Variables[parameter.ParameterIndex] is not {
                     Type: PrimitiveType.NativeRawPointer,

@@ -161,7 +161,6 @@ internal static class DirectNativeImportContract
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention != NativeParameterRetention.NoEscape
-                || parameter.Extent < 0
                 || (parameter.PointeeType == PrimitiveType.Void && (parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0))
                 || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
                 || pointerParameter.Type != PrimitiveType.NativeRawPointer
@@ -268,7 +267,8 @@ internal static class DirectNativeImportContract
                 && address.ElementCount == layout.ElementCount
                 && address.ElementStride == layout.ElementStride
                 && address.ByteExtent == layout.ByteExtent
-                && (parameter.Extent == 0 || address.ElementCount >= parameter.Extent)
+                && (parameter.Extent == 0 || (address.ElementCount >= 0
+                    && (ulong)address.ElementCount >= parameter.Extent))
                 && (parameter.PointeeType != PrimitiveType.Void
                     || DirectNativeImportContract.IsInputPointee(layout.ElementType, program.Structures))
                 && (parameter.Access == NativeParameterAccess.Read

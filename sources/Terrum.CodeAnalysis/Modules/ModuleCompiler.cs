@@ -5628,15 +5628,14 @@ public static partial class ModuleCompiler
             var pointeeType = (PrimitiveType)reader.ReadInt32();
             var access = (NativeParameterAccess)reader.ReadByte();
             var retention = (NativeParameterRetention)reader.ReadByte();
-            var extent = reader.ReadInt32();
+            var extent = reader.ReadUInt32();
             if (parameterIndex <= previousParameterIndex
                 || parameterIndex >= functionParameterCount
                 || !DirectNativeImportContract.IsInputPointee(pointeeType, structures)
                 || access is not (NativeParameterAccess.Read or NativeParameterAccess.Write
                     or NativeParameterAccess.ReadWrite)
                 || retention is not (NativeParameterRetention.NoEscape
-                    or NativeParameterRetention.MayEscape)
-                || extent < 0)
+                    or NativeParameterRetention.MayEscape))
             {
                 throw new ModuleFormatException("Imported native vtable parameter is invalid.");
             }
@@ -5865,7 +5864,7 @@ public static partial class ModuleCompiler
             {
                 vtableParameters.Add(new DirectNativeParameter(reader.ReadInt32(),
                     (PrimitiveType)reader.ReadInt32(), (NativeParameterAccess)reader.ReadByte(),
-                    (NativeParameterRetention)reader.ReadByte(), reader.ReadInt32()));
+                    (NativeParameterRetention)reader.ReadByte(), reader.ReadUInt32()));
             }
             nativeVTableMethod = new NativeVTableMethodDefinition(slot,
                 vtableParameters.MoveToImmutable(), vtableByteOffset)
@@ -5889,7 +5888,7 @@ public static partial class ModuleCompiler
                     {
                         directParameters.Add(new DirectNativeParameter(reader.ReadInt32(),
                             (PrimitiveType)reader.ReadInt32(), (NativeParameterAccess)reader.ReadByte(),
-                            (NativeParameterRetention)reader.ReadByte(), reader.ReadInt32()));
+                            (NativeParameterRetention)reader.ReadByte(), reader.ReadUInt32()));
                     }
                 }
                 directNativeImport = new DirectNativeImport(libraryName, exportName, outputs) {

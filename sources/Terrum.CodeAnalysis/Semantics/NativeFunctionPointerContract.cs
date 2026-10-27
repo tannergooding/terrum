@@ -364,7 +364,6 @@ internal static class NativeFunctionPointerContract
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention != NativeParameterRetention.NoEscape
-                || parameter.Extent < 0
                 || (parameter.PointeeType == PrimitiveType.Void
                     && (parameter.Access != NativeParameterAccess.Read
                         || parameter.Extent != 0)))

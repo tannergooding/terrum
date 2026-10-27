@@ -126,13 +126,13 @@ internal sealed partial class Binder
     }
 
     private BoundExpression BindNativeParameterAddress(SyntaxNode expression,
-        NativeParameterAccess access, int extent, PrimitiveType pointeeType, TextSpan span)
+        NativeParameterAccess access, uint extent, PrimitiveType pointeeType, TextSpan span)
     {
         while (expression.Kind == SyntaxKind.ParenthesizedExpression)
         {
             expression = (SyntaxNode)expression.Children[1];
         }
-        if (extent < 0 || expression is not {
+        if (expression is not {
                 Kind: SyntaxKind.UnaryExpression,
             } || ((SyntaxTokenElement)expression.Children[0]).Token.Kind != TokenKind.Ampersand)
         {
@@ -155,7 +155,7 @@ internal sealed partial class Binder
         {
             var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
             if ((pointeeType != PrimitiveType.Void && pointeeType != layout.ElementType)
-                || (extent > 0 && layout.ElementCount < extent)
+                || (extent > 0 && (ulong)layout.ElementCount < extent)
                 || index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
                 || _variables[arrayVariable].IsInitializationLocal
                 || _unresolvedVacantLocals.Contains(arrayVariable)

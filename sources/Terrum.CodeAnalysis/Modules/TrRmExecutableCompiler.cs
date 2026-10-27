@@ -1253,15 +1253,14 @@ public static partial class TrRmExecutableCompiler
                             layouts, structureTypeByTypeDef);
                         if (parameter.Access is < 1 or > 3
                             || parameter.Retention != 1 || parameter.ExtentKind is not (0 or 1)
-                            || parameter.PointerDepth != 1 || parameter.RequiredAlignment != 0
-                            || parameter.Extent > int.MaxValue)
+                            || parameter.PointerDepth != 1 || parameter.RequiredAlignment != 0)
                         {
                             throw Invalid("Invalid direct native parameter contract.");
                         }
 
                         directParameters.Add(new DirectNativeParameter(parameter.ParameterOrdinal,
                             pointeeType, (NativeParameterAccess)(parameter.Access - 1),
-                            NativeParameterRetention.NoEscape, (int)parameter.Extent));
+                            NativeParameterRetention.NoEscape, parameter.Extent));
                     }
                 }
                 directNativeImport = new DirectNativeImport(nativeImports.GetLibraryName(row),
@@ -1290,7 +1289,7 @@ public static partial class TrRmExecutableCompiler
                             layouts, structureTypeByTypeDef);
                         directParameters.Add(new DirectNativeParameter(parameter.ParameterOrdinal,
                             pointeeType, (NativeParameterAccess)(parameter.Access - 1),
-                            NativeParameterRetention.NoEscape, checked((int)parameter.Extent)));
+                            NativeParameterRetention.NoEscape, parameter.Extent));
                     }
                 }
 

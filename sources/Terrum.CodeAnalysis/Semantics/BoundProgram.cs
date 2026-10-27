@@ -637,7 +637,7 @@ internal sealed record NativeOutputContract(
     ImmutableArray<NativeOutputDependency> Dependencies);
 
 internal sealed record DirectNativeParameter(int ParameterIndex, PrimitiveType PointeeType,
-    NativeParameterAccess Access, NativeParameterRetention Retention, int Extent);
+    NativeParameterAccess Access, NativeParameterRetention Retention, uint Extent);
 
 /// <summary>A parameter or local storage declaration.</summary>
 /// <param name="Name">The source name.</param>

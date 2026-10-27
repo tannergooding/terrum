@@ -3028,7 +3028,8 @@ internal sealed partial class Binder
                     continue;
                 }
                 directNativeParameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
-                    nativeParameter.Access, nativeParameter.Retention, nativeParameter.Extent));
+                    nativeParameter.Access, nativeParameter.Retention,
+                    checked((uint)nativeParameter.Extent)));
             }
             for (var index = 0; index < declared.Count; index++)
             {
@@ -3114,7 +3115,8 @@ internal sealed partial class Binder
                     continue;
                 }
                 nativeVTableParameters.Add(new DirectNativeParameter(parameterIndex, pointeeType,
-                    nativeParameter.Access, nativeParameter.Retention, nativeParameter.Extent));
+                    nativeParameter.Access, nativeParameter.Retention,
+                    checked((uint)nativeParameter.Extent)));
             }
             if (returnType != PrimitiveType.Void
                 && !DirectNativeImportContract.IsValueParameter(returnType,
