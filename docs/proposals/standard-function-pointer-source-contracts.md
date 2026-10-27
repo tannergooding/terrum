@@ -200,8 +200,11 @@ pointer parameter's contract.
 * **Persistence and provider binding:** retain complete types in references,
   module materialization and private persistence as well as Standard loading.
   A shape-only Development/private record is not a lossless carrier for this
-  model. Complete that migration under an explicitly selected exact schema;
-  this document assigns no private revision or alternate decoder. Bind the
+  model. The separate
+  [private carrier proposal](native-function-pointer-contract-private-persistence.md)
+  amends the unimplemented candidate 97 with exact rows and type references;
+  it remains unapproved and this document assigns no private revision or
+  alternate decoder. Bind the
   actual selected provider against every retained expected declaration, and
   separately compare the structural pointer contract. Provider extra facts do
   not silently strengthen an imported pointer type or erase an expectation.
