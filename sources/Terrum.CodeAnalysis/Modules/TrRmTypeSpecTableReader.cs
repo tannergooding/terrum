@@ -365,6 +365,65 @@ public readonly ref struct TrRmTypeSpecTableReader
         return Read(bytes, 6 + ordinal * sizeof(uint));
     }
 
+    internal bool ContainsNativeFunctionPointerValue(uint typeSpecRef,
+        TrRmTypeDefTableReader typeDefs, TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports)
+    {
+        var pending = new Stack<uint>();
+        var visitedRows = new HashSet<int>();
+        pending.Push(typeSpecRef);
+        while (pending.TryPop(out var current))
+        {
+            var reference = GetTypeSpecRef(current, allowInitQualifier: true);
+            if (reference.Form == 0x0D)
+            {
+                return true;
+            }
+
+            if (!reference.IsRow || !visitedRows.Add(reference.Row))
+            {
+                continue;
+            }
+
+            var type = GetRow(reference.Row);
+            switch (reference.Form)
+            {
+                case >= 0x06 and <= 0x0B:
+                case 0x0E:
+                    pending.Push(Read(type, 2));
+                    break;
+                case 0x0C:
+                    pending.Push(Read(type, 3));
+                    break;
+                case 0x05:
+                    var typeDef = GetNominalTypeDefRow(current, typeDefs, imports);
+                    var (formalFirst, formalCount) = typeDefs.GetGenericRange(typeDef);
+                    var argumentCount = GetConstructedArgumentCount(reference.Row);
+                    if (argumentCount != formalCount)
+                    {
+                        throw InvalidType();
+                    }
+
+                    for (var ordinal = 0; ordinal < argumentCount; ordinal++)
+                    {
+                        var formalKind = genericParams.GetFormalKind(
+                            formalFirst + ordinal);
+                        if (formalKind == 1)
+                        {
+                            pending.Push(GetConstructedArgument(reference.Row, ordinal));
+                        }
+                        else if (formalKind != 2)
+                        {
+                            throw InvalidType();
+                        }
+                    }
+                    break;
+            }
+        }
+
+        return false;
+    }
+
     internal ushort GetCompactValueTypeKey(int row)
     {
         if (row <= 0 || row >= _compactValueTypeKeys.Length
@@ -754,7 +813,7 @@ public readonly ref struct TrRmTypeSpecTableReader
                 {
                     RequireLength(bytes, 7);
                     var methodDef = Read(bytes, 3);
-                    if (bytes[2] is < 1 or > 4 || methodDef == 0
+                    if (bytes[2] > 4 || methodDef == 0
                         || methodDef > _methodDefCount)
                     {
                         throw InvalidType();

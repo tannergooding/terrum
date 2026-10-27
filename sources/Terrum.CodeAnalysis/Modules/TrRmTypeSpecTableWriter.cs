@@ -26,13 +26,13 @@ public static class TrRmTypeSpecTableWriter
     }
 
     /// <summary>Creates a Standard native function-pointer TypeSpec row.</summary>
-    /// <param name="callingConvention">The assigned NativeCallingConvention value.</param>
+    /// <param name="callingConvention">The TypeSpec convention byte.</param>
     /// <param name="signatureContractMethodDef">The bodyless MethodDef anchor row.</param>
     /// <returns>The seven-byte Standard TypeSpec `0x0D` row.</returns>
     public static byte[] NativeFunctionPointer(byte callingConvention,
         uint signatureContractMethodDef)
     {
-        if (callingConvention is < 1 or > 4)
+        if (callingConvention > 4)
         {
             throw new ArgumentOutOfRangeException(nameof(callingConvention));
         }

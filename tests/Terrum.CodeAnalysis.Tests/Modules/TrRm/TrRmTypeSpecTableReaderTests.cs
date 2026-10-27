@@ -45,6 +45,25 @@ public sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
+    public void StandardFunctionPointerAcceptsTerrumConventionTagZero()
+    {
+        var standardRow = TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2);
+        Assert.That(standardRow, Is.EqualTo(new byte[]
+            { 0x0D, 0, 0, 2, 0, 0, 0 }));
+        var section = TrRmTypeSpecTableWriter.Encode(
+            [new ReadOnlyMemory<byte>(standardRow)], 0, 0, 0, 0,
+            schema: TrRmArtifactSchema.Standard, methodDefCount: 2);
+        var reader = new TrRmTypeSpecTableReader(section, 1, 0, 0, 0,
+            nativeFunctionPointerSignatureCount: 0,
+            schema: TrRmArtifactSchema.Standard, methodDefCount: 2);
+
+        Assert.That(reader.TryGetNativeFunctionPointerAnchor(1,
+            out var convention, out var methodDefRow), Is.True);
+        Assert.That(convention, Is.EqualTo(0));
+        Assert.That(methodDefRow, Is.EqualTo(2));
+    }
+
+    [Test]
     public void DevelopmentSignatureRowsAndStandardAnchorsRemainDistinct()
     {
         var developmentRow =
@@ -63,11 +82,10 @@ public sealed class TrRmTypeSpecTableReaderTests
             Rows(standardRow), 1, 1, TrRmArtifactSchema.Development, 1));
     }
 
-    [TestCase(0, 1u)]
     [TestCase(5, 1u)]
     [TestCase(1, 0u)]
     [TestCase(1, 2u)]
-    public void StandardFunctionPointerRejectsInvalidConventionAndAnchor(
+    public void StandardFunctionPointerRejectsUnknownConventionAndAnchor(
         byte convention, uint anchor)
     {
         var bytes = new byte[7];
