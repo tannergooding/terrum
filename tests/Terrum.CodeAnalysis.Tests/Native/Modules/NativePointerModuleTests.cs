@@ -216,6 +216,181 @@ public sealed class NativePointerModuleTests
             string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
     }
 
+    [TestCase("Left", false)]
+    [TestCase("Right", true)]
+    public void NativePointerFieldReadUsesSelectedFieldProvenance(
+        string selectedField, bool shouldReject)
+    {
+        var source = $$"""
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe PointerPair() {
+                    Left = null;
+                    Right = null;
+                }
+            }
+
+            unsafe ptr<int32> Select(ptr<int32> safe) {
+                int32 local = 1;
+                unsafe {
+                    mut PointerPair pair = new PointerPair();
+                    pair.Left = safe;
+                    pair.Right = &local;
+                    return pair.{{selectedField}};
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        if (shouldReject)
+        {
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Program, Is.Null);
+        }
+        else
+        {
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [TestCase("Left", false)]
+    [TestCase("Right", true)]
+    public void NativePointerNestedFieldReadUsesSelectedFieldProvenance(
+        string selectedField, bool shouldReject)
+    {
+        var source = $$"""
+            struct InnerPointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe InnerPointerPair() {
+                    Left = null;
+                    Right = null;
+                }
+            }
+
+            struct OuterPointerPair {
+                public mut InnerPointerPair Pair;
+                public unsafe OuterPointerPair() {
+                    unsafe { Pair = new InnerPointerPair(); }
+                }
+            }
+
+            unsafe ptr<int32> Select(ptr<int32> safe) {
+                int32 local = 1;
+                unsafe {
+                    mut OuterPointerPair pair = new OuterPointerPair();
+                    pair.Pair.Left = safe;
+                    pair.Pair.Right = &local;
+                    return pair.Pair.{{selectedField}};
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        if (shouldReject)
+        {
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Program, Is.Null);
+        }
+        else
+        {
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [TestCase("Left", false)]
+    [TestCase("Right", true)]
+    public void NativePointerFieldProvenanceCopiesWithInlineValue(
+        string selectedField, bool shouldReject)
+    {
+        var source = $$"""
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe PointerPair() {
+                    Left = null;
+                    Right = null;
+                }
+            }
+
+            unsafe ptr<int32> Select(ptr<int32> safe) {
+                int32 local = 1;
+                unsafe {
+                    mut PointerPair pair = new PointerPair();
+                    pair.Left = safe;
+                    pair.Right = &local;
+                    mut PointerPair copy = pair;
+                    return copy.{{selectedField}};
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        if (shouldReject)
+        {
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Program, Is.Null);
+        }
+        else
+        {
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [Test]
+    public void NativePointerFieldReplacementPreservesEarlierDescriptorCopies()
+    {
+        const string source = """
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe PointerPair() {
+                    Left = null;
+                    Right = null;
+                }
+            }
+
+            unsafe ptr<int32> ReturnOld(ptr<int32> safe) {
+                int32 local = 1;
+                unsafe {
+                    mut PointerPair pair = new PointerPair();
+                    pair.Left = &local;
+                    ptr<int32> old = pair.Left;
+                    pair.Left = safe;
+                    return old;
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
     [TestCase("""
         unsafe ptr<int32> Escape() {
             int32 value = 1;
@@ -345,7 +520,7 @@ public sealed class NativePointerModuleTests
     public void NativePointerCannotEscapeThroughIndirectIdentityCallback()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] [Terrum.Interop.NativeCallable]
+             [Terrum.Interop.NativeCallable]
             unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
             unsafe ptr<int32> Escape() {
                 int32 value = 1;
@@ -472,7 +647,7 @@ public sealed class NativePointerModuleTests
     public void OpaqueNativePointerCannotEscapeThroughIndirectIdentityCallback()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] [Terrum.Interop.NativeCallable]
+             [Terrum.Interop.NativeCallable]
             unsafe ptr<void> Identity(ptr<int32> pointer) { return null; }
             unsafe ptr<void> Escape() {
                 int32 value = 1;
@@ -509,7 +684,7 @@ public sealed class NativePointerModuleTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
-            [NoThrow] [Terrum.Interop.NativeCallable]
+             [Terrum.Interop.NativeCallable]
             unsafe ptr<void> Identity(ptr<TestObject> receiver, ptr<int32> pointer) { return null; }
 
             [Terrum.Interop.NativeVTableMethod(0)]
@@ -629,7 +804,7 @@ public sealed class NativePointerModuleTests
     public void IndirectIdentityCallbackPreservesLiveLocalBacking()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] [Terrum.Interop.NativeCallable]
+             [Terrum.Interop.NativeCallable]
             unsafe ptr<int32> Identity(ptr<int32> pointer) { return pointer; }
             int32 Main() {
                 int32 value = 42;
@@ -758,6 +933,25 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerLifetimeTracksItsExactLocalStorageSite()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                int32 backing = 42;
+                mut int32 unrelated = 1;
+                unsafe {
+                    ptr<int32> pointer = &backing;
+                    unrelated = _;
+                    return *pointer;
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void NativePointerCannotFormAddressAfterBackingLifetimeEnd()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
@@ -779,9 +973,96 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerReobservesAStillLiveLocalAfterMutation()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 value = 1;
+                mut ptr<int32> pointer = null;
+                unsafe { pointer = &value; }
+                value = 2;
+                unsafe { return *pointer; }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void NativePointerCanUseReinitializedStorageAfterTheOldPointerIsCleared()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init mut int32 value;
+                value = 1;
+                mut ptr<int32> pointer = null;
+                unsafe { pointer = &value; }
+                pointer = null;
+                value = _;
+                value = 2;
+                unsafe {
+                    pointer = &value;
+                    return *pointer;
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void NativePointerStorageGenerationsRemainFiniteAcrossLoopActivations()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 total = 0;
+                mut int32 index = 0;
+                while (index < 2) {
+                    int32 current = index;
+                    mut ptr<int32> pointer = null;
+                    unsafe { pointer = &current; }
+                    unsafe { total += *pointer; }
+                    index += 1;
+                }
+                return total;
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void NativePointerCannotEscapeLoopScopeThroughContinue()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                mut int32 index = 0;
+                mut ptr<int32> escaped = null;
+                while (index < 1) {
+                    int32 current = index;
+                    unsafe { escaped = &current; }
+                    index += 1;
+                    continue;
+                }
+                return 0;
+            }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
     public void NativePointerLifetimeTracksPointerStoredThroughInternalHelper()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [param(destination): Captures(nameof(value))]
             unsafe void StorePointer(write ptr<ptr<int32>> destination, ptr<int32> value) {
                 unsafe { *destination = value; }
             }
@@ -802,9 +1083,25 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerHolderCaptureRequiresADeclaredSourceContract()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe void StorePointer(write ptr<ptr<int32>> destination, ptr<int32> value) {
+                unsafe { *destination = value; }
+            }
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3023"),
+            Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
     public void NativePointerLifetimeTracksPointerStoredThroughAliasedHelperParameters()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [param(destination): Captures(nameof(value))]
             unsafe void StorePointer(write ptr<ptr<int32>> destination, ptr<int32> value) {
                 write ptr<ptr<int32>> destinationAlias = destination;
                 mut ptr<int32> valueAlias = null;
@@ -833,6 +1130,8 @@ public sealed class NativePointerModuleTests
     public void RecursiveNativePointerWriteSummariesDoNotMutateDuringEnumeration()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [param(first): Captures(nameof(value))]
+            [param(second): Captures(nameof(value))]
             unsafe void StorePointer(
                 write ptr<ptr<int32>> first,
                 write ptr<ptr<int32>> second,
@@ -942,7 +1241,7 @@ public sealed class NativePointerModuleTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unsafe void Read(ptr<Owner> address) {
                 unsafe { Owner copy = *address; }
@@ -967,7 +1266,7 @@ public sealed class NativePointerModuleTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             unsafe void Read(ptr<int32> address) {
                 unsafe {
@@ -1109,7 +1408,7 @@ public sealed class NativePointerModuleTests
         using var stream = new MemoryStream(module, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(89));
+        Assert.That(reader.ReadInt32(), Is.EqualTo(92));
         SkipString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();

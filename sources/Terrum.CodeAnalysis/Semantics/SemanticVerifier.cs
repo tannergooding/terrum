@@ -765,7 +765,7 @@ public static partial class SemanticVerifier
             BackingDependencies? backingDependencies;
             try
             {
-                backingDependencies = CreateBackingDependencies(function, program, hasSpanDependencies,
+                backingDependencies = CreateBackingDependencies(functionIndex, function, program, hasSpanDependencies,
                     nativePointerCaptureEffects);
             }
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
@@ -780,6 +780,7 @@ public static partial class SemanticVerifier
                     ? new Dictionary<BoundStatement, InitializationState>(ReferenceEqualityComparer.Instance) : null,
                 Dependencies = backingDependencies,
                 NativePointerCaptureEffects = nativePointerCaptureEffects,
+                ScopeActivation = BackingDependencies.RootScopeActivation,
             };
             if (function.IsConstructor)
             {
@@ -2217,25 +2218,36 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var counted = inCleanup && loops.Exists(static scope => scope.IsCleanupSwitch)
-                    ? RecognizeCleanupCountedLoop(block, function, program, ref remaining, depth + 1) : null;
-                var returns = false;
-                foreach (var child in block.Statements)
+                var previousScopeActivation = initialized.ScopeActivation;
+                initialized.ScopeActivation = initialized.EnterBlockActivation(block.Span);
+                initialized.EnterStorageScope(block);
+                try
                 {
-                    if (child is null)
+                    var counted = inCleanup && loops.Exists(static scope => scope.IsCleanupSwitch)
+                        ? RecognizeCleanupCountedLoop(block, function, program, ref remaining, depth + 1) : null;
+                    var returns = false;
+                    foreach (var child in block.Statements)
                     {
-                        throw Invalid();
+                        if (child is null)
+                        {
+                            throw Invalid();
+                        }
+                        var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1,
+                            reachable && !returns, cleanups, inCleanup, inUnsafe, failures, loops,
+                            countedLoop: counted is not null && ReferenceEquals(child, counted.Loop) ? counted : null);
+                        returns |= childReturns;
                     }
-                    var childReturns = Statement(child, initialized, fieldMasks, declarations, function, program, ref remaining, depth + 1,
-                        reachable && !returns, cleanups, inCleanup, inUnsafe, failures, loops,
-                        countedLoop: counted is not null && ReferenceEquals(child, counted.Loop) ? counted : null);
-                    returns |= childReturns;
+                    if (reachable && !returns)
+                    {
+                        CheckNativePointerScopeExit(block, initialized);
+                    }
+                    return returns;
                 }
-                if (reachable && !returns)
+                finally
                 {
-                    CheckNativePointerScopeExit(block, initialized);
+                    initialized.ExitStorageScope(block);
+                    initialized.ScopeActivation = previousScopeActivation;
                 }
-                return returns;
             case BoundLocal local:
                 if (local.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || local.Variable >= initialized.Length
@@ -2245,6 +2257,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                initialized.ActivateStorage(local.Variable, (long)local.Span.Start + 1);
                 if (!CanCompleteNormally(local.Initializer, initialized, program,
                     ref remaining, depth + 1))
                 {
@@ -2314,6 +2327,16 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1),
                         NativePointerMayBeUnknownOf(local.Initializer, localPointerDependencies,
                             program, ref remaining, depth + 1));
+                    if (IsInlineStructStorage(local.Initializer.Type, program))
+                    {
+                        SetNativePointerFieldValuesFromExpression(local.Variable,
+                            StorageProjection.WholeObject, local.Initializer.Type,
+                            local.Initializer, localPointerDependencies, function,
+                            program, ref remaining, depth + 1);
+                        RefreshNativePointerAggregateProvenance(local.Variable,
+                            local.Initializer.Type, localPointerDependencies,
+                            program, ref remaining, depth + 1);
+                    }
                 }
                 return false;
             case BoundVacantLocal vacant:
@@ -2324,6 +2347,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid(vacant.Span);
                 }
+                initialized.ActivateStorage(vacant.Variable, (long)vacant.Span.Start + 1);
                 initialized.InvalidateNativeOutputVariable(vacant.Variable);
                 initialized[vacant.Variable] = false;
                 return false;
@@ -2336,6 +2360,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid(output.Span);
                 }
+                initialized.ActivateStorage(output.Variable, (long)output.Span.Start + 1);
                 return false;
             case BoundLifetimeEnd end:
                 if (end.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -2364,7 +2389,7 @@ public static partial class SemanticVerifier
                     AddCleanupFailure(failures, initialized, fieldMasks, end.Variable);
                 }
                 initialized.InvalidateNativeOutputVariable(end.Variable);
-                initialized.Retire(end.Variable);
+                initialized.Retire(end.Variable, (long)end.Span.Start + 1);
                 initialized.Dependencies?.ClearBackingSources(end.Variable);
                 fieldMasks[end.Variable] = 0;
                 return false;
@@ -2396,6 +2421,7 @@ public static partial class SemanticVerifier
                 initialized.InvalidateNativeOutputVariable(drop.Variable);
                 initialized[drop.Variable] = false;
                 initialized.Dependencies?.ClearBackingSources(drop.Variable);
+                initialized.AdvanceStorageGeneration(drop.Variable, (long)drop.Span.Start + 1);
                 if (initialized.Dependencies is BackingDependencies dropDependencies)
                 {
                     dropDependencies.ClearNativePointerProvenance(drop.Variable);
@@ -2411,6 +2437,7 @@ public static partial class SemanticVerifier
                 }
                 initialized[span.Variable] = false;
                 initialized.Dependencies?.ClearBackingSources(span.Variable);
+                initialized.AdvanceStorageGeneration(span.Variable, (long)span.Span.Start + 1);
                 return false;
             case BoundDropConstructedFields partial:
                 if (!inCleanup || !function.IsConstructor || partial.Variable != 0
@@ -2507,6 +2534,16 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1),
                         NativePointerMayBeUnknownOf(assignment.Value, assignmentPointerDependencies,
                             program, ref remaining, depth + 1));
+                    if (IsInlineStructStorage(assignment.Value.Type, program))
+                    {
+                        SetNativePointerFieldValuesFromExpression(assignment.Variable,
+                            StorageProjection.WholeObject, assignment.Value.Type,
+                            assignment.Value, assignmentPointerDependencies, function,
+                            program, ref remaining, depth + 1);
+                        RefreshNativePointerAggregateProvenance(assignment.Variable,
+                            assignment.Value.Type, assignmentPointerDependencies,
+                            program, ref remaining, depth + 1);
+                    }
                 }
                 return false;
             case BoundOptionalAssignment optionalAssignment:
@@ -2694,12 +2731,35 @@ public static partial class SemanticVerifier
                 if (CarriesNativePointer(targetField.Type, program)
                     && initialized.Dependencies is BackingDependencies fieldPointerDependencies)
                 {
-                    fieldPointerDependencies.AddNativePointerProvenance(
-                        fieldAssignment.Variable,
-                        NativePointerBackingOf(fieldAssignment.Value, fieldPointerDependencies,
-                            program, ref remaining, depth + 1),
-                        NativePointerMayBeUnknownOf(fieldAssignment.Value,
-                            fieldPointerDependencies, program, ref remaining, depth + 1));
+                    if (TryGetNativePointerFieldAssignmentPlace(fieldAssignment,
+                            function, program, out var fieldProjection,
+                            out var fieldValueType))
+                    {
+                        if (fieldValueType != targetField.Type)
+                        {
+                            throw Invalid(fieldAssignment.Span);
+                        }
+                        SetNativePointerFieldValuesFromExpression(
+                            fieldAssignment.Variable, fieldProjection,
+                            fieldValueType, fieldAssignment.Value,
+                            fieldPointerDependencies, function, program,
+                            ref remaining, depth + 1);
+                        RefreshNativePointerAggregateProvenance(
+                            fieldAssignment.Variable, ownerType,
+                            fieldPointerDependencies, program,
+                            ref remaining, depth + 1);
+                    }
+                    else
+                    {
+                        fieldPointerDependencies.AddNativePointerProvenance(
+                            fieldAssignment.Variable,
+                            NativePointerBackingOf(fieldAssignment.Value,
+                                fieldPointerDependencies, program,
+                                ref remaining, depth + 1),
+                            NativePointerMayBeUnknownOf(fieldAssignment.Value,
+                                fieldPointerDependencies, program,
+                                ref remaining, depth + 1));
+                    }
                 }
                 fieldMasks[fieldAssignment.Variable] |= 1u << fieldAssignment.Field;
                 initialized[fieldAssignment.Variable] = fieldMasks[fieldAssignment.Variable]
@@ -2890,6 +2950,7 @@ public static partial class SemanticVerifier
 
                     var unreachableScope = new LoopScope(cleanups.Count) {
                         IsCleanupSwitch = inCleanup && loop.SwitchArmVariable >= 0,
+                        ScopeActivation = initialized.ScopeActivation,
                     };
                     loops.Add(unreachableScope);
                     _ = Statement(verifiedBody, initialized.Clone(), (uint[])fieldMasks.Clone(),
@@ -2935,10 +2996,22 @@ public static partial class SemanticVerifier
                     var iteratorDeclarations = new HashSet<int>(iterationDeclarations);
                     var loopScope = new LoopScope(cleanups.Count) {
                         IsCleanupSwitch = inCleanup && loop.SwitchArmVariable >= 0,
+                        ScopeActivation = initialized.ScopeActivation,
                     };
                     loops.Add(loopScope);
-                    var bodyReturns = Statement(verifiedBody, bodyState, bodyMasks, iterationDeclarations, function, program, ref remaining, depth + 1,
-                        reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    var previousLoopActivation = bodyState.ScopeActivation;
+                    bodyState.ScopeActivation = bodyState.EnterLoopActivation(loop.Span, iteration != 0);
+                    bool bodyReturns;
+                    try
+                    {
+                        bodyReturns = Statement(verifiedBody, bodyState, bodyMasks,
+                            iterationDeclarations, function, program, ref remaining, depth + 1,
+                            reachable && bodyReachable, cleanups, inCleanup, inUnsafe, failures, loops);
+                    }
+                    finally
+                    {
+                        bodyState.ScopeActivation = previousLoopActivation;
+                    }
                     loops.RemoveAt(loops.Count - 1);
                     var exitState = loop.IsPostTested ? conditionState.Clone()
                         : Outcome(loop.Condition, conditionInput, false, ref remaining);
@@ -3084,6 +3157,8 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, reachable, inUnsafe);
                 if (reachable && !transferDoesNotComplete)
                 {
+                    transferState.CheckAndExitStorageScopesTo(target.ScopeActivation);
+                    transferState.ScopeActivation = target.ScopeActivation;
                     (statement is BoundBreak ? target.Breaks : target.Continues).Add(transferState, transferMasks);
                 }
                 return true;
@@ -3294,6 +3369,14 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
+                }
+                if (result.Value is BoundExpression pointerResult
+                    && CarriesNativePointer(pointerResult.Type, program)
+                    && initialized.Dependencies is BackingDependencies pointerResultDependencies
+                    && NativePointerBackingOf(pointerResult, pointerResultDependencies,
+                        program, ref remaining, depth + 1).Count != 0)
+                {
+                    throw InvalidEffect(pointerResult.Span, "NativePointer");
                 }
                 CheckNativePointerReturn(function, initialized, result.Span);
                 IReadOnlySet<ProvenanceAnchor>? forwardedBacking = null;
@@ -3638,10 +3721,13 @@ public static partial class SemanticVerifier
 
     private sealed record CleanupScope(BoundBlock Body, HashSet<int> Visible, FailureEdges? OuterFailures);
 
+    private readonly record struct ActiveStorageScope(int Activation, BoundBlock Block);
+
     private sealed class LoopScope(int cleanupDepth)
     {
         internal int CleanupDepth { get; } = cleanupDepth;
         internal bool IsCleanupSwitch { get; init; }
+        internal int ScopeActivation { get; init; }
         internal FailureEdges Breaks { get; } = new();
         internal FailureEdges Continues { get; } = new();
     }
@@ -3660,6 +3746,7 @@ public static partial class SemanticVerifier
         private readonly Dictionary<BoundExpression, byte> _nativeOutputFlowFacts;
         private readonly NativeOutputDestinationState?[] _nativeOutputDestinations;
         private readonly NativeOutputCallFact?[] _nativeOutputResults;
+        private readonly List<ActiveStorageScope> _activeStorageScopes = [];
         private int _nativeOutputStateCount;
         internal bool MayHaveNativeOutputState => _nativeOutputStateCount != 0;
         internal bool HasNativeOutputContracts { get; }
@@ -3668,6 +3755,7 @@ public static partial class SemanticVerifier
         internal Dictionary<BoundStatement, InitializationState>? StatementInputs { get; init; }
         internal BackingDependencies? Dependencies { get; init; }
         internal HashSet<NativePointerWriteEffect>[]? NativePointerCaptureEffects { get; init; }
+        internal int ScopeActivation { get; set; }
 
         internal InitializationState(BoundProgram program, int length,
             bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions)
@@ -3767,11 +3855,68 @@ public static partial class SemanticVerifier
 
         internal bool HasRetiredValue(int index) => (_possibilities[index] & 4) != 0;
 
-        internal void Retire(int index)
+        internal void ActivateStorage(int index, long generation)
+            => Dependencies?.ActivateStorage(index, generation, ScopeActivation);
+
+        internal int EnterBlockActivation(TextSpan span) =>
+            Dependencies?.EnterBlockActivation(ScopeActivation, span) ?? ScopeActivation;
+
+        internal int EnterLoopActivation(TextSpan span, bool isReentry) =>
+            Dependencies?.EnterLoopActivation(ScopeActivation, span, isReentry) ?? ScopeActivation;
+
+        internal void EnterStorageScope(BoundBlock block)
+        {
+            if (Dependencies is not null)
+            {
+                _activeStorageScopes.Add(new ActiveStorageScope(ScopeActivation, block));
+            }
+        }
+
+        internal void ExitStorageScope(BoundBlock block)
+        {
+            if (Dependencies is null)
+            {
+                return;
+            }
+            if (_activeStorageScopes.Count == 0
+                || !ReferenceEquals(_activeStorageScopes[^1].Block, block)
+                || _activeStorageScopes[^1].Activation != ScopeActivation)
+            {
+                throw Invalid();
+            }
+            _activeStorageScopes.RemoveAt(_activeStorageScopes.Count - 1);
+        }
+
+        internal void CheckAndExitStorageScopesTo(int activation)
+        {
+            if (Dependencies is null)
+            {
+                return;
+            }
+            var targetIndex = activation == 0 ? -1
+                : _activeStorageScopes.FindLastIndex(scope => scope.Activation == activation);
+            if (activation != 0 && targetIndex < 0)
+            {
+                throw Invalid();
+            }
+
+            for (var index = _activeStorageScopes.Count - 1; index > targetIndex; index--)
+            {
+                CheckNativePointerScopeExit(_activeStorageScopes[index].Block, this);
+            }
+            _activeStorageScopes.RemoveRange(targetIndex + 1,
+                _activeStorageScopes.Count - targetIndex - 1);
+        }
+
+        internal void AdvanceStorageGeneration(int index, long generation)
+            => Dependencies?.RetireStorage(index, generation);
+
+        internal void Retire(int index, long generation)
         {
             _possibilities[index] = 4;
             SetNativeOutputState(index, null, null);
             Dependencies?.ClearNativePointerProvenance(index);
+            AdvanceStorageGeneration(index, generation);
         }
 
         internal byte Possibilities(int index) => _possibilities[index];
@@ -3833,7 +3978,9 @@ public static partial class SemanticVerifier
                 StatementInputs = StatementInputs,
                 Dependencies = Dependencies?.Clone(),
                 NativePointerCaptureEffects = NativePointerCaptureEffects,
+                ScopeActivation = ScopeActivation,
             };
+            result._activeStorageScopes.AddRange(_activeStorageScopes);
             Array.Copy(_possibilities, result._possibilities, Length);
             Array.Copy(_nativeOutputDestinations, result._nativeOutputDestinations, Length);
             Array.Copy(_nativeOutputResults, result._nativeOutputResults, Length);
@@ -3847,6 +3994,9 @@ public static partial class SemanticVerifier
             Array.Copy(_nativeOutputDestinations, destination._nativeOutputDestinations, Length);
             Array.Copy(_nativeOutputResults, destination._nativeOutputResults, Length);
             destination._nativeOutputStateCount = _nativeOutputStateCount;
+            destination.ScopeActivation = ScopeActivation;
+            destination._activeStorageScopes.Clear();
+            destination._activeStorageScopes.AddRange(_activeStorageScopes);
             if (Dependencies is not null && destination.Dependencies is not null)
             {
                 Dependencies.CopyTo(destination.Dependencies);
@@ -4314,6 +4464,16 @@ public static partial class SemanticVerifier
                     {
                         if (backing.Kind != ProvenanceAnchorKind.NativeStorage
                             || (uint)backing.Identity >= (uint)initialized.Length)
+                        {
+                            throw InvalidEffect(pointerRead.Span, "NativePointer");
+                        }
+                        if (backing.Storage is StorageKey storage
+                            && storage.IsKnown
+                            && (storage.Activation != nativePointerDependencies.FunctionActivation
+                                || HasUnknownStorageInstances(
+                                    nativePointerDependencies.StorageInstanceSet(backing.Identity))
+                                || !nativePointerDependencies.StorageInstanceSet(backing.Identity)
+                                    .Contains(storage.Instance)))
                         {
                             throw InvalidEffect(pointerRead.Span, "NativePointer");
                         }
@@ -4836,7 +4996,7 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
-                initialized.Retire(move.Variable);
+                initialized.Retire(move.Variable, (long)move.Span.Start + 1);
                 fieldMasks[move.Variable] = 0;
                 break;
             case BoundReceiverLoan loan:
@@ -6472,7 +6632,7 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
-                state.Retire(move.Variable);
+                state.Retire(move.Variable, (long)move.Span.Start + 1);
                 break;
             default:
                 throw Invalid();

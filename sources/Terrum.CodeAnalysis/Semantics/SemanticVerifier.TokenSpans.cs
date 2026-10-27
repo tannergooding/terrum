@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Text;
 
@@ -9,7 +10,213 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 public static partial class SemanticVerifier
 {
-    private static readonly IReadOnlySet<int> EmptyBackingSources = new HashSet<int>();
+    private enum ProvenanceAnchorKind : byte
+    {
+        BackingSource,
+        IncomingBacking,
+        NativeStorage,
+    }
+
+    private enum StorageProjectionKind : byte
+    {
+        WholeObject,
+        ElementRange,
+        ArrayElement,
+        UnknownElement,
+        InlineFieldPath,
+    }
+
+    private readonly record struct FieldProjectionSegment(PrimitiveType OwnerType, int Field);
+
+    private readonly struct FieldProjectionPath : IEquatable<FieldProjectionPath>
+    {
+        private readonly ImmutableArray<FieldProjectionSegment> _segments;
+
+        private FieldProjectionPath(ImmutableArray<FieldProjectionSegment> segments)
+        {
+            _segments = segments;
+        }
+
+        internal ImmutableArray<FieldProjectionSegment> Segments => _segments.IsDefault
+            ? [] : _segments;
+
+        internal FieldProjectionPath Append(PrimitiveType ownerType, int field)
+        {
+            if (field < 0)
+            {
+                throw Invalid();
+            }
+
+            var segments = _segments.IsDefault ? [] : _segments;
+            return new FieldProjectionPath(segments.Add(new FieldProjectionSegment(ownerType, field)));
+        }
+
+        internal FieldProjectionPath Append(FieldProjectionPath suffix)
+        {
+            var result = _segments.IsDefault ? [] : _segments;
+            foreach (var segment in suffix.Segments)
+            {
+                result = result.Add(segment);
+            }
+            return new FieldProjectionPath(result);
+        }
+
+        public bool Equals(FieldProjectionPath other)
+            => Segments.AsSpan().SequenceEqual(other.Segments.AsSpan());
+
+        public override bool Equals(object? obj)
+            => obj is FieldProjectionPath other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            var hash = new HashCode();
+            foreach (var segment in Segments)
+            {
+                hash.Add(segment);
+            }
+            return hash.ToHashCode();
+        }
+    }
+
+    private enum StorageActivationKind : byte
+    {
+        Block,
+        LoopFirstEntry,
+        LoopReentry,
+    }
+
+    private readonly record struct StorageActivationKey(
+        int Parent, int Site, int Length, StorageActivationKind Kind);
+
+    private sealed class StorageActivationContext
+    {
+        private readonly Dictionary<StorageActivationKey, int> _activations = [];
+        private int _nextActivation = 1;
+
+        internal int Enter(int parent, TextSpan span, StorageActivationKind kind)
+        {
+            if (parent < 0)
+            {
+                throw Invalid();
+            }
+
+            var key = new StorageActivationKey(parent, span.Start, span.Length, kind);
+            if (!_activations.TryGetValue(key, out var activation))
+            {
+                activation = _nextActivation++;
+                _activations.Add(key, activation);
+            }
+            return activation;
+        }
+    }
+
+    private readonly record struct StorageProjection(
+        StorageProjectionKind Kind, long Start, long Length,
+        FieldProjectionPath FieldPath = default)
+    {
+        internal static StorageProjection WholeObject =>
+            new(StorageProjectionKind.WholeObject, 0, 0);
+
+        internal StorageProjection AppendField(PrimitiveType ownerType, int field)
+        {
+            return Kind switch
+            {
+                StorageProjectionKind.WholeObject => new StorageProjection(
+                    StorageProjectionKind.InlineFieldPath, 0, 0,
+                    new FieldProjectionPath().Append(ownerType, field)),
+                StorageProjectionKind.InlineFieldPath => this with
+                {
+                    FieldPath = FieldPath.Append(ownerType, field),
+                },
+                _ => new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0),
+            };
+        }
+
+        internal static StorageProjection Combine(
+            StorageProjection prefix, StorageProjection suffix)
+        {
+            if (suffix.Kind == StorageProjectionKind.WholeObject)
+            {
+                return prefix;
+            }
+            if (prefix.Kind == StorageProjectionKind.WholeObject)
+            {
+                return suffix;
+            }
+            return prefix.Kind == StorageProjectionKind.InlineFieldPath
+                && suffix.Kind == StorageProjectionKind.InlineFieldPath
+                    ? new StorageProjection(StorageProjectionKind.InlineFieldPath,
+                        0, 0, prefix.FieldPath.Append(suffix.FieldPath))
+                    : new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0);
+        }
+
+        internal static StorageProjection ForArrayElement(BoundExpression index)
+        {
+            if (index is BoundConstant constant && constant.TryGetLegacyValue(out var value))
+            {
+                return new StorageProjection(StorageProjectionKind.ArrayElement, value, 1);
+            }
+            return new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0);
+        }
+
+        internal static StorageProjection ForStorageAddress(BoundNativeStorageAddress address) =>
+            address.CarrierType == PrimitiveType.NativeFixedArray
+                ? new StorageProjection(StorageProjectionKind.ElementRange, 0, address.ElementCount)
+                : WholeObject;
+    }
+
+    private readonly record struct StorageInstance(int SupportingScopeActivation, long LifetimeGeneration)
+    {
+        internal bool IsKnown => SupportingScopeActivation >= 0
+            && LifetimeGeneration != StorageKey.UnknownGeneration;
+    }
+
+    private readonly record struct StorageKey(
+        int Activation, int Site, StorageInstance Instance, StorageProjection Projection)
+    {
+        internal const long UnknownGeneration = long.MinValue;
+        internal bool IsKnown => Activation >= 0 && Instance.IsKnown;
+    }
+
+    private readonly record struct ProvenanceAnchor(
+        ProvenanceAnchorKind Kind, int Identity, StorageKey? Storage)
+    {
+        internal static ProvenanceAnchor ForBackingSource(int source)
+            => source >= 0
+                ? new ProvenanceAnchor(ProvenanceAnchorKind.BackingSource, source, null)
+                : new ProvenanceAnchor(ProvenanceAnchorKind.IncomingBacking, ~source, null);
+
+        internal static ProvenanceAnchor ForNativeStorage(int activation, int variable,
+            StorageInstance instance, StorageProjection projection)
+            => new(ProvenanceAnchorKind.NativeStorage, variable,
+                new StorageKey(activation, variable, instance, projection));
+    }
+
+    private static readonly HashSet<ProvenanceAnchor> EmptyBackingSources
+        = new HashSet<ProvenanceAnchor>();
+
+    private readonly record struct StagedDependencySource(
+        BoundCall? Call,
+        int ParameterIndex,
+        HashSet<ProvenanceAnchor> BackingSources,
+        HashSet<ProvenanceAnchor> NativePointerSources,
+        bool NativePointerMayBeUnknown);
+
+    private sealed class NativePointerFieldValue
+    {
+        internal HashSet<ProvenanceAnchor> Sources { get; }
+        internal bool MayBeUnknown { get; set; }
+
+        internal NativePointerFieldValue(IReadOnlySet<ProvenanceAnchor> sources,
+            bool mayBeUnknown)
+        {
+            Sources = [.. sources];
+            MayBeUnknown = mayBeUnknown;
+        }
+
+        internal NativePointerFieldValue Clone()
+            => new(Sources, MayBeUnknown);
+    }
 
     private static bool VerifySpanContracts(BoundProgram program)
     {
@@ -27,13 +234,13 @@ public static partial class SemanticVerifier
             if (role != TokenSpanTypeRole.None
                 && (role is < TokenSpanTypeRole.Token or > TokenSpanTypeRole.Snapshot
                     || !roles.Add(role)
-                    || role == TokenSpanTypeRole.Snapshot
-                        && !TokenSpanContract.ValidSnapshot(structure)))
+                    || (role == TokenSpanTypeRole.Snapshot
+                        && !TokenSpanContract.ValidSnapshot(structure))))
             {
                 throw InvalidEffect(default, "Ownership");
             }
-            if (structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)
-                && !TokenSpanContract.ValidCursor(structure)
+            if ((structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)
+                && !TokenSpanContract.ValidCursor(structure))
                 || structure.Fields.Any(field => TokenSpanContract.IsCursor(field.Type, program.Structures)))
             {
                 throw InvalidEffect(default, "Ownership");
@@ -45,15 +252,38 @@ public static partial class SemanticVerifier
             {
                 throw Invalid(function.Span);
             }
+            var resultDependency = function.ReturnType == PrimitiveType.TokenSpan
+                ? ResultDependencyContract(function) : null;
+            var resultSources = resultDependency?.Sources ?? [];
+            var expectedResultParameters = resultSources
+                .Where(static source => source.Kind == BoundDependencySourceKind.Formal)
+                .Select(static source => source.FormalOrdinal!.Value)
+                .ToImmutableArray();
+            var expectedResultReceiver = resultSources.Any(static source =>
+                source.Kind == BoundDependencySourceKind.Receiver);
             var forwardedSpanResult = function.ReturnType == PrimitiveType.TokenSpan
-                && function.ReturnsForwardedBacking && !function.ResultDependencyParameters.IsEmpty;
+                && !resultSources.IsEmpty;
             if (function.ReturnsForwardedBacking != forwardedSpanResult
-                || !function.ReturnsForwardedBacking && !function.ResultDependencyParameters.IsEmpty)
+                || !function.ResultDependencyParameters.SequenceEqual(expectedResultParameters)
+                || function.ResultDependencyIncludesReceiver != expectedResultReceiver)
             {
                 throw InvalidEffect(function.Span, "Ownership");
             }
             var cursorConstructor = function.IsConstructor
                 && TokenSpanContract.IsCursor(function.ReturnType, program.Structures);
+            var capture = cursorConstructor ? ReceiverCaptureContract(function) : null;
+            var expectedCapturedParameters = capture is null
+                ? ImmutableArray<int>.Empty
+                : [
+                    .. capture.Sources
+                    .Where(static source => source.Kind == BoundDependencySourceKind.Formal)
+                    .Select(static source => source.FormalOrdinal!.Value + 1),
+                ];
+            if (!function.CapturedParameters.SequenceEqual(expectedCapturedParameters))
+            {
+                throw InvalidEffect(function.Span, "Ownership");
+            }
+
             if (cursorConstructor)
             {
                 if (function.CapturedParameters is not [1] || function.ParameterCount != 1
@@ -65,22 +295,34 @@ public static partial class SemanticVerifier
                 }
             }
             else if (!function.CapturedParameters.IsEmpty
-                || TokenSpanContract.IsDependent(function.ReturnType, program.Structures) && !forwardedSpanResult)
+                || (TokenSpanContract.IsDependent(function.ReturnType, program.Structures)
+                    && !forwardedSpanResult))
             {
                 throw InvalidEffect(function.Span, "Ownership");
             }
             if (forwardedSpanResult)
             {
                 if (function.IsConstructor || function.IsExternal || function.Intrinsic != BoundIntrinsic.None
-                    || function.DeclaringStruct is not null || !function.IsInternal || function.ParameterCount == 0)
+                    || !function.IsInternal || function.ParameterCount == 0)
+                {
+                    throw InvalidEffect(function.Span, "Ownership");
+                }
+                var receiverOffset = function.DeclaringStruct is not null
+                    && !function.IsStatic ? 1 : 0;
+                var explicitParameterCount = function.ParameterCount - receiverOffset;
+                if (function.ResultDependencyIncludesReceiver
+                    && (receiverOffset == 0 || function.Variables.Length == 0
+                        || !IsSpanResultReceiver(function.Variables[0].Type, program)))
                 {
                     throw InvalidEffect(function.Span, "Ownership");
                 }
                 var seen = new HashSet<int>();
                 foreach (var parameter in function.ResultDependencyParameters)
                 {
-                    if ((uint)parameter >= (uint)function.ParameterCount || !seen.Add(parameter)
-                        || function.Variables[parameter] is not {
+                    var slot = parameter + receiverOffset;
+                    if ((uint)parameter >= (uint)explicitParameterCount || !seen.Add(parameter)
+                        || (uint)slot >= (uint)function.Variables.Length
+                        || function.Variables[slot] is not {
                             Type: PrimitiveType.TokenSpan,
                             IsOut: false,
                             IsInit: false,
@@ -100,7 +342,7 @@ public static partial class SemanticVerifier
                 if (TokenSpanContract.IsDependent(variable.Type, program.Structures)
                     && (function.IsExternal || function.Intrinsic != BoundIntrinsic.None
                         || variable.IsOut || variable.IsInit || variable.IsInitializationLocal
-                        || variable.Type == PrimitiveType.TokenSpan && variable.IsMutable))
+                        || (variable.Type == PrimitiveType.TokenSpan && variable.IsMutable)))
                 {
                     throw InvalidEffect(variable.Span, "Ownership");
                 }
@@ -109,20 +351,508 @@ public static partial class SemanticVerifier
         return hasSpans;
     }
 
+    private static bool IsSpanResultReceiver(PrimitiveType type,
+        BoundProgram program)
+    {
+        if (TokenSpanContract.IsDependent(type, program.Structures))
+        {
+            return true;
+        }
+
+        return IsTokenSnapshotType(type, program);
+    }
+
+    private static BoundDependencyContract? ResultDependencyContract(
+        BoundFunction function)
+        => function.DependencyContracts.FirstOrDefault(static contract =>
+            contract.Relation == BoundDependencyRelation.DependsOn
+            && contract.Destination == BoundDependencyDestination.Result);
+
+    private static BoundDependencyContract? ReceiverCaptureContract(
+        BoundFunction function)
+        => function.DependencyContracts.FirstOrDefault(static contract =>
+            contract.Relation == BoundDependencyRelation.Captures
+            && contract.Destination == BoundDependencyDestination.Receiver);
+
+    private static BoundExpression DependencyCallArgument(BoundCall call,
+        BoundFunction callee, BoundDependencySource source)
+    {
+        var receiverOffset = callee.DeclaringStruct is not null
+            && !callee.IsStatic && !callee.IsConstructor && !callee.IsClassConstructor ? 1 : 0;
+        var parameter = source.Kind switch
+        {
+            BoundDependencySourceKind.Receiver when receiverOffset != 0 => 0,
+            BoundDependencySourceKind.Formal when source.FormalOrdinal is int ordinal
+                => ordinal + receiverOffset,
+            _ => throw Invalid(call.Span),
+        };
+        var argument = call.ArgumentIndex(parameter);
+        return (uint)argument < (uint)call.Arguments.Length
+            ? call.Arguments[argument] : throw Invalid(call.Span);
+    }
+
     private sealed class BackingDependencies
     {
         // A slot conservatively retains every source it can hold on any path. Liveness
         // remains path-sensitive in InitializationState, including unwind replay.
-        internal HashSet<int>?[] Sources { get; }
-        internal HashSet<int>?[] NativePointerSources { get; }
+        internal HashSet<ProvenanceAnchor>?[] Sources { get; }
+        internal HashSet<ProvenanceAnchor>?[] NativePointerSources { get; }
         internal bool[] NativePointerMayBeUnknown { get; }
-        internal List<IReadOnlySet<int>> Staged { get; } = [];
+        private Dictionary<StorageKey, NativePointerFieldValue> NativePointerFieldValues { get; } = [];
+        private HashSet<StorageInstance>[] StorageInstances { get; }
+        private StorageActivationContext StorageActivationContext { get; }
+        internal int FunctionActivation { get; }
+        internal BoundFunction Function { get; }
+        internal const int RootScopeActivation = 0;
+        internal List<StagedDependencySource> Staged { get; } = [];
 
-        internal BackingDependencies(int length)
+        internal BackingDependencies(int functionActivation, BoundFunction function, int length)
+            : this(functionActivation, function, length, new StorageActivationContext())
         {
-            Sources = new HashSet<int>?[length];
-            NativePointerSources = new HashSet<int>?[length];
+        }
+
+        private BackingDependencies(int functionActivation, BoundFunction function, int length,
+            StorageActivationContext storageActivationContext)
+        {
+            FunctionActivation = functionActivation;
+            Function = function;
+            StorageActivationContext = storageActivationContext;
+            Sources = new HashSet<ProvenanceAnchor>?[length];
+            NativePointerSources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerMayBeUnknown = new bool[length];
+            StorageInstances = new HashSet<StorageInstance>[length];
+            for (var slot = 0; slot < length; slot++)
+            {
+                StorageInstances[slot] = [new StorageInstance(RootScopeActivation, 0)];
+            }
+        }
+
+        internal BackingDependencies Clone()
+        {
+            var clone = new BackingDependencies(FunctionActivation, Function, Sources.Length,
+                StorageActivationContext);
+            CopyTo(clone);
+            return clone;
+        }
+
+        internal void CopyTo(BackingDependencies destination)
+        {
+            if (destination.Sources.Length != Sources.Length
+                || destination.FunctionActivation != FunctionActivation
+                || !ReferenceEquals(destination.StorageActivationContext, StorageActivationContext))
+            {
+                throw Invalid();
+            }
+
+            for (var slot = 0; slot < Sources.Length; slot++)
+            {
+                destination.Sources[slot] = CloneSet(Sources[slot]);
+                destination.NativePointerSources[slot] = CloneSet(NativePointerSources[slot]);
+                destination.NativePointerMayBeUnknown[slot] = NativePointerMayBeUnknown[slot];
+                destination.StorageInstances[slot] = [.. StorageInstances[slot]];
+            }
+            destination.Staged.Clear();
+            foreach (var staged in Staged)
+            {
+                destination.Staged.Add(staged with {
+                    BackingSources = [.. staged.BackingSources],
+                    NativePointerSources = [.. staged.NativePointerSources],
+                });
+            }
+            destination.NativePointerFieldValues.Clear();
+            foreach (var (key, value) in NativePointerFieldValues)
+            {
+                destination.NativePointerFieldValues.Add(key, value.Clone());
+            }
+        }
+
+        internal bool MergeSlot(int slot, BackingDependencies other)
+        {
+            if ((uint)slot >= (uint)Sources.Length || other.Sources.Length != Sources.Length)
+            {
+                throw Invalid();
+            }
+
+            var changed = MergeSet(ref Sources[slot], other.Sources[slot]);
+            changed |= MergeSet(ref NativePointerSources[slot], other.NativePointerSources[slot]);
+            if (other.NativePointerMayBeUnknown[slot] && !NativePointerMayBeUnknown[slot])
+            {
+                NativePointerMayBeUnknown[slot] = true;
+                changed = true;
+            }
+            if (other.FunctionActivation != FunctionActivation
+                || !ReferenceEquals(other.StorageActivationContext, StorageActivationContext))
+            {
+                throw Invalid();
+            }
+            var currentInstances = new HashSet<StorageInstance>(StorageInstances[slot]);
+            var priorInstanceCount = StorageInstances[slot].Count;
+            StorageInstances[slot].UnionWith(other.StorageInstances[slot]);
+            changed |= priorInstanceCount != StorageInstances[slot].Count;
+
+            var fieldKeys = NativePointerFieldValues.Keys
+                .Concat(other.NativePointerFieldValues.Keys)
+                .Where(key => key.Site == slot)
+                .Distinct()
+                .ToArray();
+            foreach (var key in fieldKeys)
+            {
+                var hasCurrent = NativePointerFieldValues.TryGetValue(key, out var currentValue);
+                var hasOther = other.NativePointerFieldValues.TryGetValue(key, out var otherValue);
+                if (hasCurrent && hasOther)
+                {
+                    var currentCount = currentValue!.Sources.Count;
+                    currentValue.Sources.UnionWith(otherValue!.Sources);
+                    changed |= currentCount != currentValue.Sources.Count;
+                    if (otherValue.MayBeUnknown && !currentValue.MayBeUnknown)
+                    {
+                        currentValue.MayBeUnknown = true;
+                        changed = true;
+                    }
+                }
+                else if (hasCurrent)
+                {
+                    if (other.StorageInstances[slot].Contains(key.Instance)
+                        && !currentValue!.MayBeUnknown)
+                    {
+                        currentValue.MayBeUnknown = true;
+                        changed = true;
+                    }
+                }
+                else
+                {
+                    currentValue = otherValue!.Clone();
+                    if (currentInstances.Contains(key.Instance)
+                        && !currentValue.MayBeUnknown)
+                    {
+                        currentValue.MayBeUnknown = true;
+                    }
+                    NativePointerFieldValues.Add(key, currentValue);
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        internal bool CopySlot(int slot, BackingDependencies other)
+        {
+            if ((uint)slot >= (uint)Sources.Length || other.Sources.Length != Sources.Length)
+            {
+                throw Invalid();
+            }
+
+            var changed = !SetEquals(Sources[slot], other.Sources[slot])
+                || !SetEquals(NativePointerSources[slot], other.NativePointerSources[slot])
+                || NativePointerMayBeUnknown[slot] != other.NativePointerMayBeUnknown[slot]
+                || !StorageInstances[slot].SetEquals(other.StorageInstances[slot])
+                || !NativePointerFieldValuesEqualForSlot(slot, other);
+            Sources[slot] = CloneSet(other.Sources[slot]);
+            NativePointerSources[slot] = CloneSet(other.NativePointerSources[slot]);
+            NativePointerMayBeUnknown[slot] = other.NativePointerMayBeUnknown[slot];
+            StorageInstances[slot] = [.. other.StorageInstances[slot]];
+            ClearNativePointerFieldValues(slot);
+            foreach (var (key, value) in other.NativePointerFieldValues)
+            {
+                if (key.Site == slot)
+                {
+                    NativePointerFieldValues.Add(key, value.Clone());
+                }
+            }
+            return changed;
+        }
+
+        internal HashSet<StorageInstance> StorageInstanceSet(int slot)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length)
+            {
+                throw Invalid();
+            }
+            return StorageInstances[slot];
+        }
+
+        internal int EnterBlockActivation(int parent, TextSpan span) =>
+            StorageActivationContext.Enter(parent, span, StorageActivationKind.Block);
+
+        internal int EnterLoopActivation(int parent, TextSpan span, bool isReentry) =>
+            StorageActivationContext.Enter(parent, span, isReentry
+                ? StorageActivationKind.LoopReentry : StorageActivationKind.LoopFirstEntry);
+
+        internal void ActivateStorage(int slot, long generation, int supportingScopeActivation)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length || generation == StorageKey.UnknownGeneration
+                || supportingScopeActivation < 0)
+            {
+                throw Invalid();
+            }
+            StorageInstances[slot] = [new StorageInstance(supportingScopeActivation, generation)];
+        }
+
+        internal void RetireStorage(int slot, long generation)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length || generation == StorageKey.UnknownGeneration)
+            {
+                throw Invalid();
+            }
+            StorageInstances[slot] = [.. StorageInstances[slot]
+                .Select(instance => instance with { LifetimeGeneration = generation })];
+        }
+
+        internal void SetBackingSources(int slot, IReadOnlySet<ProvenanceAnchor> sources)
+        {
+            if ((uint)slot >= (uint)Sources.Length)
+            {
+                throw Invalid();
+            }
+            Sources[slot] = sources.Count == 0 ? null : [.. sources];
+        }
+
+        internal void AddBackingSources(int slot, IReadOnlySet<ProvenanceAnchor> sources)
+        {
+            if ((uint)slot >= (uint)Sources.Length)
+            {
+                throw Invalid();
+            }
+            _ = MergeSet(ref Sources[slot], sources);
+        }
+
+        internal void ClearBackingSources(int slot)
+        {
+            if ((uint)slot >= (uint)Sources.Length)
+            {
+                throw Invalid();
+            }
+            Sources[slot] = null;
+        }
+
+        internal void SetNativePointerProvenance(int slot,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeUnknown)
+        {
+            if ((uint)slot >= (uint)NativePointerSources.Length)
+            {
+                throw Invalid();
+            }
+            NativePointerSources[slot] = sources.Count == 0 ? null : [.. sources];
+            NativePointerMayBeUnknown[slot] = mayBeUnknown;
+        }
+
+        internal void SetNativePointerAggregateProvenance(int slot,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeUnknown)
+        {
+            if ((uint)slot >= (uint)NativePointerSources.Length)
+            {
+                throw Invalid();
+            }
+            NativePointerSources[slot] = sources.Count == 0 ? null : [.. sources];
+            NativePointerMayBeUnknown[slot] = mayBeUnknown;
+        }
+
+        internal void AddNativePointerProvenance(int slot,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeUnknown)
+        {
+            if ((uint)slot >= (uint)NativePointerSources.Length)
+            {
+                throw Invalid();
+            }
+            _ = MergeSet(ref NativePointerSources[slot], sources);
+            NativePointerMayBeUnknown[slot] |= mayBeUnknown;
+        }
+
+        internal void ClearNativePointerProvenance(int slot)
+        {
+            if ((uint)slot >= (uint)NativePointerSources.Length)
+            {
+                throw Invalid();
+            }
+            NativePointerSources[slot] = null;
+            NativePointerMayBeUnknown[slot] = false;
+            ClearNativePointerFieldValues(slot);
+        }
+
+        internal void MarkAllNativePointerProvenanceUnknown()
+        {
+            Array.Fill(NativePointerMayBeUnknown, true);
+            foreach (var fieldValue in NativePointerFieldValues.Values)
+            {
+                fieldValue.MayBeUnknown = true;
+            }
+        }
+
+        internal void SetNativePointerFieldValue(int slot, StorageProjection projection,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeUnknown)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || projection.Kind != StorageProjectionKind.InlineFieldPath
+                || projection.FieldPath.Segments.IsEmpty)
+            {
+                throw Invalid();
+            }
+
+            foreach (var instance in StorageInstances[slot])
+            {
+                var key = new StorageKey(FunctionActivation, slot, instance, projection);
+                NativePointerFieldValues[key] = new NativePointerFieldValue(
+                    sources, mayBeUnknown);
+            }
+        }
+
+        internal bool TryGetNativePointerFieldValue(int slot,
+            StorageProjection projection, out HashSet<ProvenanceAnchor> sources,
+            out bool mayBeUnknown)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || projection.Kind != StorageProjectionKind.InlineFieldPath
+                || projection.FieldPath.Segments.IsEmpty)
+            {
+                throw Invalid();
+            }
+
+            sources = [];
+            mayBeUnknown = false;
+            var found = false;
+            foreach (var instance in StorageInstances[slot])
+            {
+                var key = new StorageKey(FunctionActivation, slot, instance, projection);
+                if (NativePointerFieldValues.TryGetValue(key, out var value))
+                {
+                    sources.UnionWith(value.Sources);
+                    mayBeUnknown |= value.MayBeUnknown;
+                    found = true;
+                }
+                else
+                {
+                    mayBeUnknown = true;
+                }
+            }
+
+            return found;
+        }
+
+        private void ClearNativePointerFieldValues(int slot)
+        {
+            foreach (var key in NativePointerFieldValues.Keys
+                .Where(key => key.Site == slot).ToArray())
+            {
+                _ = NativePointerFieldValues.Remove(key);
+            }
+        }
+
+        private bool NativePointerFieldValuesEqualForSlot(
+            int slot, BackingDependencies other)
+        {
+            foreach (var (key, value) in NativePointerFieldValues)
+            {
+                if (key.Site != slot)
+                {
+                    continue;
+                }
+                if (!other.NativePointerFieldValues.TryGetValue(key, out var otherValue)
+                    || value.MayBeUnknown != otherValue.MayBeUnknown
+                    || !value.Sources.SetEquals(otherValue.Sources))
+                {
+                    return false;
+                }
+            }
+            foreach (var key in other.NativePointerFieldValues.Keys)
+            {
+                if (key.Site == slot && !NativePointerFieldValues.ContainsKey(key))
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        internal void TransferBackingSource(int source, int destination)
+        {
+            if ((uint)source >= (uint)Sources.Length
+                || (uint)destination >= (uint)Sources.Length)
+            {
+                throw Invalid();
+            }
+            if (source == destination)
+            {
+                return;
+            }
+
+            var sourceBacking = CloneSet(Sources[source]);
+            var sourcePointers = CloneSet(NativePointerSources[source]);
+            var sourcePointerMayBeUnknown = NativePointerMayBeUnknown[source];
+            var sourceFieldValues = NativePointerFieldValues
+                .Where(pair => pair.Key.Site == source)
+                .Select(static pair => (pair.Key.Projection, Value: pair.Value.Clone()))
+                .ToArray();
+            for (var slot = 0; slot < Sources.Length; slot++)
+            {
+                RemapSource(Sources[slot], source, destination);
+            }
+            for (var index = 0; index < Staged.Count; index++)
+            {
+                var sourceAnchor = ProvenanceAnchor.ForBackingSource(source);
+                var staged = Staged[index];
+                if (!staged.BackingSources.Contains(sourceAnchor))
+                {
+                    continue;
+                }
+                var sources = new HashSet<ProvenanceAnchor>(staged.BackingSources);
+                RemapSource(sources, source, destination);
+                Staged[index] = staged with { BackingSources = sources };
+            }
+
+            if (sourceBacking is not null)
+            {
+                RemapSource(sourceBacking, source, destination);
+            }
+            Sources[destination] = sourceBacking;
+            Sources[source] = null;
+            NativePointerSources[destination] = sourcePointers;
+            NativePointerSources[source] = null;
+            NativePointerMayBeUnknown[destination] = sourcePointerMayBeUnknown;
+            NativePointerMayBeUnknown[source] = false;
+            ClearNativePointerFieldValues(destination);
+            foreach (var (projection, value) in sourceFieldValues)
+            {
+                foreach (var instance in StorageInstances[destination])
+                {
+                    NativePointerFieldValues.Add(new StorageKey(
+                        FunctionActivation, destination, instance, projection), value.Clone());
+                }
+            }
+        }
+
+        private static HashSet<ProvenanceAnchor>? CloneSet(
+            HashSet<ProvenanceAnchor>? sources)
+            => sources is null ? null : [.. sources];
+
+        private static bool MergeSet(ref HashSet<ProvenanceAnchor>? destination,
+            IReadOnlySet<ProvenanceAnchor>? additions)
+        {
+            if (additions is null || additions.Count == 0)
+            {
+                return false;
+            }
+            if (destination is null)
+            {
+                destination = [.. additions];
+                return true;
+            }
+            var priorCount = destination.Count;
+            destination.UnionWith(additions);
+            return priorCount != destination.Count;
+        }
+
+        private static bool SetEquals(IReadOnlySet<ProvenanceAnchor>? left,
+            IReadOnlySet<ProvenanceAnchor>? right)
+            => left is null ? right is null || right.Count == 0
+                : right is not null && left.SetEquals(right);
+
+        private static void RemapSource(HashSet<ProvenanceAnchor>? sources,
+            int source, int destination)
+        {
+            var sourceAnchor = ProvenanceAnchor.ForBackingSource(source);
+            if (sources?.Remove(sourceAnchor) == true)
+            {
+                _ = sources.Add(ProvenanceAnchor.ForBackingSource(destination));
+            }
         }
     }
 
@@ -130,7 +860,104 @@ public static partial class SemanticVerifier
 
     private readonly record struct NativePointerCallSite(int CallerFunction, BoundCall Call);
 
-    private static HashSet<NativePointerWriteEffect>[] CreateNativePointerWriteEffects(BoundProgram program)
+    private static HashSet<NativePointerWriteEffect>[] CreateNativePointerCaptureEffects(
+        BoundProgram program)
+    {
+        var effects = new HashSet<NativePointerWriteEffect>[program.Functions.Length];
+        for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
+        {
+            var function = program.Functions[functionIndex];
+            if (function.DependencyContracts.IsDefault)
+            {
+                throw InvalidEffect(function.Span, "Ownership");
+            }
+
+            var functionEffects = effects[functionIndex] = [];
+            var receiverOffset = function.DeclaringStruct is not null
+                && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor
+                    ? 1 : 0;
+            var variableOffset = function.IsConstructor ? 1 : receiverOffset;
+            foreach (var contract in function.DependencyContracts)
+            {
+                if (contract.Relation != BoundDependencyRelation.Captures
+                    || contract.Destination != BoundDependencyDestination.RetainedFormal
+                    || contract.DestinationOrdinal is not int destinationOrdinal)
+                {
+                    continue;
+                }
+
+                var destinationSlot = destinationOrdinal + variableOffset;
+                if ((uint)destinationSlot >= (uint)function.Variables.Length
+                    || !IsNativePointerHolder(function.Variables[destinationSlot].Type, program))
+                {
+                    continue;
+                }
+
+                foreach (var source in contract.Sources)
+                {
+                    var sourceParameter = source.Kind switch
+                    {
+                        BoundDependencySourceKind.Formal
+                            when source.FormalOrdinal is int ordinal => ordinal + receiverOffset,
+                        BoundDependencySourceKind.Receiver when receiverOffset != 0 => 0,
+                        _ => -1,
+                    };
+                    var sourceSlot = source.Kind switch
+                    {
+                        BoundDependencySourceKind.Formal
+                            when source.FormalOrdinal is int ordinal => ordinal + variableOffset,
+                        BoundDependencySourceKind.Receiver when receiverOffset != 0 => 0,
+                        _ => -1,
+                    };
+                    if ((uint)sourceSlot < (uint)function.Variables.Length
+                        && sourceParameter >= 0
+                        && CarriesNativePointer(function.Variables[sourceSlot].Type, program))
+                    {
+                        _ = functionEffects.Add(new NativePointerWriteEffect(
+                            destinationOrdinal + receiverOffset, sourceParameter));
+                    }
+                }
+            }
+        }
+        return effects;
+    }
+
+    private static bool IsNativePointerHolder(PrimitiveType type, BoundProgram program)
+    {
+        if (!NativePointerTypeContract.IsValidType(type, program.NativePointerTypes))
+        {
+            return false;
+        }
+
+        var pointer = program.NativePointerTypes[NativePointerTypes.Index(type)];
+        return pointer.IsWritable && CarriesNativePointer(pointer.PointeeType, program);
+    }
+
+    private static void ValidateNativePointerWriteContracts(BoundProgram program,
+        HashSet<NativePointerWriteEffect>[] actualEffects,
+        HashSet<NativePointerWriteEffect>[] declaredEffects)
+    {
+        if (actualEffects.Length != program.Functions.Length
+            || declaredEffects.Length != program.Functions.Length)
+        {
+            throw Invalid();
+        }
+
+        for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
+        {
+            foreach (var effect in actualEffects[functionIndex])
+            {
+                if (!declaredEffects[functionIndex].Contains(effect))
+                {
+                    throw InvalidEffect(program.Functions[functionIndex].Span, "Ownership");
+                }
+            }
+        }
+    }
+
+    // Body-derived effects validate each source declaration; callers consume only declared captures.
+    private static HashSet<NativePointerWriteEffect>[] CreateNativePointerWriteEffects(
+        BoundProgram program, HashSet<NativePointerWriteEffect>[] declaredEffects)
     {
         var summaries = new HashSet<NativePointerWriteEffect>[program.Functions.Length];
         var callersByCallee = new List<NativePointerCallSite>?[program.Functions.Length];
@@ -170,8 +997,7 @@ public static partial class SemanticVerifier
                     if (expression is BoundCall call && (uint)call.Function < (uint)program.Functions.Length)
                     {
                         var callee = program.Functions[call.Function];
-                        if (!callee.IsExternal && callee.Intrinsic == BoundIntrinsic.None
-                            && callee.IndexedBody is null)
+                        if (declaredEffects[call.Function].Count > 0)
                         {
                             var callers = callersByCallee[call.Function];
                             if (callers is null)
@@ -192,7 +1018,7 @@ public static partial class SemanticVerifier
         var queued = new bool[program.Functions.Length];
         for (var functionIndex = 0; functionIndex < summaries.Length; functionIndex++)
         {
-            if (summaries[functionIndex].Count > 0)
+            if (declaredEffects[functionIndex].Count > 0)
             {
                 pending.Enqueue(functionIndex);
                 queued[functionIndex] = true;
@@ -212,7 +1038,7 @@ public static partial class SemanticVerifier
                 Count(ref remaining, 0);
                 var caller = program.Functions[callSite.CallerFunction];
                 var changed = false;
-                foreach (var effect in summaries[calleeIndex].ToArray())
+                foreach (var effect in declaredEffects[calleeIndex])
                 {
                     var destination = NativePointerCallArgument(callSite.Call, callee,
                         effect.DestinationParameter);
@@ -428,8 +1254,140 @@ public static partial class SemanticVerifier
             ? expression : throw Invalid(call.Span);
     }
 
-    private static BackingDependencies? CreateBackingDependencies(BoundFunction function,
-        BoundProgram program, bool hasSpans, HashSet<NativePointerWriteEffect>[] nativePointerWriteEffects)
+    private static void ApplyNativePointerCaptureEffects(BoundCall call, BoundFunction callee,
+        InitializationState initialized, ref int remaining)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts
+            || initialized.NativePointerCaptureEffects is not { } captureEffects
+            || (uint)call.Function >= (uint)captureEffects.Length)
+        {
+            return;
+        }
+
+        var effects = captureEffects[call.Function];
+        for (var parameter = 0; parameter < callee.ParameterCount; parameter++)
+        {
+            Count(ref remaining, 0);
+            var variable = parameter + (callee.IsConstructor ? 1 : 0);
+            if ((uint)variable >= (uint)callee.Variables.Length
+                || !IsNativePointerHolder(callee.Variables[variable].Type,
+                    initialized.Program)
+                || HasNativeOutputForParameter(callee, parameter))
+            {
+                continue;
+            }
+
+            var address = NativePointerCallArgument(call, callee, parameter);
+            var targets = NativePointerBackingOf(address, facts,
+                initialized.Program, ref remaining, 0);
+            var addressMayBeUnknown = NativePointerMayBeUnknownOf(address, facts,
+                initialized.Program, ref remaining, 0);
+            var sources = new HashSet<ProvenanceAnchor>();
+            foreach (var effect in effects)
+            {
+                Count(ref remaining, 0);
+                if (effect.DestinationParameter != parameter)
+                {
+                    continue;
+                }
+
+                var stagedIndex = facts.Staged.FindLastIndex(staged =>
+                    ReferenceEquals(staged.Call, call)
+                    && staged.ParameterIndex == effect.ValueParameter);
+                if (stagedIndex < 0)
+                {
+                    throw InvalidEffect(call.Span, "Ownership");
+                }
+                var staged = facts.Staged[stagedIndex];
+                sources.UnionWith(staged.NativePointerSources);
+            }
+
+            if (targets.Count == 0)
+            {
+                facts.MarkAllNativePointerProvenanceUnknown();
+                continue;
+            }
+            if (addressMayBeUnknown)
+            {
+                facts.MarkAllNativePointerProvenanceUnknown();
+            }
+
+            foreach (var target in targets)
+            {
+                Count(ref remaining, 0);
+                if (target.Kind == ProvenanceAnchorKind.NativeStorage
+                    && (uint)target.Identity < (uint)facts.NativePointerSources.Length)
+                {
+                    facts.AddNativePointerProvenance(target.Identity, sources,
+                        mayBeUnknown: true);
+                }
+            }
+        }
+    }
+
+    private static bool MayWriteNativePointerStorage(BoundIndirectCall call, BoundProgram program)
+    {
+        if (call.Target is null
+            || !NativeFunctionPointerTypes.IsType(call.Target.Type))
+        {
+            return false;
+        }
+
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(call.Target.Type)];
+        foreach (var parameterType in signature.ParameterTypes)
+        {
+            if (!NativePointerTypeContract.IsValidType(
+                    parameterType, program.NativePointerTypes))
+            {
+                continue;
+            }
+            var pointer = program.NativePointerTypes[NativePointerTypes.Index(parameterType)];
+            if (pointer.IsWritable && CarriesNativePointer(pointer.PointeeType, program))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void ApplyNativePointerWrite(BoundExpression address,
+        BoundExpression value, BackingDependencies facts, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        var targets = NativePointerBackingOf(address, facts, program, ref remaining, depth + 1);
+        var valueSources = NativePointerBackingOf(value, facts, program, ref remaining, depth + 1);
+        var valueMayBeUnknown = NativePointerMayBeUnknownOf(
+            value, facts, program, ref remaining, depth + 1);
+        if (valueSources.Count != 0 && (targets.Count == 0
+            || NativePointerMayBeUnknownOf(address, facts, program, ref remaining, depth + 1)))
+        {
+            throw InvalidEffect(value.Span, "NativePointer");
+        }
+
+        foreach (var target in targets)
+        {
+            Count(ref remaining, depth);
+            if (target.Kind == ProvenanceAnchorKind.NativeStorage
+                && (uint)target.Identity < (uint)facts.NativePointerSources.Length)
+            {
+                if (target.Storage is not StorageKey storage || !storage.IsKnown
+                    || storage.Activation != facts.FunctionActivation
+                    || HasUnknownStorageInstances(facts.StorageInstanceSet(target.Identity))
+                    || !facts.StorageInstanceSet(target.Identity).Contains(storage.Instance))
+                {
+                    throw InvalidEffect(value.Span, "NativePointer");
+                }
+                facts.AddNativePointerProvenance(
+                    target.Identity, valueSources, valueMayBeUnknown);
+            }
+        }
+    }
+
+    private static BackingDependencies? CreateBackingDependencies(int functionActivation,
+        BoundFunction function,
+        BoundProgram program, bool hasSpans,
+        HashSet<NativePointerWriteEffect>[] nativePointerCaptureEffects)
     {
         if (!hasSpans && program.NativePointerTypes.IsEmpty
             && !CarriesNativePointer(function.ReturnType, program)
@@ -437,22 +1395,36 @@ public static partial class SemanticVerifier
         {
             return null;
         }
-        var facts = new BackingDependencies(function.Variables.Length);
+        var facts = new BackingDependencies(
+            functionActivation, function, function.Variables.Length);
         var edges = new List<int>?[function.Variables.Length];
         var nativePointerEdges = new List<int>?[function.Variables.Length];
-        var forwardedSpanReturns = function.ReturnsForwardedBacking ? new List<BoundExpression>() : null;
+        var resultDependency = ResultDependencyContract(function);
+        var forwardedSpanReturns = function.ReturnType == PrimitiveType.TokenSpan
+            && resultDependency is not null && !resultDependency.Sources.IsEmpty
+            ? new List<BoundExpression>() : null;
         var nativePointerReturns = new List<BoundExpression>();
         var nativePointerReads = new List<(int Destination, BoundExpression Address)>();
         var nativePointerWrites = new List<(BoundExpression Address, BoundExpression Value)>();
+        var hasNativePointerFieldFlow = false;
+        if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+            hasNativePointerFieldFlow |= expression is BoundFieldRead field
+                && CarriesNativePointer(field.Type, program)))
+        {
+            throw Invalid(function.Span);
+        }
+        var remaining = MaximumAnalysisVisits;
         for (var slot = 0; slot < edges.Length; slot++)
         {
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 && !(slot == 0 && (function.IsConstructor || function.IsClassConstructor)))
             {
-                if (TokenSpanContract.IsDependent(function.Variables[slot].Type, program.Structures))
+                if (TokenSpanContract.IsDependent(function.Variables[slot].Type, program.Structures)
+                    || IsTokenSnapshotType(function.Variables[slot].Type, program))
                 {
                     // Negative roots denote incoming backing, not the callee's descriptor place.
-                    AddBackingSource(facts, slot, ~slot);
+                    AddBackingSource(facts, slot,
+                        ProvenanceAnchor.ForBackingSource(~slot));
                 }
                 if (CarriesNativePointer(function.Variables[slot].Type, program))
                 {
@@ -460,7 +1432,6 @@ public static partial class SemanticVerifier
                 }
             }
         }
-        var remaining = MaximumAnalysisVisits;
 
         void AddEdge(int source, int destination)
         {
@@ -486,6 +1457,20 @@ public static partial class SemanticVerifier
             outgoing.Add(destination);
         }
 
+        void AddSnapshotSources(int destination, int source, TextSpan span, int depth)
+        {
+            Count(ref remaining, depth);
+            if ((uint)source >= (uint)edges.Length
+                || !IsTokenSnapshotType(function.Variables[source].Type, program))
+            {
+                throw Invalid(span);
+            }
+            foreach (var backingSource in TokenSnapshotBackingOf(source, facts))
+            {
+                AddBackingSource(facts, destination, backingSource);
+            }
+        }
+
         void Source(int destination, BoundExpression expression, int depth)
         {
             Count(ref remaining, depth);
@@ -502,7 +1487,33 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid(snapshot.Span);
                     }
-                    AddBackingSource(facts, destination, snapshot.Variable);
+                    foreach (var source in BackingOf(snapshot, facts, program,
+                        ref remaining, depth + 1))
+                    {
+                        AddBackingSource(facts, destination, source);
+                    }
+                    break;
+                case BoundReceiverLoan loan when IsTokenSnapshotType(loan.Type, program):
+                    AddSnapshotSources(destination, loan.Variable, loan.Span, depth + 1);
+                    break;
+                case BoundMutableReceiverLoan loan when IsTokenSnapshotType(loan.Type, program):
+                    AddSnapshotSources(destination, loan.Variable, loan.Span, depth + 1);
+                    break;
+                case BoundRead read when IsTokenSnapshotType(read.Type, program):
+                    if ((uint)read.Variable >= (uint)edges.Length
+                        || function.Variables[read.Variable].Type != read.Type)
+                    {
+                        throw Invalid(read.Span);
+                    }
+                    AddSnapshotSources(destination, read.Variable, read.Span, depth + 1);
+                    break;
+                case BoundMove move when IsTokenSnapshotType(move.Type, program):
+                    if ((uint)move.Variable >= (uint)edges.Length
+                        || function.Variables[move.Variable].Type != move.Type)
+                    {
+                        throw Invalid(move.Span);
+                    }
+                    AddSnapshotSources(destination, move.Variable, move.Span, depth + 1);
                     break;
                 case BoundRead read:
                     if ((uint)read.Variable >= (uint)edges.Length
@@ -536,24 +1547,30 @@ public static partial class SemanticVerifier
                     && TokenSpanContract.IsCursor(call.Type, program.Structures):
                     var cursorConstructor = program.Functions[call.Function];
                     ValidateSpanCall(call, cursorConstructor);
-                    foreach (var capture in program.Functions[call.Function].CapturedParameters)
+                    var capture = ReceiverCaptureContract(cursorConstructor);
+                    if (capture is not null)
                     {
-                        var parameter = capture - 1;
-                        if ((uint)parameter >= (uint)call.Arguments.Length)
+                        foreach (var source in capture.Sources)
                         {
-                            throw Invalid(call.Span);
+                            Source(destination,
+                                DependencyCallArgument(call, cursorConstructor, source),
+                                depth + 1);
                         }
-                        Source(destination, call.Arguments[call.ArgumentIndex(parameter)], depth + 1);
                     }
                     break;
                 case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
-                    && call.Type == PrimitiveType.TokenSpan
-                    && program.Functions[call.Function].ReturnsForwardedBacking:
+                    && call.Type == PrimitiveType.TokenSpan:
                     var callee = program.Functions[call.Function];
                     ValidateSpanCall(call, callee);
-                    foreach (var parameter in callee.ResultDependencyParameters)
+                    var dependency = ResultDependencyContract(callee);
+                    if (dependency is not null)
                     {
-                        Source(destination, call.Arguments[call.ArgumentIndex(parameter)], depth + 1);
+                        foreach (var source in dependency.Sources)
+                        {
+                            Source(destination,
+                                DependencyCallArgument(call, callee, source),
+                                depth + 1);
+                        }
                     }
                     break;
                 case BoundConditional conditional:
@@ -580,7 +1597,8 @@ public static partial class SemanticVerifier
                     {
                         throw InvalidEffect(address.Span, "NativePointer");
                     }
-                    AddNativePointerSource(facts, destination, address.Variable);
+                    AddNativePointerSource(facts, destination, address.Variable,
+                        StorageProjection.WholeObject);
                     break;
                 case BoundNativeFixedArrayPointerAddress address:
                     if ((uint)address.Variable >= (uint)function.Variables.Length
@@ -588,14 +1606,16 @@ public static partial class SemanticVerifier
                     {
                         throw InvalidEffect(address.Span, "NativePointer");
                     }
-                    AddNativePointerSource(facts, destination, address.Variable);
+                    AddNativePointerSource(facts, destination, address.Variable,
+                        StorageProjection.ForArrayElement(address.Index));
                     break;
                 case BoundNativeStorageAddress address:
                     if ((uint)address.Variable >= (uint)function.Variables.Length)
                     {
                         throw InvalidEffect(address.Span, "NativePointer");
                     }
-                    AddNativePointerSource(facts, destination, address.Variable);
+                    AddNativePointerSource(facts, destination, address.Variable,
+                        StorageProjection.ForStorageAddress(address));
                     break;
                 case BoundRead read when CarriesNativePointer(read.Type, program):
                     if ((uint)read.Variable >= (uint)function.Variables.Length
@@ -720,6 +1740,7 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid(field.Span);
                     }
+                    hasNativePointerFieldFlow = true;
                     NativePointerSource(field.Variable, field.Value, depth + 1);
                     break;
                 case BoundExpressionStatement expressionStatement
@@ -784,7 +1805,7 @@ public static partial class SemanticVerifier
                     throw Invalid(call.Span);
                 }
                 var callee = program.Functions[call.Function];
-                foreach (var effect in nativePointerWriteEffects[call.Function])
+                foreach (var effect in nativePointerCaptureEffects[call.Function])
                 {
                     nativePointerWrites.Add((
                         NativePointerCallArgument(call, callee, effect.DestinationParameter),
@@ -907,11 +1928,14 @@ public static partial class SemanticVerifier
                 }
                 foreach (var target in targets)
                 {
-                    if ((uint)target >= (uint)facts.NativePointerSources.Length)
+                    if (target.Kind != ProvenanceAnchorKind.NativeStorage
+                        || (uint)target.Identity >= (uint)facts.NativePointerSources.Length)
                     {
+                        facts.NativePointerMayBeUnknown[destination] = true;
+                        pointerFactsChanged = true;
                         continue;
                     }
-                    if (facts.NativePointerMayBeUnknown[target])
+                    if (facts.NativePointerMayBeUnknown[target.Identity])
                     {
                         if (!facts.NativePointerMayBeUnknown[destination])
                         {
@@ -919,7 +1943,7 @@ public static partial class SemanticVerifier
                             pointerFactsChanged = true;
                         }
                     }
-                    if (facts.NativePointerSources[target] is not { Count: > 0 } sourceFacts)
+                    if (facts.NativePointerSources[target.Identity] is not { Count: > 0 } sourceFacts)
                     {
                         continue;
                     }
@@ -948,17 +1972,20 @@ public static partial class SemanticVerifier
                 }
                 foreach (var target in targets)
                 {
-                    if ((uint)target >= (uint)facts.NativePointerSources.Length)
+                    if (target.Kind != ProvenanceAnchorKind.NativeStorage
+                        || (uint)target.Identity >= (uint)facts.NativePointerSources.Length)
                     {
                         continue;
                     }
                     if (valueSources.Count != 0)
                     {
-                        pointerFactsChanged |= AddNativePointerSources(facts, target, valueSources);
+                        pointerFactsChanged |= AddNativePointerSources(
+                            facts, target.Identity, valueSources);
                     }
-                    if (valueMayBeUnknown && !facts.NativePointerMayBeUnknown[target])
+                    if (valueMayBeUnknown
+                        && !facts.NativePointerMayBeUnknown[target.Identity])
                     {
-                        facts.NativePointerMayBeUnknown[target] = true;
+                        facts.NativePointerMayBeUnknown[target.Identity] = true;
                         pointerFactsChanged = true;
                     }
                 }
@@ -966,7 +1993,8 @@ public static partial class SemanticVerifier
         }
         foreach (var result in nativePointerReturns)
         {
-            if (NativePointerBackingOf(result, facts, program, ref remaining, 0).Count != 0)
+            if (!hasNativePointerFieldFlow
+                && NativePointerBackingOf(result, facts, program, ref remaining, 0).Count != 0)
             {
                 throw InvalidEffect(result.Span, "NativePointer");
             }
@@ -977,8 +2005,15 @@ public static partial class SemanticVerifier
             {
                 throw InvalidEffect(function.Span, "Ownership");
             }
+            var receiverOffset = function.DeclaringStruct is not null
+                && !function.IsStatic ? 1 : 0;
             var permittedSources = function.ResultDependencyParameters
-                .Select(static parameter => ~parameter).ToHashSet();
+                .Select(parameter => ProvenanceAnchor.ForBackingSource(
+                    ~(parameter + receiverOffset))).ToHashSet();
+            if (function.ResultDependencyIncludesReceiver)
+            {
+                _ = permittedSources.Add(ProvenanceAnchor.ForBackingSource(~0));
+            }
             foreach (var result in forwardedSpanReturns)
             {
                 var actualSources = BackingOf(result, facts, program, ref remaining, 0);
@@ -991,7 +2026,8 @@ public static partial class SemanticVerifier
         return facts;
     }
 
-    private static void AddNativePointerSource(BackingDependencies facts, int slot, int source)
+    private static void AddNativePointerSource(BackingDependencies facts, int slot, int source,
+        StorageProjection projection)
     {
         var sources = facts.NativePointerSources[slot];
         if (sources is null)
@@ -999,10 +2035,331 @@ public static partial class SemanticVerifier
             sources = [];
             facts.NativePointerSources[slot] = sources;
         }
-        _ = sources.Add(source);
+        sources.UnionWith(NativeStorageAnchors(source, facts, projection));
     }
 
-    private static bool AddNativePointerSources(BackingDependencies facts, int slot, IReadOnlySet<int> additions)
+    private static HashSet<ProvenanceAnchor> NativeStorageAnchors(
+        int variable, BackingDependencies facts, StorageProjection projection)
+    {
+        var instances = facts.StorageInstanceSet(variable);
+        var sources = new HashSet<ProvenanceAnchor>();
+        foreach (var instance in instances)
+        {
+            _ = sources.Add(ProvenanceAnchor.ForNativeStorage(
+                facts.FunctionActivation, variable, instance, projection));
+        }
+        return sources;
+    }
+
+    private static bool IsInlineStructStorage(PrimitiveType type, BoundProgram program)
+    {
+        var index = (int)type - 100;
+        return !ManagedClassTypes.IsClass(type)
+            && (uint)index < (uint)program.Structures.Length;
+    }
+
+    private static bool IsNativePointerValue(PrimitiveType type, BoundProgram program)
+        => type == PrimitiveType.NativeRawPointer
+            || NativePointerTypeContract.IsValidType(type, program.NativePointerTypes);
+
+    private static List<(StorageProjection Projection, PrimitiveType Type)> NativePointerFieldLeaves(
+        PrimitiveType type, BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new List<(StorageProjection Projection, PrimitiveType Type)>();
+        CollectNativePointerFieldLeaves(type, StorageProjection.WholeObject,
+            program, result, [], ref remaining, depth);
+        return result;
+    }
+
+    private static void CollectNativePointerFieldLeaves(PrimitiveType type,
+        StorageProjection projection, BoundProgram program,
+        List<(StorageProjection Projection, PrimitiveType Type)> result,
+        HashSet<PrimitiveType> activeTypes, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (IsNativePointerValue(type, program))
+        {
+            result.Add((projection, type));
+            return;
+        }
+        if (!IsInlineStructStorage(type, program))
+        {
+            return;
+        }
+        if (!activeTypes.Add(type))
+        {
+            throw InvalidEffect(default, "NativePointer");
+        }
+
+        var structure = program.Structures[(int)type - 100];
+        for (var field = 0; field < structure.Fields.Length; field++)
+        {
+            var fieldType = structure.Fields[field].Type;
+            if (!CarriesNativePointer(fieldType, program))
+            {
+                continue;
+            }
+            CollectNativePointerFieldLeaves(fieldType,
+                projection.AppendField(type, field), program, result,
+                activeTypes, ref remaining, depth + 1);
+        }
+
+        _ = activeTypes.Remove(type);
+    }
+
+    private static bool TryGetNativePointerFieldPlace(BoundExpression expression,
+        BoundFunction function, BoundProgram program, out int variable,
+        out StorageProjection projection)
+    {
+        switch (expression)
+        {
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != read.Type)
+                {
+                    throw Invalid(read.Span);
+                }
+                variable = read.Variable;
+                projection = StorageProjection.WholeObject;
+                return IsInlineStructStorage(read.Type, program);
+
+            case BoundMove move:
+                if ((uint)move.Variable >= (uint)function.Variables.Length
+                    || function.Variables[move.Variable].Type != move.Type)
+                {
+                    throw Invalid(move.Span);
+                }
+                variable = move.Variable;
+                projection = StorageProjection.WholeObject;
+                return IsInlineStructStorage(move.Type, program);
+
+            case BoundFieldRead field:
+                if (field.Receiver is null
+                    || !TryGetNativePointerFieldPlace(field.Receiver, function,
+                        program, out variable, out projection))
+                {
+                    variable = -1;
+                    projection = default;
+                    return false;
+                }
+                if (!IsInlineStructStorage(field.Receiver.Type, program))
+                {
+                    variable = -1;
+                    projection = default;
+                    return false;
+                }
+                var fields = program.Structures[(int)field.Receiver.Type - 100].Fields;
+                if ((uint)field.Field >= (uint)fields.Length
+                    || fields[field.Field].Type != field.Type)
+                {
+                    throw Invalid(field.Span);
+                }
+                projection = projection.AppendField(field.Receiver.Type, field.Field);
+                return projection.Kind == StorageProjectionKind.InlineFieldPath;
+
+            default:
+                variable = -1;
+                projection = default;
+                return false;
+        }
+    }
+
+    private static bool TryGetNativePointerFieldAssignmentPlace(
+        BoundFieldAssignment assignment, BoundFunction function, BoundProgram program,
+        out StorageProjection projection, out PrimitiveType valueType)
+    {
+        if ((uint)assignment.Variable >= (uint)function.Variables.Length
+            || assignment.NestedFields.IsDefault)
+        {
+            throw Invalid(assignment.Span);
+        }
+        var ownerType = function.Variables[assignment.Variable].Type;
+        if (!IsInlineStructStorage(ownerType, program))
+        {
+            projection = default;
+            valueType = PrimitiveType.Void;
+            return false;
+        }
+
+        projection = StorageProjection.WholeObject;
+        var field = assignment.Field;
+        for (var pathIndex = -1; pathIndex < assignment.NestedFields.Length; pathIndex++)
+        {
+            var fields = program.Structures[(int)ownerType - 100].Fields;
+            if ((uint)field >= (uint)fields.Length)
+            {
+                throw Invalid(assignment.Span);
+            }
+            var fieldType = fields[field].Type;
+            projection = projection.AppendField(ownerType, field);
+            ownerType = fieldType;
+            if (!IsInlineStructStorage(ownerType, program)
+                && pathIndex + 1 < assignment.NestedFields.Length)
+            {
+                projection = default;
+                valueType = PrimitiveType.Void;
+                return false;
+            }
+            if (pathIndex + 1 < assignment.NestedFields.Length)
+            {
+                field = assignment.NestedFields[pathIndex + 1];
+            }
+        }
+
+        valueType = ownerType;
+        return projection.Kind == StorageProjectionKind.InlineFieldPath;
+    }
+
+    private static (HashSet<ProvenanceAnchor> Sources, bool MayBeUnknown)
+        NativePointerFieldFactsOf(BoundFieldRead field, BackingDependencies facts,
+            BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        if (!TryGetNativePointerFieldPlace(field, function, program,
+            out var variable, out var projection))
+        {
+            return (new HashSet<ProvenanceAnchor>(NativePointerBackingOf(
+                field.Receiver, facts, program, ref remaining, depth + 1)), true);
+        }
+
+        var leaves = NativePointerFieldLeaves(field.Type, program,
+            ref remaining, depth + 1);
+        var sources = new HashSet<ProvenanceAnchor>();
+        var mayBeUnknown = false;
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            var leafProjection = StorageProjection.Combine(projection, leaf.Projection);
+            if (leafProjection.Kind != StorageProjectionKind.InlineFieldPath
+                || !facts.TryGetNativePointerFieldValue(variable, leafProjection,
+                    out var fieldSources, out var fieldMayBeUnknown))
+            {
+                mayBeUnknown = true;
+                if (facts.NativePointerSources[variable] is { } aggregateSources)
+                {
+                    sources.UnionWith(aggregateSources);
+                }
+                continue;
+            }
+            sources.UnionWith(fieldSources);
+            mayBeUnknown |= fieldMayBeUnknown;
+        }
+
+        return (sources, mayBeUnknown || leaves.Count == 0);
+    }
+
+    private static (HashSet<ProvenanceAnchor> Sources, bool MayBeUnknown)
+        NativePointerValueFactsOfExpression(BoundExpression expression,
+            PrimitiveType valueType, StorageProjection relativeProjection,
+            BackingDependencies facts, BoundFunction function, BoundProgram program,
+            ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is null || expression.Type != valueType)
+        {
+            throw Invalid(expression?.Span ?? default);
+        }
+
+        switch (expression)
+        {
+            case BoundUnsafeExpression unsafeExpression:
+                return NativePointerValueFactsOfExpression(unsafeExpression.Expression,
+                    valueType, relativeProjection, facts, function, program,
+                    ref remaining, depth + 1);
+            case BoundConditional conditional when CarriesNativePointer(valueType, program):
+                var (whenTrueSources, whenTrueMayBeUnknown) = NativePointerValueFactsOfExpression(conditional.WhenTrue,
+                    valueType, relativeProjection, facts, function, program,
+                    ref remaining, depth + 1);
+                var (whenFalseSources, whenFalseMayBeUnknown) = NativePointerValueFactsOfExpression(conditional.WhenFalse,
+                    valueType, relativeProjection, facts, function, program,
+                    ref remaining, depth + 1);
+                whenTrueSources.UnionWith(whenFalseSources);
+                return (whenTrueSources, whenTrueMayBeUnknown || whenFalseMayBeUnknown);
+        }
+
+        if (IsNativePointerValue(valueType, program))
+        {
+            if (relativeProjection.Kind != StorageProjectionKind.WholeObject)
+            {
+                return (new HashSet<ProvenanceAnchor>(), true);
+            }
+            return (new HashSet<ProvenanceAnchor>(NativePointerBackingOf(
+                    expression, facts, program, ref remaining, depth + 1)),
+                NativePointerMayBeUnknownOf(expression, facts, program,
+                    ref remaining, depth + 1));
+        }
+
+        if (TryGetNativePointerFieldPlace(expression, function, program,
+            out var variable, out var sourcePrefix))
+        {
+            var sourceProjection = StorageProjection.Combine(
+                sourcePrefix, relativeProjection);
+            if (sourceProjection.Kind == StorageProjectionKind.InlineFieldPath
+                && facts.TryGetNativePointerFieldValue(variable, sourceProjection,
+                    out var sources, out var mayBeUnknown))
+            {
+                return (sources, mayBeUnknown);
+            }
+        }
+
+        return (new HashSet<ProvenanceAnchor>(NativePointerBackingOf(
+                expression, facts, program, ref remaining, depth + 1)), true);
+    }
+
+    private static void SetNativePointerFieldValuesFromExpression(int destination,
+        StorageProjection destinationPrefix, PrimitiveType destinationType,
+        BoundExpression expression, BackingDependencies facts,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        var leaves = NativePointerFieldLeaves(destinationType, program,
+            ref remaining, depth + 1);
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            var destinationProjection = StorageProjection.Combine(
+                destinationPrefix, leaf.Projection);
+            if (destinationProjection.Kind != StorageProjectionKind.InlineFieldPath)
+            {
+                throw Invalid(expression.Span);
+            }
+            var (sources, mayBeUnknown) = NativePointerValueFactsOfExpression(expression,
+                destinationType, leaf.Projection, facts, function, program,
+                ref remaining, depth + 1);
+            facts.SetNativePointerFieldValue(destination, destinationProjection,
+                sources, mayBeUnknown);
+        }
+    }
+
+    private static void RefreshNativePointerAggregateProvenance(int slot,
+        PrimitiveType type, BackingDependencies facts, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (!IsInlineStructStorage(type, program)
+            || !CarriesNativePointer(type, program))
+        {
+            return;
+        }
+
+        var leaves = NativePointerFieldLeaves(type, program,
+            ref remaining, depth + 1);
+        var sources = new HashSet<ProvenanceAnchor>();
+        var mayBeUnknown = leaves.Count == 0;
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            if (!facts.TryGetNativePointerFieldValue(slot, leaf.Projection,
+                out var fieldSources, out var fieldMayBeUnknown))
+            {
+                mayBeUnknown = true;
+                continue;
+            }
+            sources.UnionWith(fieldSources);
+            mayBeUnknown |= fieldMayBeUnknown;
+        }
+        facts.SetNativePointerAggregateProvenance(slot, sources, mayBeUnknown);
+    }
+
+    private static bool AddNativePointerSources(BackingDependencies facts, int slot,
+        IReadOnlySet<ProvenanceAnchor> additions)
     {
         if (additions.Count == 0)
         {
@@ -1049,7 +2406,8 @@ public static partial class SemanticVerifier
     private static bool CarriesNativePointer(BoundExpression expression, BoundProgram program) =>
         expression is BoundNativeStorageAddress || CarriesNativePointer(expression.Type, program);
 
-    private static IReadOnlySet<int> NativePointerBackingOf(BoundExpression expression,
+    private static IReadOnlySet<ProvenanceAnchor> NativePointerBackingOf(
+        BoundExpression expression,
         BackingDependencies facts, BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
@@ -1060,31 +2418,42 @@ public static partial class SemanticVerifier
         switch (expression)
         {
             case BoundNativePointerAddress address when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
-                return new HashSet<int> { address.Variable };
+                return NativeStorageAnchors(address.Variable, facts, StorageProjection.WholeObject);
             case BoundNativeFixedArrayPointerAddress address
                 when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
-                return new HashSet<int> { address.Variable };
+                return NativeStorageAnchors(address.Variable, facts,
+                    StorageProjection.ForArrayElement(address.Index));
             case BoundNativeStorageAddress address
                 when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
-                return new HashSet<int> { address.Variable };
+                return NativeStorageAnchors(address.Variable, facts,
+                    StorageProjection.ForStorageAddress(address));
             case BoundRead read when (uint)read.Variable < (uint)facts.NativePointerSources.Length:
                 return facts.NativePointerSources[read.Variable] ?? EmptyBackingSources;
             case BoundMove move when (uint)move.Variable < (uint)facts.NativePointerSources.Length:
                 return facts.NativePointerSources[move.Variable] ?? EmptyBackingSources;
             case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
-                var readSources = new HashSet<int>();
+                var readSources = new HashSet<ProvenanceAnchor>();
                 foreach (var target in NativePointerBackingOf(read.Address, facts, program,
                     ref remaining, depth + 1))
                 {
-                    if ((uint)target < (uint)facts.NativePointerSources.Length
-                        && facts.NativePointerSources[target] is { } targetSources)
+                    if (target.Kind == ProvenanceAnchorKind.NativeStorage
+                        && (uint)target.Identity < (uint)facts.NativePointerSources.Length
+                        && facts.NativePointerSources[target.Identity] is { } targetSources)
                     {
+                        if (target.Storage is not StorageKey targetStorage
+                            || !targetStorage.IsKnown
+                            || targetStorage.Activation != facts.FunctionActivation
+                            || !facts.StorageInstanceSet(target.Identity).Contains(targetStorage.Instance))
+                        {
+                            throw InvalidEffect(read.Span, "NativePointer");
+                        }
                         readSources.UnionWith(targetSources);
                     }
                 }
                 return readSources;
             case BoundFieldRead field:
-                return NativePointerBackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
+                return NativePointerFieldFactsOf(field, facts, facts.Function, program,
+                    ref remaining, depth + 1).Sources;
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerBackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
             case BoundCall call when CarriesNativePointer(call.Type, program):
@@ -1098,7 +2467,7 @@ public static partial class SemanticVerifier
                 {
                     ValidateSpanCall(call, callee);
                 }
-                var callBacking = new HashSet<int>();
+                var callBacking = new HashSet<ProvenanceAnchor>();
                 foreach (var argument in call.Arguments)
                 {
                     if (CarriesNativePointer(argument, program))
@@ -1113,7 +2482,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid(call.Span);
                 }
-                var indirectCallBacking = new HashSet<int>();
+                var indirectCallBacking = new HashSet<ProvenanceAnchor>();
                 foreach (var argument in call.Arguments)
                 {
                     if (CarriesNativePointer(argument, program))
@@ -1124,8 +2493,9 @@ public static partial class SemanticVerifier
                 }
                 return indirectCallBacking;
             case BoundConditional conditional when CarriesNativePointer(conditional.Type, program):
-                var branchBacking = new HashSet<int>(NativePointerBackingOf(conditional.WhenTrue,
-                    facts, program, ref remaining, depth + 1));
+                var branchBacking = new HashSet<ProvenanceAnchor>(
+                    NativePointerBackingOf(conditional.WhenTrue,
+                        facts, program, ref remaining, depth + 1));
                 branchBacking.UnionWith(NativePointerBackingOf(conditional.WhenFalse,
                     facts, program, ref remaining, depth + 1));
                 return branchBacking;
@@ -1144,14 +2514,18 @@ public static partial class SemanticVerifier
         }
         switch (expression)
         {
-            case BoundNativePointerAddress:
-            case BoundNativeFixedArrayPointerAddress:
-            case BoundNativeStorageAddress:
-                return false;
+            case BoundNativePointerAddress address:
+                return HasUnknownStorageInstances(facts.StorageInstanceSet(address.Variable));
+            case BoundNativeFixedArrayPointerAddress address:
+                return HasUnknownStorageInstances(facts.StorageInstanceSet(address.Variable));
+            case BoundNativeStorageAddress address:
+                return HasUnknownStorageInstances(facts.StorageInstanceSet(address.Variable));
             case BoundRead read when (uint)read.Variable < (uint)facts.NativePointerMayBeUnknown.Length:
-                return facts.NativePointerMayBeUnknown[read.Variable];
+                return facts.NativePointerMayBeUnknown[read.Variable]
+                    || !NativePointerStorageInstancesMatch(read.Variable, facts);
             case BoundMove move when (uint)move.Variable < (uint)facts.NativePointerMayBeUnknown.Length:
-                return facts.NativePointerMayBeUnknown[move.Variable];
+                return facts.NativePointerMayBeUnknown[move.Variable]
+                    || !NativePointerStorageInstancesMatch(move.Variable, facts);
             case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
                 var targets = NativePointerBackingOf(read.Address, facts, program,
                     ref remaining, depth + 1);
@@ -1162,16 +2536,22 @@ public static partial class SemanticVerifier
                 }
                 foreach (var target in targets)
                 {
-                    if ((uint)target >= (uint)facts.NativePointerMayBeUnknown.Length
-                        || facts.NativePointerMayBeUnknown[target])
+                    if (target.Kind != ProvenanceAnchorKind.NativeStorage
+                        || (uint)target.Identity >= (uint)facts.NativePointerMayBeUnknown.Length
+                        || facts.NativePointerMayBeUnknown[target.Identity]
+                        || target.Storage is not StorageKey targetStorage
+                        || !targetStorage.IsKnown
+                        || targetStorage.Activation != facts.FunctionActivation
+                        || !facts.StorageInstanceSet(target.Identity).Contains(targetStorage.Instance)
+                        || !NativePointerStorageInstancesMatch(target.Identity, facts))
                     {
                         return true;
                     }
                 }
                 return false;
             case BoundFieldRead field:
-                return NativePointerMayBeUnknownOf(field.Receiver, facts, program,
-                    ref remaining, depth + 1);
+                return NativePointerFieldFactsOf(field, facts, facts.Function, program,
+                    ref remaining, depth + 1).MayBeUnknown;
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerMayBeUnknownOf(unsafeExpression.Expression, facts,
                     program, ref remaining, depth + 1);
@@ -1189,6 +2569,53 @@ public static partial class SemanticVerifier
             default:
                 return CarriesNativePointer(expression.Type, program);
         }
+    }
+
+    private static bool HasUnknownStorageInstances(HashSet<StorageInstance> instances)
+        => instances.Count == 0 || instances.Any(static instance => !instance.IsKnown);
+
+    private static bool NativePointerStorageInstancesMatch(int variable, BackingDependencies facts)
+    {
+        if ((uint)variable >= (uint)facts.NativePointerSources.Length
+            || facts.NativePointerSources[variable] is not { } sources)
+        {
+            return true;
+        }
+
+        var sites = sources.Where(static source => source.Kind == ProvenanceAnchorKind.NativeStorage)
+            .Select(static source => source.Identity).Distinct();
+        foreach (var site in sites)
+        {
+            if ((uint)site >= (uint)facts.NativePointerSources.Length)
+            {
+                return false;
+            }
+
+            var expected = facts.StorageInstanceSet(site);
+            if (HasUnknownStorageInstances(expected))
+            {
+                return false;
+            }
+            var actual = new HashSet<StorageInstance>();
+            foreach (var source in sources)
+            {
+                if (source.Kind != ProvenanceAnchorKind.NativeStorage || source.Identity != site)
+                {
+                    continue;
+                }
+                if (source.Storage is not StorageKey key || !key.IsKnown
+                    || key.Activation != facts.FunctionActivation || key.Site != site)
+                {
+                    return false;
+                }
+                _ = actual.Add(key.Instance);
+            }
+            if (!actual.SetEquals(expected))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static void ValidateSpanCall(BoundCall call, BoundFunction callee)
@@ -1215,7 +2642,32 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void AddBackingSource(BackingDependencies facts, int slot, int source)
+    private static bool IsTokenSnapshotType(PrimitiveType type,
+        BoundProgram program)
+    {
+        var index = (int)type - 100;
+        return (uint)index < (uint)program.Structures.Length
+            && TokenSpanContract.RoleOf(program.Structures[index])
+                == TokenSpanTypeRole.Snapshot
+            && TokenSpanContract.ValidSnapshot(program.Structures[index]);
+    }
+
+    private static HashSet<ProvenanceAnchor> TokenSnapshotBackingOf(
+        int variable, BackingDependencies facts)
+    {
+        var sources = facts.Sources[variable] is { } existing
+            ? new HashSet<ProvenanceAnchor>(existing)
+            : [];
+        var incomingSource = ProvenanceAnchor.ForBackingSource(~variable);
+        if (!sources.Contains(incomingSource))
+        {
+            _ = sources.Add(ProvenanceAnchor.ForBackingSource(variable));
+        }
+        return sources;
+    }
+
+    private static void AddBackingSource(BackingDependencies facts, int slot,
+        ProvenanceAnchor source)
     {
         var sources = facts.Sources[slot];
         if (sources is null)
@@ -1232,14 +2684,33 @@ public static partial class SemanticVerifier
         {
             return;
         }
+        var ownerInstances = facts.StorageInstanceSet(owner);
+        if (facts.Staged.Any(staged => staged.NativePointerSources.Any(
+                source => IsNativeStorageInstance(source, owner, ownerInstances,
+                    facts.FunctionActivation))))
+        {
+            throw InvalidEffect(span, "NativePointer");
+        }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if ((state.Possibilities(slot) & 2) != 0 && facts.NativePointerSources[slot]?.Contains(owner) == true)
+            if ((state.Possibilities(slot) & 2) != 0
+                && facts.NativePointerSources[slot]?.Any(
+                    source => IsNativeStorageInstance(source, owner, ownerInstances,
+                        facts.FunctionActivation)) == true)
             {
                 throw InvalidEffect(span, "NativePointer");
             }
         }
     }
+
+    private static bool IsNativeStorageInstance(ProvenanceAnchor source, int site,
+        HashSet<StorageInstance> instances, int activation)
+        => source.Kind == ProvenanceAnchorKind.NativeStorage
+            && source.Identity == site
+            && (HasUnknownStorageInstances(instances)
+                || source.Storage is not StorageKey key || !key.IsKnown
+                || key.Activation != activation
+                || instances.Contains(key.Instance));
 
     private static void CheckNativePointerReturn(BoundFunction function, InitializationState state, TextSpan span)
     {
@@ -1289,15 +2760,22 @@ public static partial class SemanticVerifier
         }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if (!scopedVariables.Contains(slot) && (state.Possibilities(slot) & 2) != 0
-                && facts.NativePointerSources[slot]?.Any(scopedVariables.Contains) == true)
+            if (scopedVariables.Contains(slot) || (state.Possibilities(slot) & 2) == 0)
+            {
+                continue;
+            }
+
+            if (facts.NativePointerSources[slot]?.Any(source =>
+                    source.Kind == ProvenanceAnchorKind.NativeStorage
+                    && scopedVariables.Contains(source.Identity)) == true)
             {
                 throw InvalidEffect(block.Span, "NativePointer");
             }
         }
     }
 
-    private static IReadOnlySet<int> BackingOf(BoundExpression expression, BackingDependencies? facts,
+    private static IReadOnlySet<ProvenanceAnchor> BackingOf(
+        BoundExpression expression, BackingDependencies? facts,
         BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
@@ -1312,14 +2790,29 @@ public static partial class SemanticVerifier
         switch (expression)
         {
             case BoundSnapshotSpan snapshot when (uint)snapshot.Variable < (uint)facts.Sources.Length:
-                return new HashSet<int> { snapshot.Variable };
+                return facts.Sources[snapshot.Variable] ?? new HashSet<ProvenanceAnchor>
+                {
+                    ProvenanceAnchor.ForBackingSource(snapshot.Variable),
+                };
             case BoundRead read when (uint)read.Variable < (uint)facts.Sources.Length:
-                return facts.Sources[read.Variable] ?? EmptyBackingSources;
+                return IsTokenSnapshotType(read.Type, program)
+                    ? TokenSnapshotBackingOf(read.Variable, facts)
+                    : facts.Sources[read.Variable] ?? EmptyBackingSources;
             case BoundMove move when (uint)move.Variable < (uint)facts.Sources.Length:
-                return facts.Sources[move.Variable] ?? EmptyBackingSources;
+                return IsTokenSnapshotType(move.Type, program)
+                    ? TokenSnapshotBackingOf(move.Variable, facts)
+                    : facts.Sources[move.Variable] ?? EmptyBackingSources;
             case BoundReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
+                if (IsTokenSnapshotType(loan.Type, program))
+                {
+                    return TokenSnapshotBackingOf(loan.Variable, facts);
+                }
                 return facts.Sources[loan.Variable] ?? EmptyBackingSources;
             case BoundMutableReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
+                if (IsTokenSnapshotType(loan.Type, program))
+                {
+                    return TokenSnapshotBackingOf(loan.Variable, facts);
+                }
                 return facts.Sources[loan.Variable] ?? EmptyBackingSources;
             case BoundFieldRead field:
                 return BackingOf(field.Receiver, facts, program, ref remaining, depth + 1);
@@ -1332,16 +2825,16 @@ public static partial class SemanticVerifier
                 && TokenSpanContract.IsCursor(call.Type, program.Structures):
                 var constructor = program.Functions[call.Function];
                 ValidateSpanCall(call, constructor);
-                var cursorBacking = new HashSet<int>();
-                foreach (var capture in constructor.CapturedParameters)
+                var cursorBacking = new HashSet<ProvenanceAnchor>();
+                var capture = ReceiverCaptureContract(constructor);
+                if (capture is not null)
                 {
-                    var parameter = capture - 1;
-                    if ((uint)parameter >= (uint)call.Arguments.Length)
+                    foreach (var source in capture.Sources)
                     {
-                        throw Invalid(call.Span);
+                        cursorBacking.UnionWith(BackingOf(
+                            DependencyCallArgument(call, constructor, source),
+                            facts, program, ref remaining, depth + 1));
                     }
-                    cursorBacking.UnionWith(BackingOf(call.Arguments[call.ArgumentIndex(parameter)],
-                        facts, program, ref remaining, depth + 1));
                 }
                 if (cursorBacking.Count == 0)
                 {
@@ -1350,14 +2843,16 @@ public static partial class SemanticVerifier
                 return cursorBacking;
             case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                 && call.Type == PrimitiveType.TokenSpan:
-                var result = new HashSet<int>();
+                var result = new HashSet<ProvenanceAnchor>();
                 var callee = program.Functions[call.Function];
                 ValidateSpanCall(call, callee);
-                if (callee.ReturnsForwardedBacking && callee.ReturnType == PrimitiveType.TokenSpan)
+                var dependency = ResultDependencyContract(callee);
+                if (dependency is not null)
                 {
-                    foreach (var parameter in callee.ResultDependencyParameters)
+                    foreach (var source in dependency.Sources)
                     {
-                        result.UnionWith(BackingOf(call.Arguments[call.ArgumentIndex(parameter)], facts,
+                        result.UnionWith(BackingOf(
+                            DependencyCallArgument(call, callee, source), facts,
                             program, ref remaining, depth + 1));
                     }
                 }
@@ -1366,12 +2861,44 @@ public static partial class SemanticVerifier
                 && conditional.WhenTrue is not null && conditional.WhenFalse is not null
                 && conditional.WhenTrue.Type == PrimitiveType.TokenSpan
                 && conditional.WhenFalse.Type == PrimitiveType.TokenSpan:
-                var union = new HashSet<int>(BackingOf(conditional.WhenTrue, facts, program, ref remaining, depth + 1));
+                var union = new HashSet<ProvenanceAnchor>(
+                    BackingOf(conditional.WhenTrue, facts, program, ref remaining, depth + 1));
                 union.UnionWith(BackingOf(conditional.WhenFalse, facts, program, ref remaining, depth + 1));
                 return union;
             default:
                 throw InvalidEffect(expression.Span, "Ownership");
         }
+    }
+
+    private static void StageDependencySource(BoundCall call, int parameterIndex,
+        BoundExpression argument, BoundFunction target, InitializationState initialized,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        if (initialized.Dependencies is not BackingDependencies dependencies)
+        {
+            return;
+        }
+
+        var hasBacking = TokenSpanContract.IsDependent(argument.Type, program.Structures);
+        var hasNativePointer = CarriesNativePointer(argument, program);
+        if (!hasBacking && !hasNativePointer && target.NativeOutputContracts.IsEmpty)
+        {
+            return;
+        }
+
+        var backingSources = hasBacking
+            ? BackingOf(argument, dependencies, program, ref remaining, depth + 1)
+            : EmptyBackingSources;
+        var nativePointerSources = hasNativePointer
+            ? NativePointerBackingOf(argument, dependencies, program, ref remaining, depth + 1)
+            : EmptyBackingSources;
+        var nativePointerMayBeUnknown = hasNativePointer
+            && NativePointerMayBeUnknownOf(argument, dependencies, program,
+                ref remaining, depth + 1);
+        dependencies.Staged.Add(new StagedDependencySource(call, parameterIndex,
+            [.. backingSources],
+            [.. nativePointerSources],
+            nativePointerMayBeUnknown));
     }
 
     private static void CheckBackingInvalidation(int owner, InitializationState state, TextSpan span)
@@ -1382,12 +2909,15 @@ public static partial class SemanticVerifier
         }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if ((state.Possibilities(slot) & 2) != 0 && facts.Sources[slot]?.Contains(owner) == true)
+            if ((state.Possibilities(slot) & 2) != 0
+                && facts.Sources[slot]?.Contains(
+                    ProvenanceAnchor.ForBackingSource(owner)) == true)
             {
                 throw InvalidEffect(span, "Ownership");
             }
         }
-        if (facts.Staged.Any(sources => sources.Contains(owner)))
+        var ownerSource = ProvenanceAnchor.ForBackingSource(owner);
+        if (facts.Staged.Any(staged => staged.BackingSources.Contains(ownerSource)))
         {
             throw InvalidEffect(span, "Ownership");
         }
@@ -1464,11 +2994,12 @@ public static partial class SemanticVerifier
                                 || block.Statements[index + 1] is not BoundTryFinally region
                                 || region.Finally.Statements is not [BoundDropSpan drop]
                                 || drop.Variable != local.Variable || !allowed.Add(drop)
-                                || index + 2 != block.Statements.Length
+                                || (index + 2 != block.Statements.Length
                                     && !(index + 3 == block.Statements.Length
                                         && block.Statements[^1] is BoundReturn terminal
-                                        && (function.ReturnType == PrimitiveType.Void && terminal.Value is null
-                                            || function.IsConstructor && terminal.Value is BoundRead { Variable: 0 })))
+                                        && ((function.ReturnType == PrimitiveType.Void && terminal.Value is null)
+                                            || (function.IsConstructor
+                                                && terminal.Value is BoundRead { Variable: 0 })))))
                             {
                                 throw InvalidEffect(local.Span, "Ownership");
                             }
