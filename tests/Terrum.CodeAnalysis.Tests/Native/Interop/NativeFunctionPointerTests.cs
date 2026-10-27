@@ -17,6 +17,7 @@ using Terrum.CodeAnalysis.Syntax;
 using NUnit.Framework;
 
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Interop;
 
@@ -267,6 +268,58 @@ public sealed class NativeFunctionPointerTests
         var loadedCallback = loaded.Functions.Single(static function => function.Name == "Callback");
         Assert.That(loadedCallback.IsNoThrow, Is.False);
         Assert.That(loadedCallback.NativeFunctionPointerType, Is.Not.Null);
+    }
+
+    [Test]
+    public void NativeImportCanBeAddressedAndIndirectlyInvoked()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadValue")]
+            extern unsafe int32 ReadValue(int32 input);
+
+            int32 Invoke(int32 value) {
+                unsafe {
+                    var readValue = &ReadValue;
+                    return readValue(value);
+                }
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var imported = program.Functions.Single(static function =>
+            function.Name == "ReadValue");
+        var invoke = program.Functions.Single(static function =>
+            function.Name == "Invoke");
+        var addresses = new List<BoundNativeFunctionAddress>();
+        var calls = new List<BoundIndirectCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(invoke.Body, expression =>
+        {
+            if (expression is BoundNativeFunctionAddress address)
+            {
+                addresses.Add(address);
+            }
+            if (expression is BoundIndirectCall call)
+            {
+                calls.Add(call);
+            }
+        }), Is.True);
+
+        var address = addresses.Single();
+        var call = calls.Single();
+        Assert.That(address.Function, Is.EqualTo(program.Functions.IndexOf(imported)));
+        Assert.That(call.Target.Type, Is.EqualTo(address.Type));
+        Assert.That(call.Arguments, Has.Length.EqualTo(1));
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(address.Type)];
+        Assert.That(signature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Unmanaged));
+        Assert.That(signature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(signature.ParameterTypes,
+            Is.EqualTo(new[] { PrimitiveType.Int32 }));
     }
 
     [Test]

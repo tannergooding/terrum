@@ -943,7 +943,7 @@ public sealed class NativeCoreRegistrationTests
             compilation.Program!, ["Invoke"], NativeRuntimePolicy.FailFast));
     }
 
-    private static NativeCoreRegistrationSet CreateRegistration()
+    internal static NativeCoreRegistrationSet CreateRegistration()
     {
         var conventions = CreateEnum("NativeCallingConvention",
             "Terrum.Interop.NativeCallingConvention",

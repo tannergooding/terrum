@@ -534,6 +534,55 @@ internal static class NativeFunctionPointerContract
             && CanProject(actualType, expectedType, signatures);
     }
 
+    internal static bool TryCreateNativeImportSignature(BoundFunction function,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
+        out NativeFunctionPointerSignatureDefinition? signature)
+    {
+        signature = null;
+        if (function.DirectNativeImport is not DirectNativeImport import
+            || !function.IsExternal || !function.RequiresUnsafeCaller
+            || import.CallingConvention == NativeCallingConvention.Native
+            || import.Outputs.IsDefault || !import.Outputs.IsEmpty
+            || import.Parameters.IsDefault || !import.Parameters.IsEmpty
+            || function.NativeOutputRole is not null
+            || function.NativeOutputContracts.IsDefault
+            || !function.NativeOutputContracts.IsEmpty
+            || function.Variables.IsDefault || function.ParameterCount < 0
+            || function.ParameterCount > function.Variables.Length
+            || !TryCreateDependencies(function.DependencyContracts,
+                out var dependencies))
+        {
+            return false;
+        }
+
+        var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(
+            function.ParameterCount);
+        for (var index = 0; index < function.ParameterCount; index++)
+        {
+            var parameter = function.Variables[index];
+            if (parameter.IsOut || parameter.IsInit || parameter.IsImplicitRef)
+            {
+                return false;
+            }
+            parameterTypes.Add(parameter.Type);
+        }
+
+        var candidate = new NativeFunctionPointerSignatureDefinition(
+            import.CallingConvention, function.ReturnType,
+            parameterTypes.MoveToImmutable()) {
+            EffectsMask = GetDeclaredEffectsMask(
+                function.DoesNotReturn, function.DeclaredRequiresUnsafeCaller),
+            Dependencies = dependencies,
+        };
+        if (!IsValidSignature(candidate, signatures))
+        {
+            return false;
+        }
+
+        signature = candidate;
+        return true;
+    }
+
     internal static bool TryGetAddressableFunctionType(BoundFunction function,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
         out PrimitiveType functionPointerType)
@@ -542,6 +591,25 @@ internal static class NativeFunctionPointerContract
         {
             functionPointerType = nativeCallableType;
             return MatchesFunction(function, nativeCallableType, signatures);
+        }
+        if (function.DirectNativeImport is not null)
+        {
+            if (TryCreateNativeImportSignature(function, signatures,
+                out var nativeImportSignature)
+                && nativeImportSignature is not null)
+            {
+                for (var index = 0; index < signatures.Length; index++)
+                {
+                    if (AreEquivalent(nativeImportSignature, signatures[index]))
+                    {
+                        functionPointerType = NativeFunctionPointerTypes.Type(index);
+                        return true;
+                    }
+                }
+            }
+
+            functionPointerType = default;
+            return false;
         }
         if (!IsOrdinaryAddressableFunction(function))
         {

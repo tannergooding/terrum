@@ -4406,6 +4406,15 @@ internal sealed partial class Binder
         {
             return nativeCallableType;
         }
+        if (signature.External is BoundFunction external
+            && external.DirectNativeImport is not null
+            && NativeFunctionPointerContract.TryCreateNativeImportSignature(
+                external, [.. _nativeFunctionPointerSignatures],
+                out var nativeImportSignature)
+            && nativeImportSignature is not null)
+        {
+            return GetNativeFunctionPointerType(nativeImportSignature);
+        }
         if (signature.External is not null || signature.NativeCallableConvention is not null
             || signature.NativeCallableConventionExpression is not null
             || (signature.StructName is not null && !signature.IsStatic)
