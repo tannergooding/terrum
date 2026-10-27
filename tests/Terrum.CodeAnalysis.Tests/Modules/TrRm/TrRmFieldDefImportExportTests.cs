@@ -75,13 +75,90 @@ public sealed class TrRmFieldDefImportExportTests
                 [new TrRmExportRow(0x1400_0001, 7)]));
     }
 
+    [Test]
+    public void CopyOriginCandidateAllowsPrivateTypeAndFieldContractIdentities()
+    {
+        var fixture = CreateFixture(providerTypeFlags: 5, providerFieldFlags: 9,
+            consumerTypeFlags: 5, consumerFieldFlags: 9);
+        var imports = new[]
+        {
+            new TrRmImportRow(1, 6, 0x1300_0002),
+            new TrRmImportRow(1, 7, 0x1400_0002),
+        };
+        var exports = new[]
+        {
+            new TrRmExportRow(0x1300_0001, 6),
+            new TrRmExportRow(0x1400_0001, 7),
+        };
+
+        Assert.That(Read(fixture, imports, exports, writeRows: true,
+            featureRows: [new TrRmFeatureRow(13, 1), new TrRmFeatureRow(15, 1)]),
+            Is.True);
+    }
+
+    [Test]
+    public void CopyOriginCandidateRequiresBothIdentityFeatures()
+    {
+        var fixture = CreateFixture(providerTypeFlags: 5, providerFieldFlags: 9,
+            consumerTypeFlags: 5, consumerFieldFlags: 9);
+        var imports = new[]
+        {
+            new TrRmImportRow(1, 6, 0x1300_0002),
+            new TrRmImportRow(1, 7, 0x1400_0002),
+        };
+        var exports = new[]
+        {
+            new TrRmExportRow(0x1300_0001, 6),
+            new TrRmExportRow(0x1400_0001, 7),
+        };
+
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, imports, exports, writeRows: true,
+                featureRows: [new TrRmFeatureRow(13, 1)]));
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, imports, exports, writeRows: true,
+                featureRows: [new TrRmFeatureRow(15, 1)]));
+    }
+
+    [Test]
+    public void CopyOriginCandidateRequiresLayoutFeatureForFieldExports()
+    {
+        var fixture = CreateFixture(providerTypeFlags: 5, providerFieldFlags: 9);
+        Assert.Throws<InvalidDataException>(() =>
+            Read(fixture, [], [
+                new TrRmExportRow(0x1300_0001, 6),
+                new TrRmExportRow(0x1400_0001, 7),
+            ], writeRows: true,
+                featureRows: [new TrRmFeatureRow(15, 1)]));
+    }
+
     private static bool Read(Fixture fixture,
         IReadOnlyList<TrRmImportRow> importRows,
-        IReadOnlyList<TrRmExportRow> exportRows, bool writeRows = false)
+        IReadOnlyList<TrRmExportRow> exportRows, bool writeRows = false,
+        IReadOnlyList<TrRmFeatureRow>? featureRows = null)
     {
+        var copyOriginDraft = featureRows is not null;
+        var schema = copyOriginDraft
+            ? TrRmArtifactSchema.CopyOriginDraft : TrRmArtifactSchema.Standard;
         var strings = new TrRmStringTableReader(fixture.Strings, 7);
-        var modules = new TrRmModuleTableReader(fixture.Modules, 2, strings,
-            1, 2, 0, 0);
+        var moduleBytes = (byte[])fixture.Modules.Clone();
+        var featureBytes = featureRows is null ? Array.Empty<byte>() :
+            TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var featureCount = featureRows?.Count ?? 0;
+        if (featureCount != 0)
+        {
+            for (var module = 0; module < 2; module++)
+            {
+                var offset = module * 48;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    moduleBytes.AsSpan(offset + 24), 1);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    moduleBytes.AsSpan(offset + 28), (uint)featureCount);
+            }
+        }
+        var features = new TrRmFeatureTableReader(featureBytes, featureCount, schema);
+        var modules = new TrRmModuleTableReader(moduleBytes, 2, strings,
+            1, 2, 0, 0, featureCount);
         var references = new TrRmModuleRefTableReader(fixture.ModuleRefs, 1,
             strings, modules);
         var types = new TrRmTypeDefTableReader(fixture.TypeDefs, 2,
@@ -106,25 +183,54 @@ public sealed class TrRmFieldDefImportExportTests
         var associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
             [], 0, strings, typeSpecs, interfaces);
 
-        var importBytes = writeRows
-            ? TrRmImportTableWriter.Encode(importRows, strings, references,
-                types, methods, properties, interfaces, associatedTypeDefs, fields)
+        var importBytes = writeRows && importRows.Count != 0
+            ? copyOriginDraft
+                ? TrRmImportTableWriter.Encode(importRows, strings, references,
+                    types, methods, properties, interfaces, associatedTypeDefs,
+                    fields, features, modules, schema)
+                : TrRmImportTableWriter.Encode(importRows, strings, references,
+                    types, methods, properties, interfaces, associatedTypeDefs, fields)
             : EncodeImportRows(importRows);
-        var imports = new TrRmImportTableReader(importBytes, importRows.Count,
-            strings, references, types, methods, properties,
-            interfaces, associatedTypeDefs, fields);
-        var exportBytes = writeRows
-            ? TrRmExportTableWriter.Encode(exportRows, strings, types, methods,
-                properties, imports, interfaces, associatedTypeDefs, fields)
+        var imports = copyOriginDraft
+            ? new TrRmImportTableReader(importBytes, importRows.Count,
+                strings, references, types, methods, properties,
+                interfaces, associatedTypeDefs, fields, features, modules, schema)
+            : new TrRmImportTableReader(importBytes, importRows.Count,
+                strings, references, types, methods, properties,
+                interfaces, associatedTypeDefs, fields);
+        var exportBytes = writeRows && exportRows.Count != 0
+            ? copyOriginDraft
+                ? TrRmExportTableWriter.Encode(exportRows, strings, types, methods,
+                    properties, imports, interfaces, associatedTypeDefs, fields,
+                    features, modules, schema)
+                : TrRmExportTableWriter.Encode(exportRows, strings, types, methods,
+                    properties, imports, interfaces, associatedTypeDefs, fields)
             : EncodeExportRows(exportRows);
-        _ = new TrRmExportTableReader(exportBytes, exportRows.Count,
-            strings, types, methods, properties, imports,
-            interfaces, associatedTypeDefs, fields);
+        if (copyOriginDraft)
+        {
+            _ = new TrRmExportTableReader(exportBytes, exportRows.Count,
+                strings, types, methods, properties, imports,
+                interfaces, associatedTypeDefs, fields, features, modules, schema);
+        }
+        else
+        {
+            _ = new TrRmExportTableReader(exportBytes, exportRows.Count,
+                strings, types, methods, properties, imports,
+                interfaces, associatedTypeDefs, fields);
+        }
         _ = layoutFields;
 
-        TrRmStructuralMetadataValidator.Validate(TrRmArtifactWriter.Encode([
-            new TrRmSection(0x0001, 0, 2, fixture.Modules),
-            new TrRmSection(0x0002, 0, 7, fixture.Strings),
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 2, moduleBytes),
+            new(0x0002, 0, 7, fixture.Strings),
+        };
+        if (featureCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                (uint)featureCount, featureBytes));
+        }
+        sections.AddRange([
             new TrRmSection(0x0010, 0, 1, fixture.ModuleRefs),
             new TrRmSection(0x0011, 0, 1, fixture.TypeSpecs),
             new TrRmSection(0x0013, 0, 2, fixture.TypeDefs),
@@ -132,12 +238,23 @@ public sealed class TrRmFieldDefImportExportTests
             new TrRmSection(0x0015, 0, 2, fixture.Layouts),
             new TrRmSection(0x001C, 0, (uint)importRows.Count, importBytes),
             new TrRmSection(0x001D, 0, (uint)exportRows.Count, exportBytes),
-        ]));
+        ]);
+        var artifact = TrRmArtifactWriter.Encode(sections, schema);
+        if (copyOriginDraft)
+        {
+            _ = TrRmStructuralMetadataValidator.ValidateCopyOriginDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForCopyOriginDraft(artifact));
+        }
+        else
+        {
+            TrRmStructuralMetadataValidator.Validate(artifact);
+        }
         return imports.IsExpectedDefinition(0x1400_0002);
     }
 
     private static Fixture CreateFixture(uint providerTypeFlags = 6,
-        uint providerFieldFlags = 10)
+        uint providerFieldFlags = 10, uint consumerTypeFlags = 6,
+        uint consumerFieldFlags = 10)
     {
         var stringBytes = TrRmStringTableWriter.EncodeNames([
             ("Provider", 0), ("Consumer", 0), ("Example", 0), ("Widget", 0),
@@ -160,7 +277,7 @@ public sealed class TrRmFieldDefImportExportTests
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(3, 4, providerTypeFlags,
                 1, 1, 0, 0, 1, 1, 0, 0),
-            new TrRmTypeDefRow(3, 4, 6,
+            new TrRmTypeDefRow(3, 4, consumerTypeFlags,
                 2, 1, 0, 0, 2, 1, 0, 0),
         ], strings, modules, 2, 0, 2, 0);
         var types = new TrRmTypeDefTableReader(typeDefBytes, 2,
@@ -172,7 +289,7 @@ public sealed class TrRmFieldDefImportExportTests
         ], types, targetProfiles, 0);
         var fieldBytes = TrRmFieldDefTableWriter.Encode([
             new TrRmFieldDefRow(1, 5, 1, providerFieldFlags),
-            new TrRmFieldDefRow(2, 5, 1, 10),
+            new TrRmFieldDefRow(2, 5, 1, consumerFieldFlags),
         ], strings, types, typeSpecs);
         return new Fixture(stringBytes, moduleBytes, moduleRefBytes,
             typeSpecBytes, typeDefBytes, layoutBytes, fieldBytes);

@@ -208,6 +208,53 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void CopyOriginDraftFeatureIsSelectedOutOfBandAndHasNoPrerequisites()
+    {
+        var featureBytes = TrRmFeatureTableWriter.Encode(
+            [new TrRmFeatureRow(15, 1)], TrRmArtifactSchema.CopyOriginDraft);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(15, 1)]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([new TrRmFeatureRow(15, 2)],
+                TrRmArtifactSchema.CopyOriginDraft));
+
+        var artifact = FeatureArtifact(1, 1, featureBytes);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(artifact));
+        var index = TrRmArtifactIndex.ForCopyOriginDraft(artifact);
+        _ = TrRmStructuralMetadataValidator.ValidateCopyOriginDraftAndGetExecutionTables(index);
+
+        Assert.That(index.TryGetSection(0x0002, out var stringBytes,
+            out var stringCount), Is.True);
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes,
+            out var moduleCount), Is.True);
+        Assert.That(index.TryGetSection(0x0004, out var selectedFeatureBytes,
+            out var selectedFeatureCount), Is.True);
+        var features = new TrRmFeatureTableReader(selectedFeatureBytes,
+            selectedFeatureCount, TrRmArtifactSchema.CopyOriginDraft);
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            strings, 0, 0, 0, 0, selectedFeatureCount);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, 15), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, 13), Is.False);
+        var standardFeatures = new TrRmFeatureTableReader(selectedFeatureBytes,
+            selectedFeatureCount);
+        var standardRejectedCandidate = false;
+        try
+        {
+            _ = TrRmFeatureManifestValidator.Requires(standardFeatures, modules, 1, 15);
+        }
+        catch (InvalidDataException)
+        {
+            standardRejectedCandidate = true;
+        }
+        Assert.That(standardRejectedCandidate, Is.True);
+    }
+
+    [Test]
     public void DerivesPrerequisiteClosurePerModule()
     {
         var artifact = FeatureArtifact(1, 1,

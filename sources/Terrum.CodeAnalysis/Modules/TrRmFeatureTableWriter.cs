@@ -14,8 +14,17 @@ public static class TrRmFeatureTableWriter
     /// <param name="rows">The required feature pairs; repeated identical pairs are coalesced.</param>
     /// <returns>The encoded Feature section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmFeatureRow> rows)
+        => Encode(rows, TrRmArtifactSchema.Standard);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmFeatureRow> rows,
+        TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.CopyOriginDraft))
+        {
+            throw InvalidFeature();
+        }
         if (rows.Count > 0xFF_FFFF)
         {
             throw new ArgumentOutOfRangeException(nameof(rows));
@@ -25,8 +34,8 @@ public static class TrRmFeatureTableWriter
         for (var index = 0; index < rows.Count; index++)
         {
             var row = rows[index];
-            if (!TrRmFeatureTableReader.TryGetAssignedRuleRevision(row.FeatureId,
-                    out var assignedRevision)
+            if (!TrRmFeatureTableReader.TryGetRuleRevision(row.FeatureId,
+                    schema, out var assignedRevision)
                 || row.RuleRevision != assignedRevision)
             {
                 throw InvalidFeature();
@@ -62,7 +71,7 @@ public static class TrRmFeatureTableWriter
             Write(result, (index * 8) + 4, row.RuleRevision);
         }
 
-        _ = new TrRmFeatureTableReader(result, distinctCount);
+        _ = new TrRmFeatureTableReader(result, distinctCount, schema);
         return result;
     }
 

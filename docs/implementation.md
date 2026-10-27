@@ -615,7 +615,11 @@ exclusive `004A` ranges. They do not bind path owners or compute target
 layouts; FieldMap token binding and query execution remain incomplete.
 FieldDef DefId/Import/Export rows also have structural C# support for owner
 imports and public local publication; exact field-contract and retained-layout
-comparison remain incomplete. The executable path still uses separate
+comparison remain incomplete. An explicit out-of-band `CopyOriginDraft`
+profile now recognizes provisional Feature 15/1 and contract-only nonpublic
+TypeDef/FieldDef identities, with Feature 13/1 required for FieldDef
+Import/Export. This profile does not yet read or write Contract 000D and is not
+the selected current schema. The executable path still uses separate
 development Feature assignments and does not claim current schema conformance.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
 inputs, and invoke the shared mandatory verifier and backend; there is no

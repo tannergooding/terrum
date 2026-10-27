@@ -30,6 +30,34 @@ public readonly ref struct TrRmExportTableReader
         TrRmImportTableReader imports, TrRmInterfaceDefTableReader interfaces = default,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
         TrRmFieldDefTableReader fields = default)
+        : this(section, recordCount, strings, types, methods, properties,
+            imports, interfaces, associatedTypeDefs, fields, default, default,
+            TrRmArtifactSchema.Standard, profileAware: false)
+    {
+    }
+
+    internal TrRmExportTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmPropertyDefTableReader properties,
+        TrRmImportTableReader imports, TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema)
+        : this(section, recordCount, strings, types, methods, properties,
+            imports, interfaces, associatedTypeDefs, fields, features, modules,
+            schema, profileAware: true)
+    {
+    }
+
+    private TrRmExportTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmPropertyDefTableReader properties,
+        TrRmImportTableReader imports, TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema, bool profileAware)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -53,7 +81,23 @@ public readonly ref struct TrRmExportTableReader
                 associatedTypeDefs);
             var text = strings.DecodeName((int)key);
             var definitionKind = definition >> 24;
-            if (visibility != 2 || (owner != 0 && (types.GetFlags(owner) & 3) != 2)
+            var nonpublicDefinition = visibility != 2
+                || (owner != 0 && (types.GetFlags(owner) & 3) != 2);
+            var nonpublicContractIdentity = definitionKind is 0x13 or 0x14
+                && nonpublicDefinition;
+            var allowsContractOnlyIdentity = profileAware
+                && schema == TrRmArtifactSchema.CopyOriginDraft
+                && nonpublicContractIdentity
+                && TrRmFeatureManifestValidator.Requires(features, modules,
+                    module, TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
+                    schema);
+            var missingFieldPathFeature = profileAware
+                && schema == TrRmArtifactSchema.CopyOriginDraft
+                && definitionKind == 0x14
+                && !TrRmFeatureManifestValidator.Requires(features, modules,
+                    module, TrRmFeatureTableReader.LayoutQueriesFeatureId, schema);
+            if ((nonpublicDefinition && !allowsContractOnlyIdentity)
+                || missingFieldPathFeature
                 || imports.IsExpectedDefinition(definition)
                 || ((definitionKind is 0x14 or 0x20)
                     && imports.IsExpectedDefinition(0x1300_0000u | (uint)owner))

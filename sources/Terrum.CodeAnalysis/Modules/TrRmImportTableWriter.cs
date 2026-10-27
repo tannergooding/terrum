@@ -30,6 +30,32 @@ public static class TrRmImportTableWriter
         TrRmInterfaceDefTableReader interfaces = default,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
         TrRmFieldDefTableReader fields = default)
+        => EncodeCore(rows, strings, references, types, methods, properties,
+            interfaces, associatedTypeDefs, fields, default, default,
+            TrRmArtifactSchema.Standard, profileAware: false);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmImportRow> rows,
+        TrRmStringTableReader strings, TrRmModuleRefTableReader references,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmPropertyDefTableReader properties,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema)
+        => EncodeCore(rows, strings, references, types, methods, properties,
+            interfaces, associatedTypeDefs, fields, features, modules, schema,
+            profileAware: true);
+
+    private static byte[] EncodeCore(IReadOnlyList<TrRmImportRow> rows,
+        TrRmStringTableReader strings, TrRmModuleRefTableReader references,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmPropertyDefTableReader properties,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema, bool profileAware)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -47,9 +73,17 @@ public static class TrRmImportTableWriter
             Write(result, offset + 8, row.ExpectedLocalDefId);
         }
 
-        _ = new TrRmImportTableReader(result, rows.Count,
-            strings, references, types, methods, properties, interfaces,
-            associatedTypeDefs, fields);
+        if (profileAware)
+        {
+            _ = new TrRmImportTableReader(result, rows.Count, strings, references,
+                types, methods, properties, interfaces, associatedTypeDefs,
+                fields, features, modules, schema);
+        }
+        else
+        {
+            _ = new TrRmImportTableReader(result, rows.Count, strings, references,
+                types, methods, properties, interfaces, associatedTypeDefs, fields);
+        }
         return result;
     }
 

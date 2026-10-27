@@ -98,12 +98,14 @@ public readonly ref struct TrRmFeatureTableReader
     public const uint ConstantExecutionFeatureId = 12;
     /// <summary>The assigned identifier for LayoutQueries.</summary>
     public const uint LayoutQueriesFeatureId = 13;
+    internal const uint CopyOriginContractsCandidateFeatureId = 15;
     /// <summary>The assigned Feature rule revision shared by currently assigned features.</summary>
     public const uint RuleRevision = 1;
 
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmArtifactSchema _schema;
 
     /// <summary>Gets the number of validated Feature rows.</summary>
     public int Count => _recordCount;
@@ -112,15 +114,24 @@ public readonly ref struct TrRmFeatureTableReader
     /// <param name="section">The borrowed Feature section bytes.</param>
     /// <param name="recordCount">The number of eight-byte Feature rows.</param>
     public TrRmFeatureTableReader(ReadOnlySpan<byte> section, int recordCount)
+        : this(section, recordCount, TrRmArtifactSchema.Standard)
+    {
+    }
+
+    internal TrRmFeatureTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmArtifactSchema schema)
     {
         if (recordCount < 0 || recordCount > 0xFF_FFFF
-            || (long)recordCount * RowSize != section.Length)
+            || (long)recordCount * RowSize != section.Length
+            || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.Development or TrRmArtifactSchema.CopyOriginDraft))
         {
             throw InvalidFeature();
         }
 
         _rows = section;
         _recordCount = recordCount;
+        _schema = schema;
         for (var row = 0; row < recordCount; row++)
         {
             if (Read(row * RowSize) == 0 || Read((row * RowSize) + 4) == 0)
@@ -175,6 +186,28 @@ public readonly ref struct TrRmFeatureTableReader
         return ruleRevision != 0;
     }
 
+    internal static bool TryGetRuleRevision(uint featureId,
+        TrRmArtifactSchema schema, out uint ruleRevision)
+    {
+        if (schema == TrRmArtifactSchema.CopyOriginDraft
+            && featureId == CopyOriginContractsCandidateFeatureId)
+        {
+            ruleRevision = TrRmProvisionalFeatureRevisions.CopyOriginContractsRuleRevision;
+            return true;
+        }
+
+        if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.CopyOriginDraft))
+        {
+            ruleRevision = 0;
+            return false;
+        }
+
+        return TryGetAssignedRuleRevision(featureId, out ruleRevision);
+    }
+
+    internal TrRmArtifactSchema Schema => _schema;
+
     private uint Read(int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice(offset, sizeof(uint)));
 
@@ -186,35 +219,53 @@ internal static class TrRmProvisionalFeatureRevisions
 {
     internal const uint ScalarInitOutputInitialRuleRevision = 1;
     internal const uint ScalarInitOutputRuleRevision = 8;
+    internal const uint CopyOriginContractsRuleRevision = 1;
 }
 
 internal static class TrRmFeatureManifestValidator
 {
     internal static void Validate(TrRmFeatureTableReader features,
-        TrRmModuleTableReader modules)
+        TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
-        Span<uint> revisions = stackalloc uint[14];
+        if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.CopyOriginDraft))
+        {
+            throw InvalidManifest();
+        }
+        Span<uint> revisions = stackalloc uint[16];
         for (var module = 1; module <= modules.Count; module++)
         {
-            ExpandModuleRequirements(features, modules, module, revisions);
+            ExpandModuleRequirements(features, modules, module, revisions, schema);
         }
     }
 
     internal static bool Requires(TrRmFeatureTableReader features,
         TrRmModuleTableReader modules, int module, uint featureId)
+        => Requires(features, modules, module, featureId, features.Schema);
+
+    internal static bool Requires(TrRmFeatureTableReader features,
+        TrRmModuleTableReader modules, int module, uint featureId,
+        TrRmArtifactSchema schema)
     {
-        if (featureId >= 14)
+        if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.CopyOriginDraft))
+        {
+            throw InvalidManifest();
+        }
+        if (!TrRmFeatureTableReader.TryGetRuleRevision(featureId, schema, out _))
         {
             throw InvalidManifest();
         }
 
-        Span<uint> revisions = stackalloc uint[14];
-        ExpandModuleRequirements(features, modules, module, revisions);
+        Span<uint> revisions = stackalloc uint[16];
+        ExpandModuleRequirements(features, modules, module, revisions, schema);
         return revisions[(int)featureId] != 0;
     }
 
     private static void ExpandModuleRequirements(TrRmFeatureTableReader features,
-        TrRmModuleTableReader modules, int module, Span<uint> revisions)
+        TrRmModuleTableReader modules, int module, Span<uint> revisions,
+        TrRmArtifactSchema schema)
     {
         revisions.Clear();
         var (first, count) = modules.GetFeatureRange(module);
@@ -222,8 +273,8 @@ internal static class TrRmFeatureManifestValidator
         {
             var feature = features.GetFeature(first + offset);
             if (feature.FeatureId >= revisions.Length
-                || !TrRmFeatureTableReader.TryGetAssignedRuleRevision(
-                    feature.FeatureId, out var assignedRevision)
+                || !TrRmFeatureTableReader.TryGetRuleRevision(
+                    feature.FeatureId, schema, out var assignedRevision)
                 || feature.RuleRevision != assignedRevision)
             {
                 throw InvalidManifest();

@@ -39,6 +39,36 @@ public readonly ref struct TrRmImportTableReader
         TrRmInterfaceDefTableReader interfaces = default,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
         TrRmFieldDefTableReader fields = default)
+        : this(section, recordCount, strings, references, types, methods,
+            properties, interfaces, associatedTypeDefs, fields, default, default,
+            TrRmArtifactSchema.Standard, profileAware: false)
+    {
+    }
+
+    internal TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmModuleRefTableReader references,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmPropertyDefTableReader properties,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema)
+        : this(section, recordCount, strings, references, types, methods,
+            properties, interfaces, associatedTypeDefs, fields, features, modules,
+            schema, profileAware: true)
+    {
+    }
+
+    private TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmModuleRefTableReader references,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmPropertyDefTableReader properties,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmFieldDefTableReader fields,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema, bool profileAware)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -64,7 +94,7 @@ public readonly ref struct TrRmImportTableReader
                 throw InvalidImport();
             }
 
-            var (module, _, _, body) = TrRmDefinitionResolver.Resolve(expected,
+            var (module, visibility, owner, body) = TrRmDefinitionResolver.Resolve(expected,
                 types, fields, methods, properties, interfaces, associatedTypeDefs);
             var moduleRefRow = (int)moduleRef;
             if (moduleRefRow != lastModuleRefRow)
@@ -85,6 +115,23 @@ public readonly ref struct TrRmImportTableReader
                 || (expected >> 24 is 0x16 or 0x1E && body != 0))
             {
                 throw InvalidImport();
+            }
+            if (profileAware && schema == TrRmArtifactSchema.CopyOriginDraft)
+            {
+                var definitionKind = expected >> 24;
+                var contractOnlyIdentity = definitionKind is 0x13 or 0x14
+                    && (visibility != 2 || (owner != 0
+                        && (types.GetFlags(owner) & 3) != 2));
+                if ((definitionKind == 0x14
+                    && !TrRmFeatureManifestValidator.Requires(features, modules,
+                        module, TrRmFeatureTableReader.LayoutQueriesFeatureId, schema))
+                    || (contractOnlyIdentity
+                        && !TrRmFeatureManifestValidator.Requires(features, modules,
+                            module, TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
+                            schema)))
+                {
+                    throw InvalidImport();
+                }
             }
 
             if (!_expected.TryAdd(expected, new TrRmImportBinding(

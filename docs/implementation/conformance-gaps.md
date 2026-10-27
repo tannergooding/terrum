@@ -114,6 +114,11 @@ current-schema conformance. See
 [Body fixtures](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmBodyExampleTests.cs)
 and the [module inventory](modules.md). Existing test success would not establish
 current-registry decoding.
+A separate internal `CopyOriginDraft` profile now admits candidate Feature
+15/1 and contract-only nonpublic TypeDef/FieldDef identities; FieldDef
+Import/Export additionally requires Feature 13/1. Standard validation does
+not select this profile, and Contract 000D decoding/writing, summary binding,
+producer routes and current-schema conformance remain unfinished.
 
 Selected Body access now decodes register kind-01 framing, optional-map
 extents, fixed Blocks, assigned typed-record payload shapes, instruction
