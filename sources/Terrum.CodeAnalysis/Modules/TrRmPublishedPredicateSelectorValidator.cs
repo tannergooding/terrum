@@ -9,7 +9,7 @@ namespace Terrum.CodeAnalysis.Modules;
 
 internal static class TrRmPublishedPredicateSelectorValidator
 {
-    internal static void Validate(ReadOnlySpan<byte> readRoots, int readRootCount,
+    internal static byte[] Validate(ReadOnlySpan<byte> readRoots, int readRootCount,
         ReadOnlySpan<byte> nodes, int nodeCount,
         ReadOnlySpan<byte> operands, int operandCount, int dependencyCount,
         TrRmPredicateGraphTableReader graphs,
@@ -143,6 +143,8 @@ internal static class TrRmPublishedPredicateSelectorValidator
 
             return nodeKindsByGraph[graph];
         }
+
+        return nodeKindsByGraph;
     }
 
     private static bool SelectorsOverlap(byte left, byte right)

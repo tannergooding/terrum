@@ -23,6 +23,9 @@ internal readonly record struct TrRmPredicateGraphContract(
     byte PhaseTag, uint PhaseLocalOrdinal, int PredicateGraphRow);
 internal readonly record struct TrRmOutputStateContract(
     int ParameterOrdinal, int PredicateGraphRow, byte State);
+internal readonly record struct TrRmDependencyContract(
+    byte DestinationKind, byte SourceKind, byte Relationship, byte Phase,
+    uint DestinationOrdinal, uint SourceOrdinal);
 
 /// <summary>Validates Contract row framing, owner ranges and assigned clause shapes.</summary>
 /// <remarks>Structural decoding does not prove the promises or make unassigned clause modes executable.</remarks>
@@ -38,6 +41,7 @@ public readonly ref struct TrRmContractTableReader
     private readonly bool[] _hasNativeAbis;
     private readonly ImmutableArray<TrRmPredicateGraphContract>[] _predicateGraphContracts;
     private readonly ImmutableArray<TrRmOutputStateContract>[] _outputStateContracts;
+    private readonly ImmutableArray<TrRmDependencyContract>[] _dependencyContracts;
     private readonly byte[] _nativeCallableConventions;
     private readonly int[] _nativeCallableContractRows;
     private readonly HashSet<int> _cleanupMethodRows;
@@ -102,6 +106,8 @@ public readonly ref struct TrRmContractTableReader
             new ImmutableArray<TrRmPredicateGraphContract>[methods.Count + 1];
         _outputStateContracts =
             new ImmutableArray<TrRmOutputStateContract>[methods.Count + 1];
+        _dependencyContracts =
+            new ImmutableArray<TrRmDependencyContract>[methods.Count + 1];
         _nativeCallableConventions = new byte[methods.Count + 1];
         _nativeCallableContractRows = new int[methods.Count + 1];
         _cleanupMethodRows = new HashSet<int>();
@@ -122,6 +128,12 @@ public readonly ref struct TrRmContractTableReader
         var singletons = new HashSet<(uint Owner, ushort Kind)>();
         var outputs = new HashSet<(uint Owner, uint Ordinal)>();
         var outputStates = new HashSet<(uint Owner, uint Ordinal, uint Predicate)>();
+        var dependencies = new HashSet<(uint Owner, byte DestinationKind,
+            uint DestinationOrdinal, byte Phase, byte SourceKind, uint SourceOrdinal)>();
+        var emptyDependencyDestinations = new HashSet<(uint Owner, byte DestinationKind,
+            uint DestinationOrdinal, byte Phase)>();
+        var sourcedDependencyDestinations = new HashSet<(uint Owner, byte DestinationKind,
+            uint DestinationOrdinal, byte Phase)>();
         var cleanupTypes = new HashSet<int>();
         var predicateOrdinals = new Dictionary<(uint Owner, byte Phase), HashSet<uint>>();
         var nativeParameterOrdinals = new HashSet<(uint Owner, uint Ordinal)>();
@@ -212,6 +224,68 @@ public readonly ref struct TrRmContractTableReader
                     {
                         throw InvalidContract();
                     }
+                    if (developmentProfile)
+                    {
+                        break;
+                    }
+                    if (owner >> 24 != 0x16)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var dependencyMethod = checked((int)(owner & 0xFF_FFFF));
+                    var dependencySignature = methods.GetSignature(dependencyMethod);
+                    var dependencyParamCount =
+                        signatures.GetParamRange(dependencySignature).Count;
+                    var destinationKind = data[8];
+                    var sourceKind = data[9];
+                    var relationship = data[10];
+                    var phase = data[11];
+                    var destinationOrdinal = Read(data, 12);
+                    var sourceOrdinal = Read(data, 16);
+                    var destinationValid = destinationKind switch
+                    {
+                        1 => destinationOrdinal == 0,
+                        2 or 3 => destinationOrdinal < dependencyParamCount,
+                        4 => destinationOrdinal == 0
+                            && signatures.GetReceiverTypeSpec(dependencySignature) != 0,
+                        _ => false,
+                    };
+                    var sourceValid = sourceKind switch
+                    {
+                        0 => relationship == 0 && sourceOrdinal == 0,
+                        1 => relationship is >= 1 and <= 3
+                            && sourceOrdinal < dependencyParamCount,
+                        2 => relationship is >= 1 and <= 3 && sourceOrdinal == 0
+                            && signatures.GetReceiverTypeSpec(dependencySignature) != 0,
+                        _ => false,
+                    };
+                    var dependencyKey = (owner, destinationKind,
+                        destinationOrdinal, phase, sourceKind, sourceOrdinal);
+                    var destinationKey = (owner, destinationKind,
+                        destinationOrdinal, phase);
+                    if (phase is < 1 or > 3 || !destinationValid || !sourceValid
+                        || !dependencies.Add(dependencyKey))
+                    {
+                        throw InvalidContract();
+                    }
+
+                    if (sourceKind == 0)
+                    {
+                        _ = emptyDependencyDestinations.Add(destinationKey);
+                    }
+                    else
+                    {
+                        _ = sourcedDependencyDestinations.Add(destinationKey);
+                    }
+
+                    var dependency = new TrRmDependencyContract(destinationKind,
+                        sourceKind, relationship, phase, destinationOrdinal,
+                        sourceOrdinal);
+                    var methodDependencies = _dependencyContracts[dependencyMethod];
+                    _dependencyContracts[dependencyMethod] =
+                        methodDependencies.IsDefault
+                            ? [dependency] : methodDependencies.Add(dependency);
                     break;
                 case 5:
                     if (data.Length != 12 || owner >> 24 != 0x13
@@ -380,6 +454,11 @@ public readonly ref struct TrRmContractTableReader
             }
         }
 
+        if (emptyDependencyDestinations.Overlaps(sourcedDependencyDestinations))
+        {
+            throw InvalidContract();
+        }
+
         for (var method = 1; method <= methods.Count; method++)
         {
             if (_hasNativeAbis[method] && (GetEffectsMask(method) & 4) == 0)
@@ -532,6 +611,13 @@ public readonly ref struct TrRmContractTableReader
         => methodRow > 0 && methodRow < _outputStateContracts.Length
             ? _outputStateContracts[methodRow].IsDefault
                 ? [] : _outputStateContracts[methodRow]
+            : throw InvalidContract();
+
+    internal ImmutableArray<TrRmDependencyContract> GetDependencyContracts(
+        int methodRow)
+        => methodRow > 0 && methodRow < _dependencyContracts.Length
+            ? _dependencyContracts[methodRow].IsDefault
+                ? [] : _dependencyContracts[methodRow]
             : throw InvalidContract();
 
     internal TrRmNativeAbiContract GetNativeAbi(int methodRow)

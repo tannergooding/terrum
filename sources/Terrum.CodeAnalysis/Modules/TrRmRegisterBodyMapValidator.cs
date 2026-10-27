@@ -37,18 +37,20 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmFrozenValueNodeTableReader frozenValueNodes,
         TrRmBlobTableReader blobs,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
         TrRmModuleRefTableReader moduleRefs)
     {
         var visitedTypeSpecRows = new HashSet<int>();
         var constantValues = new ConstantSourceValueContext(features, modules,
             constantSources, frozenValueNodes, blobs);
-        ValidateHomeMap(body, methodDefRow, types, methods, signatures, parameters,
-            typeSpecs, genericParams, imports);
+        ValidateHomeMap(body, methodDefRow, ownerModule, types, methods, signatures,
+            parameters, typeSpecs, genericParams, imports, constantValues,
+            nativeFunctionPointerAnchors);
         ValidateTypeMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateMethodMap(body, ownerModule, methods, signatures, parameters,
             types, typeSpecs, genericParams, imports, moduleRefs, constantValues,
-            visitedTypeSpecRows);
+            visitedTypeSpecRows, nativeFunctionPointerAnchors);
         ValidateFieldMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, fields, fieldPaths, imports, moduleRefs, constantValues,
             visitedTypeSpecRows);
@@ -59,10 +61,12 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,
+        int ownerModule,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports, ConstantSourceValueContext constantValues,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var signature = methods.GetSignature(methodDefRow);
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
@@ -88,7 +92,8 @@ internal static class TrRmRegisterBodyMapValidator
                 case 1:
                     if (flags != 0 || formalOrdinal != 0 || !hasReceiver || hasReceiverHome
                         || !MatchesTypeMapEntry(body, typeMapIndex, receiverType,
-                            types, typeSpecs, genericParams, imports))
+                            ownerModule, types, typeSpecs, genericParams, imports,
+                            constantValues, nativeFunctionPointerAnchors))
                     {
                         throw InvalidMap();
                     }
@@ -99,7 +104,8 @@ internal static class TrRmRegisterBodyMapValidator
                         || !formalOrdinals.Add(formalOrdinal)
                         || !MatchesTypeMapEntry(body, typeMapIndex,
                             parameters.GetTypeSpec(firstParameter + formalOrdinal),
-                            types, typeSpecs, genericParams, imports))
+                            ownerModule, types, typeSpecs, genericParams, imports,
+                            constantValues, nativeFunctionPointerAnchors))
                     {
                         throw InvalidMap();
                     }
@@ -115,9 +121,11 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static bool MatchesTypeMapEntry(TrRmRegisterBodyReader body,
-        int typeMapIndex, uint expectedType, TrRmTypeDefTableReader types,
+        int typeMapIndex, uint expectedType, int ownerModule,
+        TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports, ConstantSourceValueContext constantValues,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var token = ReadUInt32(body.TypeMap, typeMapIndex * sizeof(uint));
         var kind = (byte)(token >> 24);
@@ -136,7 +144,8 @@ internal static class TrRmRegisterBodyMapValidator
             }
 
             return AreEquivalentSelectedTypeSpecRefs(typeSpecRef, expectedType,
-                types, typeSpecs, genericParams, imports);
+                ownerModule, types, typeSpecs, genericParams, imports, constantValues,
+                nativeFunctionPointerAnchors);
         }
 
         if (kind is not (0x13 or 0x1C))
@@ -162,8 +171,10 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static bool AreEquivalentSelectedTypeSpecRefs(uint left, uint right,
-        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
-        TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports)
+        int ownerModule, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports, ConstantSourceValueContext constantValues,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var pending = new Stack<(uint Left, uint Right)>();
         var visited = new HashSet<(uint Left, uint Right)>();
@@ -268,7 +279,10 @@ internal static class TrRmRegisterBodyMapValidator
                         {
                             pending.Push((leftArgument, rightArgument));
                         }
-                        else if (formalKind != 2 || leftArgument != rightArgument)
+                        else if (formalKind != 2
+                            || !AreEquivalentFrozenScalarSources(leftArgument, rightArgument,
+                                genericParams.GetConstantTypeSpecRef(firstFormal + ordinal),
+                                ownerModule, typeSpecs, constantValues))
                         {
                             return false;
                         }
@@ -293,6 +307,14 @@ internal static class TrRmRegisterBodyMapValidator
                     pending.Push((ReadUInt32(leftRow, 3), ReadUInt32(rightRow, 3)));
                     break;
 
+                case 0x0D:
+                    if (!nativeFunctionPointerAnchors.AreEquivalentTypeSpecRefs(
+                        pair.Left, pair.Right))
+                    {
+                        return false;
+                    }
+                    break;
+
                 default:
                     if (!typeSpecs.AreEquivalentTypeSpecRefs(pair.Left, pair.Right))
                     {
@@ -303,6 +325,35 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         return true;
+    }
+
+    private static bool AreEquivalentFrozenScalarSources(uint leftSourceRow,
+        uint rightSourceRow, uint constantTypeSpecRef, int ownerModule,
+        TrRmTypeSpecTableReader typeSpecs, ConstantSourceValueContext constantValues)
+    {
+        if (leftSourceRow == 0 || rightSourceRow == 0)
+        {
+            return false;
+        }
+
+        var leftRow = checked((int)leftSourceRow);
+        var rightRow = checked((int)rightSourceRow);
+        TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+            leftRow, constantTypeSpecRef, ownerModule,
+            constantValues.ConstantSources, constantValues.FrozenValueNodes,
+            constantValues.Blobs, typeSpecs, constantValues.Features,
+            constantValues.Modules);
+        TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+            rightRow, constantTypeSpecRef, ownerModule,
+            constantValues.ConstantSources, constantValues.FrozenValueNodes,
+            constantValues.Blobs, typeSpecs, constantValues.Features,
+            constantValues.Modules);
+        var leftNode = checked((int)constantValues.ConstantSources.GetPayloadReference(leftRow));
+        var rightNode = checked((int)constantValues.ConstantSources.GetPayloadReference(rightRow));
+        return constantValues.FrozenValueNodes.GetScalarPayload(leftNode,
+                constantValues.Blobs)
+            .SequenceEqual(constantValues.FrozenValueNodes.GetScalarPayload(rightNode,
+                constantValues.Blobs));
     }
 
     private static bool MatchesInlineFamilyTypeSpec(uint inlineTypeSpecRef,
@@ -345,9 +396,19 @@ internal static class TrRmRegisterBodyMapValidator
             switch (token >> 24)
             {
                 case 0x11:
-                    ValidateTypeSpecModuleContext((uint)row, ownerModule,
+                    var typeSpecRef = (uint)row;
+                    ValidateTypeSpecModuleContext(typeSpecRef, ownerModule,
                         types, typeSpecs, genericParams, methods, imports,
                         moduleRefs, constantValues, visitedTypeSpecRows);
+                    if (typeSpecs.ContainsNativeFunctionPointerValue(typeSpecRef,
+                            types, genericParams, imports)
+                        && !TrRmFeatureManifestValidator.Requires(
+                            constantValues.Features, constantValues.Modules,
+                            ownerModule,
+                            TrRmFeatureTableReader.RootlessNativeValuesFeatureId))
+                    {
+                        throw InvalidMap();
+                    }
                     break;
                 case 0x13:
                     if (row <= 0 || row > types.Count
@@ -380,7 +441,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
         TrRmImportTableReader imports, TrRmModuleRefTableReader moduleRefs,
         ConstantSourceValueContext constantValues,
-        HashSet<int> visitedTypeSpecRows)
+        HashSet<int> visitedTypeSpecRows,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         for (var index = 0; index < body.MethodCount; index++)
         {
@@ -390,6 +452,7 @@ internal static class TrRmRegisterBodyMapValidator
             {
                 case 0x16:
                     if (row <= 0 || row > methods.Count
+                        || nativeFunctionPointerAnchors.IsAnchorMethodDef(row)
                         || methods.GetOwnerModule(row) != ownerModule)
                     {
                         throw InvalidMap();
@@ -402,8 +465,13 @@ internal static class TrRmRegisterBodyMapValidator
                 case 0x1C:
                     ValidateImport(row, 0x16, ownerModule, imports, moduleRefs);
                     var expectedMethod = imports.GetExpectedDefinitionForImportRow(row);
+                    var expectedMethodRow = (int)(expectedMethod & 0x00FF_FFFF);
+                    if (nativeFunctionPointerAnchors.IsAnchorMethodDef(expectedMethodRow))
+                    {
+                        throw InvalidMap();
+                    }
                     ValidateMethodSignatureTypeContexts(
-                        (int)(expectedMethod & 0x00FF_FFFF), ownerModule,
+                        expectedMethodRow, ownerModule,
                         methods, signatures, parameters, types, typeSpecs,
                         genericParams, imports, moduleRefs, constantValues,
                         visitedTypeSpecRows);

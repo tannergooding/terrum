@@ -187,7 +187,7 @@ public static class TrRmStructuralMetadataValidator
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
                 Modules, TypeDefs, TypeSpecs, GenericParams, Methods, Signatures,
                 Parameters, Fields, FieldPaths, ConstantSources, FrozenValueNodes,
-                Blobs, Contracts, Imports, ModuleRefs);
+                Blobs, Contracts, Imports, NativeFunctionPointerAnchors, ModuleRefs);
         }
 
         internal void ValidateNonBodyTypeSpecModuleContexts()
@@ -809,7 +809,8 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmMethodSigTableReader(methodSigBytes, methodSigCount,
                 typeSpecs, paramCount, genericParamCount);
         var parameters = paramCount == 0 ? default
-            : new TrRmParamTableReader(paramBytes, paramCount, signatures, typeSpecs);
+            : new TrRmParamTableReader(paramBytes, paramCount, signatures,
+                typeSpecs, index.Schema);
         var methods = new TrRmMethodDefTableReader(methodDefBytes, methodDefCount,
             strings, modules, types, signatures, contractCount, bodyCount);
         var properties = propertyCount == 0 ? default
@@ -941,9 +942,10 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs, fieldPathCount,
                 features, modules, index.Schema, predicateGraphs.Count);
+        var predicateSelectorKinds = Array.Empty<byte>();
         if (!developmentProfile)
         {
-            TrRmPublishedPredicateSelectorValidator.Validate(
+            predicateSelectorKinds = TrRmPublishedPredicateSelectorValidator.Validate(
                 predicateReadRootBytes, predicateReadRootCount,
                 predicateNodeBytes, predicateNodeCount,
                 predicateNodeOperandBytes, predicateNodeOperandCount,
@@ -1011,8 +1013,10 @@ public static class TrRmStructuralMetadataValidator
                 typeSpecs, contracts, layouts)
             : default;
         var nativeFunctionPointerAnchors = !developmentProfile
-            ? new TrRmNativeFunctionPointerAnchorTableReader(typeSpecs, methods,
-                signatures, contracts, modules, imports, features, index.Schema,
+            ? new TrRmNativeFunctionPointerAnchorTableReader(typeSpecs, types,
+                generics, methods, signatures, parameters, contracts, imports,
+                constantSources, frozenValueNodes, blobs, features, index.Schema,
+                predicateSelectorKinds, modules,
                 exports, properties, interfaceMethods, standardNativeImports,
                 nativeExports)
             : default;
@@ -1055,7 +1059,7 @@ public static class TrRmStructuralMetadataValidator
                 features, modules, methods, types, fields, index.Schema);
             ValidateStandardNativeFunctionPointerValueFeatureAssignments(
                 typeSpecs, signatures, parameters, methods, types, fields,
-                features, modules, index.Schema);
+                generics, imports, features, modules, index.Schema);
             if (!copyOriginDraft)
             {
                 ValidateStandardNativeImportFeatureAssignments(standardNativeImports,
@@ -1357,6 +1361,7 @@ public static class TrRmStructuralMetadataValidator
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmMethodDefTableReader methods,
         TrRmTypeDefTableReader typeDefs, TrRmFieldDefTableReader fields,
+        TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmArtifactSchema schema)
     {
@@ -1367,13 +1372,23 @@ public static class TrRmStructuralMetadataValidator
             for (var method = methodStart; method < methodEnd; method++)
             {
                 var signature = methods.GetSignature(method);
-                containsFunctionPointerValue |= ContainsNativeFunctionPointerType(
-                    typeSpecs, signatures.GetResultTypeSpec(signature));
+                containsFunctionPointerValue |= typeSpecs.ContainsNativeFunctionPointerValue(
+                    signatures.GetResultTypeSpec(signature), typeDefs, genericParams,
+                    imports);
+                var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
+                if (receiverTypeSpec != 0)
+                {
+                    containsFunctionPointerValue |= typeSpecs
+                        .ContainsNativeFunctionPointerValue(receiverTypeSpec,
+                            typeDefs, genericParams, imports);
+                }
+
                 var (parameterStart, parameterCount) = signatures.GetParamRange(signature);
                 for (var parameter = 0; parameter < parameterCount; parameter++)
                 {
-                    containsFunctionPointerValue |= ContainsNativeFunctionPointerType(
-                        typeSpecs, parameters.GetTypeSpec(parameterStart + parameter));
+                    containsFunctionPointerValue |= typeSpecs.ContainsNativeFunctionPointerValue(
+                        parameters.GetTypeSpec(parameterStart + parameter), typeDefs,
+                        genericParams, imports);
                 }
             }
 
@@ -1383,8 +1398,8 @@ public static class TrRmStructuralMetadataValidator
                 var (fieldStart, fieldEnd) = typeDefs.GetFieldRange(type);
                 for (var field = fieldStart; field < fieldEnd; field++)
                 {
-                    containsFunctionPointerValue |= ContainsNativeFunctionPointerType(
-                        typeSpecs, fields.GetTypeSpecRef(field));
+                    containsFunctionPointerValue |= typeSpecs.ContainsNativeFunctionPointerValue(
+                        fields.GetTypeSpecRef(field), typeDefs, genericParams, imports);
                 }
             }
 
@@ -1395,40 +1410,6 @@ public static class TrRmStructuralMetadataValidator
             {
                 throw InvalidMetadata();
             }
-        }
-    }
-
-    private static bool ContainsNativeFunctionPointerType(
-        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
-    {
-        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef, allowInitQualifier: true);
-        while (true)
-        {
-            if (type[0] == 0x0D)
-            {
-                return true;
-            }
-
-            uint argument = type[0] switch
-            {
-                >= 0x06 and <= 0x0B or 0x0E => BinaryPrimitives
-                    .ReadUInt32LittleEndian(type[2..]),
-                0x0C => BinaryPrimitives.ReadUInt32LittleEndian(type[3..]),
-                _ => 0,
-            };
-            if (argument == 0)
-            {
-                return false;
-            }
-
-            var reference = typeSpecs.GetTypeSpecRef(argument,
-                allowInitQualifier: type[0] == 0x0E || type[0] == 0x0C && type[2] == 0x8A);
-            if (!reference.IsRow)
-            {
-                return false;
-            }
-
-            type = typeSpecs.GetRow(reference.Row);
         }
     }
 

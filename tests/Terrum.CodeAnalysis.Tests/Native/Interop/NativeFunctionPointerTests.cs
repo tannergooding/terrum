@@ -25,7 +25,7 @@ public sealed class NativeFunctionPointerTests
         [Terrum.Interop.NativeCallable]
         int32 Answer(int32 value) { return value; }
 
-        [NoThrow]
+
         public unsafe fnptr<NativeAbi, int32, int32> GetAnswer() {
             unsafe { return &Answer; }
         }
@@ -194,6 +194,81 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public void NativeCallableMayCallNativeImportWithoutGeneralNoThrow()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadValue")]
+            extern unsafe int32 ReadValue();
+
+            [Terrum.Interop.NativeVTableMethod(3)]
+            extern unsafe int32 Dispatch(ptr<void> receiver);
+
+            [Terrum.Interop.NativeCallable]
+            public int32 Callback() {
+                unsafe { return ReadValue(); }
+            }
+
+            [Terrum.Interop.NativeCallable]
+            public int32 VTableCallback(ptr<void> receiver) {
+                unsafe { return Dispatch(receiver); }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.Functions.Select(static function => function.Name),
+            Is.EqualTo(["ReadValue", "Dispatch", "Callback", "VTableCallback"]));
+        var callback = program.Functions.Single(static function => function.Name == "Callback");
+        var imported = program.Functions.Single(static function => function.Name == "ReadValue");
+        Assert.That(callback.IsExternal, Is.False);
+        Assert.That(callback.Body.Statements, Is.Not.Empty);
+        Assert.That(imported.IsExternal, Is.True);
+        Assert.That(imported.DirectNativeImport, Is.Not.Null);
+        Assert.That(callback.IsNoThrow, Is.False);
+        Assert.That(callback.NativeFunctionPointerType, Is.Not.Null);
+        var vtableCallback = program.Functions.Single(static function => function.Name == "VTableCallback");
+        Assert.That(vtableCallback.IsNoThrow, Is.False);
+        Assert.That(vtableCallback.NativeFunctionPointerType, Is.Not.Null);
+
+        var privateProducer = ModuleCompiler.CreateProducer(program, ["Callback", "VTableCallback"]);
+        var privateReference = ModuleCompiler.CreateReference(privateProducer);
+        var privateCallback = privateReference.Functions.Single(static function => function.Name == "Callback");
+        Assert.That(privateCallback.IsNoThrow, Is.False);
+        Assert.That(privateCallback.NativeFunctionPointerType, Is.Not.Null);
+        var privateVTableCallback = privateReference.Functions
+            .Single(static function => function.Name == "VTableCallback");
+        Assert.That(privateVTableCallback.IsNoThrow, Is.False);
+        Assert.That(privateVTableCallback.NativeFunctionPointerType, Is.Not.Null);
+        var privateConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            namespace Terrum.CodeAnalysis;
+            int32 Main() {
+                unsafe {
+                    if (Callback() != 0) { return 1; }
+                    return VTableCallback(null);
+                }
+            }
+            """), privateReference, BoundRuntimePolicy.FailFast);
+        Assert.That(privateConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, privateConsumerCompilation.Diagnostics));
+        var privateConsumer = ModuleCompiler.CreateConsumer(
+            privateConsumerCompilation.Program!, privateProducer);
+        var linkedCallback = ModuleCompiler.Link(privateConsumer, privateProducer);
+        foreach (var name in new[] { "Callback", "VTableCallback" })
+        {
+            var linkedFunction = linkedCallback.Functions.Single(function => function.Name == name);
+            Assert.That(linkedFunction.IsNoThrow, Is.False, name);
+            Assert.That(linkedFunction.NativeFunctionPointerType, Is.Not.Null, name);
+        }
+
+        var loaded = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(program, "native-callable-import"));
+        var loadedCallback = loaded.Functions.Single(static function => function.Name == "Callback");
+        Assert.That(loadedCallback.IsNoThrow, Is.False);
+        Assert.That(loadedCallback.NativeFunctionPointerType, Is.Not.Null);
+    }
+
+    [Test]
     public void NativeFunctionAddressSurvivesPrivateModuleProducerConsumerRoundTrip()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeCallbackProvider));
@@ -217,11 +292,11 @@ public sealed class NativeFunctionPointerTests
             Is.Zero);
 
         var incompatibleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 Answer() { return 42; }
 
-            [NoThrow]
+
             public unsafe fnptr<NativeAbi, int32> GetAnswer() {
                 unsafe { return &Answer; }
             }
@@ -407,19 +482,19 @@ public sealed class NativeFunctionPointerTests
                 }
 
                 [Terrum.Interop.NativeImport("native-narrow-return.dll", "ReturnFalseDirty")]
-                [NoThrow]
+
                 extern unsafe bool ReturnFalseDirty();
 
                 [Terrum.Interop.NativeImport("native-narrow-return.dll", "GetFalseDirty")]
-                [NoThrow]
+
                 extern unsafe fnptr<NativeAbi, bool> GetFalseDirty();
 
                 [Terrum.Interop.NativeImport("native-narrow-return.dll", "GetFalseDirtyWithReceiver")]
-                [NoThrow]
+
                 extern unsafe fnptr<NativeAbi, ptr<TestObject>, bool> GetFalseDirtyWithReceiver();
 
                 [Terrum.Interop.NativeImport("native-narrow-return.dll", "ReturnChar16Dirty")]
-                [NoThrow]
+
                 extern unsafe char16 ReturnChar16Dirty();
 
                 [Terrum.Interop.NativeVTableMethod(0)]
@@ -492,7 +567,7 @@ public sealed class NativeFunctionPointerTests
                 }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 Echo(int32 value) { return value; }
 
@@ -557,7 +632,7 @@ public sealed class NativeFunctionPointerTests
                 }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 Echo(int32 value) { return value; }
 
@@ -591,7 +666,7 @@ public sealed class NativeFunctionPointerTests
                 }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             uint32 GetValue(ptr<void> receiver) { return 42; }
 
@@ -629,7 +704,7 @@ public sealed class NativeFunctionPointerTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             uint32 GetValue(ptr<TestObject> receiver) { return 42; }
 
@@ -753,7 +828,7 @@ public sealed class NativeFunctionPointerTests
     public void StandardTrRmRejectsMalformedNativeFunctionAddressOperations()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(NativeCallbackProvider + """
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int64 WrongSignature() { return 0; }
 
@@ -816,7 +891,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(artifactIndex.TryGetSection(0x0011, out var typeSpecBytes,
             out var typeSpecCount), Is.True);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
-            0, 0, 0, signatureCount);
+            0, 0, 0, signatureCount, TrRmArtifactSchema.Development);
         var hasFunctionPointerTypeSpec = false;
         for (var row = 1; row <= typeSpecCount; row++)
         {
@@ -873,74 +948,36 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
-    public void ReorderedTrRmNestedSignaturesPreserveOutputStorageInPrivateModules()
+    public void NativeFunctionPointerOutputRetainsItsNestedSignature()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
-            [Terrum.Interop.NativeCallable]
-            public int32 Invoke(fnptr<NativeAbi, int32> callback) {
-                return 0;
-            }
+            [Terrum.Interop.NativeImport("example.dll", "AcquireCallback")]
+            extern int32 AcquireCallback(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<fnptr<NativeAbi, fnptr<NativeAbi, int32>, int32>> callback);
             """));
+
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-
-        var artifact = TrRmExecutableCompiler.Emit(compilation.Program!, "forward-native-signature");
-        var reordered = ReverseNativeFunctionPointerSignatureRows(artifact);
-        var loaded = TrRmExecutableCompiler.Load(reordered);
-        var loadedFunction = loaded.Functions.Single(static candidate => candidate.Name == "Invoke");
-        var callableSignatureIndex =
-            NativeFunctionPointerTypes.Index(loadedFunction.NativeFunctionPointerType!.Value);
-        Assert.That(callableSignatureIndex, Is.EqualTo(0));
-        var callableSignature = loaded.NativeFunctionPointerSignatures[callableSignatureIndex];
-        Assert.That(NativeFunctionPointerTypes.Index(callableSignature.ParameterTypes[0]), Is.EqualTo(1));
-
-        var producer = ModuleCompiler.CreateProducer(loaded, ["Invoke"]);
-        var reference = ModuleCompiler.CreateReference(producer);
-        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
-            [Terrum.Interop.NativeImport("example.dll", "AcquireCallback")]
-            [Terrum.Interop.NativeOutput(0, NonZero)]
-            extern int32 AcquireCallback(
-                write ptr<fnptr<NativeAbi, fnptr<NativeAbi, int32>, int32>> callback);
-
-            [Terrum.Interop.NativeCallable]
-            int32 Placeholder(fnptr<NativeAbi, int32> callback) { return 0; }
-
-            int32 Main() {
-                unsafe {
-                    mut fnptr<NativeAbi, fnptr<NativeAbi, int32>, int32> callback = &Placeholder;
-                    int32 status = AcquireCallback(&callback);
-                    if (status != 0) { return 0; }
-                    return -1;
-                }
-            }
-            """), reference);
-        Assert.That(consumerCompilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
-        var consumerProgram = consumerCompilation.Program!;
-        var mainFunction = consumerProgram.Functions.Single(static function =>
-            function.Name == "Main");
-        var importCall = mainFunction.Body.Statements.OfType<BoundUnsafe>().Single().Body
-            .Statements.OfType<BoundLocal>()
-            .Select(static local => local.Initializer)
-            .OfType<BoundCall>().Single();
-        var outputAddress = (BoundNativeStorageAddress)importCall.Arguments[0];
-        var outputPointee = consumerProgram.Functions.Single(static function =>
-            function.Name == "AcquireCallback").DirectNativeImport!.Outputs.Single().PointeeType;
-        Assert.That(outputAddress.CarrierType,
-            Is.EqualTo(mainFunction.Variables[outputAddress.Variable].Type));
-        Assert.That(outputAddress.CarrierType, Is.EqualTo(outputPointee));
-
-        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
-        var linked = ModuleCompiler.Link(consumer, producer);
-        Assert.DoesNotThrow(() => SemanticVerifier.VerifyWithDirectNativeImports(linked));
+        var program = compilation.Program!;
+        var import = program.Functions.Single(static function => function.Name == "AcquireCallback");
+        var outputType = import.NativeOutputContracts.Single().PointeeType;
+        Assert.That(NativeFunctionPointerTypes.IsType(outputType), Is.True);
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(outputType)];
+        Assert.That(signature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(signature.ParameterTypes, Has.Length.EqualTo(1));
+        var nestedSignature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(signature.ParameterTypes[0])];
+        Assert.That(nestedSignature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(nestedSignature.ParameterTypes, Is.Empty);
     }
 
     [Test]
     public void DevelopmentTrRmRequiresFunctionPointerFeaturesOnEveryUsingModule()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             public int32 Invoke(fnptr<NativeAbi, int32> callback) {
                 return 0;
@@ -1158,16 +1195,16 @@ public sealed class NativeFunctionPointerTests
     public void StandardTrRmMapsMethodDefRowsPastSignatureAnchors()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow]
+
             int32 Unused(int32 value) { return 10; }
 
             int32 Chosen(int32 value) { return 20; }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 CallbackChosen(int32 value) { return 20; }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 CallbackDecoy(int32 value) { return 30; }
 
@@ -1225,7 +1262,7 @@ public sealed class NativeFunctionPointerTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
 
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             public int32 GetAnswer(int32 value) { return value; }
             """));
@@ -1379,21 +1416,20 @@ public sealed class NativeFunctionPointerTests
     [TestCase("""
         [Terrum.Interop.NativeCallable]
         int32 ReadSourceLength() { return Host.Source.Length; }
-        """)]
+        """, "TRM3016")]
     [TestCase("""
-        [NoThrow]
+
         int32 SourceLength() { return Host.Source.Length; }
         [Terrum.Interop.NativeCallable]
         int32 ReadSourceLength() { return SourceLength(); }
-        """)]
-    public void NativeCallableCannotDependOnInvocationScopedSource(string source)
+        """, "TRM3030")]
+    public void NativeCallableCannotDependOnInvocationScopedSource(string source, string expectedCode)
     {
         var compilation = Compilation.CreateLibrary([SyntaxTree.Parse(source)],
             [new HostBuffer("Source", PrimitiveType.Char16, [], false) { IsInvocationScoped = true }],
             BoundRuntimePolicy.FailFast);
 
-        Assert.That(compilation.Diagnostics.Any(diagnostic =>
-            diagnostic.Code == "TRM3016" && diagnostic.Message.Contains("NativeFunctionPointer", StringComparison.Ordinal)),
+        Assert.That(compilation.Diagnostics.Any(diagnostic => diagnostic.Code == expectedCode),
             Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
@@ -1478,7 +1514,7 @@ public sealed class NativeFunctionPointerTests
         using var stream = new MemoryStream(module, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(89));
+        Assert.That(reader.ReadInt32(), Is.EqualTo(92));
         SkipString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();

@@ -272,6 +272,28 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void StandardDependencyValidatesTypedEndpointsAndExplicitEmptySources()
+    {
+        var emptyResultSource = Contract(0x1600_0001, 4,
+            [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        Assert.DoesNotThrow(() => Create(Section(emptyResultSource),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        var invalidDestination = Contract(0x1600_0001, 4,
+            [0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        Assert.Throws<InvalidDataException>(() => Create(Section(invalidDestination),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        var invalidSource = Contract(0x1600_0001, 4,
+            [1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0]);
+        Assert.Throws<InvalidDataException>(() => Create(Section(invalidSource),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+    }
+
+    [Test]
     public void StandardOutputStateRequiresAnAttachedPredicateAndInitializationOutput()
     {
         var predicate = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
@@ -698,7 +720,8 @@ public sealed class TrRmContractTableReaderTests
         }
 
         var parameters = parameterCount != 0
-            ? new TrRmParamTableReader(param, parameterCount, signatures, typeSpecs)
+            ? new TrRmParamTableReader(param, parameterCount, signatures,
+                typeSpecs, schema)
             : default;
         var method = new byte[28];
         Write(method, 0, (uint)methodOwnerType);
