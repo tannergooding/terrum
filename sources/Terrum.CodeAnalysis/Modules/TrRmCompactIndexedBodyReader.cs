@@ -647,8 +647,9 @@ public readonly ref struct TrRmCompactIndexedBodyReader
                         ? targetBodyRow == 0
                         : methods.GetBodyRow(target) == 0;
                     var nativeVTableTarget = nativeVTables.HasVTableForMethod(target);
+                    var nativeImportTarget = nativeImports.HasImportForMethod(target);
                     var targetOwner = methods.GetOwnerType(target);
-                    if ((method == 0 || (imported && !nativeVTableTarget))
+                    if ((method == 0 || (imported && !nativeVTableTarget && !nativeImportTarget))
                         && (methods.GetFlags(target) != 2
                             || (targetOwner != 0 && (targetOwner > nominalTypes.Count
                                 || (nominalTypes.GetFlags(targetOwner) & 3) != 2

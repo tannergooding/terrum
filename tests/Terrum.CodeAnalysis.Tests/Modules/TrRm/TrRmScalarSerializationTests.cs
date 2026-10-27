@@ -27,7 +27,7 @@ public sealed class TrRmScalarSerializationTests
     {
         get
         {
-            (string Type, string Literal, string Hex, int TypeId)[] values = [
+            (string Type, string Literal, string Hex, int TypeMapIndex)[] values = [
                 ("bool", "false", "00", 1), ("bool", "true", "01", 1),
                 ("char16", "255", "FF", 2), ("char16", "256", "0001", 2),
                 ("char16", "65535", "FFFF", 2),
@@ -35,31 +35,31 @@ public sealed class TrRmScalarSerializationTests
                 ("int32", "65535", "FFFF", 3), ("int32", "65536", "00000100", 3),
                 ("int32", "2147483647", "FFFFFF7F", 3),
                 ("int32", "-2147483648", "00000080", 3), ("int32", "-1", "FFFFFFFF", 3),
-                ("uint32", "255", "FF", 4), ("uint32", "256", "0001", 4),
-                ("uint32", "65535", "FFFF", 4), ("uint32", "65536", "00000100", 4),
-                ("uint32", "2147483648", "00000080", 4),
-                ("uint32", "4294967295", "FFFFFFFF", 4),
-                ("int64", "4294967295", "FFFFFFFF", 5),
-                ("int64", "4294967296", "0000000001000000", 5),
-                ("int64", "9223372036854775807", "FFFFFFFFFFFFFF7F", 5),
-                ("int64", "-9223372036854775808", "0000000000000080", 5),
-                ("int64", "-1", "FFFFFFFFFFFFFFFF", 5),
+                ("uint32", "255", "FF", 5), ("uint32", "256", "0001", 5),
+                ("uint32", "65535", "FFFF", 5), ("uint32", "65536", "00000100", 5),
+                ("uint32", "2147483648", "00000080", 5),
+                ("uint32", "4294967295", "FFFFFFFF", 5),
+                ("int64", "4294967295", "FFFFFFFF", 4),
+                ("int64", "4294967296", "0000000001000000", 4),
+                ("int64", "9223372036854775807", "FFFFFFFFFFFFFF7F", 4),
+                ("int64", "-9223372036854775808", "0000000000000080", 4),
+                ("int64", "-1", "FFFFFFFFFFFFFFFF", 4),
                 ("uint64", "4294967295", "FFFFFFFF", 6),
                 ("uint64", "4294967296", "0000000001000000", 6),
                 ("uint64", "9223372036854775808", "0000000000000080", 6),
                 ("uint64", "18446744073709551615", "FFFFFFFFFFFFFFFF", 6),
                 ("uint64", "0x0123456789ABCDEF", "EFCDAB8967452301", 6),
             ];
-            foreach (var (type, literal, hex, typeId) in values)
+            foreach (var (type, literal, hex, typeMapIndex) in values)
             {
-                yield return [type, literal, hex, typeId, false];
-                yield return [type, literal, hex, typeId, true];
+                yield return [type, literal, hex, typeMapIndex, false];
+                yield return [type, literal, hex, typeMapIndex, true];
             }
         }
     }
     [TestCaseSource(nameof(Scalars))]
     public void CanonicalScalarBytesRoundTripThroughLinearAndIndexedGraphs(
-        string type, string literal, string hex, int typeId, bool indexed)
+        string type, string literal, string hex, int typeMapIndex, bool indexed)
     {
         var function = indexed
             ? $"public {type} Value(bool choose) {{ if (choose) {{ return {literal}; }} else {{ return {literal}; }} }}"
@@ -74,7 +74,7 @@ public sealed class TrRmScalarSerializationTests
         if (!indexed)
         {
             var expected = new List<byte> { 4, 6 };
-            foreach (var row in new[] { 2, 3, 4, 5, 6, 7 })
+            foreach (var row in new[] { 2, 4, 9, 10, 13, 14 })
             {
                 var bytes = new byte[4];
                 BinaryPrimitives.WriteInt32LittleEndian(bytes, row);
@@ -85,14 +85,14 @@ public sealed class TrRmScalarSerializationTests
             {
                 expected.AddRange([0xF0, Layout(payload.Length)]);
             }
-            expected.AddRange([1, 1, (byte)typeId]);
+            expected.AddRange([1, 1, (byte)typeMapIndex]);
             expected.AddRange(payload);
             expected.AddRange([0x83, 1]);
             Assert.That(body, Is.EqualTo(expected.ToArray()));
         }
         else
         {
-            AssertIndexedConstants(body, payload, typeId);
+            AssertIndexedConstants(body, payload, typeMapIndex);
         }
         var loaded = TrRmExecutableCompiler.Load(artifact);
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
@@ -267,7 +267,7 @@ public sealed class TrRmScalarSerializationTests
         return new TrRmBodyTableReader(bytes, count).GetRow(method).ToArray();
     }
 
-    private static void AssertIndexedConstants(byte[] body, byte[] payload, int typeId)
+    private static void AssertIndexedConstants(byte[] body, byte[] payload, int typeMapIndex)
     {
         Assert.That(body[0] & 0xFC, Is.EqualTo(8));
         var width = 1 << (body[0] & 3);
@@ -311,7 +311,7 @@ public sealed class TrRmScalarSerializationTests
             }
             Assert.That(body[at++], Is.EqualTo(1));
             Assert.That(body[at++], Is.InRange(2, 3));
-            Assert.That(body[at++], Is.EqualTo(typeId));
+            Assert.That(body[at++], Is.EqualTo(typeMapIndex));
             Assert.That(body.AsSpan(at, payload.Length).ToArray(), Is.EqualTo(payload));
             constants++;
         }

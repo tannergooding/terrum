@@ -11,6 +11,25 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private static readonly PrimitiveType[] s_compactBuiltinTypes =
+    [
+        PrimitiveType.Bool, PrimitiveType.Char16, PrimitiveType.Int32,
+        PrimitiveType.Int64, PrimitiveType.UInt32, PrimitiveType.UInt64,
+        PrimitiveType.Float32, PrimitiveType.Float64,
+    ];
+
+    private static int CompactBuiltinTypeIndex(PrimitiveType type, bool hasFloatingTypes)
+    {
+        var index = Array.IndexOf(s_compactBuiltinTypes, type);
+        var typeCount = hasFloatingTypes
+            ? s_compactBuiltinTypes.Length : s_compactBuiltinTypes.Length - 2;
+        if (index < 0 || index >= typeCount)
+        {
+            throw Unsupported($"Scalar type {type} has no compact Body TypeMap entry.");
+        }
+        return index + 1;
+    }
+
     private static (int Opcode, int Kind) IntegerArithmeticEncoding(TokenKind operation,
         BoundIntegerOverflowBehavior overflowBehavior)
         => (operation, overflowBehavior) switch
@@ -32,12 +51,19 @@ public static partial class TrRmExecutableCompiler
         var instructions = new List<byte>();
         var current = new int[function.Variables.Length];
         var next = function.ParameterCount;
+        var builtinTypeCount = hasFloatingTypes
+            ? s_compactBuiltinTypes.Length : s_compactBuiltinTypes.Length - 2;
         for (var parameter = 0; parameter < next; parameter++)
         {
             current[parameter] = parameter + 1;
         }
         int returnValue = -1;
         var ended = false;
+
+        int BodyTypeIndex(PrimitiveType type)
+        {
+            return CompactBuiltinTypeIndex(type, hasFloatingTypes);
+        }
 
         int EmitExpression(BoundExpression expression)
         {
@@ -59,7 +85,7 @@ public static partial class TrRmExecutableCompiler
                     return current[read.Variable];
                 case BoundConstant constant:
                     opcode = 1;
-                    type = TypeRow(constant.Type) - 1;
+                    type = BodyTypeIndex(constant.Type);
                     data = constant.Type switch
                     {
                         PrimitiveType.Int32 or PrimitiveType.UInt32 => unchecked((uint)constant.Value),
@@ -167,22 +193,22 @@ public static partial class TrRmExecutableCompiler
                     if (IsFloat(cast.Operand.Type) && IsFloat(cast.Type))
                     {
                         opcode = cast.Operand.Type == cast.Type ? 3 : 0x1A;
-                        type = opcode == 0x1A ? TypeRow(cast.Type) - 1 : 0;
+                        type = opcode == 0x1A ? BodyTypeIndex(cast.Type) : 0;
                     }
                     else if (IsInteger(cast.Operand.Type) && IsFloat(cast.Type))
                     {
                         opcode = 0x1B;
-                        type = TypeRow(cast.Type) - 1;
+                        type = BodyTypeIndex(cast.Type);
                     }
                     else if (cast.Operand.Type == PrimitiveType.Char16 && IsFloat(cast.Type))
                     {
                         opcode = 0x1E;
-                        type = TypeRow(cast.Type) - 1;
+                        type = BodyTypeIndex(cast.Type);
                     }
                     else if (IsFloat(cast.Operand.Type) && IsInteger(cast.Type))
                     {
                         opcode = 0x1F;
-                        type = TypeRow(cast.Type) - 1;
+                        type = BodyTypeIndex(cast.Type);
                     }
                     else if (IsFloat(cast.Operand.Type) || IsFloat(cast.Type))
                     {
@@ -191,7 +217,7 @@ public static partial class TrRmExecutableCompiler
                     else
                     {
                         opcode = 0x16;
-                        type = TypeRow(cast.Type) - 1;
+                        type = BodyTypeIndex(cast.Type);
                     }
                     break;
                 default:
@@ -225,10 +251,6 @@ public static partial class TrRmExecutableCompiler
             {
                 Write(instructions, (ulong)left, referenceWidth);
                 Write(instructions, (ulong)right, referenceWidth);
-            }
-            if (function.IsNoThrow && opcode is 0x15 or 0x16 or 0x17 or 0x18 or 0x1F)
-            {
-                throw Unsupported("NoThrow requires a total Body, not a source-only constant proof.");
             }
             return next;
         }
@@ -275,7 +297,6 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("A linear Body requires a terminal return.");
         }
-        var builtinTypeCount = hasFloatingTypes ? 8 : 6;
         var nativeParameterTypes = function.Variables
             .Select(static variable => variable.Type)
             .Where(static type => type == PrimitiveType.NativeRawPointer
@@ -294,9 +315,10 @@ public static partial class TrRmExecutableCompiler
         var destination = body.AsSpan();
         destination[bodyPosition++] = (byte)(0x04 | WidthCode(localWidth));
         WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, localWidth);
-        for (var row = 2; row <= builtinTypeCount + 1; row++)
+        for (var index = 0; index < builtinTypeCount; index++)
         {
-            WriteToSpan(destination, ref bodyPosition, (ulong)row, 4);
+            WriteToSpan(destination, ref bodyPosition,
+                (ulong)TypeRow(s_compactBuiltinTypes[index]), 4);
         }
         foreach (var type in nativeParameterTypes)
         {
@@ -326,7 +348,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static ImmutableArray<BoundStatement> DecodeBody(ReadOnlySpan<byte> body,
-        int parameterCount, ImmutableArray<BoundVariable>.Builder variables, bool noThrow,
+        int parameterCount, ImmutableArray<BoundVariable>.Builder variables,
         TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions,
         int[] functionIndexByMethodRow,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
@@ -440,10 +462,6 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Invalid("Nonminimal instruction width.");
             }
-            if (noThrow && opcode is 0x15 or 0x16 or 0x17 or 0x18 or 0x1F)
-            {
-                throw Invalid("NoThrow cannot rely on source-only constant proofs for checked operations.");
-            }
             BoundRead Operand(int id)
             {
                 if (id <= 0 || id > variables.Count)
@@ -488,10 +506,9 @@ public static partial class TrRmExecutableCompiler
             {
                 var target = functions[methodFunction];
                 if (target.ReturnType == PrimitiveType.Void != (result == 0)
-                    || target.ParameterCount != argumentCount
-                    || noThrow && !target.IsNoThrow)
+                    || target.ParameterCount != argumentCount)
                 {
-                    throw Invalid("Call signature or effect does not match.");
+                    throw Invalid("Call signature does not match.");
                 }
                 for (var argument = 0; argument < argumentCount; argument++)
                 {

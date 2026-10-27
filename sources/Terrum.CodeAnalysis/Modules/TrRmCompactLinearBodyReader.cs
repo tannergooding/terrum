@@ -740,7 +740,13 @@ public readonly ref struct TrRmCompactLinearBodyReader
     }
 
     private static int BitWidth(ushort type)
-        => type switch { 1 => 1, 3 => 16, 8 or 0x0D or 0x14 => 32, _ => 64 };
+        => type switch {
+            1 => 1,
+            2 or 6 or 0x0B => 8,
+            3 or 7 or 0x0C => 16,
+            4 or 5 or 8 or 0x0D or 0x14 => 32,
+            _ => 64,
+        };
 
     private static bool IsInteger(ushort type)
         => type is 8 or 9 or 0x0D or 0x0E;

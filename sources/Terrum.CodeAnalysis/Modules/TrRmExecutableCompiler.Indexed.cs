@@ -496,7 +496,7 @@ public static partial class TrRmExecutableCompiler
                             overflowedDefinition |= definitions[remap[result] - 1] >= sentinel;
                         }
                         WriteScalarOperation(data, result == 0 ? 0 : remap[result],
-                            expression, remap, function.IsNoThrow, program,
+                            expression, remap, program, hasFloatingTypes,
                             sourceTypes.Contains(PrimitiveType.NativeRawPointer)
                                 ? scalarTypeCount + 1 : 0);
                     }
@@ -528,9 +528,10 @@ public static partial class TrRmExecutableCompiler
                 WriteToSpan(destination, ref bodyPosition, (ulong)sourceTypes.Count, width);
                 WriteToSpan(destination, ref bodyPosition, (ulong)regions.Count, width);
                 WriteToSpan(destination, ref bodyPosition, (ulong)typeCount, width);
-                for (var row = 2; row <= scalarTypeCount + 1; row++)
+                for (var index = 0; index < scalarTypeCount; index++)
                 {
-                    WriteToSpan(destination, ref bodyPosition, (ulong)row, 4);
+                    WriteToSpan(destination, ref bodyPosition,
+                        (ulong)TypeRow(s_compactBuiltinTypes[index]), 4);
                 }
                 if (hasNativeRawPointer)
                 {
@@ -564,7 +565,7 @@ public static partial class TrRmExecutableCompiler
                             => functionPointerTypeIds[types[id]],
                         _ when NativePointerTypes.IsType(types[id])
                             => pointerTypeIds[types[id]],
-                        _ => TypeRow(types[id]) - 1,
+                        _ => CompactBuiltinTypeIndex(types[id], hasFloatingTypes),
                     };
                     WriteToSpan(destination, ref bodyPosition, (ulong)typeId, width);
                     WriteToSpan(destination, ref bodyPosition, (ulong)useCounts[id], width);
@@ -773,8 +774,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         private static void WriteScalarOperation(List<byte> bytes, int result,
-            BoundExpression expression, int[] remap, bool noThrow, BoundProgram program,
-            int nativeRawPointerTypeId)
+            BoundExpression expression, int[] remap, BoundProgram program,
+            bool hasFloatingTypes, int nativeRawPointerTypeId)
         {
             int ReadOperand(BoundExpression operand) => operand is BoundRead read
                 ? remap[read.Variable + 1] : throw Unsupported("Indexed scalar operand was not materialized.");
@@ -793,7 +794,7 @@ public static partial class TrRmExecutableCompiler
                         ? constant.Value == 0 && nativeRawPointerTypeId != 0
                             ? nativeRawPointerTypeId
                             : throw Unsupported("Only a null raw-pointer constant has an indexed TRRM encoding.")
-                        : TypeRow(constant.Type) - 1;
+                        : CompactBuiltinTypeIndex(constant.Type, hasFloatingTypes);
                     bits = constant.Type switch {
                         PrimitiveType.Int32 or PrimitiveType.UInt32 => unchecked((uint)constant.Value),
                         PrimitiveType.Bool or PrimitiveType.Char16 => (ulong)constant.Value,
@@ -829,22 +830,23 @@ public static partial class TrRmExecutableCompiler
                     if (IsFloat(cast.Operand.Type) && IsFloat(cast.Type))
                     {
                         opcode = cast.Operand.Type == cast.Type ? 3 : 0x1A;
-                        target = opcode == 0x1A ? TypeRow(cast.Type) - 1 : 0;
+                        target = opcode == 0x1A
+                            ? CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes) : 0;
                     }
                     else if (IsInteger(cast.Operand.Type) && IsFloat(cast.Type))
                     {
                         opcode = 0x1B;
-                        target = TypeRow(cast.Type) - 1;
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
                     }
                     else if (cast.Operand.Type == PrimitiveType.Char16 && IsFloat(cast.Type))
                     {
                         opcode = 0x1E;
-                        target = TypeRow(cast.Type) - 1;
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
                     }
                     else if (IsFloat(cast.Operand.Type) && IsInteger(cast.Type))
                     {
                         opcode = 0x1F;
-                        target = TypeRow(cast.Type) - 1;
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
                     }
                     else if (IsFloat(cast.Operand.Type) || IsFloat(cast.Type))
                     {
@@ -853,7 +855,7 @@ public static partial class TrRmExecutableCompiler
                     else
                     {
                         opcode = 0x16;
-                        target = TypeRow(cast.Type) - 1;
+                        target = CompactBuiltinTypeIndex(cast.Type, hasFloatingTypes);
                     }
                     break;
                 case TrRmScalarReinterpret reinterpret:
@@ -863,7 +865,7 @@ public static partial class TrRmExecutableCompiler
                         throw Unsupported("Only equal-width integer bit reinterpretation is executable.");
                     }
                     opcode = 6;
-                    target = TypeRow(reinterpret.Type) - 1;
+                    target = CompactBuiltinTypeIndex(reinterpret.Type, hasFloatingTypes);
                     break;
                 case BoundBinary binary:
                     if (IsFloat(binary.Left.Type))
@@ -929,10 +931,6 @@ public static partial class TrRmExecutableCompiler
                 case BoundCall call:
                     opcode = 0x12;
                     target = call.Function + 1;
-                    if (noThrow && !program.Functions[call.Function].IsNoThrow)
-                    {
-                        throw Unsupported("NoThrow caller cannot target a may-fail declaration.");
-                    }
                     break;
                 case BoundNativeFunctionAddress address:
                     opcode = 0x31;
@@ -957,10 +955,6 @@ public static partial class TrRmExecutableCompiler
                     break;
                 default:
                     throw Unsupported($"Operation {expression.GetType().Name} is not executable.");
-            }
-            if (noThrow && opcode is 0x15 or 0x16 or 0x17 or 0x1F)
-            {
-                throw Unsupported("NoThrow requires a total indexed Body.");
             }
             var maximum = Math.Max(result, target);
             var argumentExpressions = expression switch
@@ -1056,7 +1050,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         internal static TrRmScalarGraph DecodeIndexedBody(ReadOnlySpan<byte> body,
-            int parameterCount, PrimitiveType resultType, bool noThrow, bool doesNotReturn,
+            int parameterCount, PrimitiveType resultType, bool doesNotReturn,
             TrRmTypeSpecTableReader types, ImmutableArray<BoundFunction>.Builder functions,
             int[] functionIndexByMethodRow,
             ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
@@ -1188,7 +1182,7 @@ public static partial class TrRmExecutableCompiler
                     variables.Add(variable);
                 }
                 var statements = DecodeBody(CollectionsMarshal.AsSpan(synthetic), variables.Count,
-                    variables, noThrow, types, functions, functionIndexByMethodRow,
+                    variables, types, functions, functionIndexByMethodRow,
                     nativeFunctionPointerSignatures,
                     isCallerUnsafeScope, nativePointerTypeDefinitions, structureTypeByTypeDef);
                 var operations = ImmutableArray.CreateBuilder<BoundStatement>(countOperations);
@@ -1339,7 +1333,7 @@ public static partial class TrRmExecutableCompiler
                     switchCases, switchDefault, isCallerUnsafeScope));
             }
             return TrRmScalarGraph.FromAuditedBody(result.MoveToImmutable(),
-                valueTypes.MoveToImmutable(), parameterCount, resultType, noThrow, doesNotReturn);
+                valueTypes.MoveToImmutable(), parameterCount, resultType, doesNotReturn);
         }
 
         private static ImmutableArray<int> ReadIndexedList(ReadOnlySpan<byte> body,
@@ -2328,13 +2322,6 @@ public static partial class TrRmExecutableCompiler
             Statement(_function.Body);
             foreach (var block in _blocks)
             {
-                if (_function.IsNoThrow && block.FailureReason != 0
-                    && (block.Operations.Count == 0
-                        || block.Operations[^1].Expression is not BoundCall call
-                        || !_program.Functions[call.Function].DoesNotReturn))
-                {
-                    throw Unsupported("NoThrow indexed Body contains an unproved failure effect.");
-                }
                 if (block.True?.Target is { IsLoopHeader: true } header
                     && block.Region == header.Region && block != header)
                 {
