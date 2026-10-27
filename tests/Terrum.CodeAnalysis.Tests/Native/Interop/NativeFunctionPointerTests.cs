@@ -319,34 +319,44 @@ public sealed class NativeFunctionPointerTests
             Is.EqualTo(NativeCallingConvention.Unmanaged));
         Assert.That(signature.ReturnType, Is.EqualTo(PrimitiveType.Int32));
         Assert.That(signature.ParameterTypes,
-            Is.EqualTo(new[] { PrimitiveType.Int32 }));
+            Is.EqualTo([PrimitiveType.Int32]));
     }
 
-    [Test]
-    public void NativeOutputPointerCallRemainsRejectedUntilItsProtocolIsImplemented()
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeJitExecutesIndirectNativeOutputUnderItsResultCondition(
+        NativeRuntimePolicy runtimePolicy)
     {
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var boundRuntimePolicy = runtimePolicy == NativeRuntimePolicy.CheckedExceptions
+            ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
+        var reference = new CompilationReference([], [], boundRuntimePolicy,
             nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
             [param(counter): Terrum.Interop.NativeOutput(
                 When: Terrum.Interop.NativeOutputCondition.NonZero)]
             [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
             extern unsafe int32 QueryPerformanceCounter(write ptr<int64> counter);
 
-            int32 Invoke() {
+            int32 Main() {
                 init int64 counter;
                 unsafe {
                     var query = &QueryPerformanceCounter;
-                    return query(&init counter);
+                    int32 status = query(&init counter);
+                    if (status != 0) { return counter > 0 ? 0 : -1; }
                 }
+                return -2;
             }
-            """), reference, BoundRuntimePolicy.FailFast);
+            """), reference, boundRuntimePolicy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
-            diagnostic.Code == "TRM3030"
-            && diagnostic.Message.Contains("output-state", StringComparison.Ordinal)),
-            Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var image = NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, runtimePolicy);
+        Assert.That(Encoding.ASCII.GetString(image),
+            Does.Contain("QueryPerformanceCounter").And.Contain("KERNEL32.dll"));
+        Assert.That(NativeJit.Execute(compilation.Program!, runtimePolicy), Is.Zero);
     }
 
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -379,7 +389,187 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
+        var image = NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, runtimePolicy);
+        Assert.That(Encoding.ASCII.GetString(image),
+            Does.Contain("CompareStringOrdinal").And.Contain("KERNEL32.dll"));
         Assert.That(NativeJit.Execute(compilation.Program!, runtimePolicy), Is.Zero);
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeJitExecutesIndirectNativeOutputComplementWithStackArgument(
+        NativeRuntimePolicy runtimePolicy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var boundRuntimePolicy = runtimePolicy == NativeRuntimePolicy.CheckedExceptions
+            ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
+        var reference = new CompilationReference([], [], boundRuntimePolicy,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeParameter(5, Read, NoEscape, 0)]
+            [param(bytesRead): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("kernel32.dll", "ReadFile")]
+            extern unsafe int32 ReadFile(
+                ptr<void> file, ptr<void> buffer, uint32 bytesToRead,
+                write ptr<uint32> bytesRead, ptr<void> overlapped);
+
+            int32 Main() {
+                init uint32 bytesRead;
+                unsafe {
+                    var readFile = &ReadFile;
+                    int32 status = readFile(null, null, 0, &init bytesRead, null);
+                    if (status == 0) { return 0; }
+                }
+                return int32(bytesRead);
+            }
+            """), reference, boundRuntimePolicy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var image = NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, runtimePolicy);
+        Assert.That(Encoding.ASCII.GetString(image),
+            Does.Contain("ReadFile").And.Contain("KERNEL32.dll"));
+        Assert.That(NativeJit.Execute(compilation.Program!, runtimePolicy), Is.Zero);
+    }
+
+    [Test]
+    public void IndirectNativeOutputCarriesDependencyToItsSourceFormal()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Packet { public ptr<void> Value; }
+
+            [param(packet): DependsOn(nameof(source))]
+            [param(packet): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadPacket")]
+            extern unsafe int32 ReadPacket(ptr<void> source,
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Packet> packet);
+
+            int32 Probe(ptr<void> source) {
+                init Packet packet;
+                unsafe {
+                    var readPacket = &ReadPacket;
+                    int32 status = readPacket(source, &init packet);
+                    if (status != 0 && packet.Value == null) { return 0; }
+                }
+                return -1;
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var imported = program.Functions.Single(static function =>
+            function.Name == "ReadPacket");
+        var probe = program.Functions.Single(static function => function.Name == "Probe");
+        var indirectCall = new List<BoundIndirectCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(probe.Body, expression =>
+        {
+            if (expression is BoundIndirectCall call)
+            {
+                indirectCall.Add(call);
+            }
+        }), Is.True);
+
+        var call = indirectCall.Single();
+        Assert.That(call.Arguments[1], Is.TypeOf<BoundNativeOutputReservation>());
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(call.Target.Type)];
+        Assert.That(signature.Dependencies, Is.EqualTo(
+        [
+            new NativeFunctionPointerDependency(2, 1, 2, 1, 1, 0),
+        ]));
+        Assert.That(signature.NativeParameters,
+            Is.EqualTo(
+            [
+                new DirectNativeParameter(0, PrimitiveType.Void,
+                    NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 0),
+            ]));
+        Assert.That(NativeFunctionPointerContract.MatchesAddressableFunction(
+            imported, call.Target.Type, program.NativeFunctionPointerSignatures), Is.True);
+    }
+
+    [Test]
+    public void IndirectNativeOutputRejectsReadingOnItsComplementResult()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(counter): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern unsafe int32 QueryPerformanceCounter(write ptr<int64> counter);
+
+            int32 Probe() {
+                init int64 counter;
+                unsafe {
+                    var query = &QueryPerformanceCounter;
+                    int32 status = query(&init counter);
+                    if (status == 0) { return int32(counter); }
+                }
+                return 0;
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void IndirectNativeOutputRejectsReadingAfterDiscardedStatus()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(counter): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern unsafe int32 QueryPerformanceCounter(write ptr<int64> counter);
+
+            int32 Probe() {
+                init int64 counter;
+                unsafe {
+                    var query = &QueryPerformanceCounter;
+                    query(&init counter);
+                }
+                return int32(counter);
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void IndirectNativeOutputRejectsDuplicateReservationTargets()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(first): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [param(second): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadTwoValues")]
+            extern unsafe int32 ReadTwoValues(
+                write ptr<int32> first, write ptr<int32> second);
+
+            int32 Probe() {
+                init int32 value;
+                unsafe {
+                    var readTwoValues = &ReadTwoValues;
+                    return readTwoValues(&init value, &init value);
+                }
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
     }
 
     [Test]
@@ -455,30 +645,42 @@ public sealed class NativeFunctionPointerTests
             Is.EqualTo(program.Functions.IndexOf(imported)));
         Assert.That(signature.CallingConvention,
             Is.EqualTo(NativeCallingConvention.Unmanaged));
-        Assert.That(signature.Selectors, Is.EqualTo(new[]
-        {
+        Assert.That(signature.Selectors, Is.EqualTo(
+        [
             new NativeFunctionPointerSelector(3, 0,
                 (byte)NativeOutputSelector.NonZero),
             new NativeFunctionPointerSelector(3, 1,
                 (byte)NativeOutputSelector.Zero),
-        }));
-        Assert.That(signature.OutputStates, Is.EqualTo(new[]
-        {
+        ]));
+        Assert.That(signature.OutputStates, Is.EqualTo(
+        [
             new NativeFunctionPointerOutputState(1, 0,
                 (byte)NativeOutputState.Live),
             new NativeFunctionPointerOutputState(1, 1,
                 (byte)NativeOutputState.Vacant),
-        }));
-        Assert.That(signature.Dependencies, Is.EqualTo(new[]
-        {
+        ]));
+        Assert.That(signature.Dependencies, Is.EqualTo(
+        [
             new NativeFunctionPointerDependency(2, 1, 2, 1, 1, 0),
-        }));
+        ]));
         Assert.That(signature.NativeParameters,
-            Is.EqualTo(new[]
-            {
+            Is.EqualTo(
+            [
                 new DirectNativeParameter(2, PrimitiveType.UInt32,
                     NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 4),
-            }));
+            ]));
+        Assert.That(NativeFunctionPointerContract.TryGetNativeOutputContract(
+            signature, 1, program.NativePointerTypes, out var output), Is.True);
+        var outputContract = output ?? throw new InvalidOperationException();
+        Assert.That(outputContract.FormalOrdinal, Is.EqualTo(1));
+        Assert.That(outputContract.PointeeType,
+            Is.EqualTo(imported.NativeOutputContracts.Single().PointeeType));
+        Assert.That(outputContract.SuccessSelector, Is.EqualTo(NativeOutputSelector.NonZero));
+        Assert.That(outputContract.SuccessState, Is.EqualTo(NativeOutputState.Live));
+        Assert.That(outputContract.ComplementSelector, Is.EqualTo(NativeOutputSelector.Zero));
+        Assert.That(outputContract.ComplementState, Is.EqualTo(NativeOutputState.Vacant));
+        Assert.That(outputContract.Dependencies,
+            Is.EqualTo(imported.NativeOutputContracts.Single().Dependencies));
         Assert.That(NativeFunctionPointerContract.MatchesAddressableFunction(
             imported, functionPointer.Type, program.NativeFunctionPointerSignatures), Is.True);
         Assert.That(NativeFunctionPointerContract.CanPersistRevision92(signature), Is.False);
@@ -536,6 +738,9 @@ public sealed class NativeFunctionPointerTests
         }, [signature]), Is.False);
         Assert.That(NativeFunctionPointerContract.IsValidSignature(signature with {
             Dependencies = [],
+        }, [signature]), Is.False);
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(signature with {
+            Dependencies = [new NativeFunctionPointerDependency(2, 1, 1, 1, 0, 1)],
         }, [signature]), Is.False);
         Assert.That(NativeFunctionPointerContract.AreEquivalent(signature, noOutput),
             Is.False);

@@ -759,7 +759,9 @@ public static partial class SemanticVerifier
 
         var hasSpanDependencies = VerifySpanContracts(program);
         var hasNativeOutputContracts = program.Functions.Any(static function =>
-            function is not null && NativeOutputCount(function) != 0);
+                function is not null && NativeOutputCount(function) != 0)
+            || program.NativeFunctionPointerSignatures.Any(static signature =>
+                !signature.OutputStates.IsEmpty);
         var hasDoesNotReturnFunctions = program.Functions.Any(
             static function => function.DoesNotReturn)
             || program.NativeFunctionPointerSignatures.Any(
@@ -5619,52 +5621,112 @@ public static partial class SemanticVerifier
                 VerifyIndirectCall(call, function, program);
                 var indirectSignature = program.NativeFunctionPointerSignatures[
                     NativeFunctionPointerTypes.Index(call.Target.Type)];
-                if (!EvaluateExpression(call.Target, initialized, fieldMasks, declarations,
-                    function, program, ref remaining, depth + 1, failures))
+                var indirectStagedDependencyCount = initialized.Dependencies?.Staged.Count ?? 0;
+                try
                 {
-                    foreach (var argument in call.Arguments)
+                    if (!EvaluateExpression(call.Target, initialized, fieldMasks, declarations,
+                        function, program, ref remaining, depth + 1, failures))
                     {
-                        ValidateUnreachableExpression(argument, initialized, fieldMasks,
-                            declarations, function, program, ref remaining, depth + 1);
+                        foreach (var argument in call.Arguments)
+                        {
+                            ValidateUnreachableExpression(argument, initialized, fieldMasks,
+                                declarations, function, program, ref remaining, depth + 1);
+                        }
+                        break;
                     }
-                    break;
-                }
-                var indirectCallCompletes = true;
-                for (var index = 0; index < call.Arguments.Length; index++)
-                {
-                    var argument = call.Arguments[index];
+
+                    var indirectCallCompletes = true;
+                    var indirectOutputTargets = new HashSet<int>();
+                    for (var index = 0; index < call.Arguments.Length; index++)
+                    {
+                        var argument = call.Arguments[index];
+                        if (!indirectCallCompletes)
+                        {
+                            ValidateUnreachableExpression(argument, initialized, fieldMasks,
+                                declarations, function, program, ref remaining, depth + 1);
+                            continue;
+                        }
+
+                        var isNativeOutput = indirectSignature.OutputStates.Any(outputState =>
+                            outputState.FormalOrdinal == (uint)index);
+                        if (isNativeOutput)
+                        {
+                            if (!NativeFunctionPointerContract.TryGetNativeOutputContract(
+                                indirectSignature, index, program.NativePointerTypes,
+                                out var output)
+                                || output is null
+                                || argument is not BoundNativeOutputReservation reservation
+                                || !MatchesReservation(reservation, output, function, program)
+                                || !indirectOutputTargets.Add(reservation.Variable))
+                            {
+                                throw InvalidEffect(call.Span, "NativeImport");
+                            }
+                            VerifyNativeOutputReservation(reservation, output,
+                                initialized, fieldMasks, declarations, function, program,
+                                ref remaining, depth + 1, failures);
+                            StageIndirectDependencySource(call, index, argument,
+                                indirectSignature, initialized, program,
+                                ref remaining, depth + 1);
+                            continue;
+                        }
+
+                        var nativeParameter = indirectSignature.NativeParameters
+                            .FirstOrDefault(parameter => parameter.ParameterIndex == index);
+                        if (nativeParameter is not null
+                            && argument is BoundNativeStorageAddress address)
+                        {
+                            VerifyDirectNativeParameterAddress(address, nativeParameter,
+                                initialized, fieldMasks, declarations, function, program,
+                                ref remaining, depth + 1, failures);
+                            StageIndirectDependencySource(call, index, argument,
+                                indirectSignature, initialized, program,
+                                ref remaining, depth + 1);
+                            continue;
+                        }
+
+                        indirectCallCompletes = EvaluateExpression(argument, initialized,
+                            fieldMasks, declarations, function, program, ref remaining,
+                            depth + 1, failures);
+                        if (indirectCallCompletes)
+                        {
+                            StageIndirectDependencySource(call, index, argument,
+                                indirectSignature, initialized, program,
+                                ref remaining, depth + 1);
+                        }
+                    }
+
                     if (!indirectCallCompletes)
                     {
-                        ValidateUnreachableExpression(argument, initialized, fieldMasks,
-                            declarations, function, program, ref remaining, depth + 1);
-                        continue;
+                        initialized.CancelUninvokedNativeOutputReservations();
                     }
-
-                    var nativeParameter = indirectSignature.NativeParameters
-                        .FirstOrDefault(parameter => parameter.ParameterIndex == index);
-                    if (nativeParameter is not null
-                        && argument is BoundNativeStorageAddress address)
+                    if (indirectCallCompletes)
                     {
-                        VerifyDirectNativeParameterAddress(address, nativeParameter,
-                            initialized, fieldMasks, declarations, function, program,
-                            ref remaining, depth + 1, failures);
-                        continue;
+                        if (initialized.Dependencies is BackingDependencies dependencies
+                            && MayWriteNativePointerStorage(call, program))
+                        {
+                            dependencies.MarkAllNativePointerProvenanceUnknown();
+                            dependencies.InvalidateAllCopyOriginValues(
+                                program, ref remaining, depth + 1);
+                        }
+                        if (indirectSignature.OutputStates.IsEmpty)
+                        {
+                            initialized.InvalidateNativeOutputCorrelations();
+                        }
+                        else
+                        {
+                            ApplyNativeOutputIndirectCallEffects(call,
+                                indirectSignature, initialized, ref remaining);
+                        }
+                        failures?.Add(initialized, fieldMasks);
                     }
-
-                    indirectCallCompletes = EvaluateExpression(argument, initialized,
-                        fieldMasks, declarations, function, program, ref remaining,
-                        depth + 1, failures);
                 }
-                if (indirectCallCompletes)
+                finally
                 {
-                    if (initialized.Dependencies is BackingDependencies dependencies
-                        && MayWriteNativePointerStorage(call, program))
+                    if (initialized.Dependencies is BackingDependencies stagedDependencies)
                     {
-                        dependencies.MarkAllNativePointerProvenanceUnknown();
-                        dependencies.InvalidateAllCopyOriginValues(
-                            program, ref remaining, depth + 1);
+                        stagedDependencies.Staged.RemoveRange(indirectStagedDependencyCount,
+                            stagedDependencies.Staged.Count - indirectStagedDependencyCount);
                     }
-                    initialized.InvalidateNativeOutputCorrelations();
                 }
                 break;
             case BoundCall call:
@@ -6384,8 +6446,12 @@ public static partial class SemanticVerifier
         }
 
         var signature = program.NativeFunctionPointerSignatures[NativeFunctionPointerTypes.Index(call.Target.Type)];
-        if (!signature.OutputStates.IsEmpty || !signature.Selectors.IsEmpty
-            || !signature.Dependencies.IsEmpty)
+        var outputSelectorOrdinals = signature.OutputStates
+            .Select(static outputState => outputState.SelectorOrdinal).ToHashSet();
+        if (signature.Selectors.Any(selector =>
+                !outputSelectorOrdinals.Contains(selector.PhaseLocalOrdinal))
+            || signature.Dependencies.Any(static dependency =>
+                dependency.DestinationKind != 2))
         {
             throw InvalidEffect(call.Span, "NativeImport");
         }
@@ -6396,6 +6462,20 @@ public static partial class SemanticVerifier
         for (var index = 0; index < call.Arguments.Length; index++)
         {
             var argument = call.Arguments[index] ?? throw Invalid();
+            var isNativeOutput = signature.OutputStates.Any(outputState =>
+                outputState.FormalOrdinal == (uint)index);
+            if (isNativeOutput)
+            {
+                if (!NativeFunctionPointerContract.TryGetNativeOutputContract(
+                        signature, index, program.NativePointerTypes, out var output)
+                    || output is null
+                    || argument is not BoundNativeOutputReservation reservation
+                    || !MatchesReservation(reservation, output, caller, program))
+                {
+                    throw InvalidEffect(call.Span, "NativeImport");
+                }
+                continue;
+            }
 
             var nativeParameter = signature.NativeParameters.FirstOrDefault(
                 parameter => parameter.ParameterIndex == index);
@@ -6773,7 +6853,7 @@ public static partial class SemanticVerifier
                 whenFalsePossible);
         }
         var state = initialized.Clone();
-        var nativeOutputCalls = new Dictionary<BoundCall, NativeOutputCallFact>(
+        var nativeOutputCalls = new Dictionary<BoundExpression, NativeOutputCallFact>(
             ReferenceEqualityComparer.Instance);
         if (hasNativeOutputEffect)
         {

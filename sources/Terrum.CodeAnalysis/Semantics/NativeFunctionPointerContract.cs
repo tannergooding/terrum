@@ -161,6 +161,121 @@ internal static class NativeFunctionPointerContract
         return true;
     }
 
+    internal static bool TryGetNativeOutputContract(
+        NativeFunctionPointerSignatureDefinition signature, int formalOrdinal,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        out NativeOutputContract? output)
+    {
+        output = null;
+        if (formalOrdinal < 0 || formalOrdinal >= signature.ParameterTypes.Length
+            || (signature.EffectsMask & 2) != 0
+            || signature.OutputStates.IsDefault || signature.Selectors.IsDefault
+            || signature.Dependencies.IsDefault
+            || !NativePointerTypeContract.IsValidType(
+                signature.ParameterTypes[formalOrdinal], pointerTypes))
+        {
+            return false;
+        }
+
+        var formalStates = signature.OutputStates.Where(state =>
+            state.FormalOrdinal == (uint)formalOrdinal).ToArray();
+        if (formalStates.Length != 2)
+        {
+            return false;
+        }
+        var successStates = formalStates.Where(static state => state.State == 1).ToArray();
+        var complementStates = formalStates.Where(static state => state.State == 0).ToArray();
+        if (successStates.Length != 1 || complementStates.Length != 1)
+        {
+            return false;
+        }
+        var successState = successStates[0];
+        var complementState = complementStates[0];
+
+        var successSelector = signature.Selectors.FirstOrDefault(selector =>
+            selector.PhaseTag == 3
+            && selector.PhaseLocalOrdinal == successState.SelectorOrdinal);
+        var complementSelector = signature.Selectors.FirstOrDefault(selector =>
+            selector.PhaseTag == 3
+            && selector.PhaseLocalOrdinal == complementState.SelectorOrdinal);
+        if (!TryGetNativeOutputSelector(successSelector.NodeKind, out var successCondition)
+            || !TryGetNativeOutputSelector(complementSelector.NodeKind, out var complementCondition))
+        {
+            return false;
+        }
+
+        var pointer = pointerTypes[NativePointerTypes.Index(
+            signature.ParameterTypes[formalOrdinal])];
+        if (!pointer.IsWritable || pointer.PointeeType == PrimitiveType.Void)
+        {
+            return false;
+        }
+
+        var dependencies = signature.Dependencies.Where(dependency =>
+            dependency.DestinationKind == 2
+            && dependency.DestinationOrdinal == (uint)formalOrdinal
+            && dependency.Phase == 1).ToArray();
+        if (dependencies.Length == 0)
+        {
+            return false;
+        }
+        var outputDependencies = ImmutableArray.CreateBuilder<NativeOutputDependency>(
+            dependencies.Length);
+        foreach (var dependency in dependencies)
+        {
+            if (dependency.SourceKind == 1
+                && dependency.SourceOrdinal >= (uint)signature.ParameterTypes.Length)
+            {
+                return false;
+            }
+
+            var (sourceKind, relationship) = dependency.SourceKind switch
+            {
+                0 when dependency.Relationship == 0 && dependency.SourceOrdinal == 0 =>
+                    (NativeOutputDependencySourceKind.Empty,
+                        NativeOutputDependencyRelationship.Empty),
+                1 when dependency.Relationship == 2 =>
+                    (NativeOutputDependencySourceKind.Formal,
+                        NativeOutputDependencyRelationship.Forward),
+                1 when dependency.Relationship == 3 =>
+                    (NativeOutputDependencySourceKind.Formal,
+                        NativeOutputDependencyRelationship.Union),
+                _ => ((NativeOutputDependencySourceKind)byte.MaxValue,
+                    (NativeOutputDependencyRelationship)byte.MaxValue),
+            };
+            if ((byte)sourceKind == byte.MaxValue)
+            {
+                return false;
+            }
+
+            outputDependencies.Add(new NativeOutputDependency(2, sourceKind,
+                relationship, NativeOutputPublicationPhase.NormalCompletion,
+                formalOrdinal, checked((int)dependency.SourceOrdinal)));
+        }
+
+        output = new NativeOutputContract(formalOrdinal, pointer.PointeeType,
+            NativeOutputFormation.VacantWholeObject,
+            NativeOutputPublicationPhase.NormalCompletion,
+            successCondition, NativeOutputState.Live,
+            complementCondition, NativeOutputState.Vacant,
+            outputDependencies.MoveToImmutable());
+        return true;
+    }
+
+    private static bool TryGetNativeOutputSelector(byte nodeKind,
+        out NativeOutputSelector selector)
+    {
+        selector = nodeKind switch
+        {
+            (byte)NativeOutputSelector.NonZero => NativeOutputSelector.NonZero,
+            (byte)NativeOutputSelector.Zero => NativeOutputSelector.Zero,
+            (byte)NativeOutputSelector.NonNegative => NativeOutputSelector.NonNegative,
+            (byte)NativeOutputSelector.Negative => NativeOutputSelector.Negative,
+            _ => (NativeOutputSelector)byte.MaxValue,
+        };
+        return (byte)selector != byte.MaxValue;
+    }
+
     private static bool ValidOutputStates(
         NativeFunctionPointerSignatureDefinition signature)
     {
@@ -562,6 +677,9 @@ internal static class NativeFunctionPointerContract
             if (dependency.DestinationKind == 2
                 && (!outputFormals.Contains(dependency.DestinationOrdinal)
                     || dependency.Phase != 1
+                    || (dependency.SourceKind == 0
+                        ? dependency.Relationship != 0
+                        : dependency.Relationship is not (2 or 3))
                     || (dependency.SourceKind == 1
                         && outputFormals.Contains(dependency.SourceOrdinal))))
             {

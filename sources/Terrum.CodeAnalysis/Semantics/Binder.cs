@@ -7615,11 +7615,15 @@ internal sealed partial class Binder
         }
 
         var signature = _nativeFunctionPointerSignatures[typeIndex];
-        if (!signature.OutputStates.IsEmpty || !signature.Selectors.IsEmpty
-            || !signature.Dependencies.IsEmpty)
+        var outputSelectorOrdinals = signature.OutputStates
+            .Select(static outputState => outputState.SelectorOrdinal).ToHashSet();
+        if (signature.Selectors.Any(selector =>
+                !outputSelectorOrdinals.Contains(selector.PhaseLocalOrdinal))
+            || signature.Dependencies.Any(static dependency =>
+                dependency.DestinationKind != 2))
         {
             Report("TRM3030",
-                "Indirect calls with output-state or dependency contracts require their complete call protocol.",
+                "Indirect calls with selector or dependency contracts outside NativeOutput require their complete call protocol.",
                 node.Span);
             return ErrorExpression(node.Span);
         }
@@ -7645,7 +7649,9 @@ internal sealed partial class Binder
         for (var index = 0; index < argumentNodes.Length; index++)
         {
             var argument = argumentNodes[index];
-            if (argument.Children.Any(static child => child is SyntaxTokenElement {
+            var isNativeOutput = signature.OutputStates.Any(outputState =>
+                outputState.FormalOrdinal == (uint)index);
+            if (!isNativeOutput && argument.Children.Any(static child => child is SyntaxTokenElement {
                 Token.Kind: TokenKind.OutKeyword or TokenKind.VarKeyword
             } or SyntaxTokenElement { Token.Text: "init" }))
             {
@@ -7659,9 +7665,25 @@ internal sealed partial class Binder
                 boundArguments.Add(ErrorExpression(argument.Span));
                 continue;
             }
-            var nativeParameter = signature.NativeParameters.FirstOrDefault(parameter =>
-                parameter.ParameterIndex == index);
-            if (nativeParameter is not null)
+            if (isNativeOutput)
+            {
+                if (!NativeFunctionPointerContract.TryGetNativeOutputContract(
+                        signature, index, [.. _nativePointerTypes], out var output)
+                    || output is null)
+                {
+                    Report("TRM3030",
+                        "A NativeOutput pointer formal requires a complete writable output contract.",
+                        argument.Span);
+                    boundArguments.Add(ErrorExpression(argument.Span));
+                }
+                else
+                {
+                    boundArguments.Add(BindNativeOutputReservation(
+                        value, output.PointeeType, argument.Span));
+                }
+            }
+            else if (signature.NativeParameters.FirstOrDefault(parameter =>
+                parameter.ParameterIndex == index) is DirectNativeParameter nativeParameter)
             {
                 boundArguments.Add(BindDirectNativeParameterAddress(
                     value, nativeParameter, argument.Span));

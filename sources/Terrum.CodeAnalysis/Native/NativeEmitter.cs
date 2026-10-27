@@ -6631,16 +6631,37 @@ internal sealed partial class PeCompiler
                 StoreValue(Spill(spill), call.Target.Type);
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
-                    Expression(call.Arguments[i], argumentExpressionSpill);
-                    StoreValue(Spill(argumentBase + i), call.Arguments[i].Type);
+                    var argument = call.Arguments[i];
+                    Expression(argument, argumentExpressionSpill);
+                    if (argument is BoundNativeOutputReservation)
+                    {
+                        _code.Store64(Spill(argumentBase + i));
+                    }
+                    else
+                    {
+                        StoreValue(Spill(argumentBase + i), argument.Type);
+                    }
                 }
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
-                    var argumentType = call.Arguments[i].Type;
-                    LoadValue(Spill(argumentBase + i), argumentType);
+                    var argument = call.Arguments[i];
+                    var isNativeOutput = argument is BoundNativeOutputReservation;
+                    var argumentType = argument.Type;
+                    if (isNativeOutput)
+                    {
+                        _code.Load64(Spill(argumentBase + i));
+                    }
+                    else
+                    {
+                        LoadValue(Spill(argumentBase + i), argumentType);
+                    }
                     if (i < 4)
                     {
-                        if (argumentType is PrimitiveType.Float32 or PrimitiveType.Float64)
+                        if (isNativeOutput)
+                        {
+                            _code.MoveArgument(i, true);
+                        }
+                        else if (argumentType is PrimitiveType.Float32 or PrimitiveType.Float64)
                         {
                             _code.MoveFloatingArgument(i, argumentType == PrimitiveType.Float64);
                         }

@@ -573,7 +573,7 @@ public static partial class SemanticVerifier
         = new HashSet<ProvenanceAnchor>();
 
     private readonly record struct StagedDependencySource(
-        BoundCall? Call,
+        BoundExpression? Call,
         int ParameterIndex,
         HashSet<ProvenanceAnchor> BackingSources,
         HashSet<ProvenanceAnchor> NativePointerSources,
@@ -5704,6 +5704,37 @@ public static partial class SemanticVerifier
         dependencies.Staged.Add(new StagedDependencySource(call, parameterIndex,
             [.. backingSources],
             [.. nativePointerSources],
+            nativePointerMayBeUnknown));
+    }
+
+    private static void StageIndirectDependencySource(BoundIndirectCall call,
+        int parameterIndex, BoundExpression argument,
+        NativeFunctionPointerSignatureDefinition signature,
+        InitializationState initialized, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (initialized.Dependencies is not BackingDependencies dependencies
+            || !signature.Dependencies.Any(dependency =>
+                dependency.DestinationKind == 2
+                && dependency.SourceKind == 1
+                && dependency.SourceOrdinal == (uint)parameterIndex))
+        {
+            return;
+        }
+
+        var hasBacking = TokenSpanContract.IsDependent(argument.Type, program.Structures);
+        var hasNativePointer = CarriesNativePointer(argument, program);
+        var backingSources = hasBacking
+            ? BackingOf(argument, dependencies, program, ref remaining, depth + 1)
+            : EmptyBackingSources;
+        var nativePointerSources = hasNativePointer
+            ? NativePointerBackingOf(argument, dependencies, program, ref remaining, depth + 1)
+            : EmptyBackingSources;
+        var nativePointerMayBeUnknown = hasNativePointer
+            && NativePointerMayBeUnknownOf(argument, dependencies, program,
+                ref remaining, depth + 1);
+        dependencies.Staged.Add(new StagedDependencySource(call, parameterIndex,
+            [.. backingSources], [.. nativePointerSources],
             nativePointerMayBeUnknown));
     }
 
