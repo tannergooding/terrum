@@ -61,6 +61,14 @@ public static partial class SemanticVerifier
             return new FieldProjectionPath(result);
         }
 
+        internal bool IsPrefixOf(FieldProjectionPath other)
+        {
+            var segments = Segments;
+            var otherSegments = other.Segments;
+            return segments.Length <= otherSegments.Length
+                && segments.AsSpan().SequenceEqual(otherSegments.AsSpan(0, segments.Length));
+        }
+
         public bool Equals(FieldProjectionPath other)
             => Segments.AsSpan().SequenceEqual(other.Segments.AsSpan());
 
@@ -76,6 +84,88 @@ public static partial class SemanticVerifier
             }
             return hash.ToHashCode();
         }
+    }
+
+    private enum CopyOriginSourceKind : byte
+    {
+        ExplicitFormal = 1,
+        Receiver = 2,
+    }
+
+    private enum CopyOriginSourceView : byte
+    {
+        EntryValue = 1,
+        EntryReferentValue = 2,
+    }
+
+    private readonly record struct CopyValueOrigin(
+        CopyOriginSourceKind SourceKind,
+        CopyOriginSourceView SourceView,
+        int SourceOrdinal,
+        FieldProjectionPath SourcePath)
+    {
+        internal bool IsValid => (SourceKind is CopyOriginSourceKind.ExplicitFormal
+                or CopyOriginSourceKind.Receiver)
+            && (SourceView is CopyOriginSourceView.EntryValue
+                or CopyOriginSourceView.EntryReferentValue)
+            && SourceOrdinal >= 0
+            && (SourceKind != CopyOriginSourceKind.Receiver
+                || (SourceView == CopyOriginSourceView.EntryReferentValue && SourceOrdinal == 0));
+    }
+
+    private sealed class CopyOriginFact
+    {
+        private CopyOriginFact(bool isAvailable, HashSet<CopyValueOrigin> origins)
+        {
+            IsAvailable = isAvailable;
+            Origins = origins;
+        }
+
+        internal bool IsAvailable { get; private set; }
+        internal HashSet<CopyValueOrigin> Origins { get; }
+
+        internal static CopyOriginFact Unavailable() => new(false, []);
+        internal static CopyOriginFact KnownEmpty() => new(true, []);
+
+        internal static CopyOriginFact Known(IEnumerable<CopyValueOrigin> origins)
+        {
+            var result = new HashSet<CopyValueOrigin>(origins);
+            if (result.Any(static origin => !origin.IsValid))
+            {
+                throw Invalid();
+            }
+            return new CopyOriginFact(true, result);
+        }
+
+        internal CopyOriginFact Clone()
+            => new(IsAvailable, [.. Origins]);
+
+        internal bool Merge(CopyOriginFact other)
+        {
+            if (!IsAvailable || !other.IsAvailable)
+            {
+                var changed = IsAvailable || Origins.Count != 0;
+                IsAvailable = false;
+                Origins.Clear();
+                return changed;
+            }
+
+            var priorCount = Origins.Count;
+            Origins.UnionWith(other.Origins);
+            return priorCount != Origins.Count;
+        }
+
+        internal bool IsEquivalentTo(CopyOriginFact other)
+            => IsAvailable == other.IsAvailable && Origins.SetEquals(other.Origins);
+
+        internal bool IsValid => !IsAvailable || Origins.All(static origin => origin.IsValid);
+
+        internal CopyOriginFact Project(FieldProjectionPath suffix)
+            => IsAvailable
+                ? Known(Origins.Select(origin => origin with {
+                    SourcePath = origin.SourcePath.Append(suffix),
+                }))
+                : Unavailable();
     }
 
     private enum StorageActivationKind : byte
@@ -399,6 +489,8 @@ public static partial class SemanticVerifier
         internal HashSet<ProvenanceAnchor>?[] NativePointerSources { get; }
         internal bool[] NativePointerMayBeUnknown { get; }
         private Dictionary<StorageKey, NativePointerFieldValue> NativePointerFieldValues { get; } = [];
+        private CopyOriginFact[] CopyOriginRoots { get; }
+        private Dictionary<StorageKey, CopyOriginFact> CopyOriginFieldValues { get; } = [];
         private HashSet<StorageInstance>[] StorageInstances { get; }
         private StorageActivationContext StorageActivationContext { get; }
         internal int FunctionActivation { get; }
@@ -420,9 +512,11 @@ public static partial class SemanticVerifier
             Sources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerSources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerMayBeUnknown = new bool[length];
+            CopyOriginRoots = new CopyOriginFact[length];
             StorageInstances = new HashSet<StorageInstance>[length];
             for (var slot = 0; slot < length; slot++)
             {
+                CopyOriginRoots[slot] = CopyOriginFact.Unavailable();
                 StorageInstances[slot] = [new StorageInstance(RootScopeActivation, 0)];
             }
         }
@@ -449,6 +543,7 @@ public static partial class SemanticVerifier
                 destination.Sources[slot] = CloneSet(Sources[slot]);
                 destination.NativePointerSources[slot] = CloneSet(NativePointerSources[slot]);
                 destination.NativePointerMayBeUnknown[slot] = NativePointerMayBeUnknown[slot];
+                destination.CopyOriginRoots[slot] = CopyOriginRoots[slot].Clone();
                 destination.StorageInstances[slot] = [.. StorageInstances[slot]];
             }
             destination.Staged.Clear();
@@ -464,6 +559,11 @@ public static partial class SemanticVerifier
             {
                 destination.NativePointerFieldValues.Add(key, value.Clone());
             }
+            destination.CopyOriginFieldValues.Clear();
+            foreach (var (key, value) in CopyOriginFieldValues)
+            {
+                destination.CopyOriginFieldValues.Add(key, value.Clone());
+            }
         }
 
         internal bool MergeSlot(int slot, BackingDependencies other)
@@ -475,6 +575,7 @@ public static partial class SemanticVerifier
 
             var changed = MergeSet(ref Sources[slot], other.Sources[slot]);
             changed |= MergeSet(ref NativePointerSources[slot], other.NativePointerSources[slot]);
+            changed |= CopyOriginRoots[slot].Merge(other.CopyOriginRoots[slot]);
             if (other.NativePointerMayBeUnknown[slot] && !NativePointerMayBeUnknown[slot])
             {
                 NativePointerMayBeUnknown[slot] = true;
@@ -531,6 +632,39 @@ public static partial class SemanticVerifier
                     changed = true;
                 }
             }
+            var copyOriginKeys = CopyOriginFieldValues.Keys
+                .Concat(other.CopyOriginFieldValues.Keys)
+                .Where(key => key.Site == slot)
+                .Distinct()
+                .ToArray();
+            foreach (var key in copyOriginKeys)
+            {
+                var hasCurrent = CopyOriginFieldValues.TryGetValue(key, out var currentValue);
+                var hasOther = other.CopyOriginFieldValues.TryGetValue(key, out var otherValue);
+                if (hasCurrent && hasOther)
+                {
+                    changed |= currentValue!.Merge(otherValue!);
+                }
+                else if (hasCurrent)
+                {
+                    if (other.StorageInstances[slot].Contains(key.Instance))
+                    {
+                        changed |= currentValue!.Merge(
+                            other.CopyOriginRoots[slot].Project(key.Projection.FieldPath));
+                    }
+                }
+                else
+                {
+                    currentValue = otherValue!.Clone();
+                    if (currentInstances.Contains(key.Instance))
+                    {
+                        changed |= currentValue.Merge(
+                            CopyOriginRoots[slot].Project(key.Projection.FieldPath));
+                    }
+                    CopyOriginFieldValues.Add(key, currentValue);
+                    changed = true;
+                }
+            }
             return changed;
         }
 
@@ -544,11 +678,14 @@ public static partial class SemanticVerifier
             var changed = !SetEquals(Sources[slot], other.Sources[slot])
                 || !SetEquals(NativePointerSources[slot], other.NativePointerSources[slot])
                 || NativePointerMayBeUnknown[slot] != other.NativePointerMayBeUnknown[slot]
+                || !CopyOriginRoots[slot].IsEquivalentTo(other.CopyOriginRoots[slot])
                 || !StorageInstances[slot].SetEquals(other.StorageInstances[slot])
                 || !NativePointerFieldValuesEqualForSlot(slot, other);
+            changed |= !CopyOriginFieldValuesEqualForSlot(slot, other);
             Sources[slot] = CloneSet(other.Sources[slot]);
             NativePointerSources[slot] = CloneSet(other.NativePointerSources[slot]);
             NativePointerMayBeUnknown[slot] = other.NativePointerMayBeUnknown[slot];
+            CopyOriginRoots[slot] = other.CopyOriginRoots[slot].Clone();
             StorageInstances[slot] = [.. other.StorageInstances[slot]];
             ClearNativePointerFieldValues(slot);
             foreach (var (key, value) in other.NativePointerFieldValues)
@@ -556,6 +693,14 @@ public static partial class SemanticVerifier
                 if (key.Site == slot)
                 {
                     NativePointerFieldValues.Add(key, value.Clone());
+                }
+            }
+            ClearCopyOriginFieldValues(slot);
+            foreach (var (key, value) in other.CopyOriginFieldValues)
+            {
+                if (key.Site == slot)
+                {
+                    CopyOriginFieldValues.Add(key, value.Clone());
                 }
             }
             return changed;
@@ -584,6 +729,7 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            ClearCopyOriginFacts(slot);
             StorageInstances[slot] = [new StorageInstance(supportingScopeActivation, generation)];
         }
 
@@ -593,8 +739,146 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+            ClearCopyOriginFacts(slot);
             StorageInstances[slot] = [.. StorageInstances[slot]
                 .Select(instance => instance with { LifetimeGeneration = generation })];
+        }
+
+        internal void SetCopyOriginRoot(int slot, CopyOriginFact fact)
+        {
+            if ((uint)slot >= (uint)CopyOriginRoots.Length || fact is null || !fact.IsValid)
+            {
+                throw Invalid();
+            }
+            CopyOriginRoots[slot] = fact.Clone();
+        }
+
+        internal CopyOriginFact CopyOriginRoot(int slot)
+        {
+            if ((uint)slot >= (uint)CopyOriginRoots.Length)
+            {
+                throw Invalid();
+            }
+            return CopyOriginRoots[slot].Clone();
+        }
+
+        internal void SetCopyOriginFieldValue(
+            int slot, StorageProjection projection, CopyOriginFact fact)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || projection.Kind != StorageProjectionKind.InlineFieldPath
+                || projection.FieldPath.Segments.IsEmpty
+                || fact is null || !fact.IsValid)
+            {
+                throw Invalid();
+            }
+
+            foreach (var instance in StorageInstances[slot])
+            {
+                var key = new StorageKey(FunctionActivation, slot, instance, projection);
+                CopyOriginFieldValues[key] = fact.Clone();
+            }
+        }
+
+        internal bool TryGetCopyOriginFieldValue(
+            int slot, StorageProjection projection, out CopyOriginFact fact)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || projection.Kind != StorageProjectionKind.InlineFieldPath
+                || projection.FieldPath.Segments.IsEmpty)
+            {
+                throw Invalid();
+            }
+
+            var found = false;
+            CopyOriginFact? result = null;
+            foreach (var instance in StorageInstances[slot])
+            {
+                var key = new StorageKey(FunctionActivation, slot, instance, projection);
+                CopyOriginFact value;
+                if (CopyOriginFieldValues.TryGetValue(key, out var existing)
+                    && existing is not null)
+                {
+                    value = existing;
+                    found = true;
+                }
+                else
+                {
+                    value = CopyOriginRoots[slot].Project(projection.FieldPath);
+                }
+                if (result is null)
+                {
+                    result = value.Clone();
+                }
+                else
+                {
+                    _ = result.Merge(value);
+                }
+            }
+
+            fact = result ?? CopyOriginFact.Unavailable();
+            return found;
+        }
+
+        private void ClearCopyOriginFacts(int slot)
+        {
+            CopyOriginRoots[slot] = CopyOriginFact.Unavailable();
+            ClearCopyOriginFieldValues(slot);
+        }
+
+        internal void ClearCopyOriginFieldValues(int slot)
+        {
+            foreach (var key in CopyOriginFieldValues.Keys
+                .Where(key => key.Site == slot).ToArray())
+            {
+                _ = CopyOriginFieldValues.Remove(key);
+            }
+        }
+
+        internal void ClearCopyOriginFieldValues(int slot, StorageProjection prefix)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || prefix.Kind is not (StorageProjectionKind.WholeObject
+                    or StorageProjectionKind.InlineFieldPath))
+            {
+                throw Invalid();
+            }
+            if (prefix.Kind == StorageProjectionKind.WholeObject)
+            {
+                ClearCopyOriginFieldValues(slot);
+                return;
+            }
+
+            foreach (var key in CopyOriginFieldValues.Keys.Where(key =>
+                key.Site == slot
+                && prefix.FieldPath.IsPrefixOf(key.Projection.FieldPath)).ToArray())
+            {
+                _ = CopyOriginFieldValues.Remove(key);
+            }
+        }
+
+        private bool CopyOriginFieldValuesEqualForSlot(int slot, BackingDependencies other)
+        {
+            foreach (var (key, value) in CopyOriginFieldValues)
+            {
+                if (key.Site != slot)
+                {
+                    continue;
+                }
+                if (!other.CopyOriginFieldValues.TryGetValue(key, out var otherValue)
+                    || !value.IsEquivalentTo(otherValue))
+                {
+                    return false;
+                }
+            }
+            foreach (var key in other.CopyOriginFieldValues.Keys)
+            {
+                if (key.Site == slot && !CopyOriginFieldValues.ContainsKey(key))
+                {
+                    return false;
+                }
+            }
+            return true;
         }
 
         internal void SetBackingSources(int slot, IReadOnlySet<ProvenanceAnchor> sources)
@@ -781,6 +1065,11 @@ public static partial class SemanticVerifier
                 .Where(pair => pair.Key.Site == source)
                 .Select(static pair => (pair.Key.Projection, Value: pair.Value.Clone()))
                 .ToArray();
+            var sourceCopyOrigins = CopyOriginRoots[source].Clone();
+            var sourceCopyOriginFields = CopyOriginFieldValues
+                .Where(pair => pair.Key.Site == source)
+                .Select(static pair => (pair.Key.Projection, Value: pair.Value.Clone()))
+                .ToArray();
             for (var slot = 0; slot < Sources.Length; slot++)
             {
                 RemapSource(Sources[slot], source, destination);
@@ -808,12 +1097,24 @@ public static partial class SemanticVerifier
             NativePointerSources[source] = null;
             NativePointerMayBeUnknown[destination] = sourcePointerMayBeUnknown;
             NativePointerMayBeUnknown[source] = false;
+            CopyOriginRoots[destination] = sourceCopyOrigins;
+            CopyOriginRoots[source] = CopyOriginFact.Unavailable();
             ClearNativePointerFieldValues(destination);
             foreach (var (projection, value) in sourceFieldValues)
             {
                 foreach (var instance in StorageInstances[destination])
                 {
                     NativePointerFieldValues.Add(new StorageKey(
+                        FunctionActivation, destination, instance, projection), value.Clone());
+                }
+            }
+            ClearCopyOriginFieldValues(destination);
+            ClearCopyOriginFieldValues(source);
+            foreach (var (projection, value) in sourceCopyOriginFields)
+            {
+                foreach (var instance in StorageInstances[destination])
+                {
+                    CopyOriginFieldValues.Add(new StorageKey(
                         FunctionActivation, destination, instance, projection), value.Clone());
                 }
             }
@@ -1391,7 +1692,9 @@ public static partial class SemanticVerifier
     {
         if (!hasSpans && program.NativePointerTypes.IsEmpty
             && !CarriesNativePointer(function.ReturnType, program)
-            && !function.Variables.Any(variable => CarriesNativePointer(variable.Type, program)))
+            && !function.Variables.Any(variable => CarriesNativePointer(variable.Type, program))
+            && !CarriesCopyOrigin(function.ReturnType, program)
+            && !function.Variables.Any(variable => CarriesCopyOrigin(variable.Type, program)))
         {
             return null;
         }
@@ -1416,6 +1719,10 @@ public static partial class SemanticVerifier
         var remaining = MaximumAnalysisVisits;
         for (var slot = 0; slot < edges.Length; slot++)
         {
+            if (TryGetCopyOriginInput(function, program, slot, out var copyOrigin))
+            {
+                facts.SetCopyOriginRoot(slot, CopyOriginFact.Known([copyOrigin]));
+            }
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 && !(slot == 0 && (function.IsConstructor || function.IsClassConstructor)))
             {
@@ -2071,6 +2378,78 @@ public static partial class SemanticVerifier
         return result;
     }
 
+    private static bool CarriesCopyOrigin(PrimitiveType type, BoundProgram program)
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        while (pending.TryPop(out var current))
+        {
+            if (IsNativePointerValue(current, program)
+                || NativeFunctionPointerTypes.IsType(current)
+                || current == PrimitiveType.TokenSpan)
+            {
+                return true;
+            }
+            if (!IsInlineStructStorage(current, program) || !visited.Add(current))
+            {
+                continue;
+            }
+            foreach (var field in program.Structures[(int)current - 100].Fields)
+            {
+                pending.Push(field.Type);
+            }
+        }
+        return false;
+    }
+
+    private static List<(StorageProjection Projection, PrimitiveType Type)> CopyOriginFieldLeaves(
+        PrimitiveType type, BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new List<(StorageProjection Projection, PrimitiveType Type)>();
+        CollectCopyOriginFieldLeaves(type, StorageProjection.WholeObject,
+            program, result, [], ref remaining, depth);
+        return result;
+    }
+
+    private static void CollectCopyOriginFieldLeaves(PrimitiveType type,
+        StorageProjection projection, BoundProgram program,
+        List<(StorageProjection Projection, PrimitiveType Type)> result,
+        HashSet<PrimitiveType> activeTypes, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (IsNativePointerValue(type, program)
+            || NativeFunctionPointerTypes.IsType(type)
+            || type == PrimitiveType.TokenSpan)
+        {
+            result.Add((projection, type));
+            return;
+        }
+        if (!IsInlineStructStorage(type, program))
+        {
+            return;
+        }
+        if (!activeTypes.Add(type))
+        {
+            throw InvalidEffect(default, "Ownership");
+        }
+
+        var structure = program.Structures[(int)type - 100];
+        for (var field = 0; field < structure.Fields.Length; field++)
+        {
+            var fieldType = structure.Fields[field].Type;
+            if (!CarriesCopyOrigin(fieldType, program))
+            {
+                continue;
+            }
+            CollectCopyOriginFieldLeaves(fieldType,
+                projection.AppendField(type, field), program, result,
+                activeTypes, ref remaining, depth + 1);
+        }
+
+        _ = activeTypes.Remove(type);
+    }
+
     private static void CollectNativePointerFieldLeaves(PrimitiveType type,
         StorageProjection projection, BoundProgram program,
         List<(StorageProjection Projection, PrimitiveType Type)> result,
@@ -2303,6 +2682,224 @@ public static partial class SemanticVerifier
 
         return (new HashSet<ProvenanceAnchor>(NativePointerBackingOf(
                 expression, facts, program, ref remaining, depth + 1)), true);
+    }
+
+    private static CopyOriginFact CopyOriginOfExpression(
+        BoundExpression expression, PrimitiveType valueType, StorageProjection relativeProjection,
+        BackingDependencies facts, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is null || expression.Type != valueType)
+        {
+            throw Invalid(expression?.Span ?? default);
+        }
+
+        switch (expression)
+        {
+            case BoundUnsafeExpression unsafeExpression:
+                return CopyOriginOfExpression(unsafeExpression.Expression, valueType,
+                    relativeProjection, facts, function, program, ref remaining, depth + 1);
+            case BoundConditional conditional when conditional.WhenTrue is not null
+                && conditional.WhenFalse is not null
+                && conditional.WhenTrue.Type == valueType
+                && conditional.WhenFalse.Type == valueType:
+                var whenTrue = CopyOriginOfExpression(conditional.WhenTrue, valueType,
+                    relativeProjection, facts, function, program, ref remaining, depth + 1);
+                var whenFalse = CopyOriginOfExpression(conditional.WhenFalse, valueType,
+                    relativeProjection, facts, function, program, ref remaining, depth + 1);
+                _ = whenTrue.Merge(whenFalse);
+                return whenTrue;
+            case BoundRead read:
+                ValidateCopyOriginVariable(read.Variable, read.Type, function);
+                if (relativeProjection.Kind == StorageProjectionKind.InlineFieldPath
+                    && facts.TryGetCopyOriginFieldValue(read.Variable, relativeProjection,
+                        out var readFieldFact))
+                {
+                    return readFieldFact;
+                }
+                var readRoot = facts.CopyOriginRoot(read.Variable);
+                return relativeProjection.Kind switch
+                {
+                    StorageProjectionKind.WholeObject => readRoot,
+                    StorageProjectionKind.InlineFieldPath =>
+                        readRoot.Project(relativeProjection.FieldPath),
+                    _ => CopyOriginFact.Unavailable(),
+                };
+            case BoundMove move:
+                ValidateCopyOriginVariable(move.Variable, move.Type, function);
+                if (relativeProjection.Kind == StorageProjectionKind.InlineFieldPath
+                    && facts.TryGetCopyOriginFieldValue(move.Variable, relativeProjection,
+                        out var moveFieldFact))
+                {
+                    return moveFieldFact;
+                }
+                var moveRoot = facts.CopyOriginRoot(move.Variable);
+                return relativeProjection.Kind switch
+                {
+                    StorageProjectionKind.WholeObject => moveRoot,
+                    StorageProjectionKind.InlineFieldPath =>
+                        moveRoot.Project(relativeProjection.FieldPath),
+                    _ => CopyOriginFact.Unavailable(),
+                };
+            case BoundFieldRead field when TryGetNativePointerFieldPlace(field,
+                function, program, out var variable, out var sourcePrefix):
+                var sourceProjection = StorageProjection.Combine(sourcePrefix, relativeProjection);
+                if (sourceProjection.Kind == StorageProjectionKind.InlineFieldPath
+                    && facts.TryGetCopyOriginFieldValue(variable, sourceProjection,
+                        out var fieldFact))
+                {
+                    return fieldFact;
+                }
+                var fieldRoot = facts.CopyOriginRoot(variable);
+                return sourceProjection.Kind switch
+                {
+                    StorageProjectionKind.WholeObject => fieldRoot,
+                    StorageProjectionKind.InlineFieldPath =>
+                        fieldRoot.Project(sourceProjection.FieldPath),
+                    _ => CopyOriginFact.Unavailable(),
+                };
+            case BoundConstant or BoundNull or BoundNativePointerAddress
+                or BoundNativeFixedArrayPointerAddress or BoundNativeStorageAddress:
+                return CopyOriginFact.KnownEmpty();
+            default:
+                return CopyOriginFact.Unavailable();
+        }
+    }
+
+    private static void ValidateCopyOriginVariable(
+        int variable, PrimitiveType type, BoundFunction function)
+    {
+        if ((uint)variable >= (uint)function.Variables.Length
+            || function.Variables[variable].Type != type)
+        {
+            throw Invalid(function.Span);
+        }
+    }
+
+    private static void SetCopyOriginValuesFromExpression(int destination,
+        StorageProjection destinationPrefix, PrimitiveType destinationType,
+        BoundExpression expression, BackingDependencies facts,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if ((uint)destination >= (uint)function.Variables.Length
+            || expression is null || expression.Type != destinationType
+            || destinationPrefix.Kind is not (StorageProjectionKind.WholeObject
+                or StorageProjectionKind.InlineFieldPath)
+            || (destinationPrefix.Kind == StorageProjectionKind.WholeObject
+                && function.Variables[destination].Type != destinationType))
+        {
+            throw Invalid(expression?.Span ?? default);
+        }
+
+        if (destinationPrefix.Kind == StorageProjectionKind.WholeObject
+            && !CarriesCopyOrigin(destinationType, program))
+        {
+            facts.SetCopyOriginRoot(destination, CopyOriginFact.Unavailable());
+            facts.ClearCopyOriginFieldValues(destination);
+            return;
+        }
+
+        if (destinationPrefix.Kind == StorageProjectionKind.WholeObject)
+        {
+            facts.ClearCopyOriginFieldValues(destination);
+            facts.SetCopyOriginRoot(destination,
+                CopyOriginOfExpression(expression, destinationType,
+                    StorageProjection.WholeObject, facts, function, program,
+                    ref remaining, depth + 1));
+        }
+        else
+        {
+            var ownerType = function.Variables[destination].Type;
+            PreserveCopyOriginFieldValuesFromRoot(destination, ownerType,
+                facts, program, ref remaining, depth + 1);
+            facts.SetCopyOriginRoot(destination, CopyOriginFact.Unavailable());
+            facts.ClearCopyOriginFieldValues(destination, destinationPrefix);
+        }
+
+        var leaves = CopyOriginFieldLeaves(destinationType, program,
+            ref remaining, depth + 1);
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            var destinationProjection = StorageProjection.Combine(
+                destinationPrefix, leaf.Projection);
+            if (destinationProjection.Kind != StorageProjectionKind.InlineFieldPath)
+            {
+                continue;
+            }
+            facts.SetCopyOriginFieldValue(destination, destinationProjection,
+                CopyOriginOfExpression(expression, destinationType, leaf.Projection,
+                    facts, function, program, ref remaining, depth + 1));
+        }
+    }
+
+    private static void PreserveCopyOriginFieldValuesFromRoot(int slot, PrimitiveType type,
+        BackingDependencies facts, BoundProgram program, ref int remaining, int depth)
+    {
+        var root = facts.CopyOriginRoot(slot);
+        if (!root.IsAvailable)
+        {
+            return;
+        }
+
+        var leaves = CopyOriginFieldLeaves(type, program, ref remaining, depth + 1);
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            if (leaf.Projection.Kind == StorageProjectionKind.InlineFieldPath
+                && !facts.TryGetCopyOriginFieldValue(slot, leaf.Projection, out _))
+            {
+                facts.SetCopyOriginFieldValue(slot, leaf.Projection,
+                    root.Project(leaf.Projection.FieldPath));
+            }
+        }
+    }
+
+    private static bool TryGetCopyOriginInput(BoundFunction function, BoundProgram program,
+        int slot, out CopyValueOrigin origin)
+    {
+        origin = default;
+        if ((uint)slot >= (uint)function.Variables.Length || function.IsClassConstructor)
+        {
+            return false;
+        }
+
+        var hasBorrowedReceiver = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor;
+        if (hasBorrowedReceiver && slot == 0)
+        {
+            var receiverType = function.Variables[0].Type;
+            if (!IsInlineStructStorage(receiverType, program)
+                || !CarriesCopyOrigin(receiverType, program))
+            {
+                return false;
+            }
+            origin = new CopyValueOrigin(CopyOriginSourceKind.Receiver,
+                CopyOriginSourceView.EntryReferentValue, 0, default);
+            return true;
+        }
+
+        var formalOffset = function.IsConstructor || hasBorrowedReceiver ? 1 : 0;
+        var formalOrdinal = slot - formalOffset;
+        var formalCount = function.ParameterCount - (hasBorrowedReceiver ? 1 : 0);
+        if ((uint)formalOrdinal >= (uint)formalCount)
+        {
+            return false;
+        }
+
+        var formal = function.Variables[slot];
+        if (formal.IsOut || formal.IsInit || !CarriesCopyOrigin(formal.Type, program)
+            || (!formal.IsImplicitRef && IsUnique(program, formal.Type)))
+        {
+            return false;
+        }
+        origin = new CopyValueOrigin(CopyOriginSourceKind.ExplicitFormal,
+            formal.IsImplicitRef
+                ? CopyOriginSourceView.EntryReferentValue : CopyOriginSourceView.EntryValue,
+            formalOrdinal, default);
+        return true;
     }
 
     private static void SetNativePointerFieldValuesFromExpression(int destination,

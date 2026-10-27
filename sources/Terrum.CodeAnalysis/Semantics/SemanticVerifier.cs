@@ -2338,6 +2338,14 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1);
                     }
                 }
+                if (local.Initializer is not BoundMove
+                    && initialized.Dependencies is BackingDependencies localCopyOriginDependencies)
+                {
+                    SetCopyOriginValuesFromExpression(local.Variable,
+                        StorageProjection.WholeObject, local.Initializer.Type,
+                        local.Initializer, localCopyOriginDependencies, function,
+                        program, ref remaining, depth + 1);
+                }
                 return false;
             case BoundVacantLocal vacant:
                 if (vacant.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -2545,6 +2553,14 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1);
                     }
                 }
+                if (assignment.Value is not BoundMove
+                    && initialized.Dependencies is BackingDependencies assignmentCopyOriginDependencies)
+                {
+                    SetCopyOriginValuesFromExpression(assignment.Variable,
+                        StorageProjection.WholeObject, assignment.Value.Type,
+                        assignment.Value, assignmentCopyOriginDependencies, function,
+                        program, ref remaining, depth + 1);
+                }
                 return false;
             case BoundOptionalAssignment optionalAssignment:
                 if (optionalAssignment.Place is null || optionalAssignment.Value is null
@@ -2717,6 +2733,20 @@ public static partial class SemanticVerifier
                     || fieldMasks[fieldAssignment.Variable] != FullMask(program, ownerType)))
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                if (initialized.Dependencies is BackingDependencies fieldCopyOriginDependencies
+                    && TryGetNativePointerFieldAssignmentPlace(fieldAssignment,
+                        function, program, out var copyOriginProjection,
+                        out var copyOriginType))
+                {
+                    if (copyOriginType != targetField.Type)
+                    {
+                        throw Invalid(fieldAssignment.Span);
+                    }
+                    SetCopyOriginValuesFromExpression(fieldAssignment.Variable,
+                        copyOriginProjection, copyOriginType, fieldAssignment.Value,
+                        fieldCopyOriginDependencies, function, program,
+                        ref remaining, depth + 1);
                 }
                 if (targetField.Type == PrimitiveType.TokenSpan)
                 {
