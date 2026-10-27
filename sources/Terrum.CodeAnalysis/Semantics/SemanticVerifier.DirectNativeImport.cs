@@ -241,10 +241,22 @@ public static partial class SemanticVerifier
                 stagedDependencies ? stagedDependencies.Staged.Count : 0;
             try
             {
+                var argumentsComplete = true;
                 for (var index = 0; index < call.Arguments.Length; index++)
                 {
+                    if (!argumentsComplete)
+                    {
+                        break;
+                    }
+
                     var argument = call.Arguments[index];
                     ApplyNativeOutputCalls(argument, initialized, callFacts, ref remaining, depth + 1);
+                    argumentsComplete = CanCompleteNormally(argument, initialized,
+                        program, ref remaining, depth + 1);
+                    if (!argumentsComplete)
+                    {
+                        break;
+                    }
                     if (target is not null)
                     {
                         StageDependencySource(call, call.ParameterIndex(index), argument, target,
@@ -252,7 +264,7 @@ public static partial class SemanticVerifier
                     }
                 }
 
-                if (target is not null)
+                if (target is not null && argumentsComplete)
                 {
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
                     ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
@@ -301,21 +313,31 @@ public static partial class SemanticVerifier
             {
                 ApplyNativeOutputCalls(indirectCall.Target, initialized,
                     callFacts, ref remaining, depth + 1);
-                for (var index = 0; index < indirectCall.Arguments.Length; index++)
+                var argumentsComplete = CanCompleteNormally(
+                    indirectCall.Target, initialized, program, ref remaining, depth + 1);
+                for (var index = 0; argumentsComplete
+                    && index < indirectCall.Arguments.Length; index++)
                 {
                     var argument = indirectCall.Arguments[index];
                     ApplyNativeOutputCalls(argument, initialized,
                         callFacts, ref remaining, depth + 1);
+                    argumentsComplete = CanCompleteNormally(
+                        argument, initialized, program, ref remaining, depth + 1);
+                    if (!argumentsComplete)
+                    {
+                        break;
+                    }
                     StageIndirectDependencySource(indirectCall, index, argument,
                         signature, initialized, program, ref remaining, depth + 1);
                 }
 
-                if (initialized.Dependencies is BackingDependencies dependencies
+                if (argumentsComplete
+                    && initialized.Dependencies is BackingDependencies dependencies
                     && MayWriteNativePointerStorage(indirectCall, program))
                 {
                     dependencies.MarkAllNativePointerProvenanceUnknown();
                 }
-                if (!signature.OutputStates.IsEmpty)
+                if (argumentsComplete && !signature.OutputStates.IsEmpty)
                 {
                     ApplyNativeOutputIndirectCallEffects(
                         indirectCall, signature, initialized, ref remaining);
@@ -325,7 +347,7 @@ public static partial class SemanticVerifier
                         callFacts[indirectCall] = fact;
                     }
                 }
-                else
+                else if (argumentsComplete)
                 {
                     initialized.InvalidateNativeOutputCorrelations();
                 }
