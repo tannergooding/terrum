@@ -2404,6 +2404,16 @@ public static partial class SemanticVerifier
                             ref remaining, depth + 1));
                 }
                 if (local.Initializer is not BoundMove
+                    && IsInlineStructStorage(local.Initializer.Type, program)
+                    && TokenSpanContract.IsDependent(local.Initializer.Type, program.Structures)
+                    && initialized.Dependencies is BackingDependencies localFieldBackingDependencies)
+                {
+                    SetBackingFieldValuesFromExpression(local.Variable,
+                        StorageProjection.WholeObject, local.Initializer.Type,
+                        local.Initializer, localFieldBackingDependencies, function,
+                        program, ref remaining, depth + 1);
+                }
+                if (local.Initializer is not BoundMove
                     && CarriesNativePointer(local.Initializer, program)
                     && initialized.Dependencies is BackingDependencies localPointerDependencies)
                 {
@@ -2617,6 +2627,16 @@ public static partial class SemanticVerifier
                     assignmentBackingDependencies.SetBackingSources(assignment.Variable,
                         BackingOf(assignment.Value, assignmentBackingDependencies, program,
                             ref remaining, depth + 1));
+                }
+                if (assignment.Value is not BoundMove
+                    && IsInlineStructStorage(assignment.Value.Type, program)
+                    && TokenSpanContract.IsDependent(assignment.Value.Type, program.Structures)
+                    && initialized.Dependencies is BackingDependencies assignmentFieldBackingDependencies)
+                {
+                    SetBackingFieldValuesFromExpression(assignment.Variable,
+                        StorageProjection.WholeObject, assignment.Value.Type,
+                        assignment.Value, assignmentFieldBackingDependencies, function,
+                        program, ref remaining, depth + 1);
                 }
                 if (assignment.Value is not BoundMove
                     && CarriesNativePointer(assignment.Value, program)
@@ -2838,9 +2858,17 @@ public static partial class SemanticVerifier
                     VerifySpanFieldWrite(fieldAssignment, function, initialized);
                     if (initialized.Dependencies is BackingDependencies fieldBackingDependencies)
                     {
-                        fieldBackingDependencies.SetBackingSources(fieldAssignment.Variable,
-                            BackingOf(fieldAssignment.Value, fieldBackingDependencies, program,
-                                ref remaining, depth + 1));
+                        if (!TryGetNativePointerFieldAssignmentPlace(fieldAssignment,
+                            function, program, out var backingFieldProjection,
+                            out var backingFieldValueType)
+                            || backingFieldValueType != targetField.Type)
+                        {
+                            throw Invalid(fieldAssignment.Span);
+                        }
+                        SetBackingFieldValuesFromExpression(fieldAssignment.Variable,
+                            backingFieldProjection, backingFieldValueType,
+                            fieldAssignment.Value, fieldBackingDependencies, function,
+                            program, ref remaining, depth + 1);
                     }
                 }
                 if (CarriesNativePointer(targetField.Type, program)
