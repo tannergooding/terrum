@@ -112,11 +112,15 @@ alone is insufficient. Consumer imports of `F` remain provider bindings and
 must not also enter `DirectNativeBindings`. Consumer-owned source imports
 continue to use their separate direct route and collision checks.
 
-Preserve the existing private SystemDirectory resolution behavior. Do not
-replace it with a staged provider basename, current-directory search,
-accepted-source `Link`/`Dynamic` inference or a PE forwarded-export string.
-Unsupported target/convention/resolution requirements reject. This candidate
-adds no general loader-policy or convention carrier.
+The selected bridge still describes the prototype's private SystemDirectory
+IAT route. That physical behavior is not a source resolution value and is not
+equivalent to Link, Dynamic/Default or Dynamic/CompatibilitySearch. Candidate
+97's normalized resolution and convention are retained in the importing
+declaration under [NativeImport resolution private persistence](native-import-resolution-private-persistence.md);
+compare both from the original expectation rather than inferring them from an
+outer row, IAT or replacement. This bridge does not implement those source
+mappings by relabeling SystemDirectory lookup. Unsupported target,
+convention or resolution requirements reject.
 
 ## Candidate outer expectation table
 
@@ -189,10 +193,12 @@ limits still apply.
 
 `pointeeType` belongs to the **importing embedded Contract's** private type
 universe, including its structure, native-pointer and function-pointer tables.
-It is not a provider row or a standard TypeSpecRef. The table's implicit
-target/resolution mapping is the bounded Windows x64/SystemDirectory path
-above; runtime policy is the enclosing package policy. A richer requirement
-not completely represented by this mapping is not encodable.
+It is not a provider row or a standard TypeSpecRef. The outer row carries no
+source resolution identity. Candidate 97 obtains that fact from the original
+importing declaration; the bounded Windows x64/SystemDirectory IAT route
+above is a physical prototype behavior, not an implementation of any
+normalized source mode. Affected native use rejects unless the selected
+target mapping satisfies the retained resolution contract.
 
 Keep existing header fields, dependency/import/origin records, image-payload
 framing and SHA-256 coverage rules otherwise unchanged. ContractLength still
@@ -219,10 +225,11 @@ Perform the following before emission or affected image loading:
 2. Check the expectation against that selected declaration: existing complete
    signature/layout/ownership/unsafe/target/runtime obligations, **exact**
    normalized output-role/collection equality under revision 92, and the
-   new row's direct-import role and native descriptor. Compare library names
-   ordinal-ignore-case under the existing Windows DLL mapping, export names
-   ordinally, and native parameters by corresponding logical formals and
-   resolved complete pointee identities, access, retention and extent.
+   new row's direct-import role, normalized resolution/convention facts and
+   native descriptor. Compare library names ordinal-ignore-case under the
+   existing Windows DLL mapping, export names ordinally, and native
+   parameters by corresponding logical formals and resolved complete
+   pointee identities, access, retention and extent.
    A role, foreign target or input-contract change rejects even when machine
    carriers and output selectors happen to match.
 3. Retain and use the original expectations after resolution. Reconstruct

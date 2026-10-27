@@ -8,6 +8,12 @@ missing-contract workflow.** The applicable authorization is:
 This document selects private/native-container transport only. It changes no
 source schema, normative specification, standard assignment, output protocol
 or implementation, and supplies no build, test, ABI or execution evidence.
+Its candidate-97 direct-import grammar is amended by
+[NativeImport resolution private persistence](native-import-resolution-private-persistence.md):
+that proposal adds a mandatory resolution token immediately before the
+convention token and owns resolution restoration and target-support gates.
+The convention token and its encoding remain owned here; neither proposal
+alone is a complete implementation of the combined schema.
 
 ## Decision and owners
 
@@ -78,7 +84,7 @@ Composition is by these exact deltas, not by numeric ordering:
 | 94 | Exactly 93 plus the complete catalog and type-derived scalar payloads in [wide scalar persistence](scalar-wide-value-carriers.md#exact-private-schema-and-composition). |
 | 95 | Exactly 94 plus the mandatory [declaration copy-origin summary](reference-field-value-provenance.md#necessary-private-transport-candidate-95). Foreign summaries remain unavailable. |
 | 96 | Exactly 95 plus the complete nominal type/interface directory, foreign ModuleFunction variant and every-tag-5 target discriminator in [foreign private persistence](native-output-foreign-interface-private-persistence.md#exact-revision-composition). |
-| **97** | Exactly candidate 96's identity and call-target composition, but remove its foreign-member convention byte and require `|NativeCallable:K` in the existing Contract string for every NativeCallable declaration. Also add the private fnptr domain and `|NativeImportCallConv:K` declaration token/restoration rule below. No other record placement, counts, tags, scalar widths or collection meanings change. |
+| **97** | Exactly candidate 96's identity and call-target composition, but remove its foreign-member convention byte and require `|NativeCallable:K` in the existing Contract string for every NativeCallable declaration. Also add the private fnptr domain and `|NativeImportCallConv:K` declaration token/restoration rule below. The linked resolution proposal amends this same candidate with a mandatory resolution token before the convention token. No other record placement, counts, tags, scalar widths or collection meanings change. |
 
 97 is an unapproved private little-endian **i32** header value following
 `TRRM`, not the standard u16 major/minor pair or a native-profile version.
@@ -257,28 +263,33 @@ identity.
 
 A byte in Function alone is insufficient: imported ModuleFunctions can have
 `hasFunction=false`. Extend their **existing String Contract**, not every
-ModuleFunction's binary fields, with exactly one token:
+ModuleFunction's binary fields, with both mandatory tokens in this order:
 
 ```text
+ResolutionToken
 |NativeImportCallConv:K
 ```
 
+`ResolutionToken` has the exact alternatives and byte lengths selected by
+[the resolution proposal](native-import-resolution-private-persistence.md#declaration-carrier-and-token-grammar).
 It occurs at the end of the signature/role portion, after any existing
-NativeVTableParameter tokens and **immediately before** the final
+eligible role tokens. The resolution token is immediately before the
+convention token, which is **immediately before** the final
 `|DoesNotReturn` or `|MayReturn`, followed by the existing optional
 `|CallerUnsafe`. A direct import cannot actually have those vtable tokens
 or a NativeCallable/NativeCallableEntry token; the placement specifies one
-grammar position, not permission to combine roles. The token contributes
-`22 + byteLength(K)` ASCII bytes inside the existing i32-length Contract
-String; no new length prefix or standalone byte is inserted on ModuleFunction.
+grammar position, not permission to combine roles. The convention token
+contributes `22 + byteLength(K)` ASCII bytes inside the existing i32-length
+Contract String; no new length prefix or standalone byte is inserted on
+ModuleFunction.
 
-The token is mandatory exactly for an owned direct-import declaration or a
+Both tokens are mandatory exactly for an owned direct-import declaration or a
 retained module-selected direct-import expectation, whether used or uncalled,
 with or without outputs/native inputs. There is no bare token or omitted
 argument form. Reject wrong case, unknown K, duplicates, misplaced tokens
-and conflicting native roles. Parse into a typed expected role/convention
-under this exact grammar, retaining the original Contract; do not extract
-arbitrary substrings or infer the token from an output role.
+and conflicting native roles. Parse into typed expected role, resolution and
+convention facts under this exact grammar, retaining the original Contract;
+do not extract arbitrary substrings or infer either token from an output role.
 
 For a stored direct declaration, require a token and a valid direct payload.
 A direct payload without the token, or token without the required direct
@@ -344,30 +355,33 @@ repeat directExpectationCount:
 
 Its insertion remains immediately before Contract bytes: after TNPK machine
 imports, TNSP dependency/declaration/machine-import lists, or TNGP type origins.
-The importing Contract's mandatory direct-import token supplies the expected
-convention. This is a checked **join by localFunctionName to the original
-imported ModuleFunction**, not inference from an outer header, a provider
-signature, DLL name, output role or replacement.
+The importing Contract's mandatory resolution and convention tokens supply
+the expected native-import facts. This is a checked **join by
+localFunctionName to the original imported ModuleFunction**, not inference
+from an outer header, a provider signature, DLL name, output role or
+replacement.
 
 Before affected image loading/emission:
 
 1. Admit the exact outer draft and inner 97 independently. Validate every
    retained declaration token/typed fact, including declaration-only imports.
 2. Require a bijection between outer expectation rows and imported ordinary
-   declarations carrying NativeImportCallConv. Each row selects one bodyless
-   import with the same checked provider identity/key; each such import has
-   one row, even with no machine call or outputs. No rows name source-owned
-   direct imports, ordinary nonnative provider functions or foreign members.
-   A standalone native producer with no selected dependencies has count zero.
-3. Retain the expected convention from that importing declaration. Resolve
-   the original selected provider/export and require an eligible owned
-   DirectNativeImport whose convention is retained by its own declaration
-   and whose **normalized convention exactly equals the expectation**.
-   Compare every outer library/export/native-input fact and all inner
-   signature, output, dependency, ownership, target/runtime and binding
-   obligations under their existing rules. Library comparison remains Windows ordinal-ignore-case;
-   export/key/convention comparison is exact. No convention has a strengthening
-   relation to another.
+   declarations carrying both direct-import tokens. Each row selects one
+   bodyless import with the same checked provider identity/key; each such
+   import has one row, even with no machine call or outputs. No rows name
+   source-owned direct imports, ordinary nonnative provider functions or
+   foreign members. A standalone native producer with no selected
+   dependencies has count zero.
+3. Retain the expected resolution and convention from that importing
+   declaration. Resolve the original selected provider/export and require an
+   eligible owned DirectNativeImport whose resolution and convention are
+   retained by its own declaration and whose **normalized facts exactly equal
+   the expectation**. Compare every outer library/export/native-input fact
+   and all inner signature, output, dependency, ownership, target/runtime and
+   binding obligations under their existing rules. Library comparison remains
+   Windows ordinal-ignore-case; export/key/resolution/convention comparison
+   is exact. Neither resolution nor convention has a strengthening relation
+   to another.
 4. Preserve both the original token and outer descriptor after success.
    Snapshots/caches cannot replace them with a provider's current defaults
    or recompute them from its body. Check all independent using expectations
