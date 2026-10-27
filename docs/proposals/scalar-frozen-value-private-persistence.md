@@ -1,10 +1,16 @@
 # Private persistence of scalar frozen values
 
-**Status: unapproved; provisionally actionable under the authorized
-missing-contract workflow.** The recommendation supplies the missing private
-value carrier and codec, not approval of assignments, standard registration,
-compiler support or conformance. No code, sample, normative owner or existing
-proposal is amended by this document.
+**Status: superseded, unapproved historical proposal.** The original
+recommendation supplied a private scalar codec candidate, not approval of
+assignments, standard registration, compiler support or conformance. Its
+source observations below reflect the earlier worktree, not the current
+implementation inventory. No code, sample or normative owner was amended by
+the original recommendation.
+
+> Superseded as the candidate owner by
+> [Wide scalar value carriers](scalar-wide-value-carriers.md). This document
+> remains historical rationale only; it is not an alternative revision-94
+> codec or implementation target.
 
 ## Decision, scope and prerequisites
 

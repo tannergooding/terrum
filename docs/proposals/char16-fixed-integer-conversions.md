@@ -229,7 +229,7 @@ This focused candidate owns the proposed primitive source pairs. It does
 not supersede or adopt the broader
 [conversion-witness sketches](core-library-reference.md#6-numerics-and-conversions),
 internal Try/wrapping/saturating helper APIs, or the separate
-[private scalar frozen-value candidate](scalar-frozen-value-private-persistence.md).
+[wide scalar value-carrier candidate](scalar-wide-value-carriers.md).
 No other proposal or implementation inventory supplies approval of this
 direction.
 
