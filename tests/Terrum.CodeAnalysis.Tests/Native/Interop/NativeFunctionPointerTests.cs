@@ -447,11 +447,11 @@ public sealed class NativeFunctionPointerTests
 
             [param(packet): DependsOn(nameof(source))]
             [param(packet): ForwardsBacking(nameof(source))]
+            [param(packet): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
             [Terrum.Interop.NativeImport("synthetic.dll", "ReadPacket")]
-            extern unsafe int32 ReadPacket(ptr<void> source,
-                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
-                write ptr<Packet> packet);
+            extern unsafe int32 ReadPacket(ptr<void> source, write ptr<Packet> packet);
 
             int32 Probe(ptr<void> source) {
                 init Packet packet;
@@ -570,6 +570,73 @@ public sealed class NativeFunctionPointerTests
             """), reference, BoundRuntimePolicy.FailFast);
 
         Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void IndirectNativeOutputRejectsReentrantReservationOfSameCell()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(value): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadInner")]
+            extern unsafe int32 ReadInner(write ptr<int32> value);
+
+            [param(value): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadOuter")]
+            extern unsafe int32 ReadOuter(write ptr<int32> value, int32 status);
+
+            int32 Probe() {
+                init int32 value;
+                unsafe {
+                    var inner = &ReadInner;
+                    var outer = &ReadOuter;
+                    return outer(&init value, inner(&init value));
+                }
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void IndirectNativeOutputCancelsReservationWhenLaterArgumentDoesNotComplete()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.CheckedExceptions,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(value): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadValue")]
+            extern unsafe int32 ReadValue(
+                write ptr<int32> value, int32 marker);
+
+            [param(value): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadAgain")]
+            extern unsafe int32 ReadAgain(write ptr<int32> value);
+
+            [DoesNotReturn] int32 Stop() { require false; }
+
+            int32 Probe() {
+                init int32 value;
+                unsafe {
+                    var readValue = &ReadValue;
+                    var readAgain = &ReadAgain;
+                    try {
+                        readValue(&init value, Stop());
+                    } catch {
+                        readAgain(&init value);
+                    }
+                }
+                return 0;
+            }
+            """), reference, BoundRuntimePolicy.CheckedExceptions);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
