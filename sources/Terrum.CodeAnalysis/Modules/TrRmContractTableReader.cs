@@ -38,13 +38,42 @@ public readonly ref struct TrRmContractTableReader
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader typeSpecs, bool developmentProfile = false)
+        : this(section, recordCount, types, methods, signatures, parameters,
+            typeSpecs, fieldPathCount: 0, default, default,
+            developmentProfile ? TrRmArtifactSchema.Development
+                : TrRmArtifactSchema.Standard, profileAware: false)
+    {
+    }
+
+    internal TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, int fieldPathCount,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema)
+        : this(section, recordCount, types, methods, signatures, parameters,
+            typeSpecs, fieldPathCount, features, modules, schema, profileAware: true)
+    {
+    }
+
+    private TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, int fieldPathCount,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema, bool profileAware)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != types.ContractCount || recordCount != methods.ContractCount
-            || (recordCount == 0 && !section.IsEmpty))
+            || (recordCount == 0 && !section.IsEmpty)
+            || fieldPathCount is < 0 or > 0xFF_FFFF
+            || schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.CopyOriginDraft)
+            || (schema == TrRmArtifactSchema.CopyOriginDraft && !profileAware))
         {
             throw InvalidContract();
         }
+        var developmentProfile = schema == TrRmArtifactSchema.Development;
 
         _rows = recordCount == 0 ? default : new TrRmVariableTableIndex(section, recordCount, 8, 1);
         _methods = methods;
@@ -82,7 +111,7 @@ public readonly ref struct TrRmContractTableReader
             if (owners[row] == 0 || owner != owners[row]
                 || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
                 || (!developmentProfile && kind is 0x10 or 0x11 or 0x12)
-                || (kind is 1 or 5 or 0x10
+                || (kind is 1 or 5 or 0x0D or 0x10
                     && !singletons.Add((owner, kind))))
             {
                 throw InvalidContract();
@@ -152,6 +181,24 @@ public readonly ref struct TrRmContractTableReader
                     break;
                 case 6:
                     throw InvalidContract();
+                case 0x0D:
+                    if (schema != TrRmArtifactSchema.CopyOriginDraft
+                        || !profileAware || owner >> 24 != 0x16)
+                    {
+                        throw InvalidContract();
+                    }
+                    ValidateCopyOriginClause(data, (int)(owner & 0xFF_FFFF),
+                        methods, signatures, parameters, typeSpecs, fieldPathCount);
+                    var copyOriginModule = methods.GetOwnerModule(
+                        (int)(owner & 0xFF_FFFF));
+                    if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                        copyOriginModule,
+                        TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
+                        schema))
+                    {
+                        throw InvalidContract();
+                    }
+                    break;
                 case 0x10:
                     if (data.Length != 16 || owner >> 24 != 0x16
                         || Read(data, 8) != 1 || data[12] is < 1 or > 4
@@ -258,6 +305,26 @@ public readonly ref struct TrRmContractTableReader
     internal ReadOnlySpan<byte> GetRow(int row)
         => _rows.GetRow(row);
 
+    internal ReadOnlySpan<byte> GetCopyOriginClauseRow(int methodDefRow)
+    {
+        if (methodDefRow <= 0 || methodDefRow > _methods.Count)
+        {
+            throw InvalidContract();
+        }
+
+        var (first, count) = _methods.GetContractRange(methodDefRow);
+        for (var index = 0; index < count; index++)
+        {
+            var row = _rows.GetRow(first + index);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(row[4..]) == 0x0D)
+            {
+                return row;
+            }
+        }
+
+        return default;
+    }
+
     internal uint GetEffectsMask(int methodRow)
     {
         if (methodRow <= 0 || methodRow > _methods.Count)
@@ -330,6 +397,95 @@ public readonly ref struct TrRmContractTableReader
         var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
         return (type.Length == 4 && type[0] == 1 && type[2] == 0x8C)
             || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C);
+    }
+
+    private static void ValidateCopyOriginClause(ReadOnlySpan<byte> data,
+        int methodDefRow, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, int fieldPathCount)
+    {
+        if (data.Length < 20 || data[8] is not (1 or 2) || data[9] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(data[10..]) != 0
+            || Read(data, 12) == 0)
+        {
+            throw InvalidContract();
+        }
+        _ = typeSpecs.GetTypeSpecRef(Read(data, 12));
+
+        var signature = methods.GetSignature(methodDefRow);
+        var (paramFirst, paramCount) = signatures.GetParamRange(signature);
+        var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
+        var factCount = Read(data, 16);
+        if (factCount == 0 || factCount > (uint)((data.Length - 20) / 8))
+        {
+            throw InvalidContract();
+        }
+
+        var offset = 20;
+        for (uint fact = 0; fact < factCount; fact++)
+        {
+            if (offset > data.Length - 8)
+            {
+                throw InvalidContract();
+            }
+
+            var destinationPath = Read(data, offset);
+            var originCount = Read(data, offset + 4);
+            var remainingOriginBytes = data.Length - offset - 8;
+            if ((destinationPath != 0 && destinationPath > (uint)fieldPathCount)
+                || originCount == 0
+                || originCount > (uint)(remainingOriginBytes / 12))
+            {
+                throw InvalidContract();
+            }
+
+            offset += 8;
+            for (uint origin = 0; origin < originCount; origin++)
+            {
+                var sourceKind = data[offset];
+                var sourceView = data[offset + 1];
+                var sourceOrdinal = Read(data, offset + 4);
+                var sourcePath = Read(data, offset + 8);
+                if (sourceKind is not (1 or 2) || sourceView is not (1 or 2)
+                    || BinaryPrimitives.ReadUInt16LittleEndian(data[(offset + 2)..]) != 0
+                    || (sourcePath != 0 && sourcePath > (uint)fieldPathCount)
+                    || (sourceKind == 2 && (sourceView != 2 || sourceOrdinal != 0
+                        || receiverTypeSpec == 0 || data[8] == 2))
+                    || (sourceKind == 1 && sourceOrdinal >= (uint)paramCount))
+                {
+                    throw InvalidContract();
+                }
+
+                if (sourceKind == 1)
+                {
+                    var sourceMode = parameters.GetMode(paramFirst
+                        + checked((int)sourceOrdinal));
+                    if (sourceMode != 0)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var sourceType = typeSpecs.GetTypeSpecRef(
+                        parameters.GetTypeSpec(paramFirst
+                            + checked((int)sourceOrdinal)));
+                    if (sourceType.Form == 0x0E)
+                    {
+                        throw InvalidContract();
+                    }
+                    if (sourceView == 2)
+                    {
+                        _ = TrRmCopyOriginContractValidator.GetReferentTypeSpec(
+                            sourceType, typeSpecs);
+                    }
+                }
+                offset += 12;
+            }
+        }
+
+        if (offset != data.Length)
+        {
+            throw InvalidContract();
+        }
     }
 
     private void AddNativeParameter(int method, TrRmNativeParameterContract parameter)

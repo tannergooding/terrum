@@ -733,6 +733,13 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0033, out var nativeFunctionPointerSignatureBytes,
             out var nativeFunctionPointerSignatureCount);
         _ = index.TryGetSection(0x7F00, out var sourceMapBytes, out var sourceMapCount);
+        ReadOnlySpan<byte> copyOriginNativeImportBytes = default;
+        var copyOriginNativeImportCount = 0;
+        if (copyOriginDraft)
+        {
+            _ = index.TryGetSection(0x0021, out copyOriginNativeImportBytes,
+                out copyOriginNativeImportCount);
+        }
 
         var blobs = blobCount == 0 ? default
             : new TrRmBlobTableReader(blobBytes, blobCount);
@@ -911,8 +918,12 @@ public static class TrRmStructuralMetadataValidator
         var constraints = constraintCount == 0 ? default
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
                 generics, typeSpecs);
-        var contracts = new TrRmContractTableReader(contractBytes, contractCount,
-            types, methods, signatures, parameters, typeSpecs, developmentProfile);
+        var contracts = index.Schema == TrRmArtifactSchema.CopyOriginDraft
+            ? new TrRmContractTableReader(contractBytes, contractCount,
+                types, methods, signatures, parameters, typeSpecs, fieldPathCount,
+                features, modules, index.Schema)
+            : new TrRmContractTableReader(contractBytes, contractCount,
+                types, methods, signatures, parameters, typeSpecs, developmentProfile);
         var imports = new TrRmImportTableReader(importBytes, importCount,
             strings, moduleRefs, types, methods, properties,
             interfaces, associatedTypeDefs, fields, features, modules,
@@ -945,6 +956,13 @@ public static class TrRmStructuralMetadataValidator
             fieldPaths = fieldPathCount == 0 ? default
                 : new TrRmFieldPathTableReader(fieldPathBytes, fieldPathCount,
                     typeSpecs, fields, imports);
+        }
+        if (copyOriginDraft)
+        {
+            TrRmCopyOriginContractValidator.Validate(contracts, types, fields,
+                methods, signatures, parameters, typeSpecs, fieldPaths, imports,
+                unionCaseDefs, layouts, copyOriginNativeImportBytes,
+                copyOriginNativeImportCount);
         }
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports,

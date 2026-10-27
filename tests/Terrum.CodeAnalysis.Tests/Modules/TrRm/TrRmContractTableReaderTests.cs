@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Semantics;
@@ -200,6 +201,163 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void CopyOriginDraftContractUsesTypedWholeValueReferences()
+    {
+        Create(Section(CopyOriginContract()), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            writeRows: true, frameArtifact: true,
+            developmentProfile: false, copyOriginDraft: true);
+
+        var standardRow = Section(CopyOriginContract());
+        Assert.Throws<InvalidDataException>(() => Create(standardRow,
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false));
+        Assert.Throws<InvalidDataException>(() => Create(standardRow,
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            writeRows: true, developmentProfile: false, copyOriginDraft: true,
+            includeCopyOriginFeature: false));
+    }
+
+    [Test]
+    public void CopyOriginDraftReferentSourcesRequireCheckedInputReferences()
+    {
+        var referent = CopyOriginContract();
+        referent[29] = 2;
+        Create(Section(referent), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, referentParameter: true,
+            writeRows: true, frameArtifact: true,
+            developmentProfile: false, copyOriginDraft: true);
+
+        var pointer = CopyOriginContract();
+        pointer[29] = 2;
+        Assert.Throws<InvalidDataException>(() => Create(Section(pointer),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, copyOriginDraft: true));
+
+        Assert.Throws<InvalidDataException>(() =>
+            Create(Section(CopyOriginContract()), recordCount: 1,
+               declaredCount: 1, typeFirst: 0, typeCount: 0,
+               methodFirst: 1, methodCount: 1, hasOutputParam: true,
+               paramMode: 0,
+               initializationParameter: true, developmentProfile: false,
+               copyOriginDraft: true));
+    }
+
+    [Test]
+    public void CopyOriginDraftBindsFieldPathsAndFreshConstructionRoots()
+    {
+        ValidateCopyOriginFieldArtifact(
+            [new CopyOriginTestFact(1, [new CopyOriginTestOrigin(1, 1, 0, 1)])]);
+        ValidateCopyOriginFieldArtifact(
+            [new CopyOriginTestFact(1, [new CopyOriginTestOrigin(1, 1, 0, 1)])],
+            summaryKind: 2, receiver: true);
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact(
+               [new CopyOriginTestFact(1,
+                   [new CopyOriginTestOrigin(1, 1, 0, 0)])]));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact(
+               [new CopyOriginTestFact(1,
+                   [new CopyOriginTestOrigin(1, 1, 0, 1)])],
+               fieldPathRootTypeSpec: 1));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact(
+               [new CopyOriginTestFact(1,
+                   [new CopyOriginTestOrigin(1, 1, 0, 1)])],
+               summaryKind: 2));
+    }
+
+    [Test]
+    public void CopyOriginDraftRejectsDuplicateAndOverlappingFacts()
+    {
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact([
+               new CopyOriginTestFact(1,
+                   [new CopyOriginTestOrigin(1, 1, 0, 1)]),
+               new CopyOriginTestFact(1,
+                   [new CopyOriginTestOrigin(1, 1, 0, 1)]),
+            ]));
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact([
+               new CopyOriginTestFact(1, [
+                   new CopyOriginTestOrigin(1, 1, 0, 1),
+                   new CopyOriginTestOrigin(1, 1, 0, 1),
+               ]),
+            ]));
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact([
+               new CopyOriginTestFact(0,
+                   [new CopyOriginTestOrigin(1, 1, 0, 0)]),
+               new CopyOriginTestFact(1,
+                   [new CopyOriginTestOrigin(1, 1, 0, 1)]),
+            ]));
+    }
+
+    [Test]
+    public void CopyOriginDraftRejectsForeignCallableRoles()
+    {
+        var facts = new[]
+        {
+            new CopyOriginTestFact(1,
+                [new CopyOriginTestOrigin(1, 1, 0, 1)]),
+        };
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact(facts,
+                nativeImportMethod: true));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact(facts,
+                functionPointerAnchor: true));
+    }
+
+    [Test]
+    public void CopyOriginDraftWriterSortsOriginsByLogicalSourceIdentity()
+    {
+        var written = Create(Section(CopyOriginContractWithOrigins(1, 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, writeRows: true,
+            developmentProfile: false, copyOriginDraft: true,
+            twoParameters: true, canonicalizeCopyOrigin: true);
+        var contractRows = new TrRmVariableTableIndex(written, 1, 8, 1);
+        var clause = contractRows.GetRow(1);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(clause[32..]), Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(clause[44..]), Is.EqualTo(1));
+    }
+
+    [TestCase(8, 0)]
+    [TestCase(9, 1)]
+    [TestCase(10, 1)]
+    [TestCase(16, 0)]
+    [TestCase(24, 0)]
+    [TestCase(28, 3)]
+    [TestCase(29, 0)]
+    [TestCase(30, 1)]
+    [TestCase(32, 1)]
+    [TestCase(36, 1)]
+    public void CopyOriginDraftRejectsMalformedTagsCountsAndReferences(
+        int offset, byte replacement)
+    {
+        var row = CopyOriginContract();
+        row[offset] = replacement;
+        Assert.Throws<InvalidDataException>(() => Create(Section(row),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, copyOriginDraft: true));
+    }
+
+    [Test]
     public void WrittenClausesComposeAcrossTypeAndMethodInFramedArtifact()
     {
         Create(Section(Cleanup(), Effects(0)), writeRows: true,
@@ -215,25 +373,52 @@ public sealed class TrRmContractTableReaderTests
                 writeRows: true, developmentProfile: false));
     }
 
-    private static void Create(byte[] section, int recordCount = 2, int declaredCount = 2,
+    private static byte[] Create(byte[] section, int recordCount = 2, int declaredCount = 2,
         uint typeFirst = 1, uint typeCount = 1, uint methodFirst = 2, uint methodCount = 1,
         bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false,
         bool writeRows = false, bool frameArtifact = false,
         bool pointerParameter = false, int methodOwnerType = 1, uint typeFlags = 4,
         int typeRows = 1, uint secondTypeFirst = 0, uint secondTypeCount = 0,
-        bool developmentProfile = true)
+        bool developmentProfile = true, bool copyOriginDraft = false,
+        int fieldPathCount = 0, bool includeCopyOriginFeature = true,
+        bool referentParameter = false, bool initializationParameter = false,
+        bool twoParameters = false, bool canonicalizeCopyOrigin = false)
     {
+        var schema = copyOriginDraft ? TrRmArtifactSchema.CopyOriginDraft
+            : developmentProfile ? TrRmArtifactSchema.Development
+            : TrRmArtifactSchema.Standard;
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
             [("", 0), ("Module", 0), ("Widget", 0), ("Run", 0), ("Owner", 0)]);
         var names = new TrRmStringTableReader(nameBytes, 5);
         var module = new byte[48];
         Write(module, 0, 2);
         Write(module, 4, 1);
+        TrRmFeatureRow[] featureRows = copyOriginDraft
+            ? pointerParameter
+                ? includeCopyOriginFeature
+                    ? [new TrRmFeatureRow(1, 1), new TrRmFeatureRow(2, 1),
+                        new TrRmFeatureRow(15, 1)]
+                    : [new TrRmFeatureRow(1, 1), new TrRmFeatureRow(2, 1)]
+                : includeCopyOriginFeature
+                    ? [new TrRmFeatureRow(15, 1)]
+                    : Array.Empty<TrRmFeatureRow>()
+            : Array.Empty<TrRmFeatureRow>();
+        var featureBytes = featureRows.Length == 0 ? Array.Empty<byte>()
+            : TrRmFeatureTableWriter.Encode(featureRows, schema);
+        if (featureRows.Length != 0)
+        {
+            Write(module, 24, 1);
+            Write(module, 28, (uint)featureRows.Length);
+        }
+
         Write(module, 32, 1);
         Write(module, 36, 1);
         Write(module, 40, 1);
         Write(module, 44, 1);
-        var modules = new TrRmModuleTableReader(module, 1, names, 0, typeRows, 1, 0);
+        var modules = new TrRmModuleTableReader(module, 1, names, 0, typeRows,
+            1, 0, featureRows.Length);
+        var features = new TrRmFeatureTableReader(featureBytes, featureRows.Length,
+            schema);
         var type = new byte[typeRows * 44];
         for (var index = 0; index < typeRows; index++)
         {
@@ -261,32 +446,47 @@ public sealed class TrRmContractTableReaderTests
         {
             spec = [0, 0, 0, 0, 4, 0, 0, 0, 1, 1, 0x8C, 8];
         }
-        else if (hasOutputParam && !nonBooleanResult)
+        else if (referentParameter || initializationParameter)
+        {
+            spec = [
+                0, 0, 0, 0, 3, 0, 0, 0, 9, 0, 0, 0,
+                1, 0, 8, initializationParameter ? (byte)0x0E : (byte)0x07,
+                0, 8, 0, 0, 0xF2,
+            ];
+        }
+        else if (hasOutputParam && !nonBooleanResult
+            && !referentParameter && !initializationParameter)
         {
             spec[^1] = 1;
         }
 
-        var typeSpecs = new TrRmTypeSpecTableReader(spec, 1, 1, 0, 0, 0);
+        var typeSpecCount = referentParameter || initializationParameter ? 2 : 1;
+        var typeSpecs = new TrRmTypeSpecTableReader(
+            spec, typeSpecCount, 1, 0, 0, 0);
+        var parameterCount = twoParameters ? 2 : hasOutputParam ? 1 : 0;
         var signature = new byte[24];
         Write(signature, 0, 1);
-        if (hasOutputParam)
+        if (parameterCount != 0)
         {
             Write(signature, 8, 1);
-            Write(signature, 12, 1);
+            Write(signature, 12, (uint)parameterCount);
         }
 
         var signatures = new TrRmMethodSigTableReader(signature, 1, typeSpecs,
-            hasOutputParam ? 1 : 0, 0);
-        var param = hasOutputParam ? new byte[16] : [];
-        if (hasOutputParam)
+            parameterCount, 0);
+        var param = parameterCount != 0 ? new byte[parameterCount * 16] : [];
+        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
         {
-            Write(param, 0, 1);
-            Write(param, 8, 1);
-            param[12] = paramMode;
+            var offset = ordinal * 16;
+            Write(param, offset, 1);
+            Write(param, offset + 4, (uint)ordinal);
+            Write(param, offset + 8, (uint)typeSpecCount);
+            param[offset + 12] = paramMode;
         }
 
-        var parameters = hasOutputParam
-            ? new TrRmParamTableReader(param, 1, signatures, typeSpecs) : default;
+        var parameters = parameterCount != 0
+            ? new TrRmParamTableReader(param, parameterCount, signatures, typeSpecs)
+            : default;
         var method = new byte[28];
         Write(method, 0, (uint)methodOwnerType);
         Write(method, 4, 4);
@@ -308,30 +508,224 @@ public sealed class TrRmContractTableReaderTests
                     data[8..].ToArray());
             }
 
-            var emitted = TrRmContractTableWriter.Encode(
-                rows, types, methods, signatures, parameters, typeSpecs,
-                developmentProfile);
-            Assert.That(emitted, Is.EqualTo(section));
+            var emitted = copyOriginDraft
+                ? TrRmContractTableWriter.EncodeCopyOriginDraft(
+                    rows, types, methods, signatures, parameters, typeSpecs,
+                    default, fieldPathCount, features, modules)
+                : TrRmContractTableWriter.Encode(
+                    rows, types, methods, signatures, parameters, typeSpecs,
+                    developmentProfile);
+            if (!canonicalizeCopyOrigin)
+            {
+                Assert.That(emitted, Is.EqualTo(section));
+            }
             section = emitted;
         }
-        _ = new TrRmContractTableReader(section, recordCount,
-            types, methods, signatures, parameters, typeSpecs,
-            developmentProfile);
+        if (copyOriginDraft)
+        {
+            _ = new TrRmContractTableReader(section, recordCount, types, methods,
+                signatures, parameters, typeSpecs, fieldPathCount, features,
+                modules, schema);
+        }
+        else
+        {
+            _ = new TrRmContractTableReader(section, recordCount,
+                types, methods, signatures, parameters, typeSpecs,
+                developmentProfile);
+        }
         if (frameArtifact)
         {
-            var artifact = TrRmArtifactWriter.Encode([
-                new TrRmSection(0x0001, 0, 1, module),
-                new TrRmSection(0x0002, 0, 5, nameBytes),
-                new TrRmSection(0x0011, 0, 1, spec),
+            var artifactSections = new List<TrRmSection>
+            {
+                new(0x0001, 0, 1, module),
+                new(0x0002, 0, 5, nameBytes),
+            };
+            if (featureRows.Length != 0)
+            {
+                artifactSections.Add(new TrRmSection(0x0004, 0,
+                    (uint)featureRows.Length, featureBytes));
+            }
+            artifactSections.AddRange([
+                new TrRmSection(0x0011, 0, (uint)typeSpecCount, spec),
                 new TrRmSection(0x0013, 0, (uint)typeRows, type),
                 new TrRmSection(0x0015, 0, (uint)typeRows, layouts),
                 new TrRmSection(0x0016, 0, 1, method),
                 new TrRmSection(0x0017, 0, 1, signature),
-                new TrRmSection(0x001B, 0, (uint)recordCount, section),
             ]);
-            TrRmStructuralMetadataValidator.Validate(artifact);
+            if (parameterCount != 0)
+            {
+                artifactSections.Add(new TrRmSection(0x0018, 0,
+                    (uint)parameterCount, param));
+            }
+            artifactSections.Add(new TrRmSection(0x001B, 0,
+                (uint)recordCount, section));
+            var artifact = TrRmArtifactWriter.Encode(artifactSections, schema);
+            if (copyOriginDraft)
+            {
+                _ = TrRmStructuralMetadataValidator
+                    .ValidateCopyOriginDraftAndGetExecutionTables(
+                        TrRmArtifactIndex.ForCopyOriginDraft(artifact));
+            }
+            else if (developmentProfile)
+            {
+                _ = TrRmStructuralMetadataValidator
+                    .ValidateDevelopmentAndGetExecutionTables(
+                        TrRmArtifactIndex.ForDevelopment(artifact));
+            }
+            else
+            {
+                TrRmStructuralMetadataValidator.Validate(artifact);
+            }
         }
+
+        return section;
     }
+
+    private static void ValidateCopyOriginFieldArtifact(
+        CopyOriginTestFact[] facts, byte summaryKind = 1,
+        bool receiver = false, uint fieldPathRootTypeSpec = 2,
+        bool nativeImportMethod = false, bool functionPointerAnchor = false)
+    {
+        var strings = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("Module", 0), ("Pair", 0), ("Data", 0), ("Compose", 0),
+        ]);
+        var module = new byte[48];
+        Write(module, 0, 2);
+        Write(module, 4, 1);
+        Write(module, 24, 1);
+        Write(module, 28, 3);
+        Write(module, 32, 1);
+        Write(module, 36, 1);
+        Write(module, 40, 1);
+        Write(module, 44, 1);
+
+        var features = TrRmFeatureTableWriter.Encode([
+            new TrRmFeatureRow(1, 1),
+            new TrRmFeatureRow(2, 1),
+            new TrRmFeatureRow(15, 1),
+        ], TrRmArtifactSchema.CopyOriginDraft);
+        var typeSpecs = Section(
+            [1, 0, 0x8C, 8],
+            [2, 0, 1, 0, 0, 0]);
+
+        var type = new byte[44];
+        Write(type, 0, 1);
+        Write(type, 4, 3);
+        Write(type, 8, 4);
+        Write(type, 12, 1);
+        Write(type, 16, 1);
+        Write(type, 28, 1);
+        Write(type, 32, 1);
+        var field = new byte[16];
+        Write(field, 0, 1);
+        Write(field, 4, 4);
+        Write(field, 8, 1);
+
+        var layout = new byte[28];
+        Write(layout, 0, 1);
+        Write(layout, 20, 1);
+        Write(layout, 24, 1);
+        var layoutField = new byte[12];
+        Write(layoutField, 0, 1);
+        Write(layoutField, 8, 1);
+
+        var signature = new byte[24];
+        Write(signature, 0, 2);
+        Write(signature, 4, receiver ? 2u : 0u);
+        Write(signature, 8, 1);
+        Write(signature, 12, 1);
+        var parameter = new byte[16];
+        Write(parameter, 0, 1);
+        Write(parameter, 8, 2);
+        var payloadLength = 12;
+        foreach (var fact in facts)
+        {
+            payloadLength = checked(payloadLength + 8
+                + (fact.Origins.Length * 12));
+        }
+
+        var copyOrigin = new byte[payloadLength];
+        copyOrigin[0] = summaryKind;
+        Write(copyOrigin, 4, 2);
+        Write(copyOrigin, 8, (uint)facts.Length);
+        var payloadOffset = 12;
+        foreach (var fact in facts)
+        {
+            Write(copyOrigin, payloadOffset, fact.DestinationPath);
+            Write(copyOrigin, payloadOffset + 4, (uint)fact.Origins.Length);
+            payloadOffset += 8;
+            foreach (var origin in fact.Origins)
+            {
+                copyOrigin[payloadOffset] = origin.SourceKind;
+                copyOrigin[payloadOffset + 1] = origin.SourceView;
+                Write(copyOrigin, payloadOffset + 4, origin.SourceOrdinal);
+                Write(copyOrigin, payloadOffset + 8, origin.SourcePath);
+                payloadOffset += 12;
+            }
+        }
+
+        var contractRows = new List<byte[]>
+        {
+            Contract(0x1600_0001, 0x0D, copyOrigin),
+        };
+        if (functionPointerAnchor)
+        {
+            contractRows.Add(Effects(4));
+            var nativeAbi = new byte[8];
+            Write(nativeAbi, 0, 1);
+            nativeAbi[4] = 3;
+            contractRows.Add(Contract(0x1600_0001, 0x10, nativeAbi));
+        }
+
+        var method = new byte[28];
+        Write(method, 0, 1);
+        Write(method, 4, 5);
+        Write(method, 8, 1);
+        Write(method, 16, 1);
+        Write(method, 20, (uint)contractRows.Count);
+        var fieldPath = new byte[12];
+        Write(fieldPath, 0, fieldPathRootTypeSpec);
+        Write(fieldPath, 4, 1);
+        Write(fieldPath, 8, 0x1400_0001);
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, module),
+            new(0x0002, 0, 5, strings),
+            new(0x0004, 0, 3, features),
+            new(0x0011, 0, 2, typeSpecs),
+            new(0x0013, 0, 1, type),
+            new(0x0014, 0, 1, field),
+            new(0x0015, 0, 1, layout),
+            new(0x0016, 0, 1, method),
+            new(0x0017, 0, 1, signature),
+            new(0x0018, 0, 1, parameter),
+            new(0x001B, 0, (uint)contractRows.Count,
+                Section(contractRows.ToArray())),
+        };
+        if (nativeImportMethod)
+        {
+            var nativeImport = new byte[16];
+            nativeImport[0] = 1;
+            nativeImport[1] = 1;
+            nativeImport[3] = 1;
+            Write(nativeImport, 4, 1);
+            Write(nativeImport, 8, 2);
+            sections.Add(new TrRmSection(0x0021, 0, 1, nativeImport));
+        }
+        sections.Add(new TrRmSection(0x0023, 0, 1, layoutField));
+        sections.Add(new TrRmSection(0x004B, 0, 1, Section(fieldPath)));
+        var artifact = TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.CopyOriginDraft);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateCopyOriginDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForCopyOriginDraft(artifact));
+    }
+
+    private readonly record struct CopyOriginTestOrigin(
+        byte SourceKind, byte SourceView, uint SourceOrdinal, uint SourcePath);
+
+    private readonly record struct CopyOriginTestFact(
+        uint DestinationPath, CopyOriginTestOrigin[] Origins);
 
     private static byte[] Cleanup(uint typeRow = 1)
     {
@@ -340,8 +734,42 @@ public sealed class TrRmContractTableReaderTests
         return Contract(0x1300_0000u | typeRow, 5, data);
     }
 
+    private static byte[] CopyOriginContract()
+    {
+        var payload = new byte[32];
+        payload[0] = 1;
+        Write(payload, 4, 1);
+        Write(payload, 8, 1);
+        Write(payload, 12, 0);
+        Write(payload, 16, 1);
+        payload[20] = 1;
+        payload[21] = 1;
+        Write(payload, 24, 0);
+        Write(payload, 28, 0);
+        return Contract(0x1600_0001, 0x0D, payload);
+    }
+
+    private static byte[] CopyOriginContractWithOrigins(params uint[] ordinals)
+    {
+        var payload = new byte[20 + (ordinals.Length * 12)];
+        payload[0] = 1;
+        Write(payload, 4, 1);
+        Write(payload, 8, 1);
+        Write(payload, 12, 0);
+        Write(payload, 16, (uint)ordinals.Length);
+        for (var index = 0; index < ordinals.Length; index++)
+        {
+            var offset = 20 + (index * 12);
+            payload[offset] = 1;
+            payload[offset + 1] = 1;
+            Write(payload, offset + 4, ordinals[index]);
+        }
+
+        return Contract(0x1600_0001, 0x0D, payload);
+    }
+
     private static byte[] Effects()
-        => Effects(1);
+        => Effects(2);
 
     private static byte[] Effects(uint mask)
     {
