@@ -238,6 +238,7 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     mut bool negative = false;
     mut bool invert = false;
     mut bool outerSign = false;
+    mut bool explicitSign = false;
     if (count == 11 || count == 13)
     {
         mut int32 prefixIndex = 6;
@@ -256,6 +257,8 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         require tokens.TryGet(prefixIndex, init var prefix);
         negative = prefix.Kind == 58;
         invert = prefix.Kind == 63;
+        explicitSign = (prefix.Kind == 57 || prefix.Kind == 58)
+            && !outerSign && prefix.Range.End == literal.Range.Start;
     }
     if (!TryParseScalarReturnInteger(move tokens, move integers, init var foundName,
             init var expression, init var low, init var high)
@@ -265,8 +268,28 @@ bool TryEvaluateInt32ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     }
 
     bool based = IsBasedInteger(literal);
+    if (based && explicitSign)
+    {
+        uint64 magnitude = DecodeScannerMagnitude(low, high);
+        uint64 maximum = negative ? uint64(int32.MaxValue) + 1 : uint64(int32.MaxValue);
+        if (magnitude > maximum)
+        {
+            return false;
+        }
+
+        mut int32 signedBound = negative
+            ? magnitude == maximum ? int32.MinValue : -int32(magnitude)
+            : int32(magnitude);
+        if (invert)
+        {
+            signedBound = ~signedBound;
+        }
+        name = foundName;
+        result = signedBound;
+        return true;
+    }
+
     // Decimal signed minimum needs minus directly on the literal, not outside parentheses.
-    // Based literals first form int32 bits.
     if (low < 0)
     {
         if (!based)
@@ -415,6 +438,7 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     mut bool negative = false;
     mut bool invert = false;
     mut bool outerSign = false;
+    mut bool explicitSign = false;
     if (count == 11 || count == 13)
     {
         mut int32 prefixIndex = 6;
@@ -433,6 +457,8 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
         require tokens.TryGet(prefixIndex, init var prefix);
         negative = prefix.Kind == 58;
         invert = prefix.Kind == 63;
+        explicitSign = (prefix.Kind == 57 || prefix.Kind == 58)
+            && !outerSign && prefix.Range.End == literal.Range.Start;
     }
     if (!TryParseScalarReturnIntegerTyped(move tokens, move integers,
             init var scalarType, init var foundName, init var expression,
@@ -445,6 +471,25 @@ bool TryEvaluateInt64ScalarReturn(TokenSnapshot tokens, TokenIntegerSnapshot int
     uint64 magnitude = DecodeScannerMagnitude(low, high);
     uint64 signBit = uint64(int64.MaxValue) + 1;
     bool based = IsBasedInteger(literal);
+    if (based && explicitSign)
+    {
+        uint64 maximum = negative ? signBit : uint64(int64.MaxValue);
+        if (magnitude > maximum)
+        {
+            return false;
+        }
+
+        mut int64 signedBound = negative
+            ? magnitude == signBit ? int64.MinValue : -int64(magnitude)
+            : int64(magnitude);
+        if (invert)
+        {
+            signedBound = ~signedBound;
+        }
+        name = foundName;
+        result = signedBound;
+        return true;
+    }
     if (!based && magnitude > uint64(int64.MaxValue))
     {
         if (!negative || outerSign || magnitude != signBit)

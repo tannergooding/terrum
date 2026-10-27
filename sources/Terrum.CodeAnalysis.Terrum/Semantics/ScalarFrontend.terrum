@@ -426,7 +426,7 @@ mut class ScalarFrontendState
     }
 
     private mut bool TryReadMagnitude(Token token, int32 tokenIndex, int32 type,
-        bool negative, SourceRange errorSpan,
+        bool negative, bool explicitSign, SourceRange errorSpan,
         init ref<int32> low, init ref<int32> high)
     {
         if (type == 7 || type == 8)
@@ -516,10 +516,10 @@ mut class ScalarFrontendState
         uint64 magnitude = DecodeScannerMagnitude(foundLow, foundHigh);
         bool based = IsBasedInteger(token);
         if ((type == 1 && (foundHigh != 0
-            || (!based && magnitude > uint64(int32.MaxValue)
+            || ((!based || explicitSign) && magnitude > uint64(int32.MaxValue)
                 && (!negative || magnitude != uint64(int32.MaxValue) + 1))))
             || (type == 2 && foundHigh != 0)
-            || (type == 3 && !based
+            || (type == 3 && (!based || explicitSign)
                 && magnitude > uint64(int64.MaxValue)
                 && (!negative || magnitude != uint64(int64.MaxValue) + 1))
             || (type == 6 && (foundHigh != 0 || magnitude > 65535))
@@ -1011,7 +1011,7 @@ mut class ScalarFrontendState
             mut int32 right = 0;
             if (operand.Kind == 3)
             {
-                if (!TryReadMagnitude(operand, _at, expectedType, false,
+                if (!TryReadMagnitude(operand, _at, expectedType, false, false,
                     operand.Range, init var magnitudeLow, init var magnitudeHigh))
                 {
                     return false;
@@ -1175,7 +1175,9 @@ mut class ScalarFrontendState
                     FailAt(2, literal.Range);
                     return false;
                 }
-                if (!TryReadMagnitude(unaryOperand, _at, expectedType, false,
+                bool explicitSign = literal.Range.End == unaryOperand.Range.Start;
+                if (!TryReadMagnitude(unaryOperand, _at, expectedType,
+                    literal.Kind == 58 && explicitSign, explicitSign,
                     unaryOperand.Range, init var low, init var high)
                     || !FinishUnaryOperand(unaryOperand, groups, init var signedEnd, tokenView))
                 {
@@ -1234,6 +1236,7 @@ mut class ScalarFrontendState
                 return false;
             }
             if (!TryReadMagnitude(plusOperand, _at + 1, expectedType, false,
+                literal.Range.End == plusOperand.Range.Start,
                 plusOperand.Range, init var plusLow, init var plusHigh))
             {
                 return false;
@@ -1297,8 +1300,10 @@ mut class ScalarFrontendState
                     FailAt(2, numberToken.Range);
                     return false;
                 }
+                bool explicitSign = (negative || positive) && !signedGrouped
+                    && literal.Range.End == numberToken.Range.Start;
                 if (!TryReadMagnitude(numberToken, tokenIndex, parameterType,
-                    negative && !signedGrouped,
+                    negative && explicitSign, explicitSign,
                     numberToken.Range, init var low, init var high))
                 {
                     return false;
@@ -1333,8 +1338,10 @@ mut class ScalarFrontendState
                 FailAt(2, numberToken.Range);
                 return false;
             }
+            bool explicitSign = (negative || positive) && !signedGrouped
+                && literal.Range.End == numberToken.Range.Start;
             if (!TryReadMagnitude(numberToken, tokenIndex, expectedType,
-                negative && !signedGrouped,
+                negative && explicitSign, explicitSign,
                 numberSpan, init var low, init var high))
             {
                 return false;
@@ -1347,7 +1354,7 @@ mut class ScalarFrontendState
             {
                 _at = _at + 1;
                 require BeginUnaryOperand(init var secondLiteral, init var groups, tokenView);
-                if (!TryReadMagnitude(secondLiteral, _at, expectedType, false,
+                if (!TryReadMagnitude(secondLiteral, _at, expectedType, false, false,
                     secondLiteral.Range, init var secondLow, init var secondHigh)
                     || !FinishUnaryOperand(secondLiteral, groups, init var end, tokenView))
                 {
@@ -1586,8 +1593,10 @@ mut class ScalarFrontendState
                     FailAt(2, number.Range);
                     return false;
                 }
+                bool explicitSign = unaryKind != 0 && !rightSignedGrouped
+                    && right.Range.End == number.Range.Start;
                 if (!TryReadMagnitude(number, index, isShift ? 1 : selected,
-                    unaryKind == 58 && !rightSignedGrouped,
+                    unaryKind == 58 && explicitSign, explicitSign,
                     number.Range, init var low, init var high))
                 {
                     return false;
@@ -3429,6 +3438,10 @@ mut class ScalarFrontendState
     }
 
     private mut bool ResolveTreeLiteral(int32 node, int32 type, bool minimum, Span<Token> tokenView)
+        => ResolveTreeLiteralWithSign(node, type, minimum, minimum, tokenView);
+
+    private mut bool ResolveTreeLiteralWithSign(int32 node, int32 type, bool minimum,
+        bool explicitSign, Span<Token> tokenView)
     {
         int32 offset = TreeNodeOffset(node);
         int32 operation = TreeWord(node, 0);
@@ -3476,7 +3489,7 @@ mut class ScalarFrontendState
             else
             {
                 if (literal.Kind != 3
-                    || !TryReadMagnitude(literal, tokenIndex, type, minimum,
+                    || !TryReadMagnitude(literal, tokenIndex, type, minimum, explicitSign,
                         literal.Range, init var magnitudeLow, init var magnitudeHigh))
                 {
                     return false;
@@ -3527,8 +3540,13 @@ mut class ScalarFrontendState
                 FailAt(2, sign);
                 return false;
             }
-            if (!ResolveTreeLiteral(TreeWord(node, 4), type,
-                operation == 58 && TreeWord(TreeWord(node, 4), 0) == 3, tokenView))
+            bool signedNumber = operation == 57 || operation == 58;
+            bool attachedSign = signedNumber && IsAttachedNumericSign(
+                TreeWord(node, 2), tokenView);
+            bool directLiteral = TreeWord(TreeWord(node, 4), 0) == 3;
+            if (!ResolveTreeLiteralWithSign(TreeWord(node, 4), type,
+                operation == 58 && attachedSign && directLiteral,
+                attachedSign && directLiteral, tokenView))
             {
                 return false;
             }
@@ -3540,6 +3558,25 @@ mut class ScalarFrontendState
             return FailTreeType(node);
         }
         return true;
+    }
+
+    private bool IsAttachedNumericSign(int32 sourceStart, Span<Token> tokenView)
+    {
+        for (mut uint64 index = 0; index < tokenView.Length; index = index + 1)
+        {
+            Token sign = tokenView[index];
+            if (sign.Range.Start != sourceStart)
+            {
+                continue;
+            }
+            if (sign.Kind != 57 && sign.Kind != 58 || index + 1 >= tokenView.Length)
+            {
+                return false;
+            }
+            Token literal = tokenView[index + 1];
+            return literal.Kind == 3 && sign.Range.End == literal.Range.Start;
+        }
+        return false;
     }
 
     private mut bool FailTreeType(int32 node)
@@ -4196,7 +4233,7 @@ mut class ScalarFrontendState
             mut int32 high = 0;
             if (type != 0 && type != 5)
             {
-                if (!TryReadMagnitude(token, _at - 1, type, false,
+                if (!TryReadMagnitude(token, _at - 1, type, false, false,
                     token.Range, init var magnitudeLow, init var magnitudeHigh))
                 {
                     return false;
