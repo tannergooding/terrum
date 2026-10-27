@@ -96,6 +96,9 @@ this adds no enum-member provenance requirement to constant evaluation.
 An integer, string or unrelated enum with equal bits is not E and receives
 no implicit conversion. Unknown E values reject. The closed domain is a
 restriction of these schemas, not a change to ordinary enum semantics.
+The [nominal enum forwarding candidate](nominal-enum-constant-forwarding.md)
+specifies the shared value/evaluator integration prerequisite; a Core
+registration handle or direct-member decoder alone does not satisfy it.
 
 Registration identifies actual declarations through checked resolved handles
 or exact selected Module identity/export key/kind bindings. Concrete provider

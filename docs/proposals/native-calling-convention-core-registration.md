@@ -68,6 +68,10 @@ decoder. If the current PrimitiveType representation cannot preserve these
 facts, extend the shared representation first; do not use an int32 surrogate.
 The general prerequisite is the appropriate expansion when arbitrary authored
 enums are needed, not a second language interpretation or fallback mode.
+The [nominal enum forwarding candidate](nominal-enum-constant-forwarding.md)
+makes the shared value-model prerequisite concrete, with bounded int32 enum
+admission and ordinary ConstEval/runtime forwarding, not a native-specific
+evaluator or a source-free persistence codec.
 
 ## Proposed registration hand-off
 
