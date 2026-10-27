@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -38,6 +39,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmBlobTableReader blobs,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        TrRmNativeImportTableReader standardNativeImports,
         TrRmModuleRefTableReader moduleRefs)
     {
         var visitedTypeSpecRows = new HashSet<int>();
@@ -58,6 +60,10 @@ internal static class TrRmRegisterBodyMapValidator
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
             contracts, imports);
+        ValidateNativeAddressRecords(body, ownerModule, features, modules,
+            types, typeSpecs, genericParams, methods, signatures, parameters,
+            contracts, imports, standardNativeImports,
+            nativeFunctionPointerAnchors);
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,
@@ -785,6 +791,216 @@ internal static class TrRmRegisterBodyMapValidator
         {
             throw InvalidMap();
         }
+    }
+
+    private static void ValidateNativeAddressRecords(
+        TrRmRegisterBodyReader body, int ownerModule,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmContractTableReader contracts,
+        TrRmImportTableReader imports,
+        TrRmNativeImportTableReader standardNativeImports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        for (var recordIndex = 0; recordIndex < body.RecordCount; recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x0D)
+            {
+                continue;
+            }
+
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule, TrRmFeatureTableReader.NativeExportEntriesFeatureId))
+            {
+                throw InvalidMap();
+            }
+
+            var payload = record[4..];
+            var pointerTypeMapIndex = ReadUInt16(payload, 6);
+            var pointerTypeToken = ReadUInt32(body.TypeMap,
+                pointerTypeMapIndex * sizeof(uint));
+            if ((pointerTypeToken >> 24) != 0x11)
+            {
+                throw InvalidMap();
+            }
+
+            var pointerTypeSpecRow = checked((int)(pointerTypeToken & 0x00FF_FFFF));
+            var pointerType = typeSpecs.GetTypeSpecRef((uint)pointerTypeSpecRow);
+            if (!pointerType.IsRow || pointerType.Form != 0x0D
+                || pointerType.Qualifiers != 0
+                || !nativeFunctionPointerAnchors.HasAnchorForTypeSpec(
+                    pointerTypeSpecRow))
+            {
+                throw InvalidMap();
+            }
+
+            var methodMapIndex = ReadUInt16(payload, 4);
+            var methodMapToken = ReadUInt32(body.MethodMap,
+                methodMapIndex * sizeof(uint));
+            var methodKind = (byte)(methodMapToken >> 24);
+            var targetMethod = GetMethodMapTarget(
+                body, methodMapIndex, methods, imports);
+            if (nativeFunctionPointerAnchors.IsAnchorMethodDef(targetMethod)
+                || !HasSupportedNativeAddressContract(targetMethod,
+                    pointerTypeSpecRow, methodKind, ownerModule,
+                    types, methods, signatures, parameters,
+                    contracts, standardNativeImports,
+                    nativeFunctionPointerAnchors))
+            {
+                throw InvalidMap();
+            }
+
+            if (payload[0] == 2)
+            {
+                var homeIndex = ReadUInt16(payload, 2);
+                var home = body.HomeMap.Slice(homeIndex * 8, 8);
+                var homeTypeMapIndex = ReadUInt16(home, 2);
+                var homeTypeToken = ReadUInt32(body.TypeMap,
+                    homeTypeMapIndex * sizeof(uint));
+                if (home[0] != 3 || (homeTypeToken >> 24) != 0x11)
+                {
+                    throw InvalidMap();
+                }
+
+                var homeTypeSpecRef = homeTypeToken & 0x00FF_FFFF;
+                var homeType = typeSpecs.GetTypeSpecRef(homeTypeSpecRef);
+                if (!homeType.IsRow || homeType.Form != 0x0D
+                    || homeType.Qualifiers != 0
+                    || !nativeFunctionPointerAnchors.AreEquivalentTypeSpecRefs(
+                        (uint)pointerTypeSpecRow, homeTypeSpecRef))
+                {
+                    throw InvalidMap();
+                }
+            }
+        }
+    }
+
+    private static bool HasSupportedNativeAddressContract(int targetMethod,
+        int pointerTypeSpecRow, byte methodKind, int ownerModule,
+        TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmContractTableReader contracts,
+        TrRmNativeImportTableReader standardNativeImports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        var targetSignature = methods.GetSignature(targetMethod);
+        if (signatures.GetReceiverTypeSpec(targetSignature) != 0
+            || signatures.GetGenericCount(targetSignature) != 0
+            || !contracts.GetNativeOutputs(targetMethod).IsDefaultOrEmpty
+            || !contracts.GetNativeParameters(targetMethod).IsDefaultOrEmpty)
+        {
+            return false;
+        }
+
+        var targetOwnerType = methods.GetOwnerType(targetMethod);
+        if (targetOwnerType != 0
+            && types.GetGenericRange(targetOwnerType).Count != 0)
+        {
+            return false;
+        }
+
+        var hasNativeCallable = contracts.HasNativeCallableContract(targetMethod);
+        var hasNativeImport = standardNativeImports.HasImportForMethod(targetMethod);
+        byte? targetConvention = null;
+        if (hasNativeCallable)
+        {
+            targetConvention = contracts.GetNativeCallableConvention(targetMethod);
+        }
+        if (hasNativeImport)
+        {
+            var importConvention = standardNativeImports
+                .GetImportForMethod(targetMethod).CallConv;
+            if (targetConvention is byte existingConvention
+                && existingConvention != importConvention)
+            {
+                return false;
+            }
+            targetConvention = importConvention;
+        }
+
+        if (methodKind == 0x16)
+        {
+            if (methods.GetOwnerModule(targetMethod) != ownerModule)
+            {
+                return false;
+            }
+
+            if (hasNativeCallable || hasNativeImport)
+            {
+                if (methods.GetBodyRow(targetMethod) == 0
+                    && !hasNativeImport)
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!IsOrdinaryAddressableMethod(targetMethod, types,
+                    methods, signatures, parameters, contracts))
+                {
+                    return false;
+                }
+                targetConvention = 0;
+            }
+        }
+        else if (methodKind != 0x1C)
+        {
+            return false;
+        }
+
+        return nativeFunctionPointerAnchors.MatchesAddressableMethod(
+            targetMethod, pointerTypeSpecRow, targetConvention);
+    }
+
+    private static bool IsOrdinaryAddressableMethod(int methodDefRow,
+        TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmContractTableReader contracts)
+    {
+        if (methods.GetBodyRow(methodDefRow) == 0
+            || contracts.IsCleanupMethod(methodDefRow)
+            || contracts.HasNativeAbi(methodDefRow))
+        {
+            return false;
+        }
+
+        var ownerType = methods.GetOwnerType(methodDefRow);
+
+        var name = methods.GetName(methodDefRow);
+        if (name.EndsWith(".#ctor", StringComparison.Ordinal)
+            || name.EndsWith(".#cctor", StringComparison.Ordinal)
+            || name.Contains(".#get:", StringComparison.Ordinal)
+            || name.Contains(".#set:", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (ownerType != 0)
+        {
+            var ownerName = types.GetNamespace(ownerType) is string @namespace
+                && @namespace.Length != 0
+                    ? @namespace + "." + types.GetName(ownerType)
+                    : types.GetName(ownerType);
+            if (Binder.TryGetStaticOperatorKey(name, ownerName, out _))
+            {
+                return false;
+            }
+        }
+
+        var signature = methods.GetSignature(methodDefRow);
+        var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
+        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+        {
+            if (parameters.GetMode(firstParameter + ordinal) != 0)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static int GetMethodMapTarget(TrRmRegisterBodyReader body,

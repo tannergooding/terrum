@@ -55,6 +55,7 @@ public static class TrRmStructuralMetadataValidator
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts,
             TrRmDevelopmentNativeImportTableReader nativeImports,
+            TrRmNativeImportTableReader standardNativeImports,
             TrRmNativeExportTableReader nativeExports,
             TrRmNativeCallableTableReader nativeCallables,
             TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
@@ -107,6 +108,7 @@ public static class TrRmStructuralMetadataValidator
             Bodies = bodies;
             Contracts = contracts;
             NativeImports = nativeImports;
+            StandardNativeImports = standardNativeImports;
             NativeExports = nativeExports;
             NativeCallables = nativeCallables;
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures;
@@ -161,6 +163,7 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmBodyTableReader Bodies { get; }
         internal TrRmContractTableReader Contracts { get; }
         internal TrRmDevelopmentNativeImportTableReader NativeImports { get; }
+        internal TrRmNativeImportTableReader StandardNativeImports { get; }
         internal TrRmNativeExportTableReader NativeExports { get; }
         internal TrRmNativeCallableTableReader NativeCallables { get; }
         internal TrRmNativeFunctionPointerSignatureTableReader NativeFunctionPointerSignatures { get; }
@@ -187,7 +190,8 @@ public static class TrRmStructuralMetadataValidator
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
                 Modules, TypeDefs, TypeSpecs, GenericParams, Methods, Signatures,
                 Parameters, Fields, FieldPaths, ConstantSources, FrozenValueNodes,
-                Blobs, Contracts, Imports, NativeFunctionPointerAnchors, ModuleRefs);
+                Blobs, Contracts, Imports, NativeFunctionPointerAnchors,
+                StandardNativeImports, ModuleRefs);
         }
 
         internal void ValidateNonBodyTypeSpecModuleContexts()
@@ -1171,7 +1175,8 @@ public static class TrRmStructuralMetadataValidator
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
             fields, layouts, layoutFields,
             targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,
-            nativeExports, nativeCallables, nativeFunctionPointerSignatures,
+            standardNativeImports, nativeExports, nativeCallables,
+            nativeFunctionPointerSignatures,
             nativeVTables, imports,
             index.Schema);
         executionTables.ValidateNonBodyTypeSpecModuleContexts();

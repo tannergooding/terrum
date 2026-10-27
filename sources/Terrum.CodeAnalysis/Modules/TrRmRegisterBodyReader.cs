@@ -343,6 +343,7 @@ internal readonly ref struct TrRmRegisterBodyReader
             0xC1 => control is >= 0x01 and <= 0x07,
             0xC2 => control <= 0x02,
             0xC3 or 0xC4 or 0xC5 => control <= 0x0F,
+            0xE9 => control == 0,
             _ => true,
         };
         if (!isAssigned)
@@ -563,6 +564,13 @@ internal readonly ref struct TrRmRegisterBodyReader
                 }
                 ValidateRecordReference(reference, 0x09);
                 break;
+            case 0xE9:
+                if (control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x0D);
+                break;
             case 0xEB:
                 if (control != 0)
                 {
@@ -750,7 +758,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
         if (opcode is >= 0xC0 and <= 0xCC
             or >= 0xD0 and <= 0xDE
-            or >= 0xE0 and <= 0xE8
+            or >= 0xE0 and <= 0xE9
             or 0xEA or 0xEB)
         {
             return 4;
@@ -823,7 +831,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     private void ValidateRecord(ReadOnlySpan<byte> record)
     {
-        if (record.Length < RecordHeaderSize || record[0] is < 0x01 or > 0x0B
+        if (record.Length < RecordHeaderSize || record[0] is < 0x01 or > 0x0D
             || record[1] != 0 || ReadUInt16(record, 2) != 0)
         {
             throw InvalidBody();
@@ -933,6 +941,31 @@ internal readonly ref struct TrRmRegisterBodyReader
             case 0x0B:
                 ValidateConstructorBinding(payload);
                 break;
+            case 0x0C:
+                throw InvalidBody();
+            case 0x0D:
+                ValidateNativeAddress(payload);
+                break;
+        }
+    }
+
+    private void ValidateNativeAddress(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != 8)
+        {
+            throw InvalidBody();
+        }
+
+        var resultKind = payload[0];
+        var resultIndex = ReadUInt16(payload, 2);
+        if (resultKind is not (1 or 2) || payload[1] != 0
+            || (resultKind == 1
+                ? resultIndex > 15 || resultIndex == 14
+                : resultIndex >= HomeCount)
+            || ReadUInt16(payload, 4) >= MethodCount
+            || ReadUInt16(payload, 6) >= TypeCount)
+        {
+            throw InvalidBody();
         }
     }
 

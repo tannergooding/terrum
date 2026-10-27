@@ -518,6 +518,75 @@ public sealed class TrRmNativeImportTableTests
                 includeFunctionPointerTypeMap: true)));
     }
 
+    [Test]
+    public void StandardNativeAddressMapBindsTargetAnchorAndResult()
+    {
+        var registerResult = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, firstAnchorConvention: 0,
+            anchorHasUnitResult: true);
+        Assert.DoesNotThrow(() => ValidateAnchorMethodMapArtifact(registerResult));
+
+        var homeResult = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, firstAnchorConvention: 0,
+            anchorHasUnitResult: true, nativeAddressResultKind: 2);
+        Assert.DoesNotThrow(() => ValidateAnchorMethodMapArtifact(homeResult));
+
+        var nativeCallableTarget = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, includeNativeCallableTarget: true,
+            firstAnchorConvention: 1, anchorHasUnitResult: true);
+        Assert.DoesNotThrow(() =>
+            ValidateAnchorMethodMapArtifact(nativeCallableTarget));
+
+        var wrongConvention = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, firstAnchorConvention: 1,
+            anchorHasUnitResult: true);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(wrongConvention));
+
+        var wrongNativeCallableConvention = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, includeNativeCallableTarget: true,
+            firstAnchorConvention: 2, anchorHasUnitResult: true,
+            nativeCallableConvention: 1);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(wrongNativeCallableConvention));
+
+        var wrongSignature = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, firstAnchorConvention: 0);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(wrongSignature));
+
+        var anchorAsTarget = CreateAnchorMethodMapArtifact(0x1600_0002,
+            includeNativeAddress: true, firstAnchorConvention: 0,
+            anchorHasUnitResult: true);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(anchorAsTarget));
+
+        var wrongTypeMapForm = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, firstAnchorConvention: 0,
+            anchorHasUnitResult: true,
+            nativeAddressPointerTypeToken: 0x1100_0002);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(wrongTypeMapForm));
+
+        var wrongHomeType = CreateAnchorMethodMapArtifact(0x1600_0001,
+            includeNativeAddress: true, firstAnchorConvention: 0,
+            anchorHasUnitResult: true, nativeAddressResultKind: 2,
+            nativeAddressHomeTypeToken: 0x1100_0002);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateAnchorMethodMapArtifact(wrongHomeType));
+    }
+
+    [Test]
+    public void StandardNativeAddressMapUsesNativeImportConvention()
+    {
+        var valid = CreateNativeImportAddressArtifact(callConv: 1);
+        Assert.DoesNotThrow(() => ValidateNativeAddressArtifact(valid));
+
+        var wrongConvention = CreateNativeImportAddressArtifact(callConv: 2);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateNativeAddressArtifact(wrongConvention));
+    }
+
     private static Fixture CreateFixture(
         IReadOnlyList<TrRmNativeImportRow> rows,
         IReadOnlyList<TrRmFeatureRow>? features = null,
@@ -863,6 +932,14 @@ public sealed class TrRmNativeImportTableTests
     private static byte[] CreateAnchorMethodMapArtifact(uint methodMapToken,
         bool includeRootlessFeature = false,
         bool includeFunctionPointerTypeMap = false,
+        bool includeNativeAddress = false,
+        bool includeNativeCallableTarget = false,
+        byte firstAnchorConvention = 1,
+        byte nativeCallableConvention = 1,
+        bool anchorHasUnitResult = false,
+        byte nativeAddressResultKind = 1,
+        uint? nativeAddressPointerTypeToken = null,
+        uint? nativeAddressHomeTypeToken = null,
         byte? secondAnchorConvention = null,
         bool distinctSecondAnchor = false,
         bool secondAnchorHasUnitResult = false,
@@ -876,9 +953,12 @@ public sealed class TrRmNativeImportTableTests
         ]);
         var strings = new TrRmStringTableReader(stringsBytes, 5);
         var methodCount = distinctSecondAnchor ? 3 : 2;
-        TrRmFeatureRow[] featureRows = includeRootlessFeature
-            ? [TrRmFeatureRow.NativeBoundaryContracts, TrRmFeatureRow.RootlessNativeValues]
-            : [TrRmFeatureRow.NativeBoundaryContracts];
+        TrRmFeatureRow[] featureRows = includeNativeAddress
+            ? [TrRmFeatureRow.NativeBoundaryContracts, TrRmFeatureRow.RootlessNativeValues,
+                TrRmFeatureRow.DirectNativeCalls, TrRmFeatureRow.NativeExportEntries]
+            : includeRootlessFeature
+                ? [TrRmFeatureRow.NativeBoundaryContracts, TrRmFeatureRow.RootlessNativeValues]
+                : [TrRmFeatureRow.NativeBoundaryContracts];
         var featuresBytes = TrRmFeatureTableWriter.Encode(featureRows);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1,
@@ -890,7 +970,7 @@ public sealed class TrRmNativeImportTableTests
         {
             TrRmTypeSpecTableWriter.Builtin(0),
             TrRmTypeSpecTableWriter.Builtin(8),
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 2),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(firstAnchorConvention, 2),
         };
         if (secondAnchorConvention is byte convention)
         {
@@ -904,7 +984,8 @@ public sealed class TrRmNativeImportTableTests
         var signatureRows = new List<TrRmMethodSigRow>
         {
             new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
-            new TrRmMethodSigRow(0xF200_0008, 0, 0, 0, 0, 0),
+            new TrRmMethodSigRow(anchorHasUnitResult ? 0xF200_0000u : 0xF200_0008u,
+                0, 0, 0, 0, 0),
         };
         if (distinctSecondAnchor)
         {
@@ -916,6 +997,15 @@ public sealed class TrRmNativeImportTableTests
         var signatures = new TrRmMethodSigTableReader(signatureBytes, signatureRows.Count,
             typeSpecs, 0, 0);
         var contractRows = new List<TrRmContractRow>();
+        var targetContractFirst = 0;
+        if (includeNativeCallableTarget)
+        {
+            targetContractFirst = contractRows.Count + 1;
+            contractRows.Add(new TrRmContractRow(0x1600_0001, 1,
+                new byte[] { 4, 0, 0, 0 }));
+            contractRows.Add(new TrRmContractRow(0x1600_0001, 0x0C,
+                new byte[] { nativeCallableConvention, 0, 0, 0 }));
+        }
         var anchorContractFirst = AddAnchorContracts(contractRows, 2,
             anchorEffectsMask, anchorDependencyPhase);
         var secondAnchorContractFirst = distinctSecondAnchor
@@ -926,7 +1016,8 @@ public sealed class TrRmNativeImportTableTests
             0, 0, 0, contractRows.Count);
         var methodRows = new List<TrRmMethodDefRow>
         {
-            new(0, 3, 1, 0, 0, 0, 1),
+            new(0, 3, 1, 0, targetContractFirst,
+                includeNativeCallableTarget ? 2 : 0, 1),
             new(0, 4, 2, 0, anchorContractFirst.First,
                 anchorContractFirst.Count, 0),
         };
@@ -942,7 +1033,12 @@ public sealed class TrRmNativeImportTableTests
         var contractBytes = contractRows.Count == 0 ? []
             : TrRmContractTableWriter.Encode(contractRows, typeDefs, methods,
                 signatures, default, typeSpecs);
-        var body = CreateMethodMapBody(methodMapToken, includeFunctionPointerTypeMap);
+        var body = includeNativeAddress
+            ? CreateNativeAddressBody(methodMapToken,
+                nativeAddressPointerTypeToken ?? 0x1100_0003,
+                nativeAddressResultKind,
+                nativeAddressHomeTypeToken)
+            : CreateMethodMapBody(methodMapToken, includeFunctionPointerTypeMap);
         var sections = new List<TrRmSection>
         {
             new TrRmSection(0x0001, 0, 1, moduleBytes),
@@ -1128,11 +1224,150 @@ public sealed class TrRmNativeImportTableTests
         return body;
     }
 
+    private static byte[] CreateNativeAddressBody(uint methodMapToken,
+        uint pointerTypeToken, byte resultKind, uint? homeTypeToken)
+    {
+        var hasHome = resultKind == 2;
+        var hasDistinctHomeType = hasHome && homeTypeToken is uint selectedHomeType
+            && selectedHomeType != pointerTypeToken;
+        var typeTokens = hasDistinctHomeType
+            ? new[] { pointerTypeToken, homeTypeToken.GetValueOrDefault() }
+            : new[] { pointerTypeToken };
+        var mapMask = (byte)(0x06 | (hasHome ? 0x01 : 0));
+        var body = new List<byte> { 1, 1, mapMask, 0, 0 };
+        if (hasHome)
+        {
+            WriteUInt32(body, 1);
+        }
+        WriteUInt32(body, (uint)typeTokens.Length);
+        WriteUInt32(body, 1);
+        WriteUInt32(body, 1);
+        WriteUInt32(body, 2);
+        WriteUInt32(body, 6);
+        if (hasHome)
+        {
+            body.AddRange([3, 0, (byte)(hasDistinctHomeType ? 1 : 0),
+                0, 0, 0, 0, 0]);
+        }
+        foreach (var typeToken in typeTokens)
+        {
+            WriteUInt32(body, typeToken);
+        }
+        WriteUInt32(body, methodMapToken);
+        WriteUInt32(body, 0);
+        WriteUInt32(body, 6);
+        WriteUInt16(body, 0);
+        WriteUInt16(body, 0);
+        WriteUInt32(body, 0);
+        WriteUInt32(body, 8);
+        WriteUInt32(body, 20);
+        body.AddRange([1, 0, 0, 0, 0, 0, 0, 0]);
+        body.AddRange([
+            0x0D, 0, 0, 0, resultKind, 0, 0, 0,
+            0, 0, 0, 0,
+        ]);
+        body.AddRange([0xE9, 0, 1, 0, 0x18, 0]);
+        return [.. body];
+    }
+
+    private static byte[] CreateNativeImportAddressArtifact(byte callConv)
+    {
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("target", 0), ("anchor", 0), ("caller", 0),
+            ("kernel32", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 6);
+        TrRmFeatureRow[] featureRows = [
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.RootlessNativeValues,
+            TrRmFeatureRow.DirectNativeCalls,
+            TrRmFeatureRow.NativeExportEntries,
+        ];
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1,
+                featureRows.Length, 1),
+        ], strings, 0, 0, 3, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 3, 0, featureRows.Length);
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 2),
+        };
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            0, 0, 0, 0, schema: TrRmArtifactSchema.Standard, methodDefCount: 3);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2,
+            0, 0, 0, 0, schema: TrRmArtifactSchema.Standard, methodDefCount: 3);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 1);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layouts = new TrRmLayoutTableReader([], 0, typeDefs, targetProfiles, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000u, 0, 0, 0, 0, 0),
+        ], typeSpecs, 0, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 0, 0);
+        var contractRows = new List<TrRmContractRow> {
+            new(0x1600_0001, 1, new byte[] { 4, 0, 0, 0 }),
+        };
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 1, 1, 0),
+            new TrRmMethodDefRow(0, 4, 1, 0, 0, 0, 0),
+            new TrRmMethodDefRow(0, 5, 1, 0, 0, 0, 1),
+        ], strings, modules, typeDefs, signatures, 1, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes, 3, strings,
+            modules, typeDefs, signatures, 1, 1);
+        var contractBytes = TrRmContractTableWriter.Encode(contractRows,
+            typeDefs, methods, signatures, default, typeSpecs);
+        var contracts = new TrRmContractTableReader(contractBytes, 1,
+            typeDefs, methods, signatures, default, typeSpecs);
+        var fields = default(TrRmFieldDefTableReader);
+        var nativeImportBytes = TrRmNativeImportTableWriter.Encode([
+            new TrRmNativeImportRow(1, 1, 0, callConv, 1, 6, 0),
+        ], strings, methods, fields, typeDefs, default, modules, signatures,
+            default, typeSpecs, contracts, layouts);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 6, stringBytes),
+            new TrRmSection(0x0004, 0, (uint)featureRows.Length, featureBytes),
+            new TrRmSection(0x0011, 0, (uint)typeSpecRows.Length, typeSpecBytes),
+            new TrRmSection(0x0016, 0, 3, methodBytes),
+            new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x001B, 0, 1, contractBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([
+                    CreateNativeAddressBody(0x1600_0001, 0x1100_0002, 1, null),
+                ])),
+            new TrRmSection(0x0021, 0, 1, nativeImportBytes),
+        ]);
+    }
+
+    private static void WriteUInt16(List<byte> bytes, ushort value)
+    {
+        bytes.Add((byte)value);
+        bytes.Add((byte)(value >> 8));
+    }
+
+    private static void WriteUInt32(List<byte> bytes, uint value)
+    {
+        bytes.Add((byte)value);
+        bytes.Add((byte)(value >> 8));
+        bytes.Add((byte)(value >> 16));
+        bytes.Add((byte)(value >> 24));
+    }
+
     private static void ValidateAnchorMethodMapArtifact(byte[] artifact)
     {
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static void ValidateNativeAddressArtifact(byte[] artifact)
+    {
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(3);
     }
 
     private static uint Read(byte[] bytes, int offset)

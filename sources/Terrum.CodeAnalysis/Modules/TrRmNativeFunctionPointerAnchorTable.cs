@@ -89,6 +89,15 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
                 throw InvalidAnchor();
             }
 
+            var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
+            for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+            {
+                if (parameters.GetMode(firstParameter + ordinal) != 0)
+                {
+                    throw InvalidAnchor();
+                }
+            }
+
             _methodByTypeSpecRow[typeSpecRow] = methodDefRow;
             _conventionByTypeSpecRow[typeSpecRow] = callingConvention;
             _isAnchorMethodDef[methodDefRow] = true;
@@ -114,6 +123,56 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     internal byte GetCallingConvention(int typeSpecRow)
         => HasAnchorForTypeSpec(typeSpecRow)
             ? _conventionByTypeSpecRow[typeSpecRow] : throw InvalidAnchor();
+
+    internal bool MatchesAddressableMethod(int methodDefRow, int typeSpecRow,
+        byte? targetConvention)
+    {
+        if (!HasAnchorForTypeSpec(typeSpecRow)
+            || methodDefRow <= 0 || methodDefRow > _methods.Count
+            || IsAnchorMethodDef(methodDefRow)
+            || (targetConvention is byte convention
+                && convention != GetCallingConvention(typeSpecRow)))
+        {
+            return false;
+        }
+
+        var anchorMethod = GetAnchorMethodDefRow(typeSpecRow);
+        var targetSignature = _methods.GetSignature(methodDefRow);
+        var anchorSignature = _methods.GetSignature(anchorMethod);
+        if (_signatures.GetReceiverTypeSpec(targetSignature) != 0
+            || _signatures.GetGenericCount(targetSignature) != 0
+            || _signatures.GetReceiverTypeSpec(anchorSignature) != 0
+            || _signatures.GetGenericCount(anchorSignature) != 0
+            || !AreEquivalentTypeSpecRefs(
+                _signatures.GetResultTypeSpec(targetSignature),
+                _signatures.GetResultTypeSpec(anchorSignature)))
+        {
+            return false;
+        }
+
+        var (targetFirst, targetCount) = _signatures.GetParamRange(targetSignature);
+        var (anchorFirst, anchorCount) = _signatures.GetParamRange(anchorSignature);
+        if (targetCount != anchorCount)
+        {
+            return false;
+        }
+
+        for (var ordinal = 0; ordinal < targetCount; ordinal++)
+        {
+            var targetParameter = targetFirst + ordinal;
+            var anchorParameter = anchorFirst + ordinal;
+            if (_parameters.GetMode(targetParameter) != 0
+                || _parameters.GetMode(anchorParameter) != 0
+                || !AreEquivalentTypeSpecRefs(
+                    _parameters.GetTypeSpec(targetParameter),
+                    _parameters.GetTypeSpec(anchorParameter)))
+            {
+                return false;
+            }
+        }
+
+        return ContractsSatisfy(methodDefRow, anchorMethod);
+    }
 
     internal bool AreEquivalentTypeSpecRefs(uint left, uint right)
         => AreEquivalentTypeSpecRefs(left, right, false,
@@ -355,78 +414,42 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         }
     }
 
-    private bool EquivalentContracts(int leftMethod, int rightMethod)
+    private bool ContractsSatisfy(int actualMethod, int expectedMethod)
     {
-        if (_contracts.GetEffectsMask(leftMethod)
-            != _contracts.GetEffectsMask(rightMethod))
+        if (!_contracts.GetNativeOutputs(actualMethod).IsDefaultOrEmpty
+            || !_contracts.GetNativeParameters(actualMethod).IsDefaultOrEmpty)
         {
             return false;
         }
 
-        var leftPredicates = _contracts.GetPredicateGraphContracts(leftMethod);
-        var rightPredicates = _contracts.GetPredicateGraphContracts(rightMethod);
-        if (leftPredicates.Length != rightPredicates.Length)
+        var actualEffects = _contracts.GetEffectsMask(actualMethod);
+        var expectedEffects = _contracts.GetEffectsMask(expectedMethod);
+        if ((expectedEffects & 2) != 0 && (actualEffects & 2) == 0)
         {
             return false;
         }
-        foreach (var leftPredicate in leftPredicates)
+
+        return SamePredicateContracts(actualMethod, expectedMethod)
+            && SameOutputStateContracts(actualMethod, expectedMethod)
+            && DependenciesSatisfy(actualMethod, expectedMethod);
+    }
+
+    private bool SamePredicateContracts(int leftMethod, int rightMethod)
+    {
+        var left = _contracts.GetPredicateGraphContracts(leftMethod);
+        var right = _contracts.GetPredicateGraphContracts(rightMethod);
+        if (left.Length != right.Length)
         {
-            var identity = GetPredicateIdentity(leftPredicate);
+            return false;
+        }
+
+        foreach (var candidate in left)
+        {
+            var identity = GetPredicateIdentity(candidate);
             var found = false;
-            foreach (var rightPredicate in rightPredicates)
+            foreach (var other in right)
             {
-                if (identity == GetPredicateIdentity(rightPredicate))
-                {
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found)
-            {
-                return false;
-            }
-        }
-
-        var leftOutputs = _contracts.GetOutputStateContracts(leftMethod);
-        var rightOutputs = _contracts.GetOutputStateContracts(rightMethod);
-        if (leftOutputs.Length != rightOutputs.Length)
-        {
-            return false;
-        }
-        foreach (var leftOutput in leftOutputs)
-        {
-            var identity = (leftOutput.ParameterOrdinal, leftOutput.State,
-                GetPredicateIdentity(leftMethod, leftOutput.PredicateGraphRow));
-            var found = false;
-            foreach (var rightOutput in rightOutputs)
-            {
-                if (identity == (rightOutput.ParameterOrdinal, rightOutput.State,
-                    GetPredicateIdentity(rightMethod, rightOutput.PredicateGraphRow)))
-                {
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found)
-            {
-                return false;
-            }
-        }
-
-        var leftDependencies = _contracts.GetDependencyContracts(leftMethod);
-        var rightDependencies = _contracts.GetDependencyContracts(rightMethod);
-        if (leftDependencies.Length != rightDependencies.Length)
-        {
-            return false;
-        }
-        foreach (var dependency in leftDependencies)
-        {
-            var found = false;
-            foreach (var candidate in rightDependencies)
-            {
-                if (dependency == candidate)
+                if (identity == GetPredicateIdentity(other))
                 {
                     found = true;
                     break;
@@ -441,6 +464,137 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         return true;
     }
+
+    private bool SameOutputStateContracts(int leftMethod, int rightMethod)
+    {
+        var left = _contracts.GetOutputStateContracts(leftMethod);
+        var right = _contracts.GetOutputStateContracts(rightMethod);
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        foreach (var candidate in left)
+        {
+            var identity = (candidate.ParameterOrdinal, candidate.State,
+                GetPredicateIdentity(leftMethod, candidate.PredicateGraphRow));
+            var found = false;
+            foreach (var other in right)
+            {
+                if (identity == (other.ParameterOrdinal, other.State,
+                    GetPredicateIdentity(rightMethod, other.PredicateGraphRow)))
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool SameDependencyContracts(int leftMethod, int rightMethod)
+    {
+        var left = _contracts.GetDependencyContracts(leftMethod);
+        var right = _contracts.GetDependencyContracts(rightMethod);
+        return left.Length == right.Length
+            && new HashSet<TrRmDependencyContract>(left).SetEquals(right);
+    }
+
+    private bool DependenciesSatisfy(int actualMethod, int expectedMethod)
+    {
+        var actual = _contracts.GetDependencyContracts(actualMethod);
+        var expected = _contracts.GetDependencyContracts(expectedMethod);
+        var actualGroups = new HashSet<(byte DestinationKind,
+            uint DestinationOrdinal, byte Phase)>();
+        var expectedGroups = new HashSet<(byte DestinationKind,
+            uint DestinationOrdinal, byte Phase)>();
+        foreach (var dependency in actual)
+        {
+            _ = actualGroups.Add((dependency.DestinationKind,
+                dependency.DestinationOrdinal, dependency.Phase));
+        }
+        foreach (var dependency in expected)
+        {
+            _ = expectedGroups.Add((dependency.DestinationKind,
+                dependency.DestinationOrdinal, dependency.Phase));
+        }
+        if (!actualGroups.SetEquals(expectedGroups))
+        {
+            return false;
+        }
+
+        foreach (var group in expectedGroups)
+        {
+            var actualRows = new List<TrRmDependencyContract>();
+            var expectedRows = new List<TrRmDependencyContract>();
+            foreach (var dependency in actual)
+            {
+                if ((dependency.DestinationKind, dependency.DestinationOrdinal,
+                    dependency.Phase) == group)
+                {
+                    actualRows.Add(dependency);
+                }
+            }
+            foreach (var dependency in expected)
+            {
+                if ((dependency.DestinationKind, dependency.DestinationOrdinal,
+                    dependency.Phase) == group)
+                {
+                    expectedRows.Add(dependency);
+                }
+            }
+
+            if (actualRows[0].SourceKind == 0)
+            {
+                continue;
+            }
+            if (expectedRows[0].SourceKind == 0)
+            {
+                return false;
+            }
+
+            foreach (var actualDependency in actualRows)
+            {
+                var found = false;
+                foreach (var expectedDependency in expectedRows)
+                {
+                    if (expectedDependency.SourceKind
+                            != actualDependency.SourceKind
+                        || expectedDependency.SourceOrdinal
+                            != actualDependency.SourceOrdinal)
+                    {
+                        continue;
+                    }
+
+                    found = actualDependency.Relationship
+                            == expectedDependency.Relationship
+                        || (expectedDependency.Relationship == 3
+                            && actualDependency.Relationship is 1 or 2);
+                    break;
+                }
+
+                if (!found)
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private bool EquivalentContracts(int leftMethod, int rightMethod)
+        => _contracts.GetEffectsMask(leftMethod)
+                == _contracts.GetEffectsMask(rightMethod)
+            && SamePredicateContracts(leftMethod, rightMethod)
+            && SameOutputStateContracts(leftMethod, rightMethod)
+            && SameDependencyContracts(leftMethod, rightMethod);
 
     private (byte Phase, uint Ordinal, byte SelectorKind) GetPredicateIdentity(
         TrRmPredicateGraphContract predicate)
