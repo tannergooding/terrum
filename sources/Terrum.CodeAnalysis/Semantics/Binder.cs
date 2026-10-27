@@ -773,8 +773,9 @@ internal sealed partial class Binder
             NativeUtf8ZLiterals = [.. _nativeUtf8ZLiterals],
             RuntimePolicy = _runtimePolicy,
         };
-        if (!SemanticVerifier.TryVerifySource(program, out var functionIndex, out var span, out var exceededWorkLimit,
-            out var invalidEffect))
+        if (!SemanticVerifier.TryVerifySourceWithCopyOriginSummaries(program,
+            out var verifiedProgram, out var functionIndex, out var span,
+            out var exceededWorkLimit, out var invalidEffect))
         {
             _tree = _signatures.Count == 0 ? _trees[0] : _signatures[functionIndex].Tree;
             var (code, message) = invalidEffect switch {
@@ -797,7 +798,7 @@ internal sealed partial class Binder
             Report(code, message, span);
             return null;
         }
-        return program;
+        return verifiedProgram;
     }
 
     private static string DirectiveName(SyntaxNode directive)

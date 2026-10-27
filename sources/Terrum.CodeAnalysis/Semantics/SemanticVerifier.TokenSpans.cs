@@ -168,6 +168,231 @@ public static partial class SemanticVerifier
                 : Unavailable();
     }
 
+    private sealed class CopyOriginValue
+    {
+        private readonly Dictionary<BoundCopyOriginFieldPath, CopyOriginFact> _fields = [];
+
+        internal CopyOriginValue Clone()
+        {
+            var clone = new CopyOriginValue();
+            foreach (var (path, fact) in _fields)
+            {
+                clone._fields.Add(path, fact.Clone());
+            }
+            return clone;
+        }
+
+        internal CopyOriginFact Get(BoundCopyOriginFieldPath path)
+            => _fields.TryGetValue(path, out var fact)
+                ? fact.Clone() : CopyOriginFact.Unavailable();
+
+        internal void Set(BoundCopyOriginFieldPath path, CopyOriginFact fact)
+        {
+            if (fact is null || !fact.IsValid)
+            {
+                throw Invalid();
+            }
+            _fields[path] = fact.Clone();
+        }
+
+        internal bool Merge(CopyOriginValue other)
+        {
+            var changed = false;
+            foreach (var (path, fact) in other._fields)
+            {
+                if (_fields.TryGetValue(path, out var current))
+                {
+                    changed |= current.Merge(fact);
+                }
+                else
+                {
+                    _fields.Add(path, fact.Clone());
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+    }
+
+    private sealed record StagedCopyOriginInput(
+        BoundCopyOriginSourceView SourceView,
+        BoundExpression Argument,
+        CopyOriginValue? Snapshot);
+
+    private sealed class CopyOriginSummaryBuilder
+    {
+        private readonly BoundCopyOriginSummaryKind _kind;
+        private readonly Dictionary<BoundReturn,
+            Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>> _returns
+            = new(ReferenceEqualityComparer.Instance);
+
+        private CopyOriginSummaryBuilder(BoundCopyOriginSummaryKind kind)
+        {
+            _kind = kind;
+        }
+
+        internal static CopyOriginSummaryBuilder? Create(
+            BoundFunction function, BoundProgram program)
+        {
+            if (function.IsExternal || function.Intrinsic != BoundIntrinsic.None
+                || function.IsClassConstructor || function.IsCleanup || function.DoesNotReturn)
+            {
+                return null;
+            }
+            if (function.DirectNativeImport is not null || function.NativeVTableMethod is not null
+                || function.NativeFunctionPointerType is not null
+                || function.NativeCallableEntryName is not null)
+            {
+                return null;
+            }
+
+            if (function.IsConstructor)
+            {
+                return IsInlineStructStorage(function.ReturnType, program)
+                    && IsCopyStruct(program, function.ReturnType)
+                    && CarriesCopyOrigin(function.ReturnType, program)
+                        ? new CopyOriginSummaryBuilder(
+                            BoundCopyOriginSummaryKind.FreshInlineConstruction)
+                        : null;
+            }
+
+            return IsCopyOriginValueType(function.ReturnType, program)
+                && !IsUnique(program, function.ReturnType)
+                && CarriesCopyOrigin(function.ReturnType, program)
+                    ? new CopyOriginSummaryBuilder(BoundCopyOriginSummaryKind.NormalResult)
+                    : null;
+        }
+
+        internal BoundCopyOriginSummaryKind Kind => _kind;
+
+        internal void Observe(BoundReturn site,
+            Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>> facts)
+        {
+            if (!_returns.TryGetValue(site, out var existing))
+            {
+                existing = new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+                foreach (var (path, origins) in facts)
+                {
+                    if (origins.Count > 0)
+                    {
+                        existing.Add(path, [.. origins]);
+                    }
+                }
+                _returns.Add(site, existing);
+                return;
+            }
+
+            foreach (var path in existing.Keys.ToArray())
+            {
+                if (facts.TryGetValue(path, out var origins) && origins.Count > 0)
+                {
+                    existing[path].UnionWith(origins);
+                }
+                else
+                {
+                    _ = existing.Remove(path);
+                }
+            }
+        }
+
+        internal BoundCopyOriginSummary? Build()
+        {
+            if (_returns.Count == 0)
+            {
+                return null;
+            }
+
+            var common = new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+            var first = true;
+            foreach (var facts in _returns.Values)
+            {
+                if (first)
+                {
+                    foreach (var (path, origins) in facts)
+                    {
+                        common.Add(path, [.. origins]);
+                    }
+                    first = false;
+                    continue;
+                }
+
+                foreach (var path in common.Keys.ToArray())
+                {
+                    if (facts.TryGetValue(path, out var origins) && origins.Count > 0)
+                    {
+                        common[path].UnionWith(origins);
+                    }
+                    else
+                    {
+                        _ = common.Remove(path);
+                    }
+                }
+            }
+
+            if (common.Count == 0)
+            {
+                return null;
+            }
+
+            var copyFacts = common
+                .OrderBy(static pair => pair.Key, BoundCopyOriginPathComparer.Instance)
+                .Select(static pair => new BoundCopyFact(pair.Key,
+                    [.. pair.Value.OrderBy(static origin => origin, BoundCopyOriginComparer.Instance)]))
+                .ToImmutableArray();
+            return new BoundCopyOriginSummary(_kind, copyFacts);
+        }
+    }
+
+    private sealed class BoundCopyOriginPathComparer : IComparer<BoundCopyOriginFieldPath>
+    {
+        internal static BoundCopyOriginPathComparer Instance { get; } = new();
+
+        public int Compare(BoundCopyOriginFieldPath left, BoundCopyOriginFieldPath right)
+        {
+            var leftSteps = left.Steps;
+            var rightSteps = right.Steps;
+            var count = Math.Min(leftSteps.Length, rightSteps.Length);
+            for (var index = 0; index < count; index++)
+            {
+                var owner = ((int)leftSteps[index].OwnerType).CompareTo(
+                    (int)rightSteps[index].OwnerType);
+                if (owner != 0)
+                {
+                    return owner;
+                }
+                var field = leftSteps[index].FieldOrdinal.CompareTo(
+                    rightSteps[index].FieldOrdinal);
+                if (field != 0)
+                {
+                    return field;
+                }
+            }
+            return leftSteps.Length.CompareTo(rightSteps.Length);
+        }
+    }
+
+    private sealed class BoundCopyOriginComparer : IComparer<BoundCopyOrigin>
+    {
+        internal static BoundCopyOriginComparer Instance { get; } = new();
+
+        public int Compare(BoundCopyOrigin left, BoundCopyOrigin right)
+        {
+            var kind = ((byte)left.SourceKind).CompareTo((byte)right.SourceKind);
+            if (kind != 0)
+            {
+                return kind;
+            }
+            var ordinal = left.SourceOrdinal.CompareTo(right.SourceOrdinal);
+            if (ordinal != 0)
+            {
+                return ordinal;
+            }
+            var view = ((byte)left.SourceView).CompareTo((byte)right.SourceView);
+            return view != 0 ? view
+                : BoundCopyOriginPathComparer.Instance.Compare(left.SourcePath, right.SourcePath);
+        }
+    }
+
     private enum StorageActivationKind : byte
     {
         Block,
@@ -491,6 +716,10 @@ public static partial class SemanticVerifier
         private Dictionary<StorageKey, NativePointerFieldValue> NativePointerFieldValues { get; } = [];
         private CopyOriginFact[] CopyOriginRoots { get; }
         private Dictionary<StorageKey, CopyOriginFact> CopyOriginFieldValues { get; } = [];
+        private Dictionary<BoundExpression, CopyOriginValue> CopyOriginCallResults { get; }
+            = new(ReferenceEqualityComparer.Instance);
+        internal BoundCopyOriginSummary?[] CopyOriginSummaries { get; }
+        internal CopyOriginSummaryBuilder? CopyOriginSummaryBuilder { get; }
         private HashSet<StorageInstance>[] StorageInstances { get; }
         private StorageActivationContext StorageActivationContext { get; }
         internal int FunctionActivation { get; }
@@ -498,17 +727,24 @@ public static partial class SemanticVerifier
         internal const int RootScopeActivation = 0;
         internal List<StagedDependencySource> Staged { get; } = [];
 
-        internal BackingDependencies(int functionActivation, BoundFunction function, int length)
-            : this(functionActivation, function, length, new StorageActivationContext())
+        internal BackingDependencies(int functionActivation, BoundFunction function, int length,
+            BoundCopyOriginSummary?[] copyOriginSummaries,
+            CopyOriginSummaryBuilder? copyOriginSummaryBuilder)
+            : this(functionActivation, function, length, copyOriginSummaries,
+                new StorageActivationContext(), copyOriginSummaryBuilder)
         {
         }
 
         private BackingDependencies(int functionActivation, BoundFunction function, int length,
-            StorageActivationContext storageActivationContext)
+            BoundCopyOriginSummary?[] copyOriginSummaries,
+            StorageActivationContext storageActivationContext,
+            CopyOriginSummaryBuilder? copyOriginSummaryBuilder)
         {
             FunctionActivation = functionActivation;
             Function = function;
+            CopyOriginSummaries = copyOriginSummaries;
             StorageActivationContext = storageActivationContext;
+            CopyOriginSummaryBuilder = copyOriginSummaryBuilder;
             Sources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerSources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerMayBeUnknown = new bool[length];
@@ -524,7 +760,7 @@ public static partial class SemanticVerifier
         internal BackingDependencies Clone()
         {
             var clone = new BackingDependencies(FunctionActivation, Function, Sources.Length,
-                StorageActivationContext);
+                CopyOriginSummaries, StorageActivationContext, CopyOriginSummaryBuilder);
             CopyTo(clone);
             return clone;
         }
@@ -533,7 +769,9 @@ public static partial class SemanticVerifier
         {
             if (destination.Sources.Length != Sources.Length
                 || destination.FunctionActivation != FunctionActivation
-                || !ReferenceEquals(destination.StorageActivationContext, StorageActivationContext))
+                || !ReferenceEquals(destination.CopyOriginSummaries, CopyOriginSummaries)
+                || !ReferenceEquals(destination.StorageActivationContext, StorageActivationContext)
+                || !ReferenceEquals(destination.CopyOriginSummaryBuilder, CopyOriginSummaryBuilder))
             {
                 throw Invalid();
             }
@@ -564,6 +802,64 @@ public static partial class SemanticVerifier
             {
                 destination.CopyOriginFieldValues.Add(key, value.Clone());
             }
+            destination.CopyOriginCallResults.Clear();
+            foreach (var (expression, value) in CopyOriginCallResults)
+            {
+                destination.CopyOriginCallResults.Add(expression, value.Clone());
+            }
+        }
+
+        internal bool MergeCopyOriginCallResults(BackingDependencies other)
+        {
+            if (other.Sources.Length != Sources.Length
+                || other.FunctionActivation != FunctionActivation
+                || !ReferenceEquals(other.CopyOriginSummaries, CopyOriginSummaries))
+            {
+                throw Invalid();
+            }
+
+            var changed = false;
+            foreach (var (call, value) in other.CopyOriginCallResults)
+            {
+                if (CopyOriginCallResults.TryGetValue(call, out var current))
+                {
+                    changed |= current.Merge(value);
+                }
+                else
+                {
+                    CopyOriginCallResults.Add(call, value.Clone());
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        internal void ClearCopyOriginCallResult(BoundExpression expression)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            _ = CopyOriginCallResults.Remove(expression);
+        }
+
+        internal void SetCopyOriginCallResult(BoundExpression expression, CopyOriginValue value)
+        {
+            if (expression is null || value is null)
+            {
+                throw Invalid();
+            }
+            CopyOriginCallResults[expression] = value.Clone();
+        }
+
+        internal bool TryGetCopyOriginCallResult(BoundExpression expression,
+            out CopyOriginValue value)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            return CopyOriginCallResults.TryGetValue(expression, out value!);
         }
 
         internal bool MergeSlot(int slot, BackingDependencies other)
@@ -665,6 +961,7 @@ public static partial class SemanticVerifier
                     changed = true;
                 }
             }
+            changed |= MergeCopyOriginCallResults(other);
             return changed;
         }
 
@@ -818,6 +1115,42 @@ public static partial class SemanticVerifier
 
             fact = result ?? CopyOriginFact.Unavailable();
             return found;
+        }
+
+        internal void InvalidateCopyOriginValue(int slot, StorageProjection projection,
+            BoundProgram program, ref int remaining, int depth)
+        {
+            if ((uint)slot >= (uint)CopyOriginRoots.Length
+                || projection.Kind is not (StorageProjectionKind.WholeObject
+                    or StorageProjectionKind.InlineFieldPath))
+            {
+                throw Invalid();
+            }
+            if (projection.Kind == StorageProjectionKind.WholeObject)
+            {
+                SetCopyOriginRoot(slot, CopyOriginFact.Unavailable());
+                ClearCopyOriginFieldValues(slot);
+                return;
+            }
+
+            PreserveCopyOriginFieldValuesFromRoot(slot, Function.Variables[slot].Type,
+                this, program, ref remaining, depth + 1);
+            SetCopyOriginRoot(slot, CopyOriginFact.Unavailable());
+            ClearCopyOriginFieldValues(slot, projection);
+        }
+
+        internal void InvalidateAllCopyOriginValues(
+            BoundProgram program, ref int remaining, int depth)
+        {
+            for (var slot = 0; slot < Function.Variables.Length; slot++)
+            {
+                Count(ref remaining, depth + 1);
+                if (CarriesCopyOrigin(Function.Variables[slot].Type, program))
+                {
+                    InvalidateCopyOriginValue(slot, StorageProjection.WholeObject,
+                        program, ref remaining, depth + 1);
+                }
+            }
         }
 
         private void ClearCopyOriginFacts(int slot)
@@ -1644,7 +1977,9 @@ public static partial class SemanticVerifier
                 continue;
             }
             var pointer = program.NativePointerTypes[NativePointerTypes.Index(parameterType)];
-            if (pointer.IsWritable && CarriesNativePointer(pointer.PointeeType, program))
+            if (pointer.IsWritable
+                && (pointer.PointeeType == PrimitiveType.Void
+                    || CarriesNativePointer(pointer.PointeeType, program)))
             {
                 return true;
             }
@@ -1660,10 +1995,16 @@ public static partial class SemanticVerifier
         var valueSources = NativePointerBackingOf(value, facts, program, ref remaining, depth + 1);
         var valueMayBeUnknown = NativePointerMayBeUnknownOf(
             value, facts, program, ref remaining, depth + 1);
+        var addressMayBeUnknown = NativePointerMayBeUnknownOf(
+            address, facts, program, ref remaining, depth + 1);
         if (valueSources.Count != 0 && (targets.Count == 0
-            || NativePointerMayBeUnknownOf(address, facts, program, ref remaining, depth + 1)))
+            || addressMayBeUnknown))
         {
             throw InvalidEffect(value.Span, "NativePointer");
+        }
+        if (targets.Count == 0 || addressMayBeUnknown)
+        {
+            facts.InvalidateAllCopyOriginValues(program, ref remaining, depth + 1);
         }
 
         foreach (var target in targets)
@@ -1681,6 +2022,14 @@ public static partial class SemanticVerifier
                 }
                 facts.AddNativePointerProvenance(
                     target.Identity, valueSources, valueMayBeUnknown);
+                if (CarriesCopyOrigin(facts.Function.Variables[target.Identity].Type, program))
+                {
+                    var projection = storage.Projection.Kind is
+                        StorageProjectionKind.WholeObject or StorageProjectionKind.InlineFieldPath
+                        ? storage.Projection : StorageProjection.WholeObject;
+                    facts.InvalidateCopyOriginValue(target.Identity, projection,
+                        program, ref remaining, depth + 1);
+                }
             }
         }
     }
@@ -1688,18 +2037,24 @@ public static partial class SemanticVerifier
     private static BackingDependencies? CreateBackingDependencies(int functionActivation,
         BoundFunction function,
         BoundProgram program, bool hasSpans,
-        HashSet<NativePointerWriteEffect>[] nativePointerCaptureEffects)
+        HashSet<NativePointerWriteEffect>[] nativePointerCaptureEffects,
+        BoundCopyOriginSummary?[] copyOriginSummaries,
+        bool deriveCopyOriginSummaries, bool hasCopyOriginValues)
     {
         if (!hasSpans && program.NativePointerTypes.IsEmpty
+            && program.NativeFunctionPointerSignatures.IsEmpty
             && !CarriesNativePointer(function.ReturnType, program)
             && !function.Variables.Any(variable => CarriesNativePointer(variable.Type, program))
             && !CarriesCopyOrigin(function.ReturnType, program)
-            && !function.Variables.Any(variable => CarriesCopyOrigin(variable.Type, program)))
+            && !function.Variables.Any(variable => CarriesCopyOrigin(variable.Type, program))
+            && !hasCopyOriginValues)
         {
             return null;
         }
-        var facts = new BackingDependencies(
-            functionActivation, function, function.Variables.Length);
+        var facts = new BackingDependencies(functionActivation, function,
+            function.Variables.Length, copyOriginSummaries,
+            deriveCopyOriginSummaries
+                ? CopyOriginSummaryBuilder.Create(function, program) : null);
         var edges = new List<int>?[function.Variables.Length];
         var nativePointerEdges = new List<int>?[function.Variables.Length];
         var resultDependency = ResultDependencyContract(function);
@@ -2403,6 +2758,103 @@ public static partial class SemanticVerifier
         return false;
     }
 
+    private static bool IsCopyOriginValueType(PrimitiveType type, BoundProgram program)
+        => IsNativePointerValue(type, program)
+            || NativeFunctionPointerTypes.IsType(type)
+            || type == PrimitiveType.TokenSpan
+            || IsCopyStruct(program, type);
+
+    private static bool IsCopyOriginSummarySourceFunction(BoundFunction function)
+        => !function.IsExternal && !function.IsModuleReference
+            && function.Intrinsic == BoundIntrinsic.None && function.IndexedBody is null;
+
+    private static int[] CopyOriginSummaryVerificationOrder(
+        BoundProgram program, bool[] recursiveFunctions)
+    {
+        if (recursiveFunctions.Length != program.Functions.Length)
+        {
+            throw Invalid();
+        }
+
+        var sourceFunctions = new bool[program.Functions.Length];
+        var dependencies = new List<int>?[program.Functions.Length];
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            var function = program.Functions[index];
+            sourceFunctions[index] = IsCopyOriginSummarySourceFunction(function);
+            if (!sourceFunctions[index])
+            {
+                continue;
+            }
+
+            var callees = new HashSet<int>();
+            if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+                {
+                    if (expression is BoundCall call
+                        && (uint)call.Function < (uint)program.Functions.Length
+                        && IsCopyOriginSummarySourceFunction(program.Functions[call.Function]))
+                    {
+                        _ = callees.Add(call.Function);
+                    }
+                }))
+            {
+                throw Invalid(function.Span);
+            }
+            dependencies[index] = [.. callees.Order()];
+        }
+
+        var states = new byte[program.Functions.Length];
+        var active = new List<int>();
+        var order = new List<int>(program.Functions.Length);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            Visit(index);
+        }
+        return [.. order];
+
+        void Visit(int index)
+        {
+            if (states[index] == 2)
+            {
+                return;
+            }
+            if (!sourceFunctions[index])
+            {
+                states[index] = 2;
+                order.Add(index);
+                return;
+            }
+
+            states[index] = 1;
+            active.Add(index);
+            if (dependencies[index] is { } callees)
+            {
+                foreach (var callee in callees)
+                {
+                    if (states[callee] == 0)
+                    {
+                        Visit(callee);
+                    }
+                    else if (states[callee] == 1)
+                    {
+                        var cycleStart = active.IndexOf(callee);
+                        if (cycleStart < 0)
+                        {
+                            throw Invalid(program.Functions[index].Span);
+                        }
+                        for (var cycleIndex = cycleStart; cycleIndex < active.Count; cycleIndex++)
+                        {
+                            recursiveFunctions[active[cycleIndex]] = true;
+                        }
+                    }
+                }
+            }
+            active.RemoveAt(active.Count - 1);
+            states[index] = 2;
+            order.Add(index);
+        }
+    }
+
     private static List<(StorageProjection Projection, PrimitiveType Type)> CopyOriginFieldLeaves(
         PrimitiveType type, BoundProgram program, ref int remaining, int depth)
     {
@@ -2728,6 +3180,10 @@ public static partial class SemanticVerifier
                 };
             case BoundMove move:
                 ValidateCopyOriginVariable(move.Variable, move.Type, function);
+                if (facts.TryGetCopyOriginCallResult(move, out var moveResult))
+                {
+                    return moveResult.Get(BoundCopyOriginPath(relativeProjection.FieldPath));
+                }
                 if (relativeProjection.Kind == StorageProjectionKind.InlineFieldPath
                     && facts.TryGetCopyOriginFieldValue(move.Variable, relativeProjection,
                         out var moveFieldFact))
@@ -2742,6 +3198,18 @@ public static partial class SemanticVerifier
                         moveRoot.Project(relativeProjection.FieldPath),
                     _ => CopyOriginFact.Unavailable(),
                 };
+            case BoundReceiverLoan loan:
+                ValidateCopyOriginVariable(loan.Variable, loan.Type, function);
+                return CopyOriginFactAtProjection(loan.Variable, relativeProjection, facts);
+            case BoundMutableReceiverLoan loan:
+                ValidateCopyOriginVariable(loan.Variable, loan.Type, function);
+                return CopyOriginFactAtProjection(loan.Variable, relativeProjection, facts);
+            case BoundFieldLoan loan:
+                return CopyOriginOfExpression(loan.Place, loan.Type, relativeProjection,
+                    facts, function, program, ref remaining, depth + 1);
+            case BoundMutableFieldLoan loan:
+                return CopyOriginOfExpression(loan.Place, loan.Type, relativeProjection,
+                    facts, function, program, ref remaining, depth + 1);
             case BoundFieldRead field when TryGetNativePointerFieldPlace(field,
                 function, program, out var variable, out var sourcePrefix):
                 var sourceProjection = StorageProjection.Combine(sourcePrefix, relativeProjection);
@@ -2759,6 +3227,23 @@ public static partial class SemanticVerifier
                         fieldRoot.Project(sourceProjection.FieldPath),
                     _ => CopyOriginFact.Unavailable(),
                 };
+            case BoundFieldRead field when field.Receiver is not null
+                && IsInlineStructStorage(field.Receiver.Type, program):
+                var receiverFields = program.Structures[(int)field.Receiver.Type - 100].Fields;
+                if ((uint)field.Field >= (uint)receiverFields.Length
+                    || receiverFields[field.Field].Type != field.Type)
+                {
+                    throw Invalid(field.Span);
+                }
+                var receiverProjection = StorageProjection.Combine(
+                    StorageProjection.WholeObject.AppendField(field.Receiver.Type, field.Field),
+                    relativeProjection);
+                return CopyOriginOfExpression(field.Receiver, field.Receiver.Type,
+                    receiverProjection, facts, function, program, ref remaining, depth + 1);
+            case BoundCall call:
+                return facts.TryGetCopyOriginCallResult(call, out var callResult)
+                    ? callResult.Get(BoundCopyOriginPath(relativeProjection.FieldPath))
+                    : CopyOriginFact.Unavailable();
             case BoundConstant or BoundNull or BoundNativePointerAddress
                 or BoundNativeFixedArrayPointerAddress or BoundNativeStorageAddress:
                 return CopyOriginFact.KnownEmpty();
@@ -2766,6 +3251,18 @@ public static partial class SemanticVerifier
                 return CopyOriginFact.Unavailable();
         }
     }
+
+    private static CopyOriginFact CopyOriginFactAtProjection(int slot,
+        StorageProjection projection, BackingDependencies facts)
+        => projection.Kind switch
+        {
+            StorageProjectionKind.WholeObject => facts.CopyOriginRoot(slot),
+            StorageProjectionKind.InlineFieldPath when
+                facts.TryGetCopyOriginFieldValue(slot, projection, out var fieldFact) => fieldFact,
+            StorageProjectionKind.InlineFieldPath => facts.CopyOriginRoot(slot)
+                .Project(projection.FieldPath),
+            _ => CopyOriginFact.Unavailable(),
+        };
 
     private static void ValidateCopyOriginVariable(
         int variable, PrimitiveType type, BoundFunction function)
@@ -2857,6 +3354,535 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>
+        CopyOriginFactsForExpression(BoundExpression expression, PrimitiveType type,
+            BackingDependencies facts, BoundFunction function, BoundProgram program,
+            ref int remaining, int depth)
+    {
+        var result = new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+        var leaves = CopyOriginFieldLeaves(type, program, ref remaining, depth + 1);
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            var valueFact = CopyOriginOfExpression(expression, type, leaf.Projection,
+                facts, function, program, ref remaining, depth + 1);
+            if (!valueFact.IsAvailable || valueFact.Origins.Count == 0)
+            {
+                continue;
+            }
+
+            var destinationPath = BoundCopyOriginPath(leaf.Projection.FieldPath);
+            var origins = new HashSet<BoundCopyOrigin>(valueFact.Origins.Count);
+            foreach (var origin in valueFact.Origins)
+            {
+                _ = origins.Add(new BoundCopyOrigin(
+                    (BoundCopyOriginSourceKind)origin.SourceKind,
+                    (BoundCopyOriginSourceView)origin.SourceView,
+                    origin.SourceOrdinal, BoundCopyOriginPath(origin.SourcePath)));
+            }
+            if (!result.TryAdd(destinationPath, origins))
+            {
+                throw Invalid(expression.Span);
+            }
+        }
+        return result;
+    }
+
+    private static CopyOriginValue CopyOriginValueOfExpression(
+        BoundExpression expression, PrimitiveType type, BackingDependencies facts,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new CopyOriginValue();
+        foreach (var leaf in CopyOriginFieldLeaves(type, program, ref remaining, depth + 1))
+        {
+            Count(ref remaining, depth + 1);
+            result.Set(BoundCopyOriginPath(leaf.Projection.FieldPath),
+                CopyOriginOfExpression(expression, type, leaf.Projection, facts,
+                    function, program, ref remaining, depth + 1));
+        }
+        return result;
+    }
+
+    private static CopyOriginValue UnavailableCopyOriginValue(
+        PrimitiveType type, BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new CopyOriginValue();
+        foreach (var leaf in CopyOriginFieldLeaves(type, program, ref remaining, depth + 1))
+        {
+            Count(ref remaining, depth + 1);
+            result.Set(BoundCopyOriginPath(leaf.Projection.FieldPath),
+                CopyOriginFact.Unavailable());
+        }
+        return result;
+    }
+
+    private static void ApplyCopyOriginCallEffects(
+        BoundCall call, BoundFunction callee, InitializationState initialized,
+        BoundFunction caller, BoundProgram program, ref int remaining, int depth)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+
+        for (var argumentIndex = 0; argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            Count(ref remaining, depth + 1);
+            var argument = call.Arguments[argumentIndex];
+            var parameterIndex = call.ParameterIndex(argumentIndex);
+            var parameterSlot = parameterIndex + (callee.IsConstructor ? 1 : 0);
+            if ((uint)parameterSlot >= (uint)callee.Variables.Length)
+            {
+                throw Invalid(call.Span);
+            }
+
+            if (argument is BoundNativeOutputReservation reservation)
+            {
+                if (CarriesCopyOrigin(reservation.PointeeType, program))
+                {
+                    facts.InvalidateCopyOriginValue(reservation.Variable,
+                        StorageProjection.WholeObject, program, ref remaining, depth + 1);
+                }
+                continue;
+            }
+            if (argument is BoundOutArgument output)
+            {
+                if (CarriesCopyOrigin(output.Type, program))
+                {
+                    facts.InvalidateCopyOriginValue(output.Variable,
+                        StorageProjection.WholeObject, program, ref remaining, depth + 1);
+                }
+                continue;
+            }
+            if (NativePointerParameterMayWrite(callee, parameterIndex, program))
+            {
+                InvalidateCopyOriginThroughAddress(argument, facts, program,
+                    ref remaining, depth + 1);
+            }
+            else if (argument.Type == PrimitiveType.NativeRawPointer
+                && DirectNativeImportContract.ParameterForParameter(callee, parameterIndex)?.Access
+                    != NativeParameterAccess.Read
+                && NativeVTableCallContract.ParameterForParameter(callee, parameterIndex)?.Access
+                    != NativeParameterAccess.Read)
+            {
+                InvalidateCopyOriginThroughAddress(argument, facts, program,
+                    ref remaining, depth + 1);
+            }
+            if (argument is BoundMutableReceiverLoan mutableReceiver)
+            {
+                if (CarriesCopyOrigin(mutableReceiver.Type, program))
+                {
+                    facts.InvalidateCopyOriginValue(mutableReceiver.Variable,
+                        StorageProjection.WholeObject, program, ref remaining, depth + 1);
+                }
+                continue;
+            }
+            if (argument is BoundMutableFieldLoan mutableField)
+            {
+                if (CarriesCopyOrigin(mutableField.Type, program))
+                {
+                    if (TryGetCopyOriginPlace(mutableField.Place, caller, program,
+                        out var variable, out var projection))
+                    {
+                        facts.InvalidateCopyOriginValue(variable, projection,
+                            program, ref remaining, depth + 1);
+                    }
+                    else
+                    {
+                        facts.InvalidateAllCopyOriginValues(
+                            program, ref remaining, depth + 1);
+                    }
+                }
+                continue;
+            }
+
+            var formal = callee.Variables[parameterSlot];
+            if (!formal.IsImplicitRef || !formal.IsMutable
+                || call.ImplicitReferenceTemporary(argumentIndex) >= 0
+                || !CarriesCopyOrigin(formal.Type, program))
+            {
+                continue;
+            }
+            if (TryGetCopyOriginPlace(argument, caller, program,
+                out var sourceVariable, out var sourceProjection))
+            {
+                facts.InvalidateCopyOriginValue(sourceVariable, sourceProjection,
+                    program, ref remaining, depth + 1);
+            }
+            else
+            {
+                facts.InvalidateAllCopyOriginValues(program, ref remaining, depth + 1);
+            }
+        }
+    }
+
+    private static bool NativePointerParameterMayWrite(
+        BoundFunction callee, int parameterIndex, BoundProgram program)
+    {
+        var nativeParameter = DirectNativeImportContract.ParameterForParameter(
+            callee, parameterIndex)
+            ?? NativeVTableCallContract.ParameterForParameter(callee, parameterIndex);
+        if (nativeParameter?.Access == NativeParameterAccess.Write)
+        {
+            return true;
+        }
+
+        var parameterSlot = parameterIndex + (callee.IsConstructor ? 1 : 0);
+        if ((uint)parameterSlot >= (uint)callee.Variables.Length)
+        {
+            return false;
+        }
+        var type = callee.Variables[parameterSlot].Type;
+        return NativePointerTypeContract.IsValidType(type, program.NativePointerTypes)
+            && program.NativePointerTypes[NativePointerTypes.Index(type)].IsWritable;
+    }
+
+    private static void InvalidateCopyOriginThroughAddress(
+        BoundExpression address, BackingDependencies facts, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        var targets = NativePointerBackingOf(address, facts, program,
+            ref remaining, depth + 1);
+        var mayBeUnknown = NativePointerMayBeUnknownOf(address, facts, program,
+            ref remaining, depth + 1);
+        if (targets.Count == 0 || mayBeUnknown)
+        {
+            facts.InvalidateAllCopyOriginValues(program, ref remaining, depth + 1);
+            return;
+        }
+
+        foreach (var target in targets)
+        {
+            Count(ref remaining, depth + 1);
+            if (target.Kind != ProvenanceAnchorKind.NativeStorage
+                || (uint)target.Identity >= (uint)facts.Function.Variables.Length
+                || target.Storage is not StorageKey storage)
+            {
+                continue;
+            }
+            var projection = storage.Projection.Kind is
+                StorageProjectionKind.WholeObject or StorageProjectionKind.InlineFieldPath
+                ? storage.Projection : StorageProjection.WholeObject;
+            facts.InvalidateCopyOriginValue(target.Identity, projection, program,
+                ref remaining, depth + 1);
+        }
+    }
+
+    private static bool TryGetCopyOriginPlace(BoundExpression expression,
+        BoundFunction function, BoundProgram program, out int variable,
+        out StorageProjection projection)
+    {
+        if (expression is BoundRead read)
+        {
+            ValidateCopyOriginVariable(read.Variable, read.Type, function);
+            variable = read.Variable;
+            projection = StorageProjection.WholeObject;
+            return CarriesCopyOrigin(read.Type, program);
+        }
+        if (expression is BoundFieldRead field
+            && TryGetNativePointerFieldPlace(field, function, program,
+                out variable, out projection))
+        {
+            return CarriesCopyOrigin(field.Type, program);
+        }
+
+        variable = -1;
+        projection = default;
+        return false;
+    }
+
+    private static CopyOriginValue CreateCopyOriginCallResult(
+        BoundCall call, BoundFunction target, BoundCopyOriginSummary? summary,
+        IReadOnlyDictionary<int, StagedCopyOriginInput> stagedInputs,
+        BackingDependencies facts, BoundFunction caller, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        var result = UnavailableCopyOriginValue(target.ReturnType, program,
+            ref remaining, depth + 1);
+        if (summary is null)
+        {
+            return result;
+        }
+        ValidateCopyOriginSummary(target, summary, program);
+
+        var inputValues = new Dictionary<int, CopyOriginValue>();
+        foreach (var (parameterIndex, input) in stagedInputs)
+        {
+            var value = input.Snapshot ?? CopyOriginValueOfExpression(
+                input.Argument, input.Argument.Type, facts, caller, program,
+                ref remaining, depth + 1);
+            inputValues.Add(parameterIndex, value);
+        }
+
+        foreach (var fact in summary.Facts)
+        {
+            if (!TryResolveCopyOriginFieldPath(target.ReturnType,
+                    fact.DestinationPath, program, out var destinationType))
+            {
+                throw Invalid(call.Span);
+            }
+            foreach (var leaf in CopyOriginFieldLeaves(destinationType, program,
+                ref remaining, depth + 1))
+            {
+                var destinationPath = AppendCopyOriginPath(
+                    fact.DestinationPath, BoundCopyOriginPath(leaf.Projection.FieldPath));
+                var valueFact = CopyOriginFact.KnownEmpty();
+                foreach (var origin in fact.Origins)
+                {
+                    var parameterIndex = CopyOriginCallParameterIndex(target, origin);
+                    if (!stagedInputs.TryGetValue(parameterIndex, out var stagedInput)
+                        || stagedInput.SourceView != origin.SourceView
+                        || !inputValues.TryGetValue(parameterIndex, out var sourceValue)
+                        || !TryGetCopyOriginSourceType(target, origin, program,
+                            out var sourceRootType)
+                        || !TryResolveCopyOriginFieldPath(sourceRootType,
+                            origin.SourcePath, program, out var sourceType)
+                        || sourceType != destinationType)
+                    {
+                        throw Invalid(call.Span);
+                    }
+
+                    var sourcePath = AppendCopyOriginPath(
+                        origin.SourcePath, BoundCopyOriginPath(leaf.Projection.FieldPath));
+                    _ = valueFact.Merge(sourceValue.Get(sourcePath));
+                }
+                result.Set(destinationPath, valueFact);
+            }
+        }
+        return result;
+    }
+
+    private static void ValidateCopyOriginSummary(
+        BoundFunction function, BoundCopyOriginSummary summary, BoundProgram program)
+    {
+        if (summary is null || summary.Facts.IsDefaultOrEmpty
+            || summary.Facts.Length > MaximumAnalysisVisits
+            || function.IsExternal || function.Intrinsic != BoundIntrinsic.None
+            || function.IsClassConstructor || function.IsCleanup || function.DoesNotReturn
+            || function.DirectNativeImport is not null || function.NativeVTableMethod is not null
+            || function.NativeFunctionPointerType is not null
+            || function.NativeCallableEntryName is not null)
+        {
+            throw Invalid(function.Span);
+        }
+
+        var resultType = function.ReturnType;
+        if (summary.Kind == BoundCopyOriginSummaryKind.NormalResult)
+        {
+            if (function.IsConstructor || !IsCopyOriginValueType(resultType, program)
+                || IsUnique(program, resultType))
+            {
+                throw Invalid(function.Span);
+            }
+        }
+        else if (summary.Kind == BoundCopyOriginSummaryKind.FreshInlineConstruction)
+        {
+            if (!function.IsConstructor || !IsInlineStructStorage(resultType, program)
+                || !IsCopyStruct(program, resultType))
+            {
+                throw Invalid(function.Span);
+            }
+        }
+        else
+        {
+            throw Invalid(function.Span);
+        }
+
+        var destinations = new List<BoundCopyOriginFieldPath>(summary.Facts.Length);
+        foreach (var fact in summary.Facts)
+        {
+            if (fact is null || fact.Origins.IsDefaultOrEmpty
+                || fact.Origins.Length > MaximumAnalysisVisits
+                || !TryResolveCopyOriginFieldPath(resultType,
+                    fact.DestinationPath, program, out var destinationType)
+                || !IsCopyOriginValueType(destinationType, program)
+                || !CarriesCopyOrigin(destinationType, program))
+            {
+                throw Invalid(function.Span);
+            }
+
+            if (destinations.Any(existing =>
+                CopyOriginPathIsPrefix(existing, fact.DestinationPath)
+                || CopyOriginPathIsPrefix(fact.DestinationPath, existing)))
+            {
+                throw Invalid(function.Span);
+            }
+            destinations.Add(fact.DestinationPath);
+
+            var origins = new HashSet<BoundCopyOrigin>();
+            foreach (var origin in fact.Origins)
+            {
+                if (!origins.Add(origin)
+                    || !TryGetCopyOriginSourceType(function, origin, program,
+                        out var sourceRootType)
+                    || !TryResolveCopyOriginFieldPath(sourceRootType,
+                        origin.SourcePath, program, out var sourceType)
+                    || sourceType != destinationType)
+                {
+                    throw Invalid(function.Span);
+                }
+            }
+        }
+    }
+
+    private static Dictionary<int, BoundCopyOriginSourceView> CopyOriginSummaryInputViews(
+        BoundFunction function, BoundCopyOriginSummary summary)
+    {
+        var result = new Dictionary<int, BoundCopyOriginSourceView>();
+        foreach (var fact in summary.Facts)
+        {
+            foreach (var origin in fact.Origins)
+            {
+                var parameterIndex = CopyOriginCallParameterIndex(function, origin);
+                if (result.TryGetValue(parameterIndex, out var existing)
+                    && existing != origin.SourceView)
+                {
+                    throw Invalid(function.Span);
+                }
+                result[parameterIndex] = origin.SourceView;
+            }
+        }
+        return result;
+    }
+
+    private static bool TryGetCopyOriginSourceType(
+        BoundFunction function, BoundCopyOrigin origin, BoundProgram program,
+        out PrimitiveType type)
+    {
+        type = PrimitiveType.Void;
+        var hasBorrowedReceiver = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor;
+        if (origin.SourceKind == BoundCopyOriginSourceKind.Receiver)
+        {
+            if (!hasBorrowedReceiver || origin.SourceOrdinal != 0
+                || origin.SourceView != BoundCopyOriginSourceView.EntryReferentValue
+                || function.Variables.IsDefaultOrEmpty
+                || !IsInlineStructStorage(function.Variables[0].Type, program)
+                || !IsCopyStruct(program, function.Variables[0].Type))
+            {
+                return false;
+            }
+            type = function.Variables[0].Type;
+            return true;
+        }
+        if (origin.SourceKind != BoundCopyOriginSourceKind.Formal)
+        {
+            return false;
+        }
+
+        var formalCount = function.ParameterCount - (hasBorrowedReceiver ? 1 : 0);
+        var formalOffset = function.IsConstructor || hasBorrowedReceiver ? 1 : 0;
+        if ((uint)origin.SourceOrdinal >= (uint)formalCount)
+        {
+            return false;
+        }
+        var slot = origin.SourceOrdinal + formalOffset;
+        if ((uint)slot >= (uint)function.Variables.Length)
+        {
+            return false;
+        }
+        var formal = function.Variables[slot];
+        var expectedView = formal.IsImplicitRef
+            ? BoundCopyOriginSourceView.EntryReferentValue
+            : BoundCopyOriginSourceView.EntryValue;
+        if (origin.SourceView != expectedView || formal.IsOut || formal.IsInit
+            || !IsCopyOriginValueType(formal.Type, program)
+            || (!formal.IsImplicitRef && IsUnique(program, formal.Type))
+            || (formal.IsImplicitRef && !IsImplicitReferenceType(formal.Type, program)))
+        {
+            return false;
+        }
+        type = formal.Type;
+        return true;
+    }
+
+    private static int CopyOriginCallParameterIndex(
+        BoundFunction function, BoundCopyOrigin origin)
+    {
+        if (origin.SourceKind == BoundCopyOriginSourceKind.Receiver)
+        {
+            return 0;
+        }
+        var hasBorrowedReceiver = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor;
+        return origin.SourceOrdinal + (hasBorrowedReceiver ? 1 : 0);
+    }
+
+    private static bool TryResolveCopyOriginFieldPath(
+        PrimitiveType rootType, BoundCopyOriginFieldPath path,
+        BoundProgram program, out PrimitiveType resultType)
+    {
+        resultType = rootType;
+        if (path.Steps.Length > MaximumDepth)
+        {
+            return false;
+        }
+        foreach (var step in path.Steps)
+        {
+            if (step.OwnerType != resultType || !IsInlineStructStorage(resultType, program))
+            {
+                return false;
+            }
+            var fields = program.Structures[(int)resultType - 100].Fields;
+            if ((uint)step.FieldOrdinal >= (uint)fields.Length)
+            {
+                return false;
+            }
+            resultType = fields[step.FieldOrdinal].Type;
+        }
+        return true;
+    }
+
+    private static BoundCopyOriginFieldPath AppendCopyOriginPath(
+        BoundCopyOriginFieldPath prefix, BoundCopyOriginFieldPath suffix)
+        => new([.. prefix.Steps, .. suffix.Steps]);
+
+    private static bool CopyOriginPathIsPrefix(
+        BoundCopyOriginFieldPath prefix, BoundCopyOriginFieldPath path)
+    {
+        var prefixSteps = prefix.Steps;
+        var pathSteps = path.Steps;
+        return prefixSteps.Length <= pathSteps.Length
+            && prefixSteps.AsSpan().SequenceEqual(pathSteps.AsSpan(0, prefixSteps.Length));
+    }
+
+    private static Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>
+        CopyOriginFactsForFreshReceiver(PrimitiveType type, BackingDependencies facts,
+            BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+        var leaves = CopyOriginFieldLeaves(type, program, ref remaining, depth + 1);
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            if (leaf.Projection.Kind != StorageProjectionKind.InlineFieldPath
+                || !facts.TryGetCopyOriginFieldValue(0, leaf.Projection, out var valueFact)
+                || !valueFact.IsAvailable || valueFact.Origins.Count == 0)
+            {
+                continue;
+            }
+
+            var destinationPath = BoundCopyOriginPath(leaf.Projection.FieldPath);
+            var origins = new HashSet<BoundCopyOrigin>(valueFact.Origins.Count);
+            foreach (var origin in valueFact.Origins)
+            {
+                _ = origins.Add(new BoundCopyOrigin(
+                    (BoundCopyOriginSourceKind)origin.SourceKind,
+                    (BoundCopyOriginSourceView)origin.SourceView,
+                    origin.SourceOrdinal, BoundCopyOriginPath(origin.SourcePath)));
+            }
+            if (!result.TryAdd(destinationPath, origins))
+            {
+                throw Invalid();
+            }
+        }
+        return result;
+    }
+
+    private static BoundCopyOriginFieldPath BoundCopyOriginPath(FieldProjectionPath path)
+        => new([.. path.Segments.Select(static segment =>
+            new BoundCopyOriginFieldStep(segment.OwnerType, segment.Field))]);
+
     private static bool TryGetCopyOriginInput(BoundFunction function, BoundProgram program,
         int slot, out CopyValueOrigin origin)
     {
@@ -2872,6 +3898,7 @@ public static partial class SemanticVerifier
         {
             var receiverType = function.Variables[0].Type;
             if (!IsInlineStructStorage(receiverType, program)
+                || !IsCopyStruct(program, receiverType)
                 || !CarriesCopyOrigin(receiverType, program))
             {
                 return false;
@@ -2890,7 +3917,9 @@ public static partial class SemanticVerifier
         }
 
         var formal = function.Variables[slot];
-        if (formal.IsOut || formal.IsInit || !CarriesCopyOrigin(formal.Type, program)
+        if (formal.IsOut || formal.IsInit
+            || !IsCopyOriginValueType(formal.Type, program)
+            || !CarriesCopyOrigin(formal.Type, program)
             || (!formal.IsImplicitRef && IsUnique(program, formal.Type)))
         {
             return false;

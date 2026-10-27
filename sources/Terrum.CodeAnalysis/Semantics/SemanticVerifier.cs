@@ -38,13 +38,13 @@ public static partial class SemanticVerifier
     public static void Verify(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        VerifyCore(program, requireEntryPoint: true);
+        _ = VerifyCore(program, requireEntryPoint: true);
     }
 
     /// <summary>Checks a fully defined library with no process entry point. Libraries cannot be emitted as executables without linking.</summary>
     /// <exception cref="ArgumentException">The library is malformed or contains an entry point.</exception>
     /// <exception cref="NotSupportedException">The library exceeds verification limits.</exception>
-    public static void VerifyLibrary(BoundProgram program) => VerifyCore(program, requireEntryPoint: false);
+    public static void VerifyLibrary(BoundProgram program) => _ = VerifyCore(program, requireEntryPoint: false);
 
     internal static void VerifyLibraryWithDirectNativeImports(BoundProgram program)
     {
@@ -65,23 +65,24 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
-        VerifyCore(program, requireEntryPoint, allowExternal: true);
+        _ = VerifyCore(program, requireEntryPoint, allowExternal: true);
     }
 
     internal static void VerifyReferences(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        VerifyCore(program, requireEntryPoint: true, allowExternal: true);
+        _ = VerifyCore(program, requireEntryPoint: true, allowExternal: true);
     }
 
     internal static void VerifyLibraryReferences(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
-        VerifyCore(program, requireEntryPoint: false, allowExternal: true);
+        _ = VerifyCore(program, requireEntryPoint: false, allowExternal: true);
     }
 
-    private static void VerifyCore(BoundProgram program, bool requireEntryPoint, bool allowExternal = false,
-        bool allowGenericProofDependencies = false)
+    private static ImmutableArray<BoundCopyOriginSummary?> VerifyCore(
+        BoundProgram program, bool requireEntryPoint, bool allowExternal = false,
+        bool allowGenericProofDependencies = false, bool deriveCopyOriginSummaries = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.Functions.IsDefaultOrEmpty || (requireEntryPoint
@@ -747,7 +748,29 @@ public static partial class SemanticVerifier
             program, nativePointerCaptureEffects);
         ValidateNativePointerWriteContracts(
             program, nativePointerWriteEffects, nativePointerCaptureEffects);
+        var hasCopyOriginValues = program.Functions.Any(function =>
+            CarriesCopyOrigin(function.ReturnType, program)
+            || function.Variables.Any(variable => CarriesCopyOrigin(variable.Type, program)));
+        var copyOriginSummaries = new BoundCopyOriginSummary?[program.Functions.Length];
+        foreach (var function in program.Functions)
+        {
+            if (function.CopyOriginSummary is { } summary)
+            {
+                ValidateCopyOriginSummary(function, summary, program);
+            }
+        }
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
+        {
+            if (!deriveCopyOriginSummaries || !IsCopyOriginSummarySourceFunction(program.Functions[functionIndex]))
+            {
+                copyOriginSummaries[functionIndex] = program.Functions[functionIndex].CopyOriginSummary;
+            }
+        }
+        var recursiveCopyOriginFunctions = new bool[program.Functions.Length];
+        var functionOrder = deriveCopyOriginSummaries
+            ? CopyOriginSummaryVerificationOrder(program, recursiveCopyOriginFunctions)
+            : [.. Enumerable.Range(0, program.Functions.Length)];
+        foreach (var functionIndex in functionOrder)
         {
             var function = program.Functions[functionIndex];
             if (function.IsExternal)
@@ -766,7 +789,9 @@ public static partial class SemanticVerifier
             try
             {
                 backingDependencies = CreateBackingDependencies(functionIndex, function, program, hasSpanDependencies,
-                    nativePointerCaptureEffects);
+                    nativePointerCaptureEffects, copyOriginSummaries,
+                    deriveCopyOriginSummaries && !recursiveCopyOriginFunctions[functionIndex],
+                    hasCopyOriginValues);
             }
             catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
             {
@@ -837,9 +862,20 @@ public static partial class SemanticVerifier
                 exception.Data[FunctionIndexKey] = functionIndex;
                 throw;
             }
+            if (deriveCopyOriginSummaries
+                && backingDependencies?.CopyOriginSummaryBuilder is { } summaryBuilder)
+            {
+                copyOriginSummaries[functionIndex] = summaryBuilder.Build();
+                if (copyOriginSummaries[functionIndex] is { } summary)
+                {
+                    ValidateCopyOriginSummary(function, summary, program);
+                }
+            }
         }
 
         VerifySourceGrantNativeCallables(program, requireEntryPoint);
+        var summaries = ImmutableArray.CreateRange(copyOriginSummaries);
+        return summaries;
 
         bool HasFieldName(int owner, string name)
         {
@@ -2162,11 +2198,51 @@ public static partial class SemanticVerifier
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
         out string? invalidEffect, bool allowGenericProofDependencies = false)
+        => TryVerifySourceCore(program, out _, out functionIndex, out span,
+            out exceededWorkLimit, out invalidEffect, allowGenericProofDependencies,
+            deriveCopyOriginSummaries: false);
+
+    internal static bool TryVerifySourceWithCopyOriginSummaries(BoundProgram program,
+        out BoundProgram verifiedProgram, out int functionIndex, out TextSpan span,
+        out bool exceededWorkLimit, out string? invalidEffect,
+        bool allowGenericProofDependencies = false)
+        => TryVerifySourceCore(program, out verifiedProgram, out functionIndex, out span,
+            out exceededWorkLimit, out invalidEffect, allowGenericProofDependencies,
+            deriveCopyOriginSummaries: true);
+
+    private static bool TryVerifySourceCore(BoundProgram program,
+        out BoundProgram verifiedProgram, out int functionIndex, out TextSpan span,
+        out bool exceededWorkLimit, out string? invalidEffect,
+        bool allowGenericProofDependencies, bool deriveCopyOriginSummaries)
     {
         try
         {
-            VerifyCore(program, requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
+            var summaries = VerifyCore(program,
+                requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
                 allowGenericProofDependencies: allowGenericProofDependencies);
+            if (deriveCopyOriginSummaries
+                && program.Functions.Any(function =>
+                    IsCopyOriginSummarySourceFunction(function)
+                    && CopyOriginSummaryBuilder.Create(function, program) is not null))
+            {
+                try
+                {
+                    summaries = VerifyCore(program,
+                        requireEntryPoint: program.EntryPoint != -1, allowExternal: true,
+                        allowGenericProofDependencies: allowGenericProofDependencies,
+                        deriveCopyOriginSummaries: true);
+                }
+                catch (NotSupportedException)
+                {
+                    summaries = [.. program.Functions.Select(function =>
+                        IsCopyOriginSummarySourceFunction(function)
+                            ? null : function.CopyOriginSummary)];
+                }
+            }
+            verifiedProgram = program with {
+                Functions = [.. program.Functions.Select((function, index) =>
+                    function with { CopyOriginSummary = summaries[index] })],
+            };
             functionIndex = -1;
             span = default;
             exceededWorkLimit = false;
@@ -2175,6 +2251,7 @@ public static partial class SemanticVerifier
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)
         {
+            verifiedProgram = program;
             functionIndex = exception.Data[FunctionIndexKey] is int index ? index : Math.Max(0, program.EntryPoint);
             span = exception.Data[SourceSpanKey] is TextSpan sourceSpan
                 ? sourceSpan : program.Functions.IsDefaultOrEmpty ? default : program.Functions[functionIndex].Span;
@@ -3364,6 +3441,8 @@ public static partial class SemanticVerifier
                     beforeMasks.CopyTo(fieldMasks, 0);
                     return true;
                 }
+                var copyOriginSummaryBuilder =
+                    (initialized.Dependencies as BackingDependencies)?.CopyOriginSummaryBuilder;
                 if (function.IsClassConstructor && (!initialized[0]
                     || fieldMasks[0] != FullMask(program, function.Variables[0].Type)))
                 {
@@ -3400,6 +3479,15 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                 }
+                Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>? returnCopyOriginFacts = null;
+                if (copyOriginSummaryBuilder?.Kind == BoundCopyOriginSummaryKind.NormalResult
+                    && result.Value is BoundExpression copyOriginResult
+                    && initialized.Dependencies is BackingDependencies returnCopyOriginDependencies)
+                {
+                    returnCopyOriginFacts = CopyOriginFactsForExpression(copyOriginResult,
+                        function.ReturnType, returnCopyOriginDependencies, function, program,
+                        ref remaining, depth + 1);
+                }
                 if (result.Value is BoundExpression pointerResult
                     && CarriesNativePointer(pointerResult.Type, program)
                     && initialized.Dependencies is BackingDependencies pointerResultDependencies
@@ -3426,6 +3514,11 @@ public static partial class SemanticVerifier
                     hasOutParameter |= function.Variables[i].IsOut;
                 }
                 var canReturnNormally = true;
+                InitializationState? successfulReturnState = null;
+                if (cleanups.Count == 0 && !hasOutParameter)
+                {
+                    successfulReturnState = initialized;
+                }
                 if (function.ReturnType == PrimitiveType.Bool && result.Value is BoundExpression boolResult)
                 {
                     if (cleanups.Count != 0 || hasOutParameter)
@@ -3449,6 +3542,7 @@ public static partial class SemanticVerifier
                             if (!cleanupDoesNotComplete)
                             {
                                 canReturnNormally = true;
+                                successfulReturnState = returnState;
                                 if (predicate)
                                 {
                                     for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
@@ -3490,6 +3584,7 @@ public static partial class SemanticVerifier
                             if (!cleanupDoesNotComplete)
                             {
                                 canReturnNormally = true;
+                                successfulReturnState = returnState;
                                 for (var i = parameterOffset; i < function.ParameterCount + parameterOffset; i++)
                                 {
                                     if (function.Variables[i].IsOut && !returnState[i])
@@ -3508,6 +3603,28 @@ public static partial class SemanticVerifier
                 if (function.DoesNotReturn && reachable && canReturnNormally)
                 {
                     throw InvalidEffect(result.Span, "DoesNotReturn");
+                }
+                if (reachable && canReturnNormally && copyOriginSummaryBuilder is not null)
+                {
+                    Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>> returnFacts;
+                    if (copyOriginSummaryBuilder.Kind == BoundCopyOriginSummaryKind.NormalResult)
+                    {
+                        returnFacts = returnCopyOriginFacts
+                            ?? new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+                    }
+                    else if (copyOriginSummaryBuilder.Kind
+                            == BoundCopyOriginSummaryKind.FreshInlineConstruction
+                        && function.IsConstructor
+                        && successfulReturnState?.Dependencies is BackingDependencies constructionDependencies)
+                    {
+                        returnFacts = CopyOriginFactsForFreshReceiver(function.ReturnType,
+                            constructionDependencies, program, ref remaining, depth + 1);
+                    }
+                    else
+                    {
+                        returnFacts = new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+                    }
+                    copyOriginSummaryBuilder.Observe(result, returnFacts);
                 }
                 return true;
             default:
@@ -5026,6 +5143,16 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
+                if (initialized.Dependencies is BackingDependencies moveDependencies)
+                {
+                    moveDependencies.ClearCopyOriginCallResult(move);
+                    if (CarriesCopyOrigin(move.Type, program))
+                    {
+                        moveDependencies.SetCopyOriginCallResult(move,
+                            CopyOriginValueOfExpression(move, move.Type, moveDependencies,
+                                function, program, ref remaining, depth + 1));
+                    }
+                }
                 initialized.Retire(move.Variable, (long)move.Span.Start + 1);
                 fieldMasks[move.Variable] = 0;
                 break;
@@ -5422,6 +5549,8 @@ public static partial class SemanticVerifier
                         && MayWriteNativePointerStorage(call, program))
                     {
                         dependencies.MarkAllNativePointerProvenanceUnknown();
+                        dependencies.InvalidateAllCopyOriginValues(
+                            program, ref remaining, depth + 1);
                     }
                     initialized.InvalidateNativeOutputCorrelations();
                 }
@@ -5443,6 +5572,21 @@ public static partial class SemanticVerifier
                     throw Limit();
                 }
                 var target = program.Functions[call.Function];
+                var copyOriginSummary = initialized.Dependencies is BackingDependencies summaryDependencies
+                    ? summaryDependencies.CopyOriginSummaries[call.Function]
+                    : target.CopyOriginSummary;
+                if (copyOriginSummary is not null
+                    && initialized.Dependencies is null)
+                {
+                    throw Invalid(call.Span);
+                }
+                var copyOriginInputViews = copyOriginSummary is null
+                    ? null : CopyOriginSummaryInputViews(target, copyOriginSummary);
+                var stagedCopyOriginInputs = new Dictionary<int, StagedCopyOriginInput>();
+                if (initialized.Dependencies is BackingDependencies copyOriginDependencies)
+                {
+                    copyOriginDependencies.ClearCopyOriginCallResult(call);
+                }
                 if (target.IsCleanup || target.IsClassConstructor)
                 {
                     throw InvalidEffect(call.Span, "Ownership");
@@ -5549,6 +5693,18 @@ public static partial class SemanticVerifier
                         if (implicitReferenceTemporary < -1)
                         {
                             throw Invalid();
+                        }
+                        CopyOriginValue? preMoveCopyOriginSnapshot = null;
+                        if (argumentsComplete && argument is BoundMove
+                            && copyOriginInputViews?.ContainsKey(parameterIndex) == true)
+                        {
+                            if (initialized.Dependencies is not BackingDependencies copyOriginState)
+                            {
+                                throw Invalid(argument.Span);
+                            }
+                            preMoveCopyOriginSnapshot = CopyOriginValueOfExpression(argument,
+                                argument.Type, copyOriginState, function, program,
+                                ref remaining, depth + 1);
                         }
                         if (target.Variables[parameterSlot].IsImplicitRef)
                         {
@@ -5849,6 +6005,26 @@ public static partial class SemanticVerifier
                             initialized[implicitReferenceTemporary] = true;
                             fieldMasks[implicitReferenceTemporary] = 0;
                         }
+                        if (argumentsComplete
+                            && copyOriginInputViews is not null
+                            && copyOriginInputViews.TryGetValue(parameterIndex, out var sourceView))
+                        {
+                            if (initialized.Dependencies is not BackingDependencies copyOriginState)
+                            {
+                                throw Invalid(argument.Span);
+                            }
+                            var snapshot = sourceView == BoundCopyOriginSourceView.EntryValue
+                                || implicitReferenceTemporary >= 0
+                                ? preMoveCopyOriginSnapshot ?? CopyOriginValueOfExpression(argument,
+                                    argument.Type, copyOriginState, function, program,
+                                    ref remaining, depth + 1)
+                                : null;
+                            if (!stagedCopyOriginInputs.TryAdd(parameterIndex,
+                                new StagedCopyOriginInput(sourceView, argument, snapshot)))
+                            {
+                                throw Invalid(argument.Span);
+                            }
+                        }
                         StageDependencySource(call, parameterIndex, argument, target,
                             initialized, program, ref remaining, depth + 1);
                     }
@@ -5866,11 +6042,25 @@ public static partial class SemanticVerifier
                     {
                         throw InvalidEffect(call.Span, "NativeImport");
                     }
+                    var copyOriginCallResult = CarriesCopyOrigin(call.Type, program)
+                        && initialized.Dependencies is BackingDependencies
+                        copyOriginResultDependencies
+                        ? CreateCopyOriginCallResult(call, target, copyOriginSummary,
+                            stagedCopyOriginInputs, copyOriginResultDependencies,
+                            function, program, ref remaining, depth + 1)
+                        : null;
+                    ApplyCopyOriginCallEffects(call, target, initialized, function,
+                        program, ref remaining, depth + 1);
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
                     ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
                     if (!ProvidesNoFailureGuarantee(target))
                     {
                         failures?.Add(initialized, fieldMasks);
+                    }
+                    if (copyOriginCallResult is not null
+                        && initialized.Dependencies is BackingDependencies resultDependencies)
+                    {
+                        resultDependencies.SetCopyOriginCallResult(call, copyOriginCallResult);
                     }
                     foreach (var output in outTargets)
                     {

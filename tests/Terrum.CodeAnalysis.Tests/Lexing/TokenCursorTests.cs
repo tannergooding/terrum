@@ -133,6 +133,136 @@ public sealed class TokenCursorTests
             await ExecuteAsync(program, policy);
         }
     }
+
+    [Test]
+    public async Task CopyOriginSummariesComposeFreshConstructionAndForwardCallsAsync()
+    {
+        const string Entry = """
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+
+                public unsafe PointerPair(ptr<int32> left, ptr<int32> right) {
+                    Left = left;
+                    Right = right;
+                }
+
+                public unsafe ptr<int32> SelectLeft() { return Left; }
+
+                public unsafe mut int32 ReplaceLeft(ptr<int32> value) {
+                    Left = value;
+                    return 0;
+                }
+
+                public unsafe ptr<int32> SelectLeftAfter(int32 ignored) { return Left; }
+            }
+
+            int32 Main() {
+                mut int32 value = 42;
+                unsafe {
+                    ptr<int32> pointer = &value;
+                    PointerPair pair = Compose(pointer, pointer);
+                    ptr<int32> selected = pair.SelectLeft();
+                }
+                return 42;
+            }
+
+            unsafe PointerPair Compose(ptr<int32> left, ptr<int32> right) {
+                unsafe {
+                    PointerPair pair = new PointerPair(left, right);
+                    return Identity(pair);
+                }
+            }
+
+            unsafe PointerPair Identity(PointerPair value) { return value; }
+
+            unsafe ptr<int32> RecursiveIdentity(ptr<int32> pointer, bool recurse) {
+                if (recurse) { unsafe { return RecursiveIdentity(pointer, false); } }
+                return pointer;
+            }
+
+            unsafe ptr<int32> ReplaceThenSelect(ptr<int32> initial, ptr<int32> replacement) {
+                unsafe {
+                    mut PointerPair pair = new PointerPair(initial, initial);
+                    return pair.SelectLeftAfter(pair.ReplaceLeft(replacement));
+                }
+            }
+            """;
+        var program = Program(await CompileAsync("", Entry, BoundRuntimePolicy.FailFast));
+
+        var constructor = program.Functions.Single(static function =>
+            function.IsConstructor && function.DeclaringStruct == "PointerPair");
+        var identity = program.Functions.Single(static function => function.Name == "Identity");
+        var compose = program.Functions.Single(static function => function.Name == "Compose");
+        var selectLeft = program.Functions.Single(static function =>
+            function.Name.EndsWith(".SelectLeft", StringComparison.Ordinal));
+
+        AssertCopyOriginSummary(constructor, "FreshInlineConstruction");
+        Assert.That(CopyOriginSummaryRows(constructor), Is.EqualTo(new[]
+        {
+            "0<-Formal:EntryValue:0:",
+            "1<-Formal:EntryValue:1:",
+        }));
+        AssertCopyOriginSummary(identity, "NormalResult");
+        Assert.That(CopyOriginSummaryRows(identity), Is.EqualTo(new[]
+        {
+            "0<-Formal:EntryValue:0:0",
+            "1<-Formal:EntryValue:0:1",
+        }));
+        AssertCopyOriginSummary(compose, "NormalResult");
+        Assert.That(CopyOriginSummaryRows(compose), Is.EqualTo(new[]
+        {
+            "0<-Formal:EntryValue:0:",
+            "1<-Formal:EntryValue:1:",
+        }));
+        AssertCopyOriginSummary(selectLeft, "NormalResult");
+        Assert.That(CopyOriginSummaryRows(selectLeft),
+            Is.EqualTo(new[] { "<-Receiver:EntryReferentValue:0:0" }));
+        Assert.That(GetPropertyValue(program.Functions.Single(static function =>
+            function.Name == "RecursiveIdentity"), "CopyOriginSummary"), Is.Null);
+        Assert.That(GetPropertyValue(program.Functions.Single(static function =>
+            function.Name == "ReplaceThenSelect"), "CopyOriginSummary"), Is.Null);
+    }
+
+    private static void AssertCopyOriginSummary(BoundFunction function, string expectedKind)
+    {
+        var summary = GetPropertyValue(function, "CopyOriginSummary");
+        Assert.That(summary, Is.Not.Null, function.Name);
+        Assert.That(GetPropertyValue(summary!, "Kind")?.ToString(),
+            Is.EqualTo(expectedKind), function.Name);
+    }
+
+    private static string[] CopyOriginSummaryRows(BoundFunction function)
+    {
+        var summary = GetPropertyValue(function, "CopyOriginSummary")
+            ?? throw new AssertionException($"Expected CopyOrigin summary for {function.Name}.");
+        var facts = (System.Collections.IEnumerable)(GetPropertyValue(summary, "Facts")
+            ?? throw new AssertionException("Expected summary facts."));
+        return facts.Cast<object>().Select(fact =>
+        {
+            var destinationPath = FormatCopyOriginPath(GetPropertyValue(fact, "DestinationPath")!);
+            var origins = (System.Collections.IEnumerable)(GetPropertyValue(fact, "Origins")
+                ?? throw new AssertionException("Expected copy origins."));
+            var sourceRows = origins.Cast<object>().Select(origin =>
+                $"{GetPropertyValue(origin, "SourceKind")}:{GetPropertyValue(origin, "SourceView")}:"
+                + $"{GetPropertyValue(origin, "SourceOrdinal")}:{FormatCopyOriginPath(GetPropertyValue(origin, "SourcePath")!)}");
+            return $"{destinationPath}<-{string.Join("+", sourceRows)}";
+        }).ToArray();
+    }
+
+    private static string FormatCopyOriginPath(object path)
+    {
+        var steps = (System.Collections.IEnumerable)(GetPropertyValue(path, "Steps")
+            ?? throw new AssertionException("Expected field path steps."));
+        return string.Join(".", steps.Cast<object>().Select(step =>
+            GetPropertyValue(step, "FieldOrdinal")?.ToString()
+            ?? throw new AssertionException("Expected field ordinal.")));
+    }
+
+    private static object? GetPropertyValue(object instance, string name)
+        => instance.GetType().GetProperty(name,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(instance);
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task TerrumComponentRunnerExecutesCursorCoverageWithoutPersistingSpanMetadataAsync(

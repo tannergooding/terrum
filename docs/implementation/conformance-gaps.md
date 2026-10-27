@@ -243,6 +243,16 @@ bounded hosted/generic paths from ScalarInitOutput's experimental mode, Feature
 and Body rules. This is implementation evidence, not a scalar-only semantic
 floor. [Scalar output reader cases](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmScalarInitOutputBodyReaderTests.cs)
 are not the complete accepted reference/output model.
+The source verifier also derives provisional in-memory CopyOrigin summaries
+for supported Copy results and fresh inline construction. It composes selected
+declaration summaries without callee-body inspection, while preserving
+whole-source DependsOn/Captures bounds separately. The current codecs do not
+persist those summaries; bodyless providers and standard transport remain
+unsupported under the unapproved
+[field-provenance proposal](../proposals/reference-field-value-provenance.md).
+Mutable receiver/reference and known pointer-write call effects invalidate
+affected local origin facts conservatively; general field backing/capability
+transfer and alias-place refinements remain unfinished.
 
 **Routes/gate:** preserve complete descriptor types, receiver versus formal
 identity, eligible storage borrow versus backing forwarding, explicit/default

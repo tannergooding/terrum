@@ -366,13 +366,6 @@ public sealed record BoundStructField(string Name, PrimitiveType Type, int Offse
     public bool RequiresUnsafeCaller { get; init; }
 }
 
-/// <summary>A function whose parameter slots precede its local slots.</summary>
-/// <param name="Name">The declared name.</param>
-/// <param name="ReturnType">The declared result type.</param>
-/// <param name="Variables">Parameter and local slots.</param>
-/// <param name="ParameterCount">The number of parameter slots.</param>
-/// <param name="Body">The structured body.</param>
-/// <param name="Span">The source range.</param>
 internal enum BoundDependencyRelation : byte
 {
     DependsOn = 1,
@@ -404,6 +397,75 @@ internal sealed record BoundDependencyContract(
     int? DestinationOrdinal,
     ImmutableArray<BoundDependencySource> Sources);
 
+internal enum BoundCopyOriginSummaryKind : byte
+{
+    NormalResult = 1,
+    FreshInlineConstruction = 2,
+}
+
+internal enum BoundCopyOriginSourceKind : byte
+{
+    Formal = 1,
+    Receiver = 2,
+}
+
+internal enum BoundCopyOriginSourceView : byte
+{
+    EntryValue = 1,
+    EntryReferentValue = 2,
+}
+
+internal readonly record struct BoundCopyOriginFieldStep(PrimitiveType OwnerType, int FieldOrdinal);
+
+internal readonly struct BoundCopyOriginFieldPath : IEquatable<BoundCopyOriginFieldPath>
+{
+    private readonly ImmutableArray<BoundCopyOriginFieldStep> _steps;
+
+    internal BoundCopyOriginFieldPath(ImmutableArray<BoundCopyOriginFieldStep> steps)
+    {
+        _steps = steps;
+    }
+
+    internal ImmutableArray<BoundCopyOriginFieldStep> Steps => _steps.IsDefault ? [] : _steps;
+
+    public bool Equals(BoundCopyOriginFieldPath other)
+        => Steps.AsSpan().SequenceEqual(other.Steps.AsSpan());
+
+    public override bool Equals(object? obj)
+        => obj is BoundCopyOriginFieldPath other && Equals(other);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        foreach (var step in Steps)
+        {
+            hash.Add(step);
+        }
+        return hash.ToHashCode();
+    }
+}
+
+internal readonly record struct BoundCopyOrigin(
+    BoundCopyOriginSourceKind SourceKind,
+    BoundCopyOriginSourceView SourceView,
+    int SourceOrdinal,
+    BoundCopyOriginFieldPath SourcePath);
+
+internal sealed record BoundCopyFact(
+    BoundCopyOriginFieldPath DestinationPath,
+    ImmutableArray<BoundCopyOrigin> Origins);
+
+internal sealed record BoundCopyOriginSummary(
+    BoundCopyOriginSummaryKind Kind,
+    ImmutableArray<BoundCopyFact> Facts);
+
+/// <summary>A function whose parameter slots precede its local slots.</summary>
+/// <param name="Name">The declared name.</param>
+/// <param name="ReturnType">The declared result type.</param>
+/// <param name="Variables">Parameter and local slots.</param>
+/// <param name="ParameterCount">The number of parameter slots.</param>
+/// <param name="Body">The structured body.</param>
+/// <param name="Span">The source range.</param>
 public sealed record BoundFunction(string Name, PrimitiveType ReturnType, ImmutableArray<BoundVariable> Variables,
     int ParameterCount, BoundBlock Body, TextSpan Span)
 {
@@ -474,6 +536,7 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal bool ResultDependencyIncludesReceiver { get; init; }
 
     internal ImmutableArray<BoundDependencyContract> DependencyContracts { get; init; } = [];
+    internal BoundCopyOriginSummary? CopyOriginSummary { get; init; }
 }
 
 internal sealed record BoundModuleImport(string ProducerIdentity, string ExportKey,

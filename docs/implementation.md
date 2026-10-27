@@ -101,6 +101,19 @@ and private semantic modules persist them. Packing, alignment controls,
 and standard TRRM layout persistence remain unsupported. Raw pointer fields
 carry only their declared address bits, not pointee validity, backing,
 ownership, or lifetime.
+The verifier also carries provisional local CopyOrigin facts for currently
+represented native-pointer, function-pointer and TokenSpan values, separating
+source kind/view/formal/path from backing dependencies. Missing facts remain
+unavailable; calls without a published summary do not inspect callee bodies,
+and whole-source DependsOn/Captures bounds remain independent. Source
+verification now derives in-memory `NormalResult` and
+`FreshInlineConstruction` summaries for supported Copy values, stages
+by-value inputs at argument evaluation, and resolves checked referents at
+Invoke using the selected declaration's summary. Known mutable receiver,
+checked-reference, output and native write effects invalidate affected field
+facts instead of preserving stale origins. Recursive or exhausted inference
+remains unavailable. Bodyless cross-module expectations still have no private
+or standard transport, and these facts are not consumed by lowering.
 Direct `NativeParameter` inputs can point at committed aggregates in source,
 private semantic modules, and native execution. The canonical standard TRRM
 `NativeParameter` encoding remains unapproved; the provisional executable
