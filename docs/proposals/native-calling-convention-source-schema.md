@@ -139,12 +139,14 @@ behavior, not a new loader policy or wire allocation.
 Decode each source string literal once as a checked Unicode value, then apply
 the selected metadata String encoding/extent rules. Do not compare raw token
 spelling, admit runtime string expressions, introduce a `Text` value type or
-implicitly convert another value. LibraryName and supplied EntryName are
-nonempty ASCII names admitted by the selected target. The default entry name
-must also be exactly encodable; do not decorate, suffix, case-fold or replace
-it. No nullable/empty-string sentinel, DLL-only spelling or prototype
-capacity limit is introduced. Resolution behavior and provider retention
-remain owned by native.md.
+implicitly convert another value.
+[The separate LibraryName source-contract candidate](native-import-library-name-source-contract.md)
+supersedes only this proposal's deferred LibraryName character/path
+validation; it does not select target support. Supplied EntryName and the
+default declaration name remain exact nonempty ASCII names admitted by the
+selected target, without decoration, suffix inference, case folding or
+replacement. No nullable/empty-string sentinel is introduced. Resolution
+behavior and provider retention remain owned by native.md.
 
 Positional arguments form only the LibraryName/EntryName prefix and precede
 named arguments. Each schema argument binds at most once, including a
