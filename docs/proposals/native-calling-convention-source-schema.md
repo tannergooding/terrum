@@ -31,6 +31,8 @@ assigned**, including its 12-byte extent and convention values
 `1=Unmanaged`, `2=Cdecl`, `3=Stdcall`, `4=Vectorcall`. This proposal does
 not allocate or renumber them. The separate NativeCallConv attribute
 immediately before `fnptr` keeps its existing type-use contract.
+The exact per-Module Core enum/schema binding prerequisite is specified in
+[Native calling-convention Core registration](native-calling-convention-core-registration.md).
 
 ### Exact owners and the gap
 
