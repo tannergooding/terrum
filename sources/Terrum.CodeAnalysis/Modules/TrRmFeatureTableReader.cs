@@ -324,7 +324,7 @@ internal static class TrRmFeatureManifestValidator
     {
         2 or 7 => 1,
         3 or 5 or 6 or 12 => 2,
-        4 or 10 => 1,
+        4 => 1,
         _ => 0,
     };
 
@@ -333,7 +333,6 @@ internal static class TrRmFeatureManifestValidator
         2 or 7 => 1,
         3 or 5 or 6 => index == 0 ? 1u : 2u,
         4 => 3,
-        10 => 11,
         12 => index == 0 ? 10u : 11u,
         _ => throw InvalidManifest(),
     };

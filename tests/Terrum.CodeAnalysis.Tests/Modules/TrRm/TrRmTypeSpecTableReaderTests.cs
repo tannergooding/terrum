@@ -21,6 +21,64 @@ public sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
+    public void StandardFunctionPointerUsesConventionAndTypedMethodAnchor()
+    {
+        var standardRow = TrRmTypeSpecTableWriter.NativeFunctionPointer(3, 2);
+        Assert.That(standardRow, Is.EqualTo(new byte[]
+            { 0x0D, 0, 3, 2, 0, 0, 0 }));
+        var section = TrRmTypeSpecTableWriter.Encode(
+            [new ReadOnlyMemory<byte>(standardRow)], 0, 0, 0, 0,
+            schema: TrRmArtifactSchema.Standard, methodDefCount: 2);
+        var reader = new TrRmTypeSpecTableReader(section, 1, 0, 0, 0,
+            nativeFunctionPointerSignatureCount: 0,
+            schema: TrRmArtifactSchema.Standard, methodDefCount: 2);
+
+        Assert.That(reader.TryGetNativeFunctionPointerAnchor(1,
+            out var convention, out var methodDefRow), Is.True);
+        Assert.That(convention, Is.EqualTo(3));
+        Assert.That(methodDefRow, Is.EqualTo(2));
+        Assert.That(reader.GetCompactValueTypeKey(1),
+            Is.EqualTo(TrRmTypeSpecTableReader.NativeFunctionPointerTypeKeyStart));
+        Assert.That(reader.TryGetNativeFunctionPointerTypeSpecRow(
+            reader.GetCompactValueTypeKey(1), out var typeSpecRow), Is.True);
+        Assert.That(typeSpecRow, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void DevelopmentSignatureRowsAndStandardAnchorsRemainDistinct()
+    {
+        var developmentRow =
+            TrRmTypeSpecTableWriter.DevelopmentFunctionPointerSignatureReference(1);
+        var developmentSection = TrRmTypeSpecTableWriter.Encode(
+            [new ReadOnlyMemory<byte>(developmentRow)], 0, 0, 0, 1,
+            TrRmArtifactSchema.Development);
+        _ = new TrRmTypeSpecTableReader(developmentSection, 1, 0, 0, 0, 1,
+            TrRmArtifactSchema.Development);
+
+        Assert.Throws<InvalidDataException>(() => CreateForProfile(
+            Rows(developmentRow), 1, 0, TrRmArtifactSchema.Standard, 1));
+
+        var standardRow = TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 1);
+        Assert.Throws<InvalidDataException>(() => CreateForProfile(
+            Rows(standardRow), 1, 1, TrRmArtifactSchema.Development, 1));
+    }
+
+    [TestCase(0, 1u)]
+    [TestCase(5, 1u)]
+    [TestCase(1, 0u)]
+    [TestCase(1, 2u)]
+    public void StandardFunctionPointerRejectsInvalidConventionAndAnchor(
+        byte convention, uint anchor)
+    {
+        var bytes = new byte[7];
+        bytes[0] = 0x0D;
+        bytes[2] = convention;
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(3), anchor);
+        Assert.Throws<InvalidDataException>(() => CreateForProfile(
+            Rows(bytes), 1, 0, TrRmArtifactSchema.Standard, 1));
+    }
+
+    [Test]
     public void ValidatesInlineAndIndexedFamiliesWithoutInventingExecutableSupport()
     {
         var section = Rows(
@@ -105,16 +163,18 @@ public sealed class TrRmTypeSpecTableReaderTests
         rows[1] = TrRmTypeSpecTableWriter.Builtin(0x0D);
         for (var index = 0; index < signatureCount; index++)
         {
-            rows[index + 2] = TrRmTypeSpecTableWriter.Reference(0x0D, (uint)(index + 1));
+            rows[index + 2] = TrRmTypeSpecTableWriter
+                .DevelopmentFunctionPointerSignatureReference((uint)(index + 1));
         }
         var firstPointerRow = signatureCount + 3;
         rows[firstPointerRow - 1] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D);
         rows[firstPointerRow] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D);
         rows[firstPointerRow + 1] = TrRmTypeSpecTableWriter.InlineFamily(0x8C, 8);
 
-        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, signatureCount);
+        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0,
+            signatureCount, TrRmArtifactSchema.Development);
         var reader = new TrRmTypeSpecTableReader(section, rows.Length, 0, 0, 0,
-            signatureCount);
+            signatureCount, TrRmArtifactSchema.Development);
 
         Assert.That(reader.GetCompactValueTypeKey(firstPointerRow), Is.EqualTo(ushort.MaxValue));
         Assert.That(reader.GetCompactValueTypeKey(firstPointerRow + 1), Is.EqualTo(ushort.MaxValue));
@@ -179,6 +239,14 @@ public sealed class TrRmTypeSpecTableReaderTests
         _ = new TrRmTypeSpecTableReader(bytes, count, typeDefCount, 0, 0);
     }
 
+    private static void CreateForProfile(byte[] bytes, int count,
+        int nativeFunctionPointerSignatureCount, TrRmArtifactSchema schema,
+        int methodDefCount)
+    {
+        _ = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0,
+            nativeFunctionPointerSignatureCount, schema, methodDefCount);
+    }
+
     private static byte[] ReadRow(byte[] bytes, int row)
     {
         var reader = new TrRmTypeSpecTableReader(bytes, 1, 0, 0, 0);
@@ -189,7 +257,7 @@ public sealed class TrRmTypeSpecTableReaderTests
         int nativeFunctionPointerSignatureCount, int row)
     {
         var reader = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0,
-            nativeFunctionPointerSignatureCount);
+            nativeFunctionPointerSignatureCount, TrRmArtifactSchema.Development);
         return reader.GetCompactValueTypeKey(row);
     }
 

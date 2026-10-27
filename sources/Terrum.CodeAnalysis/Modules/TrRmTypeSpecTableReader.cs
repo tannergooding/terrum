@@ -27,16 +27,36 @@ public readonly ref struct TrRmTypeSpecTableReader
     private readonly int _importCount;
     private readonly int _genericParamCount;
     private readonly int _nativeFunctionPointerSignatureCount;
+    private readonly int _nativeFunctionPointerTypeKeyCount;
+    private readonly int _methodDefCount;
+    private readonly TrRmArtifactSchema _schema;
     private readonly ushort[] _compactValueTypeKeys;
 
     /// <summary>Creates a reader for TypeSpec rows and their referenced table counts.</summary>
     public TrRmTypeSpecTableReader(ReadOnlySpan<byte> section, int recordCount,
         int typeDefCount, int importCount, int genericParamCount,
         int nativeFunctionPointerSignatureCount = 0)
+        : this(section, recordCount, typeDefCount, importCount, genericParamCount,
+            nativeFunctionPointerSignatureCount, TrRmArtifactSchema.Standard)
+    {
+    }
+
+    internal TrRmTypeSpecTableReader(ReadOnlySpan<byte> section, int recordCount,
+        int typeDefCount, int importCount, int genericParamCount,
+        int nativeFunctionPointerSignatureCount, TrRmArtifactSchema schema,
+        int methodDefCount = 0)
     {
         if (!ValidCount(typeDefCount) || !ValidCount(importCount)
             || !ValidCount(genericParamCount)
             || !ValidCount(nativeFunctionPointerSignatureCount))
+        {
+            throw InvalidType();
+        }
+        if (!ValidCount(methodDefCount)
+            || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.Development or TrRmArtifactSchema.CopyOriginDraft)
+            || (schema != TrRmArtifactSchema.Development
+                && nativeFunctionPointerSignatureCount != 0))
         {
             throw InvalidType();
         }
@@ -47,6 +67,11 @@ public readonly ref struct TrRmTypeSpecTableReader
         _importCount = importCount;
         _genericParamCount = genericParamCount;
         _nativeFunctionPointerSignatureCount = nativeFunctionPointerSignatureCount;
+        _methodDefCount = methodDefCount;
+        _schema = schema;
+        _nativeFunctionPointerTypeKeyCount = schema == TrRmArtifactSchema.Development
+            ? nativeFunctionPointerSignatureCount
+            : CountNativeFunctionPointerRows();
         for (var row = 1; row <= recordCount; row++)
         {
             Validate(row);
@@ -293,6 +318,29 @@ public readonly ref struct TrRmTypeSpecTableReader
     public int Count => _recordCount;
     /// <summary>The number of native function-pointer signatures in the table.</summary>
     public int NativeFunctionPointerSignatureCount => _nativeFunctionPointerSignatureCount;
+    internal int NativeFunctionPointerTypeKeyCount => _nativeFunctionPointerTypeKeyCount;
+
+    internal bool TryGetNativeFunctionPointerAnchor(int typeSpecRow,
+        out byte callingConvention, out int methodDefRow)
+    {
+        callingConvention = 0;
+        methodDefRow = 0;
+        if (_schema == TrRmArtifactSchema.Development
+            || typeSpecRow <= 0 || typeSpecRow > _recordCount)
+        {
+            return false;
+        }
+
+        var type = _rows.GetRow(typeSpecRow);
+        if (type[0] != 0x0D || type.Length != 7)
+        {
+            return false;
+        }
+
+        callingConvention = type[2];
+        methodDefRow = checked((int)Read(type, 3));
+        return true;
+    }
 
     internal int GetConstructedArgumentCount(int row)
     {
@@ -331,7 +379,8 @@ public readonly ref struct TrRmTypeSpecTableReader
     internal bool TryGetNativeFunctionPointerSignatureRow(ushort typeKey, out int signatureRow)
     {
         var index = (int)typeKey - NativeFunctionPointerTypeKeyStart;
-        if (index >= 0 && index < _nativeFunctionPointerSignatureCount
+        if (_schema == TrRmArtifactSchema.Development
+            && index >= 0 && index < _nativeFunctionPointerSignatureCount
             && index < ushort.MaxValue - NativeFunctionPointerTypeKeyStart + 1)
         {
             signatureRow = index + 1;
@@ -342,9 +391,34 @@ public readonly ref struct TrRmTypeSpecTableReader
         return false;
     }
 
+    internal bool TryGetNativeFunctionPointerTypeSpecRow(ushort typeKey,
+        out int typeSpecRow)
+    {
+        if (_schema != TrRmArtifactSchema.Development)
+        {
+            var index = (int)typeKey - NativeFunctionPointerTypeKeyStart;
+            if (index >= 0 && index < _nativeFunctionPointerTypeKeyCount
+                && index < ushort.MaxValue - NativeFunctionPointerTypeKeyStart + 1)
+            {
+                for (var row = 1; row <= _recordCount; row++)
+                {
+                    if (_rows.GetRow(row)[0] == 0x0D
+                        && _compactValueTypeKeys[row] == typeKey)
+                    {
+                        typeSpecRow = row;
+                        return true;
+                    }
+                }
+            }
+        }
+
+        typeSpecRow = 0;
+        return false;
+    }
+
     internal int NativeFunctionPointerTypeKeyEnd
         => Math.Min(ushort.MaxValue + 1,
-            NativeFunctionPointerTypeKeyStart + _nativeFunctionPointerSignatureCount);
+            NativeFunctionPointerTypeKeyStart + _nativeFunctionPointerTypeKeyCount);
 
     internal bool IsNativePointerTypeKey(ushort typeKey)
         => typeKey == 0x8C || typeKey >= NativeFunctionPointerTypeKeyEnd;
@@ -355,10 +429,13 @@ public readonly ref struct TrRmTypeSpecTableReader
         var identities = new long[_recordCount + 1];
         var pointerIdentities = new Dictionary<(long Pointee, byte Qualifiers),
             (long Identity, ushort TypeKey)>();
+        var standardFunctionPointerKeys = new Dictionary<(byte Convention, uint Anchor),
+            ushort>();
         var nextPointerIdentity = 0;
+        var nextFunctionPointerTypeKey = 0;
         var nextPointerTypeKey = 0;
         var firstPointerTypeKey = NativeFunctionPointerTypeKeyStart
-            + _nativeFunctionPointerSignatureCount;
+            + _nativeFunctionPointerTypeKeyCount;
         var pointerTypeKeyCapacity = Math.Max(0, ushort.MaxValue - firstPointerTypeKey + 1);
         var reader = this;
 
@@ -427,7 +504,8 @@ public readonly ref struct TrRmTypeSpecTableReader
                 identities[row] = TypeIdentityBase + ((long)bytes[0] << 32)
                     + Read(bytes, 2);
             }
-            else if (bytes[0] == 0x0D && bytes.Length == 6 && bytes[1] == 0)
+            else if (_schema == TrRmArtifactSchema.Development
+                && bytes[0] == 0x0D && bytes.Length == 6 && bytes[1] == 0)
             {
                 var signature = Read(bytes, 2);
                 identities[row] = TypeIdentityBase + 0x20000 + signature;
@@ -436,6 +514,28 @@ public readonly ref struct TrRmTypeSpecTableReader
                 {
                     keys[row] = (ushort)typeKey;
                 }
+            }
+            else if (_schema != TrRmArtifactSchema.Development
+                && bytes[0] == 0x0D && bytes.Length == 7 && bytes[1] == 0)
+            {
+                identities[row] = TypeIdentityBase + 0x20000 + Read(bytes, 3);
+                var identity = (bytes[2], Read(bytes, 3));
+                if (!standardFunctionPointerKeys.TryGetValue(identity, out var typeKey))
+                {
+                    var assignedTypeKey = NativeFunctionPointerTypeKeyStart
+                        + nextFunctionPointerTypeKey++;
+                    if (assignedTypeKey <= ushort.MaxValue)
+                    {
+                        typeKey = (ushort)assignedTypeKey;
+                        standardFunctionPointerKeys.Add(identity, typeKey);
+                    }
+                    else
+                    {
+                        typeKey = 0;
+                    }
+                }
+
+                keys[row] = typeKey;
             }
         }
 
@@ -636,17 +736,48 @@ public readonly ref struct TrRmTypeSpecTableReader
                 }
                 break;
             case 0x0D:
-                RequireLength(bytes, 6);
-                var signature = Read(bytes, 2);
-                if (bytes[1] != 0 || signature == 0
-                    || signature > _nativeFunctionPointerSignatureCount)
+                if (bytes[1] != 0)
                 {
                     throw InvalidType();
+                }
+                if (_schema == TrRmArtifactSchema.Development)
+                {
+                    RequireLength(bytes, 6);
+                    var signature = Read(bytes, 2);
+                    if (signature == 0
+                        || signature > _nativeFunctionPointerSignatureCount)
+                    {
+                        throw InvalidType();
+                    }
+                }
+                else
+                {
+                    RequireLength(bytes, 7);
+                    var methodDef = Read(bytes, 3);
+                    if (bytes[2] is < 1 or > 4 || methodDef == 0
+                        || methodDef > _methodDefCount)
+                    {
+                        throw InvalidType();
+                    }
                 }
                 break;
             default:
                 throw InvalidType();
         }
+    }
+
+    private int CountNativeFunctionPointerRows()
+    {
+        var count = 0;
+        for (var row = 1; row <= _recordCount; row++)
+        {
+            if (_rows.GetRow(row)[0] == 0x0D)
+            {
+                count++;
+            }
+        }
+
+        return count;
     }
 
     private void ValidateTypedReference(ReadOnlySpan<byte> bytes, int tableCount)

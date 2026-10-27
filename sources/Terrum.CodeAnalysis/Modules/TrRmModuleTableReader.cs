@@ -13,6 +13,7 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <remarks>The borrowed Module and String sections must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmModuleTableReader
 {
+    internal const uint WindowsX64NativeTargetRequirement = 1;
     private const int RowSize = 48;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
@@ -102,6 +103,19 @@ public readonly ref struct TrRmModuleTableReader
         }
 
         return ReadIdentity(row - 1);
+    }
+
+    /// <summary>Gets the module entry MethodDef row, or zero when absent.</summary>
+    /// <param name="row">The one-based Module row.</param>
+    /// <returns>The entry MethodDef row or zero.</returns>
+    public int GetEntryMethod(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidModule();
+        }
+
+        return checked((int)Read(row - 1, 16));
     }
 
     public (int Start, int End) GetModuleRefRange(int row)

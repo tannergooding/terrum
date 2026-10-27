@@ -17,7 +17,7 @@ public static class TrRmContractTableWriter
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader typeSpecs, bool developmentProfile = false)
         => EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
-            fieldPathCount: 0, default, default,
+            fieldPathCount: 0, predicateGraphCount: 0, default, default,
             developmentProfile ? TrRmArtifactSchema.Development
                 : TrRmArtifactSchema.Standard, profileAware: false);
 
@@ -36,9 +36,19 @@ public static class TrRmContractTableWriter
 
         return EncodeCore(CanonicalizeCopyOriginRows(rows, fieldPaths),
             types, methods, signatures, parameters, typeSpecs,
-            fieldPathCount, features, modules,
+            fieldPathCount, predicateGraphCount: 0, features, modules,
             TrRmArtifactSchema.CopyOriginDraft, profileAware: true);
     }
+
+    internal static byte[] EncodeWithPredicateGraphs(
+        IReadOnlyList<TrRmContractRow> rows, TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        int predicateGraphCount)
+        => EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
+            fieldPathCount: 0, predicateGraphCount, features, modules,
+            TrRmArtifactSchema.Standard, profileAware: true);
 
     private static TrRmContractRow[] CanonicalizeCopyOriginRows(
         IReadOnlyList<TrRmContractRow> rows,
@@ -212,6 +222,7 @@ public static class TrRmContractTableWriter
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader typeSpecs, int fieldPathCount,
+        int predicateGraphCount,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmArtifactSchema schema, bool profileAware)
     {
@@ -256,7 +267,7 @@ public static class TrRmContractTableWriter
         {
             _ = new TrRmContractTableReader(result, rowCount, types, methods,
                 signatures, parameters, typeSpecs, fieldPathCount, features,
-                modules, schema);
+                modules, schema, predicateGraphCount);
         }
         else
         {

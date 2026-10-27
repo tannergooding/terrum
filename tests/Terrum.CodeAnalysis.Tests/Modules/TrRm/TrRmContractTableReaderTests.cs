@@ -45,16 +45,20 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void DevelopmentProfileCleanupRequiresNoThrowEffectBit()
+    public void DevelopmentProfileRetiresNoThrowAndAllowsCleanupWithoutIt()
     {
-        var withoutNoThrow = Effects();
-        withoutNoThrow[8] = 2;
-        Assert.Throws<InvalidDataException>(() =>
-            Create(Section(Cleanup(), withoutNoThrow)));
-        Assert.Throws<InvalidDataException>(() =>
-            Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
-                methodFirst: 0, methodCount: 0));
+        Create(Section(Cleanup(), Effects(2)));
+        Create(Section(Cleanup(), Effects(4)));
+        Create(Section(Cleanup(), Effects(6)));
+        Create(Section(Cleanup(), Effects(0)));
         Create(Section(Effects(), Cleanup()), typeFirst: 2, methodFirst: 1);
+
+        foreach (var mask in new uint[] { 1, 3, 5, 7 })
+        {
+            Assert.Throws<InvalidDataException>(() => Create(Section(Effects(mask)),
+                recordCount: 1, declaredCount: 1,
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
+        }
     }
 
     [Test]
@@ -86,6 +90,144 @@ public sealed class TrRmContractTableReaderTests
         Create(Section(Cleanup()), recordCount: 1, declaredCount: 1,
             typeFirst: 1, typeCount: 1, methodFirst: 0, methodCount: 0,
             writeRows: true, frameArtifact: true, developmentProfile: false);
+    }
+
+    [TestCase(1)]
+    [TestCase(2)]
+    [TestCase(3)]
+    [TestCase(4)]
+    public void StandardNativeCallableClausePreservesItsExactConvention(byte convention)
+    {
+        Create(Section(NativeCallable(convention)), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            writeRows: true, developmentProfile: false,
+            expectedNativeCallableConvention: convention);
+    }
+
+    [Test]
+    public void StandardNativeCallableClauseRequiresNativeBoundaryFeature()
+    {
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(NativeCallable()), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            frameArtifact: true, developmentProfile: false));
+
+        Create(Section(NativeCallable()), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            frameArtifact: true, developmentProfile: false,
+            includeNativeBoundaryFeature: true);
+    }
+
+    [Test]
+    public void StandardPredicateGraphContractUsesTypedClauseAndFeatureClosure()
+    {
+        var predicate = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
+        Create(Section(predicate), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, predicateGraphCount: 1,
+            includePublishedPredicatesFeature: true, writeRows: true,
+            expectedPredicateGraphContractCount: 1);
+
+        Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, predicateGraphCount: 1));
+        Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false));
+
+        var selector = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
+        Create(Section(selector),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, predicateGraphCount: 1,
+            includePublishedPredicatesFeature: true,
+            expectedPredicateGraphContractCount: 1);
+
+        foreach (var phase in new byte[] { 0, 4 })
+        {
+            var invalidPhase = PredicateGraphContract(phase, 0, 1);
+            Assert.Throws<InvalidDataException>(() => Create(Section(invalidPhase),
+                recordCount: 1, declaredCount: 1,
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+                developmentProfile: false, predicateGraphCount: 1,
+                includePublishedPredicatesFeature: true));
+        }
+
+        var phaseGap = Section(
+            PredicateGraphContract(phase: 1, ordinal: 0, graphRow: 1),
+            PredicateGraphContract(phase: 1, ordinal: 2, graphRow: 2));
+        Assert.Throws<InvalidDataException>(() => Create(phaseGap,
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            developmentProfile: false, predicateGraphCount: 2,
+            includePublishedPredicatesFeature: true));
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(PredicateGraphContract(phase: 1, ordinal: 0, graphRow: 2)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, predicateGraphCount: 1,
+            includePublishedPredicatesFeature: true));
+
+        Assert.Throws<InvalidDataException>(() => Create(Section(predicate),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: true, predicateGraphCount: 1,
+            includePublishedPredicatesFeature: true));
+    }
+
+    [Test]
+    public void BoundedPublishedPredicateFeatureDoesNotRequireFrozenValues()
+    {
+        Create(Section(Effects()), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, includePublishedPredicatesFeature: true,
+            verifyPublishedPredicatePrerequisites: true);
+    }
+
+    [Test]
+    public void NativeCallableClauseRejectsMalformedShapesAndDevelopmentAlias()
+    {
+        var convention = NativeCallable(1);
+        convention[8] = 0;
+        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        convention = NativeCallable(1);
+        convention[8] = 5;
+        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        convention = NativeCallable(1);
+        convention[9] = 1;
+        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        convention = NativeCallable(1);
+        convention[10] = 1;
+        Assert.Throws<InvalidDataException>(() => Create(Section(convention),
+            recordCount: 1, declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(NativeCallable(owner: 0x1300_0001)), recordCount: 1,
+            declaredCount: 1, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 1, developmentProfile: false));
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(NativeCallable()), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: true));
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(NativeCallable(1), NativeCallable(2)), recordCount: 2,
+            declaredCount: 2, typeFirst: 0, typeCount: 0,
+            methodFirst: 1, methodCount: 2, developmentProfile: false));
     }
 
     [Test]
@@ -406,7 +548,13 @@ public sealed class TrRmContractTableReaderTests
         bool developmentProfile = true, bool copyOriginDraft = false,
         int fieldPathCount = 0, bool includeCopyOriginFeature = true,
         bool referentParameter = false, bool initializationParameter = false,
-        bool twoParameters = false, bool canonicalizeCopyOrigin = false)
+        bool twoParameters = false, bool canonicalizeCopyOrigin = false,
+        byte? expectedNativeCallableConvention = null,
+        bool includeNativeBoundaryFeature = false,
+        int predicateGraphCount = 0,
+        bool includePublishedPredicatesFeature = false,
+        int? expectedPredicateGraphContractCount = null,
+        bool verifyPublishedPredicatePrerequisites = false)
     {
         var schema = copyOriginDraft ? TrRmArtifactSchema.CopyOriginDraft
             : developmentProfile ? TrRmArtifactSchema.Development
@@ -426,7 +574,14 @@ public sealed class TrRmContractTableReaderTests
                 : includeCopyOriginFeature
                     ? [new TrRmFeatureRow(15, 1)]
                     : Array.Empty<TrRmFeatureRow>()
-            : Array.Empty<TrRmFeatureRow>();
+                : (includeNativeBoundaryFeature, includePublishedPredicatesFeature) switch
+                {
+                    (true, true) =>
+                        [new TrRmFeatureRow(1, 1), TrRmFeatureRow.PublishedPredicates],
+                    (true, false) => [new TrRmFeatureRow(1, 1)],
+                    (false, true) => [TrRmFeatureRow.PublishedPredicates],
+                    _ => Array.Empty<TrRmFeatureRow>(),
+                };
         var featureBytes = featureRows.Length == 0 ? Array.Empty<byte>()
             : TrRmFeatureTableWriter.Encode(featureRows, schema);
         if (featureRows.Length != 0)
@@ -443,6 +598,15 @@ public sealed class TrRmContractTableReaderTests
             1, 0, featureRows.Length);
         var features = new TrRmFeatureTableReader(featureBytes, featureRows.Length,
             schema);
+        if (verifyPublishedPredicatePrerequisites)
+        {
+            Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+                1, TrRmFeatureTableReader.PublishedPredicatesFeatureId, schema),
+                Is.True);
+            Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+                1, TrRmFeatureTableReader.TypedFrozenValuesFeatureId, schema),
+                Is.False);
+        }
         var type = new byte[typeRows * 44];
         for (var index = 0; index < typeRows; index++)
         {
@@ -536,26 +700,54 @@ public sealed class TrRmContractTableReaderTests
                 ? TrRmContractTableWriter.EncodeCopyOriginDraft(
                     rows, types, methods, signatures, parameters, typeSpecs,
                     default, fieldPathCount, features, modules)
-                : TrRmContractTableWriter.Encode(
-                    rows, types, methods, signatures, parameters, typeSpecs,
-                    developmentProfile);
+                : !developmentProfile && predicateGraphCount != 0
+                    ? TrRmContractTableWriter.EncodeWithPredicateGraphs(
+                        rows, types, methods, signatures, parameters, typeSpecs,
+                        features, modules, predicateGraphCount)
+                    : TrRmContractTableWriter.Encode(
+                        rows, types, methods, signatures, parameters, typeSpecs,
+                        developmentProfile);
             if (!canonicalizeCopyOrigin)
             {
                 Assert.That(emitted, Is.EqualTo(section));
             }
             section = emitted;
         }
+        TrRmContractTableReader contractReader;
         if (copyOriginDraft)
         {
-            _ = new TrRmContractTableReader(section, recordCount, types, methods,
+            contractReader = new TrRmContractTableReader(section, recordCount, types, methods,
                 signatures, parameters, typeSpecs, fieldPathCount, features,
-                modules, schema);
+                modules, schema, predicateGraphCount);
+            if (expectedNativeCallableConvention is { } expectedConvention)
+            {
+                AssertNativeCallable(contractReader, expectedConvention);
+            }
+        }
+        else if (!developmentProfile)
+        {
+            contractReader = new TrRmContractTableReader(section, recordCount,
+                types, methods, signatures, parameters, typeSpecs, fieldPathCount,
+                features, modules, schema, predicateGraphCount);
+            if (expectedNativeCallableConvention is { } expectedConvention)
+            {
+                AssertNativeCallable(contractReader, expectedConvention);
+            }
         }
         else
         {
-            _ = new TrRmContractTableReader(section, recordCount,
+            contractReader = new TrRmContractTableReader(section, recordCount,
                 types, methods, signatures, parameters, typeSpecs,
                 developmentProfile);
+            if (expectedNativeCallableConvention is { } expectedConvention)
+            {
+                AssertNativeCallable(contractReader, expectedConvention);
+            }
+        }
+        if (expectedPredicateGraphContractCount is int expectedPredicateCount)
+        {
+            Assert.That(contractReader.GetPredicateGraphContracts(1).Length,
+                Is.EqualTo(expectedPredicateCount));
         }
         if (frameArtifact)
         {
@@ -583,6 +775,19 @@ public sealed class TrRmContractTableReaderTests
             }
             artifactSections.Add(new TrRmSection(0x001B, 0,
                 (uint)recordCount, section));
+            if (predicateGraphCount != 0)
+            {
+                var graphBytes = TrRmPredicateGraphTableWriter.Encode([
+                    new TrRmPredicateGraphRow(1, 1),
+                ], nodeCount: 1, readFootprintCount: predicateGraphCount);
+                var footprintBytes = TrRmPredicateReadFootprintTableWriter.Encode([
+                    new TrRmPredicateReadFootprintRow(0, 0, 0, 0),
+                ], rootCount: 0, dependencyCount: 0);
+                artifactSections.Add(new TrRmSection(0x0037, 0,
+                    (uint)predicateGraphCount, graphBytes));
+                artifactSections.Add(new TrRmSection(0x0038, 0, 1, footprintBytes));
+                artifactSections.Add(new TrRmSection(0x003B, 0, 1, new byte[16]));
+            }
             var artifact = TrRmArtifactWriter.Encode(artifactSections, schema);
             if (copyOriginDraft)
             {
@@ -603,6 +808,15 @@ public sealed class TrRmContractTableReaderTests
         }
 
         return section;
+    }
+
+    private static void AssertNativeCallable(TrRmContractTableReader contracts,
+        byte expectedConvention)
+    {
+        Assert.That(contracts.HasNativeCallableContract(1), Is.True);
+        Assert.That(contracts.GetNativeCallableConvention(1),
+            Is.EqualTo(expectedConvention));
+        Assert.That(contracts.GetNativeCallableContractRow(1), Is.EqualTo(1));
     }
 
     private static void ValidateCopyOriginFieldArtifact(
@@ -856,6 +1070,20 @@ public sealed class TrRmContractTableReaderTests
         var data = new byte[4];
         Write(data, 0, mask);
         return Contract(0x1600_0001, 1, data);
+    }
+
+    private static byte[] NativeCallable(byte convention = 1,
+        uint owner = 0x1600_0001)
+        => Contract(owner, 0x0C, [convention, 0, 0, 0]);
+
+    private static byte[] PredicateGraphContract(byte phase, uint ordinal,
+        uint graphRow)
+    {
+        var data = new byte[12];
+        data[0] = phase;
+        Write(data, 4, ordinal);
+        Write(data, 8, graphRow);
+        return Contract(0x1600_0001, 0x0B, data);
     }
 
     private static byte[] NativeParameter(uint ordinal, byte access, byte retention, uint extent)

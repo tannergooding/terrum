@@ -66,10 +66,27 @@ public static partial class TrRmExecutableCompiler
             SemanticVerifier.Verify(program);
         }
 
+        if (BoundEnumTypes.UsesAny(program))
+        {
+            throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+        }
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes,
             program.Structures, program.NativeFunctionPointerSignatures))
         {
             throw Unsupported("The native pointer or function-pointer type table is invalid.");
+        }
+        if (program.NativeFunctionPointerSignatures.Any(static signature =>
+                signature.CallingConvention != NativeCallingConvention.Native)
+            || program.Functions.Any(static function =>
+                function.NativeCallableConvention is NativeCallingConvention convention
+                    && convention != NativeCallingConvention.Native
+                || function.DirectNativeImport is DirectNativeImport import
+                    && (import.CallingConvention != NativeCallingConvention.Native
+                        || import.ResolutionMode != NativeImportResolutionMode.Link
+                        || import.ResolutionPolicy != NativeImportResolutionPolicy.NotApplicable)))
+        {
+            throw Unsupported(
+                "The current TRRM function-pointer writer does not preserve normalized calling conventions.");
         }
         foreach (var function in program.Functions)
         {
@@ -290,8 +307,9 @@ public static partial class TrRmExecutableCompiler
             signature < program.NativeFunctionPointerSignatures.Length; signature++)
         {
             var row = typeRowsList.Count + 1;
-            typeRowsList.Add(TrRmTypeSpecTableWriter.Reference(0x0D,
-                checked((uint)(signature + 1))));
+            typeRowsList.Add(TrRmTypeSpecTableWriter
+                .DevelopmentFunctionPointerSignatureReference(
+                    checked((uint)(signature + 1))));
             nativeFunctionPointerTypeRows.Add(NativeFunctionPointerTypes.Type(signature), row);
         }
         var nativePointerTypeRows = new Dictionary<PrimitiveType, int>(program.NativePointerTypes.Length);
@@ -687,9 +705,11 @@ public static partial class TrRmExecutableCompiler
             : new TrRmModuleRefTableReader(moduleRefBytes, moduleRefRows.Count, strings, modules);
         var typeRows = typeRowsList.ToArray();
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount, 0, 0,
-            nativeFunctionPointerSignatureRows.Count);
+            nativeFunctionPointerSignatureRows.Count,
+            TrRmArtifactSchema.Development);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length,
-            typeDefCount, 0, 0, nativeFunctionPointerSignatureRows.Count);
+            typeDefCount, 0, 0, nativeFunctionPointerSignatureRows.Count,
+            TrRmArtifactSchema.Development);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
         var sigs = new TrRmMethodSigTableReader(sigBytes, signatures.Count, types, parameters.Count, 0);
         var paramBytes = parameters.Count == 0 ? [] : TrRmParamTableWriter.Encode(parameters, sigs, types);
@@ -760,17 +780,17 @@ public static partial class TrRmExecutableCompiler
                 strings, moduleRefs, typeDefs, defs, default);
         var exportBytes = exports.Count == 0 ? []
             : TrRmExportTableWriter.Encode(exports, strings, typeDefs, defs, default, imports);
-        var nativeImportRows = new List<TrRmNativeImportRow>(nativeImportCount);
+        var nativeImportRows = new List<TrRmDevelopmentNativeImportRow>(nativeImportCount);
         for (var index = 0; index < program.Functions.Length; index++)
         {
             if (program.Functions[index].DirectNativeImport is not null)
             {
-                nativeImportRows.Add(new TrRmNativeImportRow(index + 1,
+                nativeImportRows.Add(new TrRmDevelopmentNativeImportRow(index + 1,
                     nativeLibraryRows[index], nativeExportRows[index], 1));
             }
         }
         var nativeImportBytes = nativeImportRows.Count == 0 ? []
-            : TrRmNativeImportTableWriter.Encode(nativeImportRows, strings, defs, sigs,
+            : TrRmDevelopmentNativeImportTableWriter.Encode(nativeImportRows, strings, defs, sigs,
                 paramReader, types, contractReader, layouts);
         var nativeFunctionPointerSignatureBytes = nativeFunctionPointerSignatureRows.Count == 0 ? []
             : TrRmNativeFunctionPointerSignatureTableWriter.Encode(
@@ -1839,7 +1859,11 @@ public static partial class TrRmExecutableCompiler
 
         void VisitType(PrimitiveType type, bool throughPointer)
         {
-            if ((int)type is >= 100 and < ManagedClassTypes.First)
+            if (BoundEnumTypes.IsType(type))
+            {
+                throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+            }
+            if ((int)type is >= 100 and < BoundEnumTypes.First)
             {
                 Visit((int)type - 100, throughPointer);
                 return;
@@ -1943,6 +1967,10 @@ public static partial class TrRmExecutableCompiler
 
     private static int TypeRow(PrimitiveType type)
     {
+        if (BoundEnumTypes.IsType(type))
+        {
+            throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+        }
         var row = Array.IndexOf(s_types, type) + 1;
         if (row == 0)
         {
@@ -2053,7 +2081,11 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> structureTypeDefRows, Dictionary<int, int> typeDefTypeSpecRows,
         Dictionary<PrimitiveType, int> structurePointerTypeRows)
     {
-        if ((int)pointeeType is >= 100 and < ManagedClassTypes.First)
+        if (BoundEnumTypes.IsType(pointeeType))
+        {
+            throw Unsupported("Native pointer parameters cannot use an unrepresented enum pointee type.");
+        }
+        if ((int)pointeeType is >= 100 and < BoundEnumTypes.First)
         {
             if (structurePointerTypeRows.TryGetValue(pointeeType, out var existing))
             {
@@ -2104,6 +2136,10 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, int> structureTypeDefRows,
         Dictionary<int, int> typeDefTypeSpecRows)
     {
+        if (BoundEnumTypes.IsType(type))
+        {
+            throw Unsupported("Standard TRRM has no assigned nominal enum TypeSpec or TypeDef encoding.");
+        }
         if (NativePointerTypes.IsType(type))
         {
             return NativePointerTypeRow(type, nativeRawPointerTypeRow,
@@ -2124,7 +2160,7 @@ public static partial class TrRmExecutableCompiler
                 : throw Unsupported("A native vtable pointer type has no raw-pointer TypeSpec row.");
         }
 
-        if ((int)type is >= 100 and < ManagedClassTypes.First)
+        if ((int)type is >= 100 and < BoundEnumTypes.First)
         {
             var structureIndex = (int)type - 100;
             if (!structureTypeDefRows.TryGetValue(structureIndex, out var typeDefRow))
@@ -2194,7 +2230,11 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, int> nativePointerTypeRows,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
     {
-        if ((int)fieldType is >= 100 and < ManagedClassTypes.First)
+        if (BoundEnumTypes.IsType(fieldType))
+        {
+            throw Unsupported("Standard TRRM has no assigned enum layout/type encoding.");
+        }
+        if ((int)fieldType is >= 100 and < BoundEnumTypes.First)
         {
             var structureIndex = (int)fieldType - 100;
             if (!structureTypeDefRows.TryGetValue(structureIndex, out var typeDefRow))

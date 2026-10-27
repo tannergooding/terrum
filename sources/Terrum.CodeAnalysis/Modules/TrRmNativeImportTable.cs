@@ -118,6 +118,13 @@ internal static class TrRmNativeImportTypeContract
             return true;
         }
 
+        if (type.Length == 7 && type[0] == 0x0D && type[1] == 0)
+        {
+            var typeSpec = types.GetTypeSpecRef(typeSpecRef);
+            return types.TryGetNativeFunctionPointerAnchor(typeSpec.Row,
+                out _, out _);
+        }
+
         if (type.Length != 6 || type[0] != 0x0D || type[1] != 0)
         {
             return false;
@@ -151,9 +158,16 @@ internal static class TrRmNativeImportTypeContract
     private static PrimitiveType FromAtomicCode(byte typeCode) => typeCode switch
     {
         1 => PrimitiveType.Bool,
+        2 => PrimitiveType.Char8,
         3 => PrimitiveType.Char16,
+        4 => PrimitiveType.Char32,
+        5 => PrimitiveType.Rune,
+        6 => PrimitiveType.Int8,
+        7 => PrimitiveType.Int16,
         8 => PrimitiveType.Int32,
         9 => PrimitiveType.Int64,
+        0x0B => PrimitiveType.UInt8,
+        0x0C => PrimitiveType.UInt16,
         0x0D => PrimitiveType.UInt32,
         0x0E => PrimitiveType.UInt64,
         0x14 => PrimitiveType.Float32,
@@ -162,18 +176,18 @@ internal static class TrRmNativeImportTypeContract
     };
 }
 
-/// <summary>One native import declaration in the selected provisional TRRM draft.</summary>
+/// <summary>One native import declaration in the development-only TRRM prototype.</summary>
 /// <param name="MethodDefRow">The 1-based method-definition row.</param>
 /// <param name="LibraryNameStringRow">The 1-based library-name string row.</param>
 /// <param name="ExportNameStringRow">The 1-based export-name string row.</param>
 /// <param name="ResolutionPolicy">The declared native-library resolution policy.</param>
-public readonly record struct TrRmNativeImportRow(
+public readonly record struct TrRmDevelopmentNativeImportRow(
     int MethodDefRow, int LibraryNameStringRow, int ExportNameStringRow, uint ResolutionPolicy);
 
-/// <summary>Emits native import rows for the selected provisional TRRM draft.</summary>
-public static class TrRmNativeImportTableWriter
+/// <summary>Emits rows for the development-only four-word NativeImport prototype.</summary>
+public static class TrRmDevelopmentNativeImportTableWriter
 {
-    /// <summary>Encodes and validates native import rows.</summary>
+    /// <summary>Encodes and validates development-prototype native import rows.</summary>
     /// <param name="rows">The rows to encode.</param>
     /// <param name="strings">The string table used to validate library and export names.</param>
     /// <param name="methods">The method definitions associated with the imports.</param>
@@ -183,7 +197,7 @@ public static class TrRmNativeImportTableWriter
     /// <param name="contracts">The method contracts used by the imports.</param>
     /// <param name="layouts">The selected target layouts used by aggregate pointees.</param>
     /// <returns>The encoded native-import section.</returns>
-    public static byte[] Encode(IReadOnlyList<TrRmNativeImportRow> rows,
+    public static byte[] Encode(IReadOnlyList<TrRmDevelopmentNativeImportRow> rows,
         TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
@@ -206,7 +220,7 @@ public static class TrRmNativeImportTableWriter
             Write(result, offset + 12, row.ResolutionPolicy);
         }
 
-        _ = new TrRmNativeImportTableReader(result, rows.Count, strings, methods,
+        _ = new TrRmDevelopmentNativeImportTableReader(result, rows.Count, strings, methods,
             signatures, parameters, types, contracts, layouts);
         return result;
     }
@@ -218,9 +232,9 @@ public static class TrRmNativeImportTableWriter
         => BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(offset), value);
 }
 
-/// <summary>Validates native import declarations for the selected provisional TRRM draft.</summary>
+/// <summary>Validates the development-only four-word NativeImport prototype.</summary>
 /// <remarks>The borrowed NativeImport section must remain unchanged while this reader is in use.</remarks>
-public readonly ref struct TrRmNativeImportTableReader
+public readonly ref struct TrRmDevelopmentNativeImportTableReader
 {
     private const uint WindowsSystem32ResolutionPolicy = 1;
     private readonly ReadOnlySpan<byte> _rows;
@@ -238,7 +252,7 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <param name="types">The associated type-specification table.</param>
     /// <param name="contracts">The associated contract table.</param>
     /// <param name="layouts">The validated Layout table.</param>
-    public TrRmNativeImportTableReader(ReadOnlySpan<byte> section, int recordCount,
+    public TrRmDevelopmentNativeImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
@@ -280,14 +294,14 @@ public readonly ref struct TrRmNativeImportTableReader
 
             var libraryName = strings.DecodeName((int)library);
             var exportName = strings.DecodeName((int)export);
-            if (!DirectNativeImportContract.IsValidLibraryName(libraryName)
+            if (!DirectNativeImportContract.IsValidPrivateWindowsLibraryName(libraryName)
                 || !DirectNativeImportContract.IsValidExportName(exportName))
             {
                 throw InvalidNativeImport();
             }
 
             _rowByMethod[method] = row;
-            ValidateSignature((int)method, methods, signatures, parameters, types,
+            TrRmNativeImportSignatureValidator.Validate(method, methods, signatures, parameters, types,
                 contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method),
                 layouts);
         }
@@ -326,7 +340,7 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <param name="methodDefRow">The 1-based method-definition row.</param>
     /// <returns>The import declaration for the method.</returns>
     /// <exception cref="InvalidDataException">The method has no native import declaration.</exception>
-    public TrRmNativeImportRow GetImportForMethod(int methodDefRow)
+    public TrRmDevelopmentNativeImportRow GetImportForMethod(int methodDefRow)
     {
         if (!HasImportForMethod(methodDefRow))
         {
@@ -334,7 +348,7 @@ public readonly ref struct TrRmNativeImportTableReader
         }
 
         var data = GetRow(_rowByMethod[methodDefRow]);
-        return new TrRmNativeImportRow(methodDefRow, (int)Read(data, 4),
+        return new TrRmDevelopmentNativeImportRow(methodDefRow, (int)Read(data, 4),
             (int)Read(data, 8), Read(data, 12));
     }
 
@@ -350,19 +364,39 @@ public readonly ref struct TrRmNativeImportTableReader
     public string GetExportName(int methodDefRow)
         => _strings.DecodeName(GetImportForMethod(methodDefRow).ExportNameStringRow);
 
-    private static void ValidateSignature(int method, TrRmMethodDefTableReader methods,
+    private ReadOnlySpan<byte> GetRow(int row)
+    {
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidNativeImport();
+        }
+
+        return _rows.Slice((row - 1) * 16, 16);
+    }
+
+    private static uint Read(ReadOnlySpan<byte> bytes, int offset)
+        => BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(offset, sizeof(uint)));
+
+    private static InvalidDataException InvalidNativeImport()
+        => new("Invalid TRRM NativeImport table.");
+}
+
+internal static class TrRmNativeImportSignatureValidator
+{
+    internal static void Validate(uint method, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types,
         System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
         System.Collections.Immutable.ImmutableArray<TrRmNativeParameterContract> nativeParameters,
         TrRmLayoutTableReader layouts)
     {
-        var signature = methods.GetSignature(method);
+        var signature = methods.GetSignature((int)method);
         if (!TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
                 types, signatures.GetResultTypeSpec(signature), out var resultType))
         {
             throw InvalidNativeImport();
         }
+
         var (first, count) = signatures.GetParamRange(signature);
         var seenOutputs = new bool[count];
         var seenNativeParameters = new bool[count];
@@ -388,8 +422,7 @@ public readonly ref struct TrRmNativeImportTableReader
                     types, typeRow, out var pointeeType)
                 && seenOutputs[parameter])
             {
-                if (parameters.GetMode(first + parameter) != 0 || hasNativeParameter
-                    || !seenOutputs[parameter])
+                if (parameters.GetMode(first + parameter) != 0 || hasNativeParameter)
                 {
                     throw InvalidNativeImport();
                 }
@@ -416,7 +449,7 @@ public readonly ref struct TrRmNativeImportTableReader
                         types, typeRow, layouts, out _)
                     && hasNativeParameter)
             {
-                    if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
+                if (parameters.GetMode(first + parameter) != 0 || seenOutputs[parameter]
                     || !ValidNativeParameter(nativeParameter, PrimitiveType.NativeRawPointer))
                 {
                     throw InvalidNativeImport();
@@ -469,9 +502,9 @@ public readonly ref struct TrRmNativeImportTableReader
         return false;
     }
 
-    private static bool ValidNativeParameter(TrRmNativeParameterContract parameter, PrimitiveType pointeeType)
-    {
-        return parameter.PointerDepth == 1 && parameter.Retention == 1
+    private static bool ValidNativeParameter(TrRmNativeParameterContract parameter,
+        PrimitiveType pointeeType)
+        => parameter.PointerDepth == 1 && parameter.Retention == 1
             && parameter.RequiredAlignment == 0
             && parameter.ExtentKind is 0 or 1
             && (parameter.ExtentKind != 0 || parameter.Extent == 0)
@@ -479,10 +512,10 @@ public readonly ref struct TrRmNativeImportTableReader
                 ? parameter.Access == 1 && parameter.Extent == 0
                 : parameter.Extent <= int.MaxValue
                     && parameter.Access is >= 1 and <= 3);
-    }
 
     private static TrRmNativeOutputContract FindOutput(
-        System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs, int parameter)
+        System.Collections.Immutable.ImmutableArray<TrRmNativeOutputContract> outputs,
+        int parameter)
     {
         foreach (var output in outputs)
         {
@@ -495,19 +528,6 @@ public readonly ref struct TrRmNativeImportTableReader
         throw InvalidNativeImport();
     }
 
-    private ReadOnlySpan<byte> GetRow(int row)
-    {
-        if (row <= 0 || row > _recordCount)
-        {
-            throw InvalidNativeImport();
-        }
-
-        return _rows.Slice((row - 1) * 16, 16);
-    }
-
-    private static uint Read(ReadOnlySpan<byte> bytes, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(offset, sizeof(uint)));
-
     private static InvalidDataException InvalidNativeImport()
-        => new("Invalid TRRM NativeImport table.");
+        => new("Invalid TRRM NativeImport signature.");
 }

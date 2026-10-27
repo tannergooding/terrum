@@ -12,6 +12,7 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmExportTableReader
 {
     private const int RowSize = 8;
+    private readonly HashSet<uint> _exportedDefinitions;
 
     /// <summary>Validates exported local definitions, visibility and key uniqueness.</summary>
     /// <param name="section">The borrowed 8-byte Export rows.</param>
@@ -66,6 +67,7 @@ public readonly ref struct TrRmExportTableReader
         }
 
         var keys = new HashSet<(int Module, string Key)>(recordCount);
+        _exportedDefinitions = new HashSet<uint>(recordCount);
         for (var row = 0; row < recordCount; row++)
         {
             var data = section.Slice(row * RowSize, RowSize);
@@ -105,8 +107,17 @@ public readonly ref struct TrRmExportTableReader
             {
                 throw InvalidExport();
             }
+
+            _ = _exportedDefinitions.Add(definition);
         }
     }
+
+    /// <summary>Determines whether a MethodDef has an ordinary Export row.</summary>
+    /// <param name="methodDefRow">The one-based MethodDef row.</param>
+    /// <returns><see langword="true"/> if the method is exported.</returns>
+    public bool HasExportForMethod(int methodDefRow)
+        => methodDefRow > 0
+            && _exportedDefinitions.Contains(0x1600_0000u | (uint)methodDefRow);
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
