@@ -823,6 +823,11 @@ public static partial class ModuleCompiler
                 Add((PrimitiveType)(100 + token));
                 return;
             }
+            if (BoundEnumTypes.IsType(type))
+            {
+                throw new ModuleFormatException(
+                    "The private semantic module format has no nominal enum declaration/value codec.");
+            }
             var structureIndex = (int)type - 100;
             if (structureIndex >= 0 && !ManagedClassTypes.IsManaged(type))
             {
@@ -974,6 +979,11 @@ public static partial class ModuleCompiler
                 SemanticVerifier.Verify(program);
             }
         });
+        if (BoundEnumTypes.UsesAny(program))
+        {
+            throw new ModuleContractException(
+                "The private semantic module format has no nominal enum declaration/value codec.");
+        }
         if (program.Classes.IsDefaultOrEmpty && program.Functions.Any(static function =>
                 ManagedClassTypes.IsOptional(function.ReturnType)
                 || function.Variables.Any(static variable => ManagedClassTypes.IsOptional(variable.Type))))
@@ -1178,6 +1188,11 @@ public static partial class ModuleCompiler
         }
         ArgumentNullException.ThrowIfNull(referenceProducer);
         VerifyModuleBoundProgram(() => SemanticVerifier.VerifyReferences(program));
+        if (BoundEnumTypes.UsesAny(program))
+        {
+            throw new ModuleContractException(
+                "The private semantic module format has no nominal enum declaration/value codec.");
+        }
         var hasPrivateManagedState = HasPrivateManagedState(program);
         if (hasPrivateManagedState && !program.Functions.Any(static function => function.IsExternal))
         {
@@ -1248,7 +1263,7 @@ public static partial class ModuleCompiler
             if (function.IsExternal && function.DirectNativeImport is not null
                 && !function.IsModuleReference)
             {
-                if (!DirectNativeImportContract.IsValid(function, program.Structures,
+                if (!DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
                     program.NativeFunctionPointerSignatures, program.NativePointerTypes)
                     || exports.ContainsKey(function.Name))
                 {
@@ -3428,6 +3443,79 @@ public static partial class ModuleCompiler
                 AppendBoundedTypeName(builder, ref byteCount, ")->");
                 AppendTypeName(builder, ref byteCount, signature.ReturnType, structures,
                     functionPointerSignatures, nativePointerTypes);
+                if (signature.EffectsMask != 0)
+                {
+                    AppendBoundedTypeName(builder, ref byteCount, "|effects:");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        signature.EffectsMask.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                }
+                foreach (var selector in signature.Selectors
+                    .OrderBy(static item => item.PhaseTag)
+                    .ThenBy(static item => item.PhaseLocalOrdinal))
+                {
+                    AppendBoundedTypeName(builder, ref byteCount, "|selector:");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        selector.PhaseTag.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        selector.PhaseLocalOrdinal.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        selector.NodeKind.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                }
+                foreach (var output in signature.OutputStates
+                    .OrderBy(static item => item.FormalOrdinal)
+                    .ThenBy(static item => item.SelectorOrdinal))
+                {
+                    AppendBoundedTypeName(builder, ref byteCount, "|output:");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        output.FormalOrdinal.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        output.SelectorOrdinal.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        output.State.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                }
+                foreach (var dependency in signature.Dependencies
+                    .OrderBy(static item => item.DestinationKind)
+                    .ThenBy(static item => item.DestinationOrdinal)
+                    .ThenBy(static item => item.Phase)
+                    .ThenBy(static item => item.SourceKind)
+                    .ThenBy(static item => item.SourceOrdinal))
+                {
+                    AppendBoundedTypeName(builder, ref byteCount, "|dependency:");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        dependency.DestinationKind.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        dependency.SourceKind.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        dependency.Relationship.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        dependency.Phase.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        dependency.DestinationOrdinal.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                    AppendBoundedTypeName(builder, ref byteCount, ",");
+                    AppendBoundedTypeName(builder, ref byteCount,
+                        dependency.SourceOrdinal.ToString(
+                            System.Globalization.CultureInfo.InvariantCulture));
+                }
                 return;
             }
         }
@@ -3606,6 +3694,11 @@ public static partial class ModuleCompiler
         IReadOnlyList<BoundStruct> destination, int classOffset = 0,
         IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null)
     {
+        if (BoundEnumTypes.IsType(type))
+        {
+            throw new ModuleFormatException(
+                "The private semantic module format has no nominal enum remapping contract.");
+        }
         if (NativeFunctionPointerTypes.IsType(type) || NativePointerTypes.IsType(type))
         {
             return type;
@@ -3759,19 +3852,13 @@ public static partial class ModuleCompiler
 
     private static BoundStruct RemapNativeFunctionPointerTypes(BoundStruct structure,
         ImmutableArray<PrimitiveType> mapping) =>
-        mapping.IsEmpty ? structure : structure with {
-            Fields = [.. structure.Fields.Select(field => field with {
-                Type = RemapNativeFunctionPointerType(field.Type, mapping),
-            })],
-        };
+        mapping.IsEmpty ? structure : BoundTreeTraversal.RewriteTypes(structure,
+            type => RemapNativeFunctionPointerType(type, mapping));
 
     private static BoundClass RemapNativeFunctionPointerTypes(BoundClass @class,
         ImmutableArray<PrimitiveType> mapping) =>
-        mapping.IsEmpty ? @class : @class with {
-            Fields = [.. @class.Fields.Select(field => field with {
-                Type = RemapNativeFunctionPointerType(field.Type, mapping),
-            })],
-        };
+        mapping.IsEmpty ? @class : BoundTreeTraversal.RewriteTypes(@class,
+            type => RemapNativeFunctionPointerType(type, mapping));
 
     private static BoundFunction RemapNativeFunctionPointerTypes(BoundFunction function,
         ImmutableArray<PrimitiveType> mapping)
@@ -3780,45 +3867,8 @@ public static partial class ModuleCompiler
         {
             return function;
         }
-        PrimitiveType RemapType(PrimitiveType type)
-        {
-            return RemapNativeFunctionPointerType(type, mapping);
-        }
-        var remapped = BoundTreeTraversal.RewriteExpressions(function,
-            expression => RemapNativeTypeIdentities(expression, RemapType));
-        return remapped with {
-            ReturnType = RemapNativeFunctionPointerType(function.ReturnType, mapping),
-            NativeFunctionPointerType = function.NativeFunctionPointerType is PrimitiveType functionPointerType
-                ? RemapNativeFunctionPointerType(functionPointerType, mapping) : null,
-            NativeOutputContracts = [.. function.NativeOutputContracts.Select(output => output with {
-                PointeeType = RemapNativeFunctionPointerType(output.PointeeType, mapping),
-            })],
-            DirectNativeImport = function.DirectNativeImport is DirectNativeImport import
-                ? import with {
-                    Outputs = [.. import.Outputs.Select(output => output with {
-                        PointeeType = RemapNativeFunctionPointerType(output.PointeeType, mapping),
-                    })],
-                    Parameters = [.. import.Parameters.Select(parameter => parameter with {
-                        PointeeType = RemapNativeFunctionPointerType(parameter.PointeeType, mapping),
-                    })],
-                }
-                : null,
-            NativeVTableMethod = function.NativeVTableMethod is NativeVTableMethodDefinition vtableMethod
-                ? vtableMethod with {
-                    Parameters = [.. vtableMethod.Parameters.Select(parameter => parameter with {
-                        PointeeType = RemapNativeFunctionPointerType(parameter.PointeeType, mapping),
-                    })],
-                    Outputs = [.. vtableMethod.Outputs.Select(output => output with {
-                        PointeeType = RemapNativeFunctionPointerType(output.PointeeType, mapping),
-                    })],
-                }
-                : null,
-            Variables = [.. function.Variables.Select(variable => variable with {
-                Type = RemapNativeFunctionPointerType(variable.Type, mapping),
-                    NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
-                        ? RemapNativeFixedArrayLayout(layout, RemapType) : null,
-                })],
-        };
+        return BoundTreeTraversal.RewriteTypes(function,
+            type => RemapNativeFunctionPointerType(type, mapping));
     }
 
     private static BoundStruct RemapNativePointerTypes(BoundStruct structure,
@@ -3992,9 +4042,7 @@ public static partial class ModuleCompiler
                     for (var existing = 0; existing < combined.Count; existing++)
                     {
                         var other = combined[existing];
-                        if (candidate.CallingConvention == other.CallingConvention
-                            && candidate.ReturnType == other.ReturnType
-                            && candidate.ParameterTypes.SequenceEqual(other.ParameterTypes))
+                        if (NativeFunctionPointerContract.AreEquivalent(candidate, other))
                         {
                             mergedIndex = existing;
                             break;
@@ -4482,6 +4530,26 @@ public static partial class ModuleCompiler
             throw new ModuleContractException(
                 "General NoThrow declarations are not supported by structured-module revision 92.");
         }
+        if (program.NativeFunctionPointerSignatures.Any(static signature =>
+            !NativeFunctionPointerContract.CanPersistRevision92(signature)))
+        {
+            throw new ModuleContractException(
+                "Structured-module revision 92 does not encode complete function-pointer invocation contracts.");
+        }
+        if (module.FormatVersion == Version
+            && (program.NativeFunctionPointerSignatures.Any(static signature =>
+                    signature.CallingConvention != NativeCallingConvention.Native)
+                || program.Functions.Any(static function =>
+                    function.NativeCallableConvention is NativeCallingConvention convention
+                        && convention != NativeCallingConvention.Native
+                    || function.DirectNativeImport is DirectNativeImport import
+                        && (import.CallingConvention != NativeCallingConvention.Native
+                            || import.ResolutionMode != NativeImportResolutionMode.Link
+                            || import.ResolutionPolicy != NativeImportResolutionPolicy.NotApplicable))))
+        {
+            throw new ModuleContractException(
+                "Structured-module revision 92 does not encode normalized native calling conventions.");
+        }
         var persistedFunctionNames = module.Functions
             .Select(static function => function.Name)
             .ToHashSet(StringComparer.Ordinal);
@@ -4941,6 +5009,12 @@ public static partial class ModuleCompiler
         for (var index = 0; index < signatureCount; index++)
         {
             var convention = (NativeCallingConvention)reader.ReadByte();
+            if (reader is ModuleReader { FormatVersion: Version }
+                && convention != NativeCallingConvention.Native)
+            {
+                throw new ModuleFormatException(
+                    "Structured-module revision 92 contains an unsupported native calling convention.");
+            }
             var returnType = GetType(reader);
             var parameterCount = Count(reader, MaximumSlots);
             var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(parameterCount);
@@ -5469,7 +5543,7 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Function body contradicts its declaration.");
             }
             if (function?.DirectNativeImport is not null
-                && (!function.IsExternal || !DirectNativeImportContract.IsValid(function, structures,
+                && (!function.IsExternal || !DirectNativeImportContract.IsValidPrivateWindows(function, structures,
                     nativeFunctionPointerSignatures, nativePointerTypes)))
             {
                 throw new ModuleFormatException("Direct native import metadata is invalid.");
@@ -5698,7 +5772,7 @@ public static partial class ModuleCompiler
             writer.Write(function.DirectNativeImport is not null);
             if (function.DirectNativeImport is DirectNativeImport import)
             {
-                if (!function.IsExternal || !DirectNativeImportContract.IsValid(function, structures,
+                if (!function.IsExternal || !DirectNativeImportContract.IsValidPrivateWindows(function, structures,
                     nativeFunctionPointerSignatures, nativePointerTypes))
                 {
                     throw new ModuleContractException("Direct native import metadata is invalid.");

@@ -286,6 +286,8 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>Validated value layouts; type identifiers are 100 + declaration index.</summary>
     public ImmutableArray<BoundStruct> Structures { get; init; } = [];
 
+    internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
+
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
@@ -476,6 +478,7 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether this external declaration originated in a module reference rather than source import syntax.</summary>
     internal bool IsModuleReference { get; init; }
     internal PrimitiveType? NativeFunctionPointerType { get; init; }
+    internal NativeCallingConvention? NativeCallableConvention { get; init; }
     internal string? NativeCallableEntryName { get; init; }
 
     internal NativeVTableMethodDefinition? NativeVTableMethod { get; init; }
@@ -491,6 +494,8 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 
     /// <summary>Whether calling this declaration requires an explicit unsafe caller context.</summary>
     public bool RequiresUnsafeCaller { get; init; }
+
+    internal bool DeclaredRequiresUnsafeCaller { get; init; }
 
     /// <summary>Whether this declaration guarantees no normal continuation; exceptional or fatal failure remains possible.</summary>
     public bool DoesNotReturn { get; init; }
@@ -542,9 +547,25 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
 internal sealed record BoundModuleImport(string ProducerIdentity, string ExportKey,
     uint TargetRequirement, uint RuntimePolicy);
 
+internal enum NativeImportResolutionMode : byte
+{
+    Link = 1,
+    Dynamic = 2,
+}
+
+internal enum NativeImportResolutionPolicy : byte
+{
+    NotApplicable = 0,
+    Default = 1,
+    CompatibilitySearch = 2,
+}
+
 internal sealed record DirectNativeImport(string LibraryName, string ExportName,
     ImmutableArray<DirectNativeOutput> Outputs)
 {
+    internal NativeCallingConvention CallingConvention { get; init; } = NativeCallingConvention.Native;
+    internal NativeImportResolutionMode ResolutionMode { get; init; } = NativeImportResolutionMode.Link;
+    internal NativeImportResolutionPolicy ResolutionPolicy { get; init; }
     internal ImmutableArray<DirectNativeParameter> Parameters { get; init; } = [];
 }
 
@@ -827,6 +848,10 @@ public sealed record BoundConstant : BoundExpression
     /// <param name="span">The source range.</param>
     public BoundConstant(long value, PrimitiveType type, TextSpan span) : base(type, span)
     {
+        if (BoundEnumTypes.IsType(type) && value is < int.MinValue or > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(value));
+        }
         if (PrimitiveTypeFacts.ScalarWidth(type) > sizeof(ulong))
         {
             throw new ArgumentException("A wide scalar constant requires its complete bit payload.", nameof(value));

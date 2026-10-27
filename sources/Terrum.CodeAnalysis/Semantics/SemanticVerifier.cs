@@ -104,6 +104,10 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "NativeFunctionPointer");
         }
+        if (!BoundEnumTypes.IsValidTable(program.EnumDefinitions))
+        {
+            throw Invalid();
+        }
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes, program.Structures,
                 program.NativeFunctionPointerSignatures))
         {
@@ -117,6 +121,11 @@ public static partial class SemanticVerifier
             if (function is null || function.Variables.IsDefault)
             {
                 throw Invalid();
+            }
+            if (function.NativeCallableConvention is NativeCallingConvention nativeCallableConvention
+                && !NativeFunctionPointerContract.IsKnownConvention(nativeCallableConvention))
+            {
+                throw InvalidEffect(function.Span, "NativeFunctionPointer");
             }
             VerifyDependencyContracts(function, program);
             if (function.NativeVTableMethod is not null
@@ -275,6 +284,7 @@ public static partial class SemanticVerifier
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures);
                 var nested = !NativePointerTypes.IsType(field.Type) && !NativeFunctionPointerTypes.IsType(field.Type)
+                    && !BoundEnumTypes.IsType(field.Type)
                     && (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
                     ? (int)field.Type - 100 : -1;
                 var alignment = width == 0 ? 1 : nested >= 0 && nested < alignments.Length
@@ -338,6 +348,7 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(default, "Ownership");
                 }
                 var nested = !NativePointerTypes.IsType(field.Type) && !NativeFunctionPointerTypes.IsType(field.Type)
+                    && !BoundEnumTypes.IsType(field.Type)
                     && (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
                     ? (int)field.Type - 100 : -1;
                 if (nested >= program.Structures.Length)
@@ -632,7 +643,8 @@ public static partial class SemanticVerifier
                                 && !IsCopyStruct(program, function.ReturnType))
                         : function.ParameterCount != 1 || function.Variables[0].IsMutable
                             || IsUnique(program, function.Variables[0].Type))
-                    || !IsClassArgumentType(function.ReturnType, program.Structures)
+                    || !IsClassArgumentType(function.ReturnType, program.Structures,
+                        program.EnumDefinitions.Length)
                     || (declaringType >= 0 && HasFieldName(declaringType, propertyName))))
             {
                 throw Invalid();
@@ -651,7 +663,8 @@ public static partial class SemanticVerifier
                 || function.Name != function.DeclaringStruct + ".#ctor"
                 || function.ParameterCount < 1 || function.ParameterCount > MaximumArguments
                 || function.Variables.Skip(1).Take(function.ParameterCount - 1)
-                    .Any(variable => variable.IsOut || !IsClassArgumentType(variable.Type, program.Structures))))
+                    .Any(variable => variable.IsOut || !IsClassArgumentType(variable.Type,
+                        program.Structures, program.EnumDefinitions.Length))))
             {
                 throw Invalid();
             }
@@ -742,7 +755,9 @@ public static partial class SemanticVerifier
         var hasNativeOutputContracts = program.Functions.Any(static function =>
             function is not null && NativeOutputCount(function) != 0);
         var hasDoesNotReturnFunctions = program.Functions.Any(
-            static function => function.DoesNotReturn);
+            static function => function.DoesNotReturn)
+            || program.NativeFunctionPointerSignatures.Any(
+                static signature => (signature.EffectsMask & 2) != 0);
         var nativePointerCaptureEffects = CreateNativePointerCaptureEffects(program);
         var nativePointerWriteEffects = CreateNativePointerWriteEffects(
             program, nativePointerCaptureEffects);
@@ -4609,14 +4624,15 @@ public static partial class SemanticVerifier
                     }
                 }
                 else if (!constant.Bits.IsCanonicalFor(constant.Type)
-                    || constant.Type is not (PrimitiveType.Void or PrimitiveType.Int8 or PrimitiveType.Int16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
-                    or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.Float32 or PrimitiveType.Float64
-                    or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
-                    or PrimitiveType.Rune or PrimitiveType.Bool or PrimitiveType.Int128 or PrimitiveType.UInt128
-                    or PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128
-                    or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128)
+                    || (constant.Type is not (PrimitiveType.Void or PrimitiveType.Int8 or PrimitiveType.Int16
+                        or PrimitiveType.Int32 or PrimitiveType.UInt8 or PrimitiveType.UInt16
+                        or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                        or PrimitiveType.Float32 or PrimitiveType.Float64
+                        or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
+                        or PrimitiveType.Rune or PrimitiveType.Bool or PrimitiveType.Int128 or PrimitiveType.UInt128
+                        or PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float128
+                        or PrimitiveType.Decimal32 or PrimitiveType.Decimal64 or PrimitiveType.Decimal128)
+                        && !BoundEnumTypes.IsValidType(constant.Type, program.EnumDefinitions))
                     || (constant.Type is PrimitiveType.Int32 or PrimitiveType.UInt32
                         && constant.Value is < int.MinValue or > int.MaxValue)
                     || (constant.Type == PrimitiveType.Int8 && constant.Value is < sbyte.MinValue or > sbyte.MaxValue)
@@ -4638,7 +4654,7 @@ public static partial class SemanticVerifier
             case BoundNativeFunctionAddress address:
                 if (!address.IsUnsafeAuthorized
                     || (uint)address.Function >= (uint)program.Functions.Length
-                    || !NativeFunctionPointerContract.MatchesFunction(
+                    || !NativeFunctionPointerContract.MatchesAddressableFunction(
                         program.Functions[address.Function], address.Type,
                         program.NativeFunctionPointerSignatures))
                 {
@@ -5595,6 +5611,8 @@ public static partial class SemanticVerifier
                 break;
             case BoundIndirectCall call:
                 VerifyIndirectCall(call, function, program);
+                var indirectSignature = program.NativeFunctionPointerSignatures[
+                    NativeFunctionPointerTypes.Index(call.Target.Type)];
                 if (!EvaluateExpression(call.Target, initialized, fieldMasks, declarations,
                     function, program, ref remaining, depth + 1, failures))
                 {
@@ -5608,7 +5626,8 @@ public static partial class SemanticVerifier
                 var indirectCallCompletes = true;
                 foreach (var argument in call.Arguments)
                 {
-                    if (indirectCallCompletes)
+                    if (indirectCallCompletes
+                        && (indirectSignature.EffectsMask & 2) == 0)
                     {
                         indirectCallCompletes = EvaluateExpression(argument, initialized,
                             fieldMasks, declarations, function, program, ref remaining,
@@ -6379,6 +6398,7 @@ public static partial class SemanticVerifier
             || NativeFixedArrayContract.IsCarrier(type)
             || (allowVoid && type == PrimitiveType.Void)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length)
+            || BoundEnumTypes.IsValidType(type, program.EnumDefinitions)
             || NativePointerTypeContract.IsValidType(type, program.NativePointerTypes)
             || NativeFunctionPointerContract.IsValidType(type, program.NativeFunctionPointerSignatures)
             || (ManagedClassTypes.IsManaged(type) && (ManagedClassTypes.Readonly(type) is
@@ -6389,7 +6409,8 @@ public static partial class SemanticVerifier
                 && (!ManagedClassTypes.IsWritable(type)
                     || program.Classes[ManagedClassTypes.ClassIndex(type)].IsMutable));
 
-    internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
+    internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        int enumDefinitionCount = 0) =>
         type is PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune
             or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.UInt8
             or PrimitiveType.UInt16 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
@@ -6399,6 +6420,7 @@ public static partial class SemanticVerifier
             || NativePointerTypes.IsType(type)
             || NativeFunctionPointerTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type)
+            || BoundEnumTypes.IsValidType(type, enumDefinitionCount)
             || ((int)type >= 100 && (int)type - 100 < structures.Count
                 && !structures[(int)type - 100].IsUnique);
 
@@ -6453,7 +6475,8 @@ public static partial class SemanticVerifier
             if (function.Variables[parameter].Type != constructor.Variables[parameter + 1].Type
                 || function.Variables[parameter].IsOut || function.Variables[parameter].IsMutable
                 || constructor.Variables[parameter + 1].IsOut
-                || !IsClassArgumentType(function.Variables[parameter].Type, program.Structures))
+                || !IsClassArgumentType(function.Variables[parameter].Type, program.Structures,
+                    program.EnumDefinitions.Length))
             {
                 throw Invalid();
             }
@@ -7122,6 +7145,14 @@ public static partial class SemanticVerifier
             BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                 && program.Functions[call.Function].DoesNotReturn
                 => MayNotCompleteNormallyFact,
+            BoundIndirectCall call
+                when call.Target is not null
+                    && NativeFunctionPointerTypes.IsType(call.Target.Type)
+                    && (uint)NativeFunctionPointerTypes.Index(call.Target.Type)
+                        < (uint)program.NativeFunctionPointerSignatures.Length
+                    && (program.NativeFunctionPointerSignatures[
+                        NativeFunctionPointerTypes.Index(call.Target.Type)].EffectsMask & 2) != 0
+                => MayNotCompleteNormallyFact,
             BoundNominalUpdate update when (uint)update.Function < (uint)program.Functions.Length
                 && program.Functions[update.Function].DoesNotReturn
                 => MayNotCompleteNormallyFact,
@@ -7208,7 +7239,12 @@ public static partial class SemanticVerifier
                         return false;
                     }
                 }
-                return true;
+                var callType = call.Target.Type;
+                return !NativeFunctionPointerTypes.IsType(callType)
+                    || (uint)NativeFunctionPointerTypes.Index(callType)
+                        >= (uint)program.NativeFunctionPointerSignatures.Length
+                    || (program.NativeFunctionPointerSignatures[
+                        NativeFunctionPointerTypes.Index(callType)].EffectsMask & 2) == 0;
             case BoundBinary { Operator: TokenKind.AmpersandAmpersand or TokenKind.PipePipe } logical:
                 return CanCompleteAs(logical, true, initialized, program, ref remaining, depth + 1)
                     || CanCompleteAs(logical, false, initialized, program, ref remaining, depth + 1);

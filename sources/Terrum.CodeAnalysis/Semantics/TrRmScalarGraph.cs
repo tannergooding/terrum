@@ -92,25 +92,23 @@ internal sealed class TrRmScalarGraph
     internal ImmutableArray<PrimitiveType> Types { get; }
     internal int ParameterCount { get; }
     internal PrimitiveType ResultType { get; }
-    internal bool NoThrow { get; }
     internal bool DoesNotReturn { get; }
 
     private TrRmScalarGraph(ImmutableArray<TrRmScalarBlock> blocks,
         ImmutableArray<PrimitiveType> types, int parameterCount,
-        PrimitiveType resultType, bool noThrow, bool doesNotReturn)
+        PrimitiveType resultType, bool doesNotReturn)
     {
         Blocks = blocks;
         Types = types;
         ParameterCount = parameterCount;
         ResultType = resultType;
-        NoThrow = noThrow;
         DoesNotReturn = doesNotReturn;
     }
 
     internal static TrRmScalarGraph FromAuditedBody(ImmutableArray<TrRmScalarBlock> blocks,
         ImmutableArray<PrimitiveType> types, int parameterCount,
-        PrimitiveType resultType, bool noThrow, bool doesNotReturn)
-        => new(blocks, types, parameterCount, resultType, noThrow, doesNotReturn);
+        PrimitiveType resultType, bool doesNotReturn)
+        => new(blocks, types, parameterCount, resultType, doesNotReturn);
 
     internal void Verify(BoundProgram program, BoundFunction function, ref int remaining)
     {
@@ -120,7 +118,7 @@ internal sealed class TrRmScalarGraph
             || function.IsStatic || function.IsCleanup || function.PropertyName is not null
             || function.Intrinsic != BoundIntrinsic.None
             || function.ParameterCount != ParameterCount || function.ReturnType != ResultType
-            || function.IsNoThrow != NoThrow || function.Variables.Length != Types.Length
+            || function.Variables.Length != Types.Length
             || Blocks.IsDefaultOrEmpty || Blocks.Length > SemanticVerifier.MaximumAnalysisVisits
             || Types.Length > SemanticVerifier.MaximumVariables)
         {
@@ -202,7 +200,7 @@ internal sealed class TrRmScalarGraph
                 {
                     if (!nativeAddress.IsUnsafeAuthorized || !block.IsCallerUnsafeScope
                         || (uint)nativeAddress.Function >= (uint)program.Functions.Length
-                        || !NativeFunctionPointerContract.MatchesFunction(
+                        || !NativeFunctionPointerContract.MatchesAddressableFunction(
                             program.Functions[nativeAddress.Function], nativeAddress.Type,
                             program.NativeFunctionPointerSignatures)
                         || (operation is BoundLocal addressLocal
@@ -295,7 +293,8 @@ internal sealed class TrRmScalarGraph
                     || target.RequiresUnsafeCaller && !block.IsCallerUnsafeScope
                     || target.ReturnType != call.Type
                     || target.ParameterCount != call.Arguments.Length
-                    || (requiresNoFailureProof && !SemanticVerifier.ProvidesNoFailureGuarantee(target)))
+                    || (requiresNoFailureProof
+                        && !SemanticVerifier.CanCallWithoutTerrumFailure(function, target)))
                 {
                     throw new ArgumentException("Indexed call target declaration does not match.");
                 }

@@ -936,7 +936,7 @@ public static partial class TrRmExecutableCompiler
                     opcode = 0x31;
                     target = address.Function + 1;
                     if (!address.IsUnsafeAuthorized
-                        || !NativeFunctionPointerContract.MatchesFunction(
+                        || !NativeFunctionPointerContract.MatchesAddressableFunction(
                             program.Functions[address.Function], address.Type,
                             program.NativeFunctionPointerSignatures))
                     {
@@ -1630,7 +1630,7 @@ public static partial class TrRmExecutableCompiler
                     if (!address.IsUnsafeAuthorized
                         || !IsCallerUnsafeScope((_current
                             ?? throw Unsupported("Native function address has no indexed block.")).Region)
-                        || !NativeFunctionPointerContract.MatchesFunction(
+                        || !NativeFunctionPointerContract.MatchesAddressableFunction(
                             _program.Functions[address.Function], address.Type,
                             _program.NativeFunctionPointerSignatures))
                     {

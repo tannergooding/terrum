@@ -31,6 +31,10 @@ internal sealed partial class Binder
     private readonly List<Signature> _signatures = [];
     private readonly List<NativeFunctionPointerSignatureDefinition> _nativeFunctionPointerSignatures = [];
     private readonly List<NativePointerTypeDefinition> _nativePointerTypes = [];
+    private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Expression)>
+        _pendingNativeCallConvExpressions = [];
+    private readonly List<BoundEnumDefinition> _enumDefinitions = [];
+    private readonly Dictionary<string, PrimitiveType> _enumNames = new(StringComparer.Ordinal);
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
@@ -155,6 +159,41 @@ internal sealed partial class Binder
         _reference = reference;
         _runtimePolicy = runtimePolicy;
         _sourceArithmeticProfile = sourceArithmeticProfile;
+    }
+
+    private bool AddBoundEnumDefinition(BoundEnumDefinition definition)
+    {
+        for (var index = 0; index < _enumDefinitions.Count; index++)
+        {
+            if (_enumDefinitions[index].Identity != definition.Identity)
+            {
+                continue;
+            }
+            if (BoundEnumTypes.AreEquivalent(_enumDefinitions[index], definition))
+            {
+                return true;
+            }
+            Report("TRM3003", $"Conflicting enum declaration '{definition.Name}'.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        if (_enumNames.ContainsKey(definition.Name))
+        {
+            Report("TRM3003", $"Duplicate enum declaration '{definition.Name}'.",
+                _trees[0].Root.Span);
+            return false;
+        }
+        if (_enumDefinitions.Count >= BoundEnumTypes.MaximumCount)
+        {
+            Report("TRM3016", "The selected enum declarations exceed the supported type count.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        _enumNames.Add(definition.Name, BoundEnumTypes.Type(_enumDefinitions.Count));
+        _enumDefinitions.Add(definition);
+        return true;
     }
 
     private BoundIntegerOverflowBehavior SourceOverflowBehavior(TokenKind operation, PrimitiveType type,
@@ -314,6 +353,21 @@ internal sealed partial class Binder
                 _structs.Add(structure);
                 _ = _laidOut.Add(_structs.Count - 1);
             }
+            foreach (var definition in _reference.EnumDefinitions)
+            {
+                _ = AddBoundEnumDefinition(definition);
+            }
+            if (_reference.NativeCoreRegistration is NativeCoreRegistrationSet nativeCoreRegistration)
+            {
+                foreach (var definition in nativeCoreRegistration.EnumDefinitions)
+                {
+                    _ = AddBoundEnumDefinition(BoundEnumDefinition.FromCore(definition));
+                }
+            }
+            if (DiagnosticCount != 0)
+            {
+                return null;
+            }
             foreach (var function in _reference.Functions)
             {
                 _functions.Add(function.Name, _signatures.Count);
@@ -332,6 +386,7 @@ internal sealed partial class Binder
                     IsOperator = function.IsOperator,
                     PropertyName = function.PropertyName,
                     RequiresUnsafeCaller = function.RequiresUnsafeCaller,
+                    DeclaredRequiresUnsafeCaller = function.DeclaredRequiresUnsafeCaller,
                     NativeFunctionPointerType = function.NativeFunctionPointerType,
                 });
             }
@@ -736,7 +791,9 @@ internal sealed partial class Binder
                 IsOperator = signature.IsOperator,
                 IsNoThrow = signature.IsNoThrow,
                 RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
+                DeclaredRequiresUnsafeCaller = signature.DeclaredRequiresUnsafeCaller,
                 NativeFunctionPointerType = signature.NativeFunctionPointerType,
+                NativeCallableConvention = signature.NativeCallableConvention,
                 IsClassConstructor = signature.IsClassConstructor,
                 IsCleanup = signature.IsCleanup,
                 DoesNotReturn = signature.DoesNotReturn,
@@ -759,8 +816,13 @@ internal sealed partial class Binder
         {
             return null;
         }
+        if (!ResolveNativeEnumArguments(bound))
+        {
+            return null;
+        }
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
+            EnumDefinitions = [.. _enumDefinitions],
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
             NativePointerTypes = [.. _nativePointerTypes],
             Classes = [.. _classes],
@@ -888,7 +950,207 @@ internal sealed partial class Binder
         return 1;
     }
 
-    private static bool TryDecodeDirectNativeImportAttribute(SyntaxNode attribute,
+    private bool TryDecodeDirectNativeImportAttribute(SyntaxNode attribute,
+        out string libraryName, out string? exportName,
+        out NativeCallingConvention callingConvention,
+        out NativeImportResolutionMode resolutionMode,
+        out NativeImportResolutionPolicy resolutionPolicy,
+        out NativeImportEnumArgumentExpressions? enumArguments)
+    {
+        libraryName = "";
+        exportName = null;
+        callingConvention = NativeCallingConvention.Native;
+        resolutionMode = NativeImportResolutionMode.Link;
+        resolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
+        enumArguments = null;
+
+        if (_reference?.NativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        {
+            return TryDecodeLegacyDirectNativeImportAttribute(attribute,
+                out libraryName, out var legacyExportName)
+                && (exportName = legacyExportName) is not null;
+        }
+
+        var attributeName = AttributeName(attribute);
+        if (HasLocalCoreTypeShadow(attributeName, registration.NativeImport.QualifiedName)
+            || !NativeCoreRegistrationSet.NameResolvesTo(attributeName,
+                registration.NativeImport.QualifiedName, _namespace, _usings)
+            || !TryDecodeRegisteredNativeImportArguments(attribute,
+                out libraryName, out exportName, out callingConvention,
+                out resolutionMode, out resolutionPolicy, out enumArguments))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryDecodeRegisteredNativeImportArguments(SyntaxNode attribute,
+        out string libraryName, out string? exportName,
+        out NativeCallingConvention callingConvention,
+        out NativeImportResolutionMode resolutionMode,
+        out NativeImportResolutionPolicy resolutionPolicy,
+        out NativeImportEnumArgumentExpressions? enumArguments)
+    {
+        libraryName = "";
+        exportName = null;
+        callingConvention = NativeCallingConvention.Unmanaged;
+        resolutionMode = NativeImportResolutionMode.Link;
+        resolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
+        enumArguments = null;
+        SyntaxNode? callingConventionExpression = null;
+        SyntaxNode? resolutionModeExpression = null;
+        SyntaxNode? resolutionPolicyExpression = null;
+        var openIndex = -1;
+        var closeIndex = -1;
+        for (var index = 0; index < attribute.Children.Length; index++)
+        {
+            if (attribute.Children[index] is SyntaxTokenElement { Token.Kind: TokenKind.OpenParen })
+            {
+                openIndex = index;
+            }
+            else if (attribute.Children[index] is SyntaxTokenElement {
+                Token.Kind: TokenKind.CloseParen,
+            })
+            {
+                closeIndex = index;
+            }
+        }
+        if (openIndex < 0 || closeIndex < openIndex)
+        {
+            return false;
+        }
+
+        var namedArguments = new HashSet<string>(StringComparer.Ordinal);
+        var positionalOrdinal = 0;
+        var hasNamedArguments = false;
+        var hasLibraryName = false;
+        var hasEntryName = false;
+        var hasCallConv = false;
+        var hasResolutionMode = false;
+        var hasResolutionPolicy = false;
+        var indexInArguments = openIndex + 1;
+        while (indexInArguments < closeIndex)
+        {
+            if (attribute.Children[indexInArguments] is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Identifier,
+                } label
+                && indexInArguments + 1 < closeIndex
+                && attribute.Children[indexInArguments + 1] is SyntaxTokenElement {
+                    Token.Kind: TokenKind.Colon,
+                })
+            {
+                hasNamedArguments = true;
+                if (!namedArguments.Add(label.Token.Name))
+                {
+                    return false;
+                }
+
+                indexInArguments += 2;
+                if (indexInArguments >= closeIndex)
+                {
+                    return false;
+                }
+
+                var argumentValue = attribute.Children[indexInArguments];
+                switch (label.Token.Name)
+                {
+                    case "LibraryName" when !hasLibraryName
+                        && TryDecodeNativeImportStringArgument(argumentValue, out var namedLibrary):
+                        libraryName = namedLibrary;
+                        hasLibraryName = true;
+                        break;
+                    case "EntryName" when !hasEntryName
+                        && TryDecodeNativeImportStringArgument(argumentValue, out var namedEntry):
+                        exportName = namedEntry;
+                        hasEntryName = true;
+                        break;
+                    case "CallConv" when !hasCallConv
+                        && argumentValue is SyntaxNode callConvValue:
+                        callingConventionExpression = callConvValue;
+                        hasCallConv = true;
+                        break;
+                    case "ResolutionMode" when !hasResolutionMode
+                        && argumentValue is SyntaxNode modeValue:
+                        resolutionModeExpression = modeValue;
+                        hasResolutionMode = true;
+                        break;
+                    case "ResolutionPolicy" when !hasResolutionPolicy
+                        && argumentValue is SyntaxNode policyValue:
+                        resolutionPolicyExpression = policyValue;
+                        hasResolutionPolicy = true;
+                        break;
+                    default:
+                        return false;
+                }
+
+                indexInArguments++;
+            }
+            else
+            {
+                if (hasNamedArguments || positionalOrdinal >= 2
+                    || !TryDecodeNativeImportStringArgument(
+                        attribute.Children[indexInArguments], out var positionalString))
+                {
+                    return false;
+                }
+
+                if (positionalOrdinal == 0)
+                {
+                    libraryName = positionalString;
+                    hasLibraryName = true;
+                }
+                else
+                {
+                    exportName = positionalString;
+                    hasEntryName = true;
+                }
+                positionalOrdinal++;
+                indexInArguments++;
+            }
+
+            if (indexInArguments < closeIndex)
+            {
+                if (attribute.Children[indexInArguments] is not SyntaxTokenElement {
+                        Token.Kind: TokenKind.Comma,
+                    })
+                {
+                    return false;
+                }
+                indexInArguments++;
+                if (indexInArguments == closeIndex)
+                {
+                    return false;
+                }
+            }
+        }
+
+        if (!hasLibraryName || !DirectNativeImportContract.IsValidSourceLibraryName(libraryName)
+            || (exportName is not null && !DirectNativeImportContract.IsValidExportName(exportName))
+            || (resolutionModeExpression is null
+                && resolutionMode == NativeImportResolutionMode.Link && hasResolutionPolicy))
+        {
+            return false;
+        }
+        if (resolutionModeExpression is null && resolutionMode == NativeImportResolutionMode.Link)
+        {
+            resolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
+        }
+        else if (resolutionModeExpression is null && !hasResolutionPolicy)
+        {
+            resolutionPolicy = NativeImportResolutionPolicy.Default;
+        }
+
+        if (callingConventionExpression is not null || resolutionModeExpression is not null
+            || resolutionPolicyExpression is not null)
+        {
+            enumArguments = new NativeImportEnumArgumentExpressions(
+                callingConventionExpression, resolutionModeExpression, resolutionPolicyExpression);
+        }
+        return true;
+    }
+
+    private static bool TryDecodeLegacyDirectNativeImportAttribute(SyntaxNode attribute,
         out string libraryName, out string exportName)
     {
         libraryName = "";
@@ -915,8 +1177,25 @@ internal sealed partial class Binder
             return false;
         }
 
-        return DirectNativeImportContract.IsValidLibraryName(libraryName)
+        return DirectNativeImportContract.IsValidSourceLibraryName(libraryName)
             && DirectNativeImportContract.IsValidExportName(exportName);
+    }
+
+    private static bool TryDecodeNativeImportStringArgument(SyntaxElement argument,
+        out string value)
+    {
+        value = "";
+        var literal = argument switch
+        {
+            SyntaxTokenElement { Token.Kind: TokenKind.StringLiteral } token => token,
+            SyntaxNode {
+                Kind: SyntaxKind.LiteralExpression,
+                Children: [SyntaxTokenElement { Token.Kind: TokenKind.StringLiteral } token],
+            } => token,
+            _ => null,
+        };
+        return literal is SyntaxTokenElement tokenElement
+            && StringLiteralDecoder.TryDecode(tokenElement.Token.Text.AsSpan(), out value);
     }
 
     private static bool TryGetParameterAttributeTarget(SyntaxNode attribute, out string parameterName)
@@ -2023,16 +2302,23 @@ internal sealed partial class Binder
         var isStatic = false;
         var isExternal = false;
         var requiresUnsafeCaller = false;
+        var declaredRequiresUnsafeCaller = false;
         var isNativeCallable = false;
+        NativeCallingConvention? nativeCallableConvention = null;
         var isNativeVTableMethod = false;
         var isCleanup = false;
         var isConstEval = false;
         var doesNotReturn = false;
         SyntaxNode? nativeImportAttribute = null;
+        NativeImportEnumArgumentExpressions? nativeImportEnumArguments = null;
+        SyntaxNode? nativeCallableConventionExpression = null;
         SyntaxNode? nativeVTableMethodAttribute = null;
         var nativeVTableSlot = -1;
         string? nativeLibraryName = null;
         string? nativeExportName = null;
+        var nativeImportCallingConvention = NativeCallingConvention.Native;
+        var nativeImportResolutionMode = NativeImportResolutionMode.Link;
+        var nativeImportResolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
         var nativeOutputConditionsByName = new Dictionary<string, bool>(StringComparer.Ordinal);
         var nativeParameters = new Dictionary<int, NativeParameterDefinition>();
         var dependencyAttributes = new List<(SyntaxNode Attribute,
@@ -2059,22 +2345,31 @@ internal sealed partial class Binder
                         attribute.Span);
                     continue;
                 }
-                if (attributeName == DirectNativeImportContract.AttributeFullyQualifiedName)
+                if (attributeName == DirectNativeImportContract.AttributeFullyQualifiedName
+                    || (_reference?.NativeCoreRegistration is NativeCoreRegistrationSet nativeImportRegistration
+                        && NativeCoreRegistrationSet.NameResolvesTo(attributeName,
+                            nativeImportRegistration.NativeImport.QualifiedName, _namespace, _usings)))
                 {
                     if (nativeImportAttribute is not null)
                     {
                         Report("TRM3030", "NativeImport is a nonrepeatable compiler-owned attribute.", attribute.Span);
                     }
                     else if (TryDecodeDirectNativeImportAttribute(attribute,
-                        out var decodedLibraryName, out var decodedExportName))
+                        out var decodedLibraryName, out var decodedExportName,
+                        out var decodedCallingConvention, out var decodedResolutionMode,
+                        out var decodedResolutionPolicy, out var decodedEnumArguments))
                     {
                         nativeLibraryName = decodedLibraryName;
                         nativeExportName = decodedExportName;
+                        nativeImportCallingConvention = decodedCallingConvention;
+                        nativeImportResolutionMode = decodedResolutionMode;
+                        nativeImportResolutionPolicy = decodedResolutionPolicy;
+                        nativeImportEnumArguments = decodedEnumArguments;
                     }
                     else
                     {
                         Report("TRM3030",
-                            "NativeImport requires a library and export string literal.",
+                            "NativeImport arguments do not match the selected Core schema.",
                             attribute.Span);
                     }
                     nativeImportAttribute = attribute;
@@ -2120,20 +2415,22 @@ internal sealed partial class Binder
                     }
                     continue;
                 }
-                if (attributeName == "Terrum.Interop.NativeCallable")
+                if (attributeName == "Terrum.Interop.NativeCallable"
+                    || (_reference?.NativeCoreRegistration is NativeCoreRegistrationSet nativeCallableRegistration
+                        && NativeCoreRegistrationSet.NameResolvesTo(attributeName,
+                            nativeCallableRegistration.NativeCallable.QualifiedName, _namespace, _usings)))
                 {
                     if (returnTarget || isNativeCallable)
                     {
                         Report("TRM3030", "NativeCallable is a nonrepeatable function attribute.", attribute.Span);
                     }
-                    else if (attribute.Children.OfType<SyntaxTokenElement>()
-                        .Any(static token => token.Token.Kind == TokenKind.OpenParen))
-                    {
-                        Report("TRM3030", "NativeCallable does not accept arguments.", attribute.Span);
-                    }
-                    else
+                    else if (TryBindNativeCallableAttribute(attribute,
+                        out var selectedNativeCallableConvention, out _,
+                        out var selectedNativeCallableConventionExpression))
                     {
                         isNativeCallable = true;
+                        nativeCallableConvention = selectedNativeCallableConvention;
+                        nativeCallableConventionExpression = selectedNativeCallableConventionExpression;
                     }
                     continue;
                 }
@@ -2209,6 +2506,7 @@ internal sealed partial class Binder
                     Report("TRM3001", "A callable can declare only one unsafe modifier.", unsafeModifier.Span);
                 }
                 requiresUnsafeCaller = true;
+                declaredRequiresUnsafeCaller = true;
                 continue;
             }
             Report("TRM3001", "Function modifier is not supported.", declaration.Children[index].Span);
@@ -2247,6 +2545,10 @@ internal sealed partial class Binder
         var validOperator = (operatorKey.Arity == 1 && IsStaticUnaryOperator(nameToken.Kind))
             || (operatorKey.Arity == 2 && IsStaticBinaryOperator(nameToken.Kind));
         var nameText = operatorDeclaration && validOperator ? OperatorName(operatorKey) : nameToken.Name;
+        if (nativeLibraryName is not null && nativeExportName is null)
+        {
+            nativeExportName = nameText;
+        }
         var getter = property && !directGetter ? (SyntaxNode)declaration.Children[^2] : null;
         var body = getter is SyntaxNode accessor ? (SyntaxNode)accessor.Children[^1]
             : (SyntaxNode)declaration.Children[^1];
@@ -2288,7 +2590,7 @@ internal sealed partial class Binder
         }
         if (isNativeCallable)
         {
-            if (isExternal || constructor || property || operatorDeclaration || isCleanup || doesNotReturn
+            if (isExternal || constructor || property || operatorDeclaration || isCleanup
                 || containingType is not null
                 || declaration.Children.OfType<SyntaxNode>().Any(static child =>
                     child.Kind is SyntaxKind.TypeParameterList or SyntaxKind.ConstraintClause))
@@ -2637,10 +2939,19 @@ internal sealed partial class Binder
         PrimitiveType? nativeFunctionPointerType = null;
         if (isNativeCallable)
         {
-            var nativeSignature = new NativeFunctionPointerSignatureDefinition(NativeCallingConvention.Native,
-                returnType, [.. declared.Select(static parameter => parameter.Type)]);
+            var dependenciesSupported =
+                NativeFunctionPointerContract.TryCreateDependencies(
+                    dependencyContracts, out var functionPointerDependencies);
+            var nativeSignature = new NativeFunctionPointerSignatureDefinition(
+                nativeCallableConvention ?? NativeCallingConvention.Native,
+                returnType, [.. declared.Select(static parameter => parameter.Type)]) {
+                EffectsMask = NativeFunctionPointerContract.GetDeclaredEffectsMask(
+                    doesNotReturn, declaredRequiresUnsafeCaller),
+                Dependencies = functionPointerDependencies,
+            };
             if (declared.Any(static parameter => parameter.IsOut || parameter.IsInit || parameter.IsImplicitRef
                     || parameter.IsWritableNativePointer)
+                || !dependenciesSupported
                 || !NativeFunctionPointerContract.IsValidSignature(nativeSignature,
                     [.. _nativeFunctionPointerSignatures]))
             {
@@ -2755,6 +3066,9 @@ internal sealed partial class Binder
             requiresUnsafeCaller = true;
             directNativeImport = new DirectNativeImport(nativeLibraryName, nativeExportName,
                 nativeOutputs.ToImmutable()) {
+                CallingConvention = nativeImportCallingConvention,
+                ResolutionMode = nativeImportResolutionMode,
+                ResolutionPolicy = nativeImportResolutionPolicy,
                 Parameters = directNativeParameters.ToImmutable(),
             };
             nativeOutputContractFacts = nativeOutputContracts.ToImmutable();
@@ -2874,6 +3188,7 @@ internal sealed partial class Binder
                 IsStatic = isStatic,
                 IsOperator = operatorDeclaration,
                 RequiresUnsafeCaller = requiresUnsafeCaller,
+                DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
                 DoesNotReturn = doesNotReturn,
                 IsConstructor = constructor,
                 IsClassConstructor = classConstructor,
@@ -2928,7 +3243,11 @@ internal sealed partial class Binder
             PropertyName = property ? nameText : null,
             IsConstEval = isConstEval,
             RequiresUnsafeCaller = requiresUnsafeCaller,
+            DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
             NativeFunctionPointerType = nativeFunctionPointerType,
+            NativeCallableConvention = nativeCallableConvention,
+            NativeCallableConventionExpression = nativeCallableConventionExpression,
+            NativeImportEnumArguments = nativeImportEnumArguments,
             CapturedParameters = capturedParameters,
             ReturnsForwardedBacking = returnsForwardedBacking,
             ResultDependencyParameters = resultDependencyParameters,
@@ -3594,41 +3913,37 @@ internal sealed partial class Binder
 
     private PrimitiveType BindType(SyntaxNode node, bool allowVoid)
     {
+        if (node.Kind == SyntaxKind.AttributedTypeName)
+        {
+            if (node.Children is not [
+                    SyntaxNode { Kind: SyntaxKind.Attribute } attribute,
+                    SyntaxNode { Kind: SyntaxKind.TypeName } functionPointerTypeNode
+                ] || TypeNameIdentifier(functionPointerTypeNode) != "fnptr")
+            {
+                Report("TRM3005",
+                    "NativeCallConv is a type-use attribute that must immediately precede fnptr.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+
+            if (!TryBindNativeCallConvAttribute(attribute, out var callingConvention,
+                out var conventionExpression))
+            {
+                return PrimitiveType.Int32;
+            }
+
+            return BindNativeFunctionPointerType(functionPointerTypeNode, callingConvention,
+                hasLegacyAbiPrefix: false, pendingConventionExpression: conventionExpression);
+        }
+
         var name = TypeNameIdentifier(node);
         var writable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
         var optional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
         if (name == "fnptr")
         {
-            if (typeArgumentNodes.Length < 2 || writable || optional
-                || node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.QuestionQuestion }
-                || TypeNameIdentifier(typeArgumentNodes[0]) is not ("NativeAbi" or "Terrum.Interop.NativeAbi")
-                || typeArgumentNodes[0].Children.OfType<SyntaxNode>().Any())
-            {
-                Report("TRM3005",
-                    "A native function pointer type requires fnptr<NativeAbi, parameter types..., return type>.",
-                    node.Span);
-                return PrimitiveType.Int32;
-            }
-
-            var diagnosticCount = DiagnosticCount;
-            var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(typeArgumentNodes.Length - 2);
-            for (var index = 1; index < typeArgumentNodes.Length - 1; index++)
-            {
-                parameterTypes.Add(BindType(typeArgumentNodes[index], allowVoid: false));
-            }
-            var returnType = BindType(typeArgumentNodes[^1], allowVoid: true);
-            var signature = new NativeFunctionPointerSignatureDefinition(
-                NativeCallingConvention.Native, returnType, parameterTypes.MoveToImmutable());
-            if (DiagnosticCount != diagnosticCount
-                || !NativeFunctionPointerContract.IsValidSignature(signature, [.. _nativeFunctionPointerSignatures]))
-            {
-                Report("TRM3005",
-                    "Native function pointer signatures support only scalar, raw pointer, and nested function pointer values.",
-                    node.Span);
-                return PrimitiveType.Int32;
-            }
-            return GetNativeFunctionPointerType(signature);
+            return BindNativeFunctionPointerType(node, NativeCallingConvention.Native,
+                hasLegacyAbiPrefix: true);
         }
         if (name == "ptr")
         {
@@ -3765,15 +4080,323 @@ internal sealed partial class Binder
         return type ?? PrimitiveType.Int32;
     }
 
+    private PrimitiveType BindNativeFunctionPointerType(SyntaxNode node,
+        NativeCallingConvention callingConvention, bool hasLegacyAbiPrefix,
+        SyntaxNode? pendingConventionExpression = null)
+    {
+        var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        var firstParameter = 0;
+        if (hasLegacyAbiPrefix)
+        {
+            if (typeArgumentNodes.Length < 2
+                || TypeNameIdentifier(typeArgumentNodes[0]) is not ("NativeAbi" or "Terrum.Interop.NativeAbi")
+                || typeArgumentNodes[0].Children.OfType<SyntaxNode>().Any())
+            {
+                Report("TRM3005",
+                    "The provisional legacy function-pointer type requires fnptr<NativeAbi, parameter types..., return type>.",
+                    node.Span);
+                return PrimitiveType.Int32;
+            }
+            firstParameter = 1;
+        }
+        else if (typeArgumentNodes.Length == 0)
+        {
+            Report("TRM3005",
+                "A native function-pointer type requires a return type.",
+                node.Span);
+            return PrimitiveType.Int32;
+        }
+
+        var diagnosticCount = DiagnosticCount;
+        var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(
+            typeArgumentNodes.Length - firstParameter - 1);
+        for (var index = firstParameter; index < typeArgumentNodes.Length - 1; index++)
+        {
+            parameterTypes.Add(BindType(typeArgumentNodes[index], allowVoid: false));
+        }
+        var returnType = BindType(typeArgumentNodes[^1], allowVoid: true);
+        var signature = new NativeFunctionPointerSignatureDefinition(
+            callingConvention, returnType, parameterTypes.MoveToImmutable());
+        if (DiagnosticCount != diagnosticCount
+            || !NativeFunctionPointerContract.IsValidSignature(signature, [.. _nativeFunctionPointerSignatures]))
+        {
+            Report("TRM3005",
+                "Native function pointer signatures support only scalar, raw pointer, and nested function pointer values.",
+                node.Span);
+            return PrimitiveType.Int32;
+        }
+        return pendingConventionExpression is null
+            ? GetNativeFunctionPointerType(signature)
+            : GetPendingNativeFunctionPointerType(signature, pendingConventionExpression);
+    }
+
+    private bool TryBindNativeCallConvAttribute(SyntaxNode attribute,
+        out NativeCallingConvention callingConvention, out SyntaxNode? conventionExpression)
+    {
+        callingConvention = default;
+        conventionExpression = null;
+        var registration = _reference?.NativeCoreRegistration;
+        if (registration is null)
+        {
+            Report("TRM3005",
+                "NativeCallConv requires an explicitly selected Core schema registration.",
+                attribute.Span);
+            return false;
+        }
+
+        var attributeName = AttributeName(attribute);
+        var argumentExpressions = attribute.Children.OfType<SyntaxNode>().ToArray();
+        if (HasLocalCoreTypeShadow(attributeName, registration.NativeCallConv.QualifiedName)
+            || !NativeCoreRegistrationSet.NameResolvesTo(attributeName,
+                registration.NativeCallConv.QualifiedName, _namespace, _usings)
+            || argumentExpressions.Length != 1)
+        {
+            Report("TRM3005",
+                "NativeCallConv requires one explicit value of the registered NativeCallingConvention enum.",
+                attribute.Span);
+            return false;
+        }
+
+        var valueExpression = argumentExpressions[0];
+        if (TryResolveNativeConventionMember(valueExpression, registration,
+            out callingConvention))
+        {
+            return true;
+        }
+        if (valueExpression.Kind == SyntaxKind.MemberAccessExpression)
+        {
+            Report("TRM3005",
+                "The calling-convention value is not a member of the selected Core enum.",
+                valueExpression.Span);
+            return false;
+        }
+
+        callingConvention = NativeCallingConvention.Unmanaged;
+        conventionExpression = valueExpression;
+        return true;
+    }
+
+    private bool TryBindNativeCallableAttribute(SyntaxNode attribute,
+        out NativeCallingConvention callingConvention, out bool usesLegacyRole,
+        out SyntaxNode? conventionExpression)
+    {
+        callingConvention = default;
+        usesLegacyRole = false;
+        conventionExpression = null;
+        var registration = _reference?.NativeCoreRegistration;
+        var attributeName = AttributeName(attribute);
+        if (registration is null)
+        {
+            if (attributeName != "Terrum.Interop.NativeCallable")
+            {
+                Report("TRM3030", "NativeCallable requires its selected Core schema.", attribute.Span);
+                return false;
+            }
+            if (attribute.Children.OfType<SyntaxTokenElement>()
+                .Any(static token => token.Token.Kind == TokenKind.OpenParen))
+            {
+                Report("TRM3030", "The legacy NativeCallable marker does not accept arguments.",
+                    attribute.Span);
+                return false;
+            }
+
+            callingConvention = NativeCallingConvention.Native;
+            usesLegacyRole = true;
+            return true;
+        }
+
+        if (HasLocalCoreTypeShadow(attributeName, registration.NativeCallable.QualifiedName)
+            || !NativeCoreRegistrationSet.NameResolvesTo(attributeName,
+                registration.NativeCallable.QualifiedName, _namespace, _usings))
+        {
+            Report("TRM3030", "NativeCallable does not resolve to the selected Core schema.",
+                attribute.Span);
+            return false;
+        }
+
+        if (!attribute.Children.OfType<SyntaxTokenElement>()
+                .Any(static token => token.Token.Kind == TokenKind.OpenParen)
+            || HasEmptyAttributeArgumentList(attribute))
+        {
+            callingConvention = NativeCallingConvention.Unmanaged;
+            return true;
+        }
+        if (!TryGetSingleNamedAttributeArgument(attribute, "CallConv", out var valueExpression))
+        {
+            Report("TRM3030",
+                "NativeCallable accepts only one named CallConv argument of the registered enum.",
+                attribute.Span);
+            return false;
+        }
+
+        callingConvention = NativeCallingConvention.Unmanaged;
+        conventionExpression = valueExpression;
+        return true;
+    }
+
+    private bool TryBindNativeConventionValue(SyntaxNode valueExpression,
+        NativeCoreRegistrationSet registration, out NativeCallingConvention callingConvention)
+    {
+        callingConvention = default;
+        if (!TryResolveNativeConventionMember(valueExpression, registration, out callingConvention))
+        {
+            Report("TRM3005",
+                "The calling-convention value is not a member of the selected Core enum.",
+                valueExpression.Span);
+            return false;
+        }
+
+        return true;
+    }
+
+    private bool TryResolveNativeConventionMember(SyntaxNode valueExpression,
+        NativeCoreRegistrationSet registration, out NativeCallingConvention callingConvention)
+    {
+        callingConvention = default;
+        if (!TryBindCoreEnumMember(valueExpression, registration.CallingConventions,
+                out var member))
+        {
+            return false;
+        }
+
+        callingConvention = member.Value switch
+        {
+            1 => NativeCallingConvention.Unmanaged,
+            2 => NativeCallingConvention.Cdecl,
+            3 => NativeCallingConvention.Stdcall,
+            4 => NativeCallingConvention.Vectorcall,
+            _ => default,
+        };
+        return member.Value is >= 1 and <= 4;
+    }
+
+    private bool TryBindCoreEnumMember(SyntaxNode valueExpression,
+        CoreEnumDefinition enumDefinition, out CoreEnumMemberDefinition member)
+    {
+        member = null!;
+        if (valueExpression.Kind != SyntaxKind.MemberAccessExpression
+            || valueExpression.Children[0] is not SyntaxNode receiver
+            || valueExpression.Children[2] is not SyntaxTokenElement memberToken
+            || !TryResolveEnumMember(receiver, memberToken.Token.Name,
+                out var enumType, out var enumMember)
+            || _enumDefinitions[BoundEnumTypes.Index(enumType)].Identity != enumDefinition.Identity)
+        {
+            return false;
+        }
+
+        member = new CoreEnumMemberDefinition(enumMember.Identity, enumMember.DeclaringEnum,
+            enumMember.Name, enumMember.Value, enumMember.IsPublic);
+        return true;
+    }
+
+    private bool TryResolveEnumMember(SyntaxNode receiver, string memberName,
+        out PrimitiveType enumType, out BoundEnumMemberDefinition member)
+    {
+        enumType = default;
+        member = null!;
+        if (ResolveTypeName(NameText(receiver), null, receiver.Span, out var resolvedType)
+            != DeclaredTypeResolution.Unique
+            || !BoundEnumTypes.IsType(resolvedType)
+            || (uint)BoundEnumTypes.Index(resolvedType) >= (uint)_enumDefinitions.Count)
+        {
+            return false;
+        }
+
+        var definition = _enumDefinitions[BoundEnumTypes.Index(resolvedType)];
+        foreach (var candidate in definition.Members)
+        {
+            if (candidate.Name == memberName && candidate.DeclaringEnum == definition.Identity)
+            {
+                enumType = resolvedType;
+                member = candidate;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasEmptyAttributeArgumentList(SyntaxNode attribute)
+    {
+        var children = attribute.Children;
+        for (var index = 0; index < children.Length; index++)
+        {
+            if (children[index] is SyntaxTokenElement { Token.Kind: TokenKind.OpenParen })
+            {
+                return index + 1 < children.Length
+                    && children[index + 1] is SyntaxTokenElement {
+                        Token.Kind: TokenKind.CloseParen,
+                    };
+            }
+        }
+        return false;
+    }
+
+    private static bool TryGetSingleNamedAttributeArgument(SyntaxNode attribute,
+        string argumentName, out SyntaxNode valueExpression)
+    {
+        valueExpression = null!;
+        var openIndex = -1;
+        var closeIndex = -1;
+        for (var index = 0; index < attribute.Children.Length; index++)
+        {
+            if (attribute.Children[index] is SyntaxTokenElement { Token.Kind: TokenKind.OpenParen })
+            {
+                openIndex = index;
+            }
+            else if (attribute.Children[index] is SyntaxTokenElement {
+                Token.Kind: TokenKind.CloseParen,
+            })
+            {
+                closeIndex = index;
+            }
+        }
+
+        if (openIndex < 0 || closeIndex != openIndex + 4
+            || attribute.Children[openIndex + 1] is not SyntaxTokenElement {
+                Token.Kind: TokenKind.Identifier,
+            } label
+            || label.Token.Name != argumentName
+            || attribute.Children[openIndex + 2] is not SyntaxTokenElement {
+                Token.Kind: TokenKind.Colon,
+            }
+            || attribute.Children[openIndex + 3] is not SyntaxNode expression)
+        {
+            return false;
+        }
+
+        valueExpression = expression;
+        return true;
+    }
+
+    private bool HasLocalCoreTypeShadow(string sourceName, string registeredQualifiedName)
+    {
+        if (HasLocalTypeName(sourceName))
+        {
+            return true;
+        }
+
+        return !sourceName.Contains('.', StringComparison.Ordinal)
+            && (HasLocalTypeName(Qualify(sourceName))
+                || HasLocalTypeName(registeredQualifiedName));
+    }
+
+    private bool HasLocalTypeName(string name) =>
+        _structNames.ContainsKey(name)
+        || _genericStructTemplates.ContainsKey(name)
+        || _classNames.ContainsKey(name)
+        || FindAliasDefinition(name) is not null;
+
     private PrimitiveType GetNativeFunctionPointerType(
         NativeFunctionPointerSignatureDefinition signature)
     {
         for (var index = 0; index < _nativeFunctionPointerSignatures.Count; index++)
         {
+            if (_pendingNativeCallConvExpressions.ContainsKey(index))
+            {
+                continue;
+            }
             var existing = _nativeFunctionPointerSignatures[index];
-            if (existing.CallingConvention == signature.CallingConvention
-                && existing.ReturnType == signature.ReturnType
-                && existing.ParameterTypes.SequenceEqual(signature.ParameterTypes))
+            if (NativeFunctionPointerContract.AreEquivalent(existing, signature))
             {
                 return NativeFunctionPointerTypes.Type(index);
             }
@@ -3781,6 +4404,23 @@ internal sealed partial class Binder
 
         var type = NativeFunctionPointerTypes.Type(_nativeFunctionPointerSignatures.Count);
         _nativeFunctionPointerSignatures.Add(signature);
+        return type;
+    }
+
+    private PrimitiveType GetPendingNativeFunctionPointerType(
+        NativeFunctionPointerSignatureDefinition signature, SyntaxNode expression)
+    {
+        if (_nativeFunctionPointerSignatures.Count >= SemanticVerifier.MaximumAnalysisVisits)
+        {
+            Report("TRM3016", "The compilation exceeds the native function-pointer type limit.",
+                expression.Span);
+            return PrimitiveType.Int32;
+        }
+
+        var index = _nativeFunctionPointerSignatures.Count;
+        var type = NativeFunctionPointerTypes.Type(index);
+        _nativeFunctionPointerSignatures.Add(signature);
+        _pendingNativeCallConvExpressions.Add(index, (_tree, expression));
         return type;
     }
 
@@ -6056,6 +6696,12 @@ internal sealed partial class Binder
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
+                if (receiverType is null && !HasVariableReceiverName(receiverNode)
+                    && TryResolveEnumMember(receiverNode, member, out var enumType, out var enumMember))
+                {
+                    expression = new BoundConstant(enumMember.Value, enumType, node.Span);
+                    break;
+                }
                 if (receiverType == PrimitiveType.TokenSpan && member == "Length")
                 {
                     expression = new BoundSpanLength(BindExpression(receiverNode, PrimitiveType.TokenSpan), node.Span);
@@ -6242,17 +6888,25 @@ internal sealed partial class Binder
                         break;
                     }
                     var functionName = NameText(operandNode);
-                    if (expected is PrimitiveType nativeFunctionPointerType
-                        && NativeFunctionPointerTypes.IsType(nativeFunctionPointerType)
-                        && operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
+                    if (operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
                         && !TryFindVariable(functionName, out _)
                         && TryFindFunction(functionName, out var nativeCallable))
                     {
                         var signature = _signatures[nativeCallable];
-                        if (signature.NativeFunctionPointerType != nativeFunctionPointerType)
+                        PrimitiveType? expectedFunctionPointerType = expected is PrimitiveType functionPointerExpectedType
+                            && NativeFunctionPointerTypes.IsType(functionPointerExpectedType)
+                                ? functionPointerExpectedType
+                                : null;
+                        var functionPointerType = expectedFunctionPointerType
+                            ?? (expected is null ? signature.NativeFunctionPointerType : null);
+                        if (functionPointerType is not PrimitiveType addressType
+                            || signature.NativeFunctionPointerType is not PrimitiveType actualType
+                            || (signature.NativeCallableConventionExpression is null
+                                && !NativeFunctionPointerContract.CanProject(actualType,
+                                    addressType, [.. _nativeFunctionPointerSignatures])))
                         {
                             Report("TRM3030",
-                                "The function address does not match the expected native function pointer signature.",
+                                "The function address does not match or infer a native function pointer signature.",
                                 node.Span);
                             expression = ErrorExpression(node.Span);
                         }
@@ -6265,7 +6919,7 @@ internal sealed partial class Binder
                                     node.Span);
                             }
                             expression = new BoundNativeFunctionAddress(nativeCallable,
-                                nativeFunctionPointerType, node.Span) {
+                                addressType, node.Span) {
                                 IsUnsafeAuthorized = _unsafeDepth != 0,
                             };
                         }
@@ -8247,6 +8901,11 @@ internal sealed partial class Binder
                     return _signatures[getter].ReturnType;
                 }
                 if (receiverType is null && !HasVariableReceiverName(receiver)
+                    && TryResolveEnumMember(receiver, member, out var enumType, out _))
+                {
+                    return enumType;
+                }
+                if (receiverType is null && !HasVariableReceiverName(receiver)
                     && ResolveStaticMember(receiver, member, out var staticMember) == DeclaredTypeResolution.Unique
                     && TryFindStaticGetter(staticMember, member, out var staticGetter))
                 {
@@ -8736,6 +9395,12 @@ internal sealed partial class Binder
                 {
                     AppendTypeNameText(builder, _structs[(int)type - 100].Name, ref remainingCharacters);
                 }
+                else if (BoundEnumTypes.IsType(type)
+                    && (uint)BoundEnumTypes.Index(type) < (uint)_enumDefinitions.Count)
+                {
+                    AppendTypeNameText(builder, _enumDefinitions[BoundEnumTypes.Index(type)].Name,
+                        ref remainingCharacters);
+                }
                 else
                 {
                     throw new ArgumentOutOfRangeException(nameof(type));
@@ -8841,6 +9506,11 @@ internal sealed partial class Binder
         PrimitiveType? NativePointeeType = null, bool IsWritableNativePointer = false,
         bool IsEscapedThis = false);
 
+    private sealed record NativeImportEnumArgumentExpressions(
+        SyntaxNode? CallingConvention,
+        SyntaxNode? ResolutionMode,
+        SyntaxNode? ResolutionPolicy);
+
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
         bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null)
@@ -8850,11 +9520,15 @@ internal sealed partial class Binder
         internal bool RequiresUnsafeCaller { get; init; }
         internal bool IsOperator { get; init; }
         internal PrimitiveType? NativeFunctionPointerType { get; init; }
+        internal NativeCallingConvention? NativeCallableConvention { get; init; }
         internal GenericInstantiation? Generic { get; init; }
         internal ImmutableDictionary<string, PrimitiveType>? GenericOwnerTypeArguments { get; init; }
         internal bool IsClassConstructor { get; init; }
         internal int ClassConstructor { get; init; } = -1;
         internal bool IsConstEval { get; init; }
+        internal bool DeclaredRequiresUnsafeCaller { get; init; }
+        internal SyntaxNode? NativeCallableConventionExpression { get; init; }
+        internal NativeImportEnumArgumentExpressions? NativeImportEnumArguments { get; init; }
         internal ImmutableArray<int> CapturedParameters { get; init; } = [];
         internal bool ReturnsForwardedBacking { get; init; }
         internal ImmutableArray<int> ResultDependencyParameters { get; init; } = [];

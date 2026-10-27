@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -1373,6 +1374,359 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.Diagnostics.Any(diagnostic => diagnostic.Code == diagnosticCode), Is.True,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void NativeCallableFunctionPointerTypesRetainDeclaredEffectsSeparatelyFromRoleUnsafety()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            int32 Returns(int32 value) { return value; }
+
+            [DoesNotReturn]
+            [Terrum.Interop.NativeCallable]
+            int32 Stops(int32 value) { while (true) { } }
+
+            [Terrum.Interop.NativeCallable]
+            unsafe int32 ExplicitlyUnsafe(int32 value) { return value; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var returns = program.Functions.Single(static function => function.Name == "Returns");
+        var stops = program.Functions.Single(static function => function.Name == "Stops");
+        var explicitlyUnsafe = program.Functions.Single(
+            static function => function.Name == "ExplicitlyUnsafe");
+        Assert.That(returns.RequiresUnsafeCaller, Is.True);
+        Assert.That(returns.DeclaredRequiresUnsafeCaller, Is.False);
+        Assert.That(stops.DoesNotReturn, Is.True);
+        Assert.That(stops.NativeFunctionPointerType, Is.Not.Null);
+        Assert.That(explicitlyUnsafe.RequiresUnsafeCaller, Is.True);
+        Assert.That(explicitlyUnsafe.DeclaredRequiresUnsafeCaller, Is.True);
+        Assert.That(explicitlyUnsafe.NativeFunctionPointerType, Is.Not.Null);
+        Assert.That(stops.NativeFunctionPointerType,
+            Is.Not.EqualTo(returns.NativeFunctionPointerType));
+        Assert.That(explicitlyUnsafe.NativeFunctionPointerType,
+            Is.Not.EqualTo(returns.NativeFunctionPointerType));
+
+        var signatures = program.NativeFunctionPointerSignatures;
+        Assert.That(signatures[NativeFunctionPointerTypes.Index(
+            returns.NativeFunctionPointerType!.Value)].EffectsMask, Is.Zero);
+        Assert.That(signatures[NativeFunctionPointerTypes.Index(
+            stops.NativeFunctionPointerType!.Value)].EffectsMask, Is.EqualTo(2));
+        Assert.That(signatures[NativeFunctionPointerTypes.Index(
+            explicitlyUnsafe.NativeFunctionPointerType!.Value)].EffectsMask, Is.EqualTo(4));
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(returns,
+            returns.NativeFunctionPointerType.Value, signatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(stops,
+            stops.NativeFunctionPointerType.Value, signatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(explicitlyUnsafe,
+            explicitlyUnsafe.NativeFunctionPointerType.Value, signatures), Is.True);
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(program, ["Stops"]));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "native-callable-effects"));
+    }
+
+    [Test]
+    public void NativeAddressMayProjectNoReturnTargetToDefaultReturningView()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [DoesNotReturn]
+            [Terrum.Interop.NativeCallable]
+            int32 Stops() { while (true) { } }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<NativeAbi, int32> callback = &Stops;
+                    return callback();
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var target = program.Functions.Single(static function => function.Name == "Stops");
+        var callbackType = PrimitiveType.Void;
+        var indirectCallType = PrimitiveType.Void;
+        var main = program.Functions.Single(static function => function.Name == "Main");
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body, expression =>
+        {
+            if (expression is BoundNativeFunctionAddress address)
+            {
+                callbackType = address.Type;
+            }
+            else if (expression is BoundIndirectCall call)
+            {
+                indirectCallType = call.Target.Type;
+            }
+        }), Is.True);
+        var targetType = target.NativeFunctionPointerType!.Value;
+        Assert.That(program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(targetType)].EffectsMask, Is.EqualTo(2));
+        Assert.That(program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(callbackType)].EffectsMask, Is.Zero);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            targetType, callbackType, program.NativeFunctionPointerSignatures), Is.True);
+        Assert.That(indirectCallType, Is.EqualTo(callbackType));
+    }
+
+    [Test]
+    public void NativeAddressWithoutExpectedTypeRetainsTargetContract()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            int32 Answer() { return 42; }
+
+            int32 Main() {
+                unsafe {
+                    var callback = &Answer;
+                    return callback() == 42 ? 0 : -1;
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var target = program.Functions.Single(static function => function.Name == "Answer");
+        var main = program.Functions.Single(static function => function.Name == "Main");
+        var addressType = PrimitiveType.Void;
+        var callType = PrimitiveType.Void;
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body, expression =>
+        {
+            if (expression is BoundNativeFunctionAddress address)
+            {
+                addressType = address.Type;
+            }
+            else if (expression is BoundIndirectCall call)
+            {
+                callType = call.Target.Type;
+            }
+        }), Is.True);
+        Assert.That(addressType, Is.EqualTo(target.NativeFunctionPointerType));
+        Assert.That(callType, Is.EqualTo(addressType));
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(
+            target, addressType, program.NativeFunctionPointerSignatures), Is.True);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void IndirectNoReturnContractSuppressesNormalFlowAndEmitsNoReturnTrap()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [DoesNotReturn]
+            [Terrum.Interop.NativeCallable]
+            int32 Stops() { while (true) { } }
+
+            int32 Invoke(fnptr<NativeAbi, int32> callback) {
+                unsafe { return callback(); }
+            }
+
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var stop = program.Functions.Single(static function => function.Name == "Stops");
+        var invokeIndex = Enumerable.Range(0, program.Functions.Length)
+            .Single(index => program.Functions[index].Name == "Invoke");
+        var invoke = program.Functions[invokeIndex];
+        var returningType = invoke.Variables[0].Type;
+        var noReturnType = stop.NativeFunctionPointerType!.Value;
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            noReturnType, returningType, program.NativeFunctionPointerSignatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            returningType, noReturnType, program.NativeFunctionPointerSignatures), Is.False);
+
+        var noReturnInvoke = BoundTreeTraversal.RewriteTypes(invoke,
+            type => type == returningType ? noReturnType : type) with {
+            DoesNotReturn = true,
+        };
+        var forged = program with {
+            Functions = program.Functions.SetItem(invokeIndex, noReturnInvoke),
+        };
+        SemanticVerifier.Verify(forged);
+
+        var code = NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast);
+        Assert.That(code.Code.AsSpan().IndexOf(new byte[] { 0x0F, 0x0B }),
+            Is.GreaterThanOrEqualTo(0));
+    }
+
+    [Test]
+    public void FunctionPointerIdentityRetainsDependencyContracts()
+    {
+        var plain = new NativeFunctionPointerSignatureDefinition(
+            NativeCallingConvention.Native, PrimitiveType.NativeRawPointer,
+            [PrimitiveType.NativeRawPointer]);
+        var borrowing = plain with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 0),
+            ],
+        };
+        var backingOnly = plain with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 1, 2, 1, 0, 0),
+            ],
+        };
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(
+            plain, [plain]), Is.True);
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(
+            borrowing, [borrowing]), Is.True);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(
+            plain, borrowing), Is.False);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(
+            borrowing, backingOnly), Is.False);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            NativeFunctionPointerTypes.Type(0), NativeFunctionPointerTypes.Type(0),
+            [borrowing]), Is.True);
+        Assert.That(NativeFunctionPointerContract.CanPersistRevision92(plain), Is.True);
+        Assert.That(NativeFunctionPointerContract.CanPersistRevision92(borrowing), Is.False);
+
+        var multipleSources = plain with {
+            ParameterTypes = [PrimitiveType.NativeRawPointer, PrimitiveType.NativeRawPointer],
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 0),
+                new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 1),
+            ],
+        };
+        var reorderedSources = multipleSources with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 1),
+                new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 0),
+            ],
+        };
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(
+            multipleSources, [multipleSources]), Is.True);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(
+            multipleSources, reorderedSources), Is.True);
+        var backingSubset = multipleSources with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 1, 2, 1, 0, 0),
+            ],
+        };
+        var projectionSignatures = ImmutableArray.Create(multipleSources, backingSubset);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            NativeFunctionPointerTypes.Type(1), NativeFunctionPointerTypes.Type(0),
+            projectionSignatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            NativeFunctionPointerTypes.Type(0), NativeFunctionPointerTypes.Type(1),
+            projectionSignatures), Is.False);
+
+        var explicitEmpty = plain with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 0, 0, 1, 0, 0),
+            ],
+        };
+        var broadSingleSource = plain with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 0),
+            ],
+        };
+        var emptyProjectionSignatures = ImmutableArray.Create(
+            explicitEmpty, broadSingleSource, plain);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(
+            explicitEmpty, plain), Is.False);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            NativeFunctionPointerTypes.Type(0), NativeFunctionPointerTypes.Type(1),
+            emptyProjectionSignatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            NativeFunctionPointerTypes.Type(2), NativeFunctionPointerTypes.Type(1),
+            emptyProjectionSignatures), Is.False);
+
+        var malformedEmptySource = borrowing with {
+            Dependencies = [
+                new NativeFunctionPointerDependency(1, 0, 1, 1, 0, 0),
+            ],
+        };
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(
+            malformedEmptySource, [malformedEmptySource]), Is.False);
+        var unsupportedCheckedOutput = plain with {
+            OutputStates = [new NativeFunctionPointerOutputState(0, 0, 1)],
+        };
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(
+            unsupportedCheckedOutput, [unsupportedCheckedOutput]), Is.False);
+
+        var sourceDependency = new BoundDependencyContract(
+            BoundDependencyRelation.DependsOn,
+            BoundDependencyDestination.Result, null,
+            [new BoundDependencySource(BoundDependencySourceKind.Formal, 0)]);
+        Assert.That(NativeFunctionPointerContract.TryCreateDependencies(
+            [sourceDependency], out var mappedDependencies), Is.True);
+        Assert.That(mappedDependencies, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 0),
+        }));
+
+        var capture = new BoundDependencyContract(
+            BoundDependencyRelation.Captures,
+            BoundDependencyDestination.RetainedFormal, 1,
+            [new BoundDependencySource(BoundDependencySourceKind.Formal, 0)]);
+        Assert.That(NativeFunctionPointerContract.TryCreateDependencies(
+            [capture], out mappedDependencies), Is.True);
+        Assert.That(mappedDependencies, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerDependency(3, 1, 3, 2, 1, 0),
+        }));
+
+        var forwardsBacking = sourceDependency with {
+            Relation = BoundDependencyRelation.ForwardsBacking,
+        };
+        Assert.That(NativeFunctionPointerContract.TryCreateDependencies(
+            [sourceDependency, forwardsBacking], out mappedDependencies), Is.True);
+        Assert.That(mappedDependencies, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerDependency(1, 1, 2, 1, 0, 0),
+        }));
+    }
+
+    [Test]
+    public void NativeCallableFunctionPointerCarriesDeclaredResultDependency()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [return: DependsOn(nameof(source), nameof(other))]
+            [Terrum.Interop.NativeCallable]
+            ptr<int32> Broad(ptr<int32> source, ptr<int32> other) {
+                return source;
+            }
+
+            [return: DependsOn(nameof(source), nameof(other))]
+            [return: ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeCallable]
+            ptr<int32> Forward(ptr<int32> source, ptr<int32> other) { return source; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var broad = program.Functions.Single(static candidate => candidate.Name == "Broad");
+        var function = program.Functions.Single(static candidate => candidate.Name == "Forward");
+        var type = function.NativeFunctionPointerType!.Value;
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(type)];
+        var broadSignature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(broad.NativeFunctionPointerType!.Value)];
+        Assert.That(broad.NativeFunctionPointerType,
+            Is.Not.EqualTo(function.NativeFunctionPointerType));
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(
+            broadSignature, signature), Is.False);
+        Assert.That(signature.Dependencies, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerDependency(1, 1, 2, 1, 0, 0),
+            new NativeFunctionPointerDependency(1, 1, 3, 1, 0, 1),
+        }));
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(
+            function, type, program.NativeFunctionPointerSignatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(
+            broad, broad.NativeFunctionPointerType.Value,
+            program.NativeFunctionPointerSignatures), Is.True);
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(program, ["Forward"]));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "native-callable-dependencies"));
     }
 
     [Test]

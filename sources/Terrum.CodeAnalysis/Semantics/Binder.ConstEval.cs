@@ -4,9 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Numerics;
 using System.Threading;
 using Terrum.CodeAnalysis.Lexing;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -45,7 +47,8 @@ internal sealed partial class Binder
             or PrimitiveType.UInt64 or PrimitiveType.Int128 or PrimitiveType.UInt128
             or PrimitiveType.Float16 or PrimitiveType.BFloat16 or PrimitiveType.Float32
             or PrimitiveType.Float64 or PrimitiveType.Float128 or PrimitiveType.Decimal32
-            or PrimitiveType.Decimal64 or PrimitiveType.Decimal128;
+            or PrimitiveType.Decimal64 or PrimitiveType.Decimal128
+            || BoundEnumTypes.IsType(type);
 
     private bool ResolveRequiredConstants(ImmutableArray<BoundFunction>.Builder functions)
     {
@@ -89,6 +92,604 @@ internal sealed partial class Binder
         _staticProofVariables = [];
         _staticProofJoinConstants.Clear();
         return DiagnosticCount == 0;
+    }
+
+    private bool ResolveNativeEnumArguments(ImmutableArray<BoundFunction>.Builder functions)
+    {
+        if (_reference?.NativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        {
+            return true;
+        }
+
+        var success = true;
+        for (var index = 0; index < _signatures.Count; index++)
+        {
+            var signature = _signatures[index];
+            var importArguments = signature.NativeImportEnumArguments;
+            if (signature.NativeCallableConventionExpression is null
+                && importArguments is null)
+            {
+                continue;
+            }
+
+            var declaration = signature.Declaration ?? _trees[0].Root;
+            SetContext(signature.Tree, declaration);
+            _variables.Clear();
+            _scopes.Clear();
+            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+            _unresolvedVacantLocals.Clear();
+            _constLocals.Clear();
+            _constScalarValues.Clear();
+            _localStart = 0;
+            _returnType = PrimitiveType.Void;
+            _currentStruct = null;
+            _constructor = false;
+            _unsafeDepth = 0;
+            _hasReceiver = false;
+            _genericContext = null;
+
+            var boundFunction = functions[index];
+            if (signature.NativeCallableConventionExpression is SyntaxNode callableExpression)
+            {
+                if (!TryGetBoundEnumType(registration.CallingConventions, out var conventionType)
+                    || !TryEvaluateNativeEnumValue(callableExpression, conventionType, functions,
+                        "NativeCallable.CallConv", out var value)
+                    || !TryMapNativeCallingConvention(value, out var convention))
+                {
+                    if (DiagnosticCount == 0)
+                    {
+                        Report("TRM3030",
+                            "NativeCallable.CallConv must evaluate to a member of the registered convention enum.",
+                            callableExpression.Span);
+                    }
+                    success = false;
+                }
+                else
+                {
+                    if (!NativeFunctionPointerContract.TryCreateDependencies(
+                        signature.DependencyContracts, out var functionPointerDependencies))
+                    {
+                        Report("TRM3030",
+                            "NativeCallable dependencies are outside the function-pointer contract profile.",
+                            callableExpression.Span);
+                        success = false;
+                        continue;
+                    }
+                    var nativeSignature = new NativeFunctionPointerSignatureDefinition(
+                        convention, signature.ReturnType,
+                        [.. signature.Parameters.Select(static parameter => parameter.Type)]) {
+                        EffectsMask = NativeFunctionPointerContract.GetDeclaredEffectsMask(
+                            signature.DoesNotReturn,
+                            signature.DeclaredRequiresUnsafeCaller),
+                        Dependencies = functionPointerDependencies,
+                    };
+                    if (!NativeFunctionPointerContract.IsValidSignature(nativeSignature,
+                        [.. _nativeFunctionPointerSignatures]))
+                    {
+                        Report("TRM3030",
+                            "NativeCallable has an unsupported function-pointer signature.",
+                            callableExpression.Span);
+                        success = false;
+                    }
+                    else
+                    {
+                        var functionPointerType = GetNativeFunctionPointerType(nativeSignature);
+                        signature = signature with {
+                            NativeCallableConvention = convention,
+                            NativeFunctionPointerType = functionPointerType,
+                        };
+                        boundFunction = boundFunction with {
+                            NativeCallableConvention = convention,
+                            NativeFunctionPointerType = functionPointerType,
+                        };
+                    }
+                }
+            }
+
+            if (importArguments is not null)
+            {
+                if (boundFunction.DirectNativeImport is not DirectNativeImport directImport)
+                {
+                    Report("TRM3030",
+                        "NativeImport enum arguments require a bound direct callable import.",
+                        declaration.Span);
+                    success = false;
+                }
+                else
+                {
+                    var callingConvention = directImport.CallingConvention;
+                    var resolutionMode = directImport.ResolutionMode;
+                    var resolutionPolicy = directImport.ResolutionPolicy;
+                    var argumentSuccess = true;
+                    if (importArguments.CallingConvention is SyntaxNode callConvExpression)
+                    {
+                        argumentSuccess &= TryGetBoundEnumType(registration.CallingConventions,
+                            out var conventionType)
+                            && TryEvaluateNativeEnumValue(callConvExpression, conventionType,
+                                functions, "NativeImport.CallConv", out var value)
+                            && TryMapNativeCallingConvention(value, out callingConvention);
+                    }
+                    if (importArguments.ResolutionMode is SyntaxNode modeExpression)
+                    {
+                        argumentSuccess &= TryGetBoundEnumType(registration.ResolutionModes,
+                            out var modeType)
+                            && TryEvaluateNativeEnumValue(modeExpression, modeType,
+                                functions, "NativeImport.ResolutionMode", out var value)
+                            && TryMapNativeImportResolutionMode(value, out resolutionMode);
+                    }
+                    if (importArguments.ResolutionPolicy is SyntaxNode policyExpression)
+                    {
+                        argumentSuccess &= TryGetBoundEnumType(registration.ResolutionPolicies,
+                            out var policyType)
+                            && TryEvaluateNativeEnumValue(policyExpression, policyType,
+                                functions, "NativeImport.ResolutionPolicy", out var value)
+                            && TryMapNativeImportResolutionPolicy(value, out resolutionPolicy);
+                    }
+
+                    if (argumentSuccess && resolutionMode == NativeImportResolutionMode.Link
+                        && importArguments.ResolutionPolicy is not null)
+                    {
+                        Report("TRM3030",
+                            "NativeImport.ResolutionPolicy is valid only when ResolutionMode is Dynamic.",
+                            importArguments.ResolutionPolicy.Span);
+                        argumentSuccess = false;
+                    }
+                    if (argumentSuccess)
+                    {
+                        resolutionPolicy = resolutionMode == NativeImportResolutionMode.Link
+                            ? NativeImportResolutionPolicy.NotApplicable
+                            : importArguments.ResolutionPolicy is null
+                                ? NativeImportResolutionPolicy.Default
+                                : resolutionPolicy;
+                        boundFunction = boundFunction with {
+                            DirectNativeImport = directImport with {
+                                CallingConvention = callingConvention,
+                                ResolutionMode = resolutionMode,
+                                ResolutionPolicy = resolutionPolicy,
+                            },
+                        };
+                    }
+                    else
+                    {
+                        if (DiagnosticCount == 0)
+                        {
+                            Report("TRM3030",
+                                "NativeImport enum arguments must evaluate to values of their exact registered enums.",
+                                declaration.Span);
+                        }
+                        success = false;
+                    }
+                }
+            }
+
+            _signatures[index] = signature with {
+                External = signature.External is null ? null : boundFunction,
+            };
+            functions[index] = boundFunction;
+        }
+
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        return ResolvePendingNativeCallConvTypes(functions);
+    }
+
+    private bool ResolvePendingNativeCallConvTypes(
+        ImmutableArray<BoundFunction>.Builder functions)
+    {
+        if (_pendingNativeCallConvExpressions.Count == 0)
+        {
+            return true;
+        }
+        if (_reference?.NativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        {
+            Report("TRM3005",
+                "NativeCallConv requires an explicitly selected Core schema registration.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        var conventionTypeAvailable = TryGetBoundEnumType(registration.CallingConventions,
+            out var conventionType);
+        var resolvedConventions = new Dictionary<int, NativeCallingConvention>(
+            _pendingNativeCallConvExpressions.Count);
+        var success = conventionTypeAvailable;
+        foreach (var (index, pending) in _pendingNativeCallConvExpressions)
+        {
+            if (!conventionTypeAvailable)
+            {
+                break;
+            }
+
+            SetContext(pending.Tree, pending.Expression);
+            _variables.Clear();
+            _scopes.Clear();
+            _scopes.Add(new Dictionary<string, int>(StringComparer.Ordinal));
+            _unresolvedVacantLocals.Clear();
+            _constLocals.Clear();
+            _constScalarValues.Clear();
+            _localStart = 0;
+            _returnType = PrimitiveType.Void;
+            _currentStruct = null;
+            _constructor = false;
+            _unsafeDepth = 0;
+            _hasReceiver = false;
+            _genericContext = null;
+
+            if (!TryEvaluateNativeEnumValue(pending.Expression, conventionType, functions,
+                    "NativeCallConv", out var value))
+            {
+                success = false;
+                continue;
+            }
+            if (!TryMapNativeCallingConvention(value, out var selectedConvention))
+            {
+                Report("TRM3005",
+                    "NativeCallConv must evaluate to one of the registered convention members.",
+                    pending.Expression.Span);
+                success = false;
+                continue;
+            }
+            resolvedConventions.Add(index, selectedConvention);
+        }
+        if (!success || DiagnosticCount != 0)
+        {
+            return false;
+        }
+
+        var sourceFunctionPointers = _nativeFunctionPointerSignatures.ToArray();
+        var sourcePointers = _nativePointerTypes.ToArray();
+        if (!NativeFunctionPointerContract.IsValidTable([.. sourceFunctionPointers])
+            || !NativePointerTypeContract.IsValidTable([.. sourcePointers], [.. _structs],
+                [.. sourceFunctionPointers]))
+        {
+            Report("TRM3005", "Native type identities are invalid before convention normalization.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        var functionPointerMap = new PrimitiveType[sourceFunctionPointers.Length];
+        var pointerMap = new PrimitiveType[sourcePointers.Length];
+        var functionPointerStates = new byte[sourceFunctionPointers.Length];
+        var pointerStates = new byte[sourcePointers.Length];
+        var normalizedFunctionPointers =
+            new List<NativeFunctionPointerSignatureDefinition>(sourceFunctionPointers.Length);
+        var normalizedPointers = new List<NativePointerTypeDefinition>(sourcePointers.Length);
+        var invalidTypeReference = false;
+
+        bool TryMapType(PrimitiveType type, out PrimitiveType mapped)
+        {
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                var index = NativeFunctionPointerTypes.Index(type);
+                if (!TryNormalizeFunctionPointer(index))
+                {
+                    mapped = default;
+                    return false;
+                }
+                mapped = functionPointerMap[index];
+                return true;
+            }
+            if (NativePointerTypes.IsType(type))
+            {
+                var index = NativePointerTypes.Index(type);
+                if (!TryNormalizePointer(index))
+                {
+                    mapped = default;
+                    return false;
+                }
+                mapped = pointerMap[index];
+                return true;
+            }
+
+            mapped = type;
+            return true;
+        }
+
+        bool TryNormalizeFunctionPointer(int index)
+        {
+            if ((uint)index >= (uint)sourceFunctionPointers.Length)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            if (functionPointerStates[index] == 2)
+            {
+                return true;
+            }
+            if (functionPointerStates[index] == 1)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+
+            functionPointerStates[index] = 1;
+            var source = sourceFunctionPointers[index];
+            if (source is null || !TryMapType(source.ReturnType, out var returnType))
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            var parameterTypes = ImmutableArray.CreateBuilder<PrimitiveType>(
+                source.ParameterTypes.Length);
+            foreach (var parameterType in source.ParameterTypes)
+            {
+                if (!TryMapType(parameterType, out var mappedParameterType))
+                {
+                    invalidTypeReference = true;
+                    return false;
+                }
+                parameterTypes.Add(mappedParameterType);
+            }
+
+            var convention = resolvedConventions.TryGetValue(index, out var resolvedConvention)
+                ? resolvedConvention : source.CallingConvention;
+            if (!NativeFunctionPointerContract.IsKnownConvention(convention))
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            var normalized = source with {
+                CallingConvention = convention,
+                ReturnType = returnType,
+                ParameterTypes = parameterTypes.MoveToImmutable(),
+            };
+            var normalizedIndex = normalizedFunctionPointers.FindIndex(existing =>
+                NativeFunctionPointerContract.AreEquivalent(existing, normalized));
+            if (normalizedIndex < 0)
+            {
+                if (normalizedFunctionPointers.Count >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    invalidTypeReference = true;
+                    return false;
+                }
+                normalizedIndex = normalizedFunctionPointers.Count;
+                normalizedFunctionPointers.Add(normalized);
+            }
+            functionPointerMap[index] = NativeFunctionPointerTypes.Type(normalizedIndex);
+            functionPointerStates[index] = 2;
+            return true;
+        }
+
+        bool TryNormalizePointer(int index)
+        {
+            if ((uint)index >= (uint)sourcePointers.Length)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            if (pointerStates[index] == 2)
+            {
+                return true;
+            }
+            if (pointerStates[index] == 1)
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+
+            pointerStates[index] = 1;
+            var source = sourcePointers[index];
+            if (source is null || !TryMapType(source.PointeeType, out var pointeeType))
+            {
+                invalidTypeReference = true;
+                return false;
+            }
+            var normalized = source with { PointeeType = pointeeType };
+            var normalizedIndex = normalizedPointers.FindIndex(existing =>
+                existing.PointeeType == normalized.PointeeType
+                && existing.IsWritable == normalized.IsWritable);
+            if (normalizedIndex < 0)
+            {
+                if (normalizedPointers.Count >= SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    invalidTypeReference = true;
+                    return false;
+                }
+                normalizedIndex = normalizedPointers.Count;
+                normalizedPointers.Add(normalized);
+            }
+            pointerMap[index] = NativePointerTypes.Type(normalizedIndex);
+            pointerStates[index] = 2;
+            return true;
+        }
+
+        for (var index = 0; index < sourceFunctionPointers.Length; index++)
+        {
+            if (!TryNormalizeFunctionPointer(index))
+            {
+                invalidTypeReference = true;
+                break;
+            }
+        }
+        for (var index = 0; !invalidTypeReference && index < sourcePointers.Length; index++)
+        {
+            if (!TryNormalizePointer(index))
+            {
+                invalidTypeReference = true;
+            }
+        }
+        if (invalidTypeReference)
+        {
+            Report("TRM3005", "Native function-pointer or pointer type remapping failed.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        PrimitiveType RewriteType(PrimitiveType type)
+        {
+            if (NativeFunctionPointerTypes.IsType(type))
+            {
+                var index = NativeFunctionPointerTypes.Index(type);
+                return (uint)index < (uint)functionPointerMap.Length
+                    ? functionPointerMap[index] : PrimitiveType.Int32;
+            }
+            if (NativePointerTypes.IsType(type))
+            {
+                var index = NativePointerTypes.Index(type);
+                return (uint)index < (uint)pointerMap.Length
+                    ? pointerMap[index] : PrimitiveType.Int32;
+            }
+            return type;
+        }
+
+        var normalizedStructures = _structs
+            .Select(structure => BoundTreeTraversal.RewriteTypes(structure, RewriteType)).ToArray();
+        var normalizedClasses = _classes
+            .Select(@class => BoundTreeTraversal.RewriteTypes(@class, RewriteType)).ToArray();
+        var normalizedPointerDefinitions = _nativePointerTypes
+            .Select(pointer => pointer with { PointeeType = RewriteType(pointer.PointeeType) }).ToArray();
+        if (!NativeFunctionPointerContract.IsValidTable([.. normalizedFunctionPointers])
+            || !NativePointerTypeContract.IsValidTable([.. normalizedPointerDefinitions],
+                [.. normalizedStructures], [.. normalizedFunctionPointers]))
+        {
+            Report("TRM3005", "Normalized native type identities are invalid.",
+                _trees[0].Root.Span);
+            return false;
+        }
+
+        for (var index = 0; index < normalizedStructures.Length; index++)
+        {
+            _structs[index] = normalizedStructures[index];
+        }
+        for (var index = 0; index < normalizedClasses.Length; index++)
+        {
+            _classes[index] = normalizedClasses[index];
+        }
+        _nativeFunctionPointerSignatures.Clear();
+        _nativeFunctionPointerSignatures.AddRange(normalizedFunctionPointers);
+        _nativePointerTypes.Clear();
+        _nativePointerTypes.AddRange(normalizedPointerDefinitions);
+
+        for (var index = 0; index < _signatures.Count; index++)
+        {
+            var signature = _signatures[index];
+            var parameters = signature.Parameters.Select(parameter => parameter with {
+                Type = RewriteType(parameter.Type),
+                NativePointeeType = parameter.NativePointeeType is PrimitiveType pointeeType
+                    ? RewriteType(pointeeType) : null,
+            }).ToImmutableArray();
+            var external = signature.External is BoundFunction externalFunction
+                ? BoundTreeTraversal.RewriteTypes(externalFunction, RewriteType) : null;
+            _signatures[index] = signature with {
+                ReturnType = RewriteType(signature.ReturnType),
+                Parameters = parameters,
+                NativeFunctionPointerType = signature.NativeFunctionPointerType is PrimitiveType functionPointerType
+                    ? RewriteType(functionPointerType) : null,
+                External = external,
+            };
+            functions[index] = BoundTreeTraversal.RewriteTypes(functions[index], RewriteType);
+        }
+
+        _pendingNativeCallConvExpressions.Clear();
+        return true;
+    }
+
+    private bool TryEvaluateNativeEnumValue(SyntaxNode syntax, PrimitiveType expectedType,
+        ImmutableArray<BoundFunction>.Builder functions, string argumentName, out int value)
+    {
+        value = 0;
+        var diagnosticCount = DiagnosticCount;
+        var expression = BindExpression(syntax, expected: null);
+        if (DiagnosticCount != diagnosticCount)
+        {
+            return false;
+        }
+        if (expression.Type != expectedType)
+        {
+            Report("TRM3030",
+                $"{argumentName} must have the exact registered enum type.",
+                syntax.Span);
+            return false;
+        }
+        if (!CheckConstExpression(expression, out _))
+        {
+            Report("TRM3030",
+                $"{argumentName} must be an eligible required constant expression.",
+                syntax.Span);
+            return false;
+        }
+
+        try
+        {
+            var required = new BoundRequiredConstant(expression, syntax.Span);
+            var constant = EvaluateConstExpression(required,
+                new BoundConstant?[_variables.Count], functions, 0,
+                new ConstEvalState(_cancellationToken));
+            if (constant.Type != expectedType
+                || !constant.TryGetLegacyValue(out var legacyValue)
+                || legacyValue is < int.MinValue or > int.MaxValue)
+            {
+                Report("TRM3030",
+                    $"{argumentName} did not produce a valid int32-backed enum value.",
+                    syntax.Span);
+                return false;
+            }
+
+            value = (int)legacyValue;
+            return true;
+        }
+        catch (ConstEvalFailure failure)
+        {
+            Report("TRM3030", $"{argumentName} evaluation failed: {failure.Message}",
+                syntax.Span);
+            return false;
+        }
+    }
+
+    private bool TryGetBoundEnumType(CoreEnumDefinition definition, out PrimitiveType type)
+    {
+        for (var index = 0; index < _enumDefinitions.Count; index++)
+        {
+            if (_enumDefinitions[index].Identity == definition.Identity)
+            {
+                type = BoundEnumTypes.Type(index);
+                return true;
+            }
+        }
+
+        type = default;
+        return false;
+    }
+
+    private static bool TryMapNativeCallingConvention(int value,
+        out NativeCallingConvention convention)
+    {
+        convention = value switch
+        {
+            1 => NativeCallingConvention.Unmanaged,
+            2 => NativeCallingConvention.Cdecl,
+            3 => NativeCallingConvention.Stdcall,
+            4 => NativeCallingConvention.Vectorcall,
+            _ => default,
+        };
+        return value is >= 1 and <= 4;
+    }
+
+    private static bool TryMapNativeImportResolutionMode(int value,
+        out NativeImportResolutionMode mode)
+    {
+        mode = value switch
+        {
+            1 => NativeImportResolutionMode.Link,
+            2 => NativeImportResolutionMode.Dynamic,
+            _ => default,
+        };
+        return value is 1 or 2;
+    }
+
+    private static bool TryMapNativeImportResolutionPolicy(int value,
+        out NativeImportResolutionPolicy policy)
+    {
+        policy = value switch
+        {
+            1 => NativeImportResolutionPolicy.Default,
+            2 => NativeImportResolutionPolicy.CompatibilitySearch,
+            _ => default,
+        };
+        return value is 1 or 2;
     }
 
     private bool CheckConstStatement(BoundStatement statement, out TextSpan unsupported)

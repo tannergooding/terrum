@@ -165,6 +165,46 @@ public static class NativeEmitter
         return (code, UsedImports(code, selected));
     }
 
+    internal static void EnsureNativeFunctionPointerConventionSupported(PrimitiveType type,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures)
+    {
+        if (!NativeFunctionPointerContract.IsValidType(type, signatures))
+        {
+            throw new ArgumentException("A native function-pointer use has no valid signature.", nameof(type));
+        }
+
+        var convention = signatures[NativeFunctionPointerTypes.Index(type)].CallingConvention;
+        EnsureNativeCallingConventionSupported(convention);
+    }
+
+    internal static void EnsureNativeCallingConventionSupported(NativeCallingConvention convention)
+    {
+        if (!NativeFunctionPointerContract.IsKnownConvention(convention))
+        {
+            throw new ArgumentException("A native call has an unknown calling convention.", nameof(convention));
+        }
+        if (!NativeFunctionPointerContract.IsSupportedWindowsX64Convention(convention))
+        {
+            throw new NotSupportedException(
+                $"The Windows x64 native emitter does not implement {convention} calls.");
+        }
+    }
+
+    internal static void EnsureNativeImportResolutionSupported(DirectNativeImport import)
+    {
+        if (!DirectNativeImportContract.IsValidResolution(import.ResolutionMode,
+            import.ResolutionPolicy))
+        {
+            throw new ArgumentException("A direct native import has invalid resolution settings.",
+                nameof(import));
+        }
+        if (import.ResolutionMode != NativeImportResolutionMode.Link)
+        {
+            throw new NotSupportedException(
+                "The Windows x64 native emitter does not implement Dynamic native imports.");
+        }
+    }
+
     internal static (NativeCode Code, ImmutableArray<NativeImportBinding> Imports)
         EmitCodeWithDirectNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
                 CancellationToken cancellationToken = default)
@@ -580,6 +620,8 @@ public static class NativeEmitter
                     $"Function '{function.Name}' has an invalid or duplicate native callable entry name.",
                     nameof(program));
             }
+            EnsureNativeFunctionPointerConventionSupported(function.NativeFunctionPointerType.Value,
+                program.NativeFunctionPointerSignatures);
             if (!function.IsExternal && !imageNames.Add(entryName))
             {
                 throw new ArgumentException("Native library export names must be unique.", nameof(exports));
@@ -622,6 +664,8 @@ public static class NativeEmitter
                 throw new ArgumentException(
                     $"Direct native export '{exportName}' lacks a valid owned import binding.", nameof(exports));
             }
+            EnsureNativeCallingConventionSupported(directImport.CallingConvention);
+            EnsureNativeImportResolutionSupported(directImport);
             exportThunks.Add(new NativeExportThunk(functionIndex, exportName,
                 import with { DllName = System32ImportPath(import.DllName) }));
         }
@@ -2364,7 +2408,7 @@ internal sealed partial class PeCompiler
     }
 
     private static bool IsStruct(PrimitiveType type) =>
-        (int)type is >= 100 and < ManagedClassTypes.First;
+        (int)type is >= 100 and < BoundEnumTypes.First;
     private static bool RequiresFloatingEnvironment(PrimitiveType source, PrimitiveType target) =>
         source is PrimitiveType.Float32 or PrimitiveType.Float64
             || target is PrimitiveType.Float32 or PrimitiveType.Float64;
@@ -5693,6 +5737,8 @@ internal sealed partial class PeCompiler
                 EmitNativePointerWrite(pointerWrite, spill);
                 break;
             case BoundNativeFunctionAddress address:
+                NativeEmitter.EnsureNativeFunctionPointerConventionSupported(address.Type,
+                    _program.NativeFunctionPointerSignatures);
                 _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+function]
                 var functionAddress = _code.Position;
                 _code.Int32(0);
@@ -6572,6 +6618,8 @@ internal sealed partial class PeCompiler
                 Expression(unsafeExpression.Expression, spill);
                 break;
             case BoundIndirectCall call:
+                NativeEmitter.EnsureNativeFunctionPointerConventionSupported(call.Target.Type,
+                    _program.NativeFunctionPointerSignatures);
                 var argumentBase = spill + 1;
                 var argumentExpressionSpill = argumentBase + call.Arguments.Length;
                 Expression(call.Target, argumentExpressionSpill);
@@ -6604,7 +6652,13 @@ internal sealed partial class PeCompiler
                 _code.Load64(Spill(spill));
                 _code.Bytes(0x49, 0x89, 0xC3); // mov r11,rax
                 _code.Bytes(0x41, 0xFF, 0xD3); // call r11
-                if (call.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
+                var callSignature = _program.NativeFunctionPointerSignatures[
+                    NativeFunctionPointerTypes.Index(call.Target.Type)];
+                if ((callSignature.EffectsMask & 2) != 0)
+                {
+                    _code.Bytes(0x0F, 0x0B); // no-return promises must not publish a result
+                }
+                else if (call.Type is PrimitiveType.Float32 or PrimitiveType.Float64)
                 {
                     _code.MoveFloatingReturnToAccumulator(call.Type == PrimitiveType.Float64);
                 }
@@ -6754,6 +6808,16 @@ internal sealed partial class PeCompiler
                 var sourceHidden = _sourceDependent?[call.Function] == true ? 2 : 0;
                 var hidden = hiddenReturn + sourceHidden;
                 var targetFunction = _program.Functions[call.Function];
+                if (targetFunction.DirectNativeImport is DirectNativeImport directImport)
+                {
+                    NativeEmitter.EnsureNativeCallingConventionSupported(directImport.CallingConvention);
+                    NativeEmitter.EnsureNativeImportResolutionSupported(directImport);
+                }
+                if (targetFunction.NativeFunctionPointerType is PrimitiveType nativeFunctionPointerType)
+                {
+                    NativeEmitter.EnsureNativeFunctionPointerConventionSupported(nativeFunctionPointerType,
+                        _program.NativeFunctionPointerSignatures);
+                }
                 var nativeAbi = targetFunction.DirectNativeImport is not null
                     || targetFunction.NativeFunctionPointerType is not null;
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)

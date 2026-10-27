@@ -76,6 +76,29 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("The native pointer or function-pointer type table is invalid.");
         }
         if (program.NativeFunctionPointerSignatures.Any(static signature =>
+            !NativeFunctionPointerContract.CanPersistRevision92(signature)))
+        {
+            throw Unsupported(
+                "The Development function-pointer signature table does not persist complete invocation contracts.");
+        }
+        foreach (var function in program.Functions)
+        {
+            if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+                {
+                    if (expression is BoundNativeFunctionAddress address
+                        && ((uint)address.Function >= (uint)program.Functions.Length
+                            || program.Functions[address.Function].NativeFunctionPointerType
+                                != address.Type))
+                    {
+                        throw Unsupported(
+                            "The Development address operation cannot persist a projected function-pointer view.");
+                    }
+                }))
+            {
+                throw Unsupported("A function Body cannot be traversed for function-pointer addresses.");
+            }
+        }
+        if (program.NativeFunctionPointerSignatures.Any(static signature =>
                 signature.CallingConvention != NativeCallingConvention.Native)
             || program.Functions.Any(static function =>
                 function.NativeCallableConvention is NativeCallingConvention convention
@@ -712,7 +735,9 @@ public static partial class TrRmExecutableCompiler
             TrRmArtifactSchema.Development);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
         var sigs = new TrRmMethodSigTableReader(sigBytes, signatures.Count, types, parameters.Count, 0);
-        var paramBytes = parameters.Count == 0 ? [] : TrRmParamTableWriter.Encode(parameters, sigs, types);
+        var paramBytes = parameters.Count == 0 ? []
+            : TrRmParamTableWriter.Encode(parameters, sigs, types,
+                TrRmArtifactSchema.Development);
         var typeDefRows = new TrRmTypeDefRow[typeDefCount];
         for (var type = 0; type < blittableStructureIndexes.Length; type++)
         {
@@ -750,7 +775,8 @@ public static partial class TrRmExecutableCompiler
         var defs = new TrRmMethodDefTableReader(methodBytes, methods.Count, strings, modules,
             typeDefs, sigs, contracts.Count, bodies.Count);
         var paramReader = parameters.Count == 0 ? default
-            : new TrRmParamTableReader(paramBytes, parameters.Count, sigs, types);
+            : new TrRmParamTableReader(paramBytes, parameters.Count, sigs, types,
+                TrRmArtifactSchema.Development);
         var contractBytes = contracts.Count == 0 ? []
             : TrRmContractTableWriter.Encode(contracts, typeDefs, defs, sigs,
                 paramReader, types, developmentProfile: true);
