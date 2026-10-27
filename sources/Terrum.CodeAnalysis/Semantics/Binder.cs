@@ -7615,11 +7615,11 @@ internal sealed partial class Binder
         }
 
         var signature = _nativeFunctionPointerSignatures[typeIndex];
-        if (!signature.OutputStates.IsEmpty
-            || !signature.NativeParameters.IsEmpty)
+        if (!signature.OutputStates.IsEmpty || !signature.Selectors.IsEmpty
+            || !signature.Dependencies.IsEmpty)
         {
             Report("TRM3030",
-                "Indirect calls with NativeOutput or NativeParameter contracts require their complete call protocol.",
+                "Indirect calls with output-state or dependency contracts require their complete call protocol.",
                 node.Span);
             return ErrorExpression(node.Span);
         }
@@ -7659,9 +7659,19 @@ internal sealed partial class Binder
                 boundArguments.Add(ErrorExpression(argument.Span));
                 continue;
             }
-            var parameterType = index < signature.ParameterTypes.Length
-                ? signature.ParameterTypes[index] : (PrimitiveType?)null;
-            boundArguments.Add(BindExpression(value, parameterType));
+            var nativeParameter = signature.NativeParameters.FirstOrDefault(parameter =>
+                parameter.ParameterIndex == index);
+            if (nativeParameter is not null)
+            {
+                boundArguments.Add(BindDirectNativeParameterAddress(
+                    value, nativeParameter, argument.Span));
+            }
+            else
+            {
+                var parameterType = index < signature.ParameterTypes.Length
+                    ? signature.ParameterTypes[index] : (PrimitiveType?)null;
+                boundArguments.Add(BindExpression(value, parameterType));
+            }
         }
 
         return new BoundIndirectCall(target, boundArguments.MoveToImmutable(),

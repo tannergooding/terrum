@@ -2505,7 +2505,10 @@ public static partial class SemanticVerifier
                 return true;
             }
         }
-        return false;
+        return signature.NativeParameters.Any(parameter =>
+            (parameter.Access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
+            && (parameter.PointeeType == PrimitiveType.Void
+                || CarriesNativePointer(parameter.PointeeType, program)));
     }
 
     private static void ApplyNativePointerWrite(BoundExpression address,

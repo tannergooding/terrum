@@ -323,6 +323,91 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public void NativeOutputPointerCallRemainsRejectedUntilItsProtocolIsImplemented()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [param(counter): Terrum.Interop.NativeOutput(
+                When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern unsafe int32 QueryPerformanceCounter(write ptr<int64> counter);
+
+            int32 Invoke() {
+                init int64 counter;
+                unsafe {
+                    var query = &QueryPerformanceCounter;
+                    return query(&init counter);
+                }
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"
+            && diagnostic.Message.Contains("output-state", StringComparison.Ordinal)),
+            Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void NativeJitExecutesAValidatedSystem32IndirectPointerInput(
+        NativeRuntimePolicy runtimePolicy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var boundRuntimePolicy = runtimePolicy == NativeRuntimePolicy.CheckedExceptions
+            ? BoundRuntimePolicy.CheckedExceptions : BoundRuntimePolicy.FailFast;
+        var reference = new CompilationReference([], [], boundRuntimePolicy,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "CompareStringOrdinal")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 1)]
+            extern unsafe int32 CompareStringOrdinal(ptr<char16> first, int32 firstLength,
+                ptr<char16> second, int32 secondLength, int32 ignoreCase);
+
+            int32 Main() {
+                char16 first = 'A';
+                char16 second = 'A';
+                unsafe {
+                    var compare = &CompareStringOrdinal;
+                    return compare(&first, 1, &second, 1, 0) - 2;
+                }
+            }
+            """), reference, boundRuntimePolicy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!, runtimePolicy), Is.Zero);
+    }
+
+    [Test]
+    public void IndirectNativeParameterCallRejectsWrongPointeeType()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern unsafe int32 QueryPerformanceCounter(ptr<int64> counter);
+
+            int32 Main() {
+                mut int32 counter = 0;
+                unsafe {
+                    var query = &QueryPerformanceCounter;
+                    return query(&counter);
+                }
+            }
+            """), reference);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void NativeImportPointerIdentityRetainsOutputAndParameterContracts()
     {
         var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,

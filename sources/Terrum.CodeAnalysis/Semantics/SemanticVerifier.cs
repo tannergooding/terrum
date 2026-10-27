@@ -5630,20 +5630,30 @@ public static partial class SemanticVerifier
                     break;
                 }
                 var indirectCallCompletes = true;
-                foreach (var argument in call.Arguments)
+                for (var index = 0; index < call.Arguments.Length; index++)
                 {
-                    if (indirectCallCompletes
-                        && (indirectSignature.EffectsMask & 2) == 0)
-                    {
-                        indirectCallCompletes = EvaluateExpression(argument, initialized,
-                            fieldMasks, declarations, function, program, ref remaining,
-                            depth + 1, failures);
-                    }
-                    else
+                    var argument = call.Arguments[index];
+                    if (!indirectCallCompletes)
                     {
                         ValidateUnreachableExpression(argument, initialized, fieldMasks,
                             declarations, function, program, ref remaining, depth + 1);
+                        continue;
                     }
+
+                    var nativeParameter = indirectSignature.NativeParameters
+                        .FirstOrDefault(parameter => parameter.ParameterIndex == index);
+                    if (nativeParameter is not null
+                        && argument is BoundNativeStorageAddress address)
+                    {
+                        VerifyDirectNativeParameterAddress(address, nativeParameter,
+                            initialized, fieldMasks, declarations, function, program,
+                            ref remaining, depth + 1, failures);
+                        continue;
+                    }
+
+                    indirectCallCompletes = EvaluateExpression(argument, initialized,
+                        fieldMasks, declarations, function, program, ref remaining,
+                        depth + 1, failures);
                 }
                 if (indirectCallCompletes)
                 {
@@ -6374,7 +6384,8 @@ public static partial class SemanticVerifier
         }
 
         var signature = program.NativeFunctionPointerSignatures[NativeFunctionPointerTypes.Index(call.Target.Type)];
-        if (!signature.OutputStates.IsEmpty || !signature.NativeParameters.IsEmpty)
+        if (!signature.OutputStates.IsEmpty || !signature.Selectors.IsEmpty
+            || !signature.Dependencies.IsEmpty)
         {
             throw InvalidEffect(call.Span, "NativeImport");
         }
@@ -6384,11 +6395,23 @@ public static partial class SemanticVerifier
         }
         for (var index = 0; index < call.Arguments.Length; index++)
         {
-            var argument = call.Arguments[index];
-            if (argument is null || argument.Type != signature.ParameterTypes[index]
+            var argument = call.Arguments[index] ?? throw Invalid();
+
+            var nativeParameter = signature.NativeParameters.FirstOrDefault(
+                parameter => parameter.ParameterIndex == index);
+            var validNativeParameterArgument = nativeParameter is not null
+                && (argument is BoundNativeStorageAddress address
+                    ? DirectNativeImportContract.MatchesAddress(
+                        address, nativeParameter, caller, program)
+                    : argument.Type == PrimitiveType.NativeRawPointer
+                        || DirectNativeImportContract.IsStringPointerArgument(
+                            argument, nativeParameter, program));
+            if ((nativeParameter is null
+                    ? argument.Type != signature.ParameterTypes[index]
+                    : !validNativeParameterArgument)
                 || IsUnique(program, argument.Type))
             {
-                throw Invalid();
+                throw InvalidEffect(call.Span, "NativeImport");
             }
         }
     }
