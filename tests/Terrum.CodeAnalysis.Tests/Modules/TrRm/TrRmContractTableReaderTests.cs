@@ -335,6 +335,30 @@ public sealed class TrRmContractTableReaderTests
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(clause[44..]), Is.EqualTo(1));
     }
 
+    [Test]
+    public void CopyOriginDraftWriterSortsFactsByDecodedFieldReferences()
+    {
+        ValidateCopyOriginFieldArtifact([
+            new CopyOriginTestFact(1,
+                [new CopyOriginTestOrigin(1, 1, 0, 1)]),
+            new CopyOriginTestFact(2,
+                [new CopyOriginTestOrigin(1, 1, 0, 2)]),
+        ], twoFields: true, reverseFieldPathRows: true,
+            writerCanonicalizesFacts: true);
+    }
+
+    [Test]
+    public void CopyOriginDraftWriterSortsOriginsByDecodedFieldReferences()
+    {
+        ValidateCopyOriginFieldArtifact([
+            new CopyOriginTestFact(1, [
+                new CopyOriginTestOrigin(1, 1, 0, 1),
+                new CopyOriginTestOrigin(1, 1, 0, 2),
+            ]),
+        ], twoFields: true, reverseFieldPathRows: true,
+            writerCanonicalizesOrigins: true);
+    }
+
     [TestCase(8, 0)]
     [TestCase(9, 1)]
     [TestCase(10, 1)]
@@ -584,8 +608,13 @@ public sealed class TrRmContractTableReaderTests
     private static void ValidateCopyOriginFieldArtifact(
         CopyOriginTestFact[] facts, byte summaryKind = 1,
         bool receiver = false, uint fieldPathRootTypeSpec = 2,
-        bool nativeImportMethod = false, bool functionPointerAnchor = false)
+        bool nativeImportMethod = false, bool functionPointerAnchor = false,
+        bool twoFields = false, bool reverseFieldPathRows = false,
+        bool writerCanonicalizesFacts = false,
+        bool writerCanonicalizesOrigins = false)
     {
+        var fieldCount = twoFields ? 2 : 1;
+        var fieldPathCount = twoFields ? 2 : 1;
         var strings = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Module", 0), ("Pair", 0), ("Data", 0), ("Compose", 0),
         ]);
@@ -613,21 +642,30 @@ public sealed class TrRmContractTableReaderTests
         Write(type, 4, 3);
         Write(type, 8, 4);
         Write(type, 12, 1);
-        Write(type, 16, 1);
+        Write(type, 16, (uint)fieldCount);
         Write(type, 28, 1);
         Write(type, 32, 1);
-        var field = new byte[16];
-        Write(field, 0, 1);
-        Write(field, 4, 4);
-        Write(field, 8, 1);
+        var field = new byte[fieldCount * 16];
+        for (var index = 0; index < fieldCount; index++)
+        {
+            var offset = index * 16;
+            Write(field, offset, 1);
+            Write(field, offset + 4, 4);
+            Write(field, offset + 8, 1);
+        }
 
         var layout = new byte[28];
         Write(layout, 0, 1);
         Write(layout, 20, 1);
-        Write(layout, 24, 1);
-        var layoutField = new byte[12];
-        Write(layoutField, 0, 1);
-        Write(layoutField, 8, 1);
+        Write(layout, 24, (uint)fieldCount);
+        var layoutField = new byte[fieldCount * 12];
+        for (var index = 0; index < fieldCount; index++)
+        {
+            var offset = index * 12;
+            Write(layoutField, offset, 1);
+            Write(layoutField, offset + 4, (uint)index);
+            Write(layoutField, offset + 8, (uint)index + 1);
+        }
 
         var signature = new byte[24];
         Write(signature, 0, 2);
@@ -683,10 +721,18 @@ public sealed class TrRmContractTableReaderTests
         Write(method, 8, 1);
         Write(method, 16, 1);
         Write(method, 20, (uint)contractRows.Count);
-        var fieldPath = new byte[12];
-        Write(fieldPath, 0, fieldPathRootTypeSpec);
-        Write(fieldPath, 4, 1);
-        Write(fieldPath, 8, 0x1400_0001);
+        var fieldPathRows = new byte[fieldPathCount][];
+        for (var index = 0; index < fieldPathCount; index++)
+        {
+            var fieldPath = new byte[12];
+            Write(fieldPath, 0, fieldPathRootTypeSpec);
+            Write(fieldPath, 4, 1);
+            var fieldDef = reverseFieldPathRows
+                ? fieldPathCount - index : index + 1;
+            Write(fieldPath, 8, 0x1400_0000u | (uint)fieldDef);
+            fieldPathRows[index] = fieldPath;
+        }
+        var fieldPaths = Section(fieldPathRows);
         var sections = new List<TrRmSection>
         {
             new(0x0001, 0, 1, module),
@@ -694,7 +740,7 @@ public sealed class TrRmContractTableReaderTests
             new(0x0004, 0, 3, features),
             new(0x0011, 0, 2, typeSpecs),
             new(0x0013, 0, 1, type),
-            new(0x0014, 0, 1, field),
+            new(0x0014, 0, (uint)fieldCount, field),
             new(0x0015, 0, 1, layout),
             new(0x0016, 0, 1, method),
             new(0x0017, 0, 1, signature),
@@ -712,13 +758,47 @@ public sealed class TrRmContractTableReaderTests
             Write(nativeImport, 8, 2);
             sections.Add(new TrRmSection(0x0021, 0, 1, nativeImport));
         }
-        sections.Add(new TrRmSection(0x0023, 0, 1, layoutField));
-        sections.Add(new TrRmSection(0x004B, 0, 1, Section(fieldPath)));
+        sections.Add(new TrRmSection(0x0023, 0,
+            (uint)fieldCount, layoutField));
+        sections.Add(new TrRmSection(0x004B, 0,
+            (uint)fieldPathCount, fieldPaths));
         var artifact = TrRmArtifactWriter.Encode(sections,
             TrRmArtifactSchema.CopyOriginDraft);
-        _ = TrRmStructuralMetadataValidator
+        var executionTables = TrRmStructuralMetadataValidator
             .ValidateCopyOriginDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForCopyOriginDraft(artifact));
+        if (writerCanonicalizesFacts)
+        {
+            var row = new TrRmContractRow(
+                0x1600_0001, 0x0D, copyOrigin);
+            var written = TrRmContractTableWriter.EncodeCopyOriginDraft(
+                [row], executionTables.TypeDefs, executionTables.Methods,
+                executionTables.Signatures, executionTables.Parameters,
+                executionTables.TypeSpecs, executionTables.FieldPaths,
+                fieldPathCount, executionTables.Features, executionTables.Modules);
+            var contractIndex = new TrRmVariableTableIndex(written, 1, 8, 1);
+            var canonical = contractIndex.GetRow(1);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(canonical[20..]),
+                Is.EqualTo(2));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(canonical[40..]),
+                Is.EqualTo(1));
+        }
+        if (writerCanonicalizesOrigins)
+        {
+            var row = new TrRmContractRow(
+                0x1600_0001, 0x0D, copyOrigin);
+            var written = TrRmContractTableWriter.EncodeCopyOriginDraft(
+                [row], executionTables.TypeDefs, executionTables.Methods,
+                executionTables.Signatures, executionTables.Parameters,
+                executionTables.TypeSpecs, executionTables.FieldPaths,
+                fieldPathCount, executionTables.Features, executionTables.Modules);
+            var contractIndex = new TrRmVariableTableIndex(written, 1, 8, 1);
+            var canonical = contractIndex.GetRow(1);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(canonical[36..]),
+                Is.EqualTo(2));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(canonical[48..]),
+                Is.EqualTo(1));
+        }
     }
 
     private readonly record struct CopyOriginTestOrigin(
