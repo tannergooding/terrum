@@ -330,13 +330,15 @@ layout, unsafe declaration and target support. It admits only
 Unmanaged/Cdecl/Stdcall; Vectorcall remains outside that bounded projection
 even if a broader backend implements it.
 
-The [private revision-96 candidate](native-output-foreign-interface-private-persistence.md#modulefunction-foreign-member-variant)
-already specifies a distinct projection:
-`0=Unmanaged`, `1=Cdecl`, `2=Stdcall`. Translate those values explicitly
-to/from the normalized identities; they are not the standard bytes 1..4,
+The [private convention-persistence candidate](native-calling-convention-private-persistence.md)
+selects an exact revision-97 projection: private `0=Unmanaged`, `1=Cdecl`,
+`2=Stdcall`, `3=Vectorcall` for fnptr signatures, plus declaration-owned
+NativeCallable/NativeImport convention tokens. Its foreign-interface
+composition keeps the 96 identity and typed-call records but replaces the
+foreign variant's convention byte with the common NativeCallable token.
+Translate private values explicitly; they are not the standard bytes 1..4,
 the public enum integers or casts of the current single-case host enum.
-Preserve that exact private schema and its Vectorcall rejection. This
-proposal adds no private field, revision or fallback reader.
+This source/Core proposal does not itself change private wire layouts.
 
 Both consumers retain the native-output owner's existing eligible cells,
 logical formal/receiver distinction, result correlation, reservations,
@@ -344,9 +346,11 @@ publication, dependencies, provider settlement and cleanup obligations.
 Convention selection does not authorize outputs on an unadmitted vtable
 prototype or alter any output/foreign-interface semantics.
 
-No section, DefId, clause, Feature, opcode, format-pair or private-revision
-allocation is requested. Existing native capability closure remains required;
-the dependent output/interface candidates keep their separate gates.
+This source/Core candidate allocates no standard section, DefId, clause,
+Feature, opcode or format pair. The private candidate selects its own exact
+revision without changing those standard owners. Existing native capability
+closure remains required; the dependent output/interface candidates keep
+their separate gates.
 Exact draft agreement remains required under
 [format versioning](../specs/representation/format-versioning.md); equal
 headers cannot select a different Core or convention interpretation.

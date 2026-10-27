@@ -9,6 +9,14 @@ This document selects a complete private candidate, not formal approval,
 implementation support, a standard allocation or a stable format. It changes
 no normative owner or existing proposal.
 
+> The candidate-96 foreign identity directory and typed-call design below
+> remain part of the current exact composition. Its one-byte foreign
+> `nativeConvention` placement is superseded by candidate 97 in
+> [Native calling-convention private persistence](native-calling-convention-private-persistence.md):
+> revision 97 uses `|NativeCallable:K` in the declaration Contract instead.
+> This file is retained as the identity/target semantic owner, not an
+> alternative revision-96 decoder.
+
 ## Decision and ownership
 
 Select **candidate private structured-module revision 96**: the **complete

@@ -484,12 +484,14 @@ dispatch rule and standard record candidate are concrete**. Their formal
 approval and registry/catalog integration remain outstanding; the candidate
 number above is not assigned by this document.
 
-The adjacent private-persistence decision is specified, still unapproved, by
+The private identity baseline is specified, still unapproved, by
 [Private persistence of foreign-interface method identity](native-output-foreign-interface-private-persistence.md).
-It selects candidate 96 as the exact candidate-95 composition plus private
-nominal/interface/member identity and typed call-target records. Implementation
-still depends on the complete base revisions and the outer-3 foreign-aware
-draft; this proposal does not claim that path is implemented.
+Its candidate-96 identity directory and typed-call design are retained in the
+exact revision-97 composition selected by
+[NativeCallable convention persistence](native-calling-convention-private-persistence.md),
+which moves the foreign member convention into the common declaration token.
+Implementation still depends on the complete base revisions and outer-3
+foreign-aware draft; neither proposal claims that path is implemented.
 
 Inheritance/adjustments, other target mappings, stored checked interface
 values, runtime interface authentication, IID protocols, COM/resource
