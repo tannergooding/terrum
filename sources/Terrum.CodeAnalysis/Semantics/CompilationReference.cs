@@ -1,5 +1,6 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
+using System;
 using System.Collections.Immutable;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -10,8 +11,15 @@ public sealed class CompilationReference
     internal CompilationReference(ImmutableArray<BoundStruct> structures, ImmutableArray<BoundFunction> functions,
         BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false, string? invocationProfileId = null,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
+        NativeCoreRegistrationSet? nativeCoreRegistration = null)
     {
+        if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
+        {
+            throw new ArgumentException("The selected Core native registration is invalid.",
+                nameof(nativeCoreRegistration));
+        }
+
         Structures = structures;
         Functions = functions;
         RuntimePolicy = runtimePolicy;
@@ -20,6 +28,7 @@ public sealed class CompilationReference
         NativeFunctionPointerSignatures = nativeFunctionPointerSignatures.IsDefault
             ? [] : nativeFunctionPointerSignatures;
         NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
+        NativeCoreRegistration = nativeCoreRegistration;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -40,4 +49,7 @@ public sealed class CompilationReference
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; }
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; }
+
+    // This host-selected Core profile is deliberately separate from normalized module declarations.
+    internal NativeCoreRegistrationSet? NativeCoreRegistration { get; }
 }
