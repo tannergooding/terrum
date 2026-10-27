@@ -295,6 +295,10 @@ Normalize source into the existing carriers only:
 | NativeExport row | A method references its own unique `0x000C` clause; a field references zero. No copied convention, source-attribute row or export-name inference supplies it. |
 | TypeSpec `0x0D` | Retains the existing explicit convention byte and bodyless, non-exported MethodDef signature anchor. NativeCallConv remains immediately before fnptr, with its one explicit E value, not a declaration annotation, func convention or cast. The anchor is not callable/addressable. |
 
+The unapproved, provisionally actionable definition of anchor-owned
+applicable Contract clauses and normalized signature identity is in the
+[Standard function-pointer anchor contract proposal](standard-function-pointer-anchor-contracts.md).
+
 Address formation and function-pointer use must preserve complete signature,
 contracts and exact convention. Imports need no extra C marker to form
 NativeAddress. Distinct conventions remain distinct fnptr types even where
