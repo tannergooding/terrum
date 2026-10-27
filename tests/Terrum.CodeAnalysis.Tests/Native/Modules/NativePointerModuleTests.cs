@@ -431,6 +431,58 @@ public sealed class NativePointerModuleTests
         }
     }
 
+    [TestCase("safe", false)]
+    [TestCase("&secondLocal", true)]
+    public void NativePointerFieldProvenanceMergesBranchSummaryAlternatives(
+        string secondRightExpression, bool shouldReject)
+    {
+        var source = $$"""
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe PointerPair(ptr<int32> left, ptr<int32> right) {
+                    Left = left;
+                    Right = right;
+                }
+            }
+
+            unsafe PointerPair SelectBranches(bool chooseSecond,
+                PointerPair first, PointerPair second) {
+                return chooseSecond ? second : first;
+            }
+
+            unsafe ptr<int32> Select(ptr<int32> safe) {
+                int32 firstLocal = 1;
+                int32 secondLocal = 2;
+                unsafe {
+                    PointerPair first = new PointerPair(&firstLocal, safe);
+                    ptr<int32> secondRight = {{secondRightExpression}};
+                    PointerPair second = new PointerPair(&secondLocal, secondRight);
+                    PointerPair selected = SelectBranches(
+                        false, first, second);
+                    return selected.Right;
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        if (shouldReject)
+        {
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Program, Is.Null);
+        }
+        else
+        {
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
     [Test]
     public void NativePointerFieldReplacementPreservesEarlierDescriptorCopies()
     {
