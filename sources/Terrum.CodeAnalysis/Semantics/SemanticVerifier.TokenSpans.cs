@@ -218,6 +218,7 @@ public static partial class SemanticVerifier
         BoundCopyOriginSourceView SourceView,
         BoundExpression Argument,
         CopyOriginValue? Snapshot,
+        Dictionary<StorageProjection, BackingFieldValue>? BackingSnapshot,
         Dictionary<StorageProjection, NativePointerFieldValue>? NativePointerSnapshot);
 
     private sealed class CopyOriginSummaryBuilder
@@ -723,18 +724,24 @@ public static partial class SemanticVerifier
     private static BoundExpression DependencyCallArgument(BoundCall call,
         BoundFunction callee, BoundDependencySource source)
     {
+        var parameter = DependencyCallParameterIndex(callee, source);
+        var argument = call.ArgumentIndex(parameter);
+        return (uint)argument < (uint)call.Arguments.Length
+            ? call.Arguments[argument] : throw Invalid(call.Span);
+    }
+
+    private static int DependencyCallParameterIndex(
+        BoundFunction callee, BoundDependencySource source)
+    {
         var receiverOffset = callee.DeclaringStruct is not null
             && !callee.IsStatic && !callee.IsConstructor && !callee.IsClassConstructor ? 1 : 0;
-        var parameter = source.Kind switch
+        return source.Kind switch
         {
             BoundDependencySourceKind.Receiver when receiverOffset != 0 => 0,
             BoundDependencySourceKind.Formal when source.FormalOrdinal is int ordinal
                 => ordinal + receiverOffset,
-            _ => throw Invalid(call.Span),
+            _ => throw Invalid(callee.Span),
         };
-        var argument = call.ArgumentIndex(parameter);
-        return (uint)argument < (uint)call.Arguments.Length
-            ? call.Arguments[argument] : throw Invalid(call.Span);
     }
 
     private sealed class BackingDependencies
@@ -742,6 +749,7 @@ public static partial class SemanticVerifier
         // A slot conservatively retains every source it can hold on any path. Liveness
         // remains path-sensitive in InitializationState, including unwind replay.
         internal HashSet<ProvenanceAnchor>?[] Sources { get; }
+        internal HashSet<ProvenanceAnchor>?[] BackingBounds { get; }
         internal bool[] BackingMayBeUnknown { get; }
         internal HashSet<ProvenanceAnchor>?[] NativePointerSources { get; }
         internal bool[] NativePointerMayBeUnknown { get; }
@@ -753,6 +761,9 @@ public static partial class SemanticVerifier
         private CopyOriginFact[] CopyOriginRoots { get; }
         private Dictionary<StorageKey, CopyOriginFact> CopyOriginFieldValues { get; } = [];
         private Dictionary<BoundExpression, CopyOriginValue> CopyOriginCallResults { get; }
+            = new(ReferenceEqualityComparer.Instance);
+        private Dictionary<BoundExpression,
+            Dictionary<StorageProjection, BackingFieldValue>> BackingCallResults { get; }
             = new(ReferenceEqualityComparer.Instance);
         internal BoundCopyOriginSummary?[] CopyOriginSummaries { get; }
         internal CopyOriginSummaryBuilder? CopyOriginSummaryBuilder { get; }
@@ -782,6 +793,7 @@ public static partial class SemanticVerifier
             StorageActivationContext = storageActivationContext;
             CopyOriginSummaryBuilder = copyOriginSummaryBuilder;
             Sources = new HashSet<ProvenanceAnchor>?[length];
+            BackingBounds = new HashSet<ProvenanceAnchor>?[length];
             BackingMayBeUnknown = new bool[length];
             NativePointerSources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerMayBeUnknown = new bool[length];
@@ -816,6 +828,7 @@ public static partial class SemanticVerifier
             for (var slot = 0; slot < Sources.Length; slot++)
             {
                 destination.Sources[slot] = CloneSet(Sources[slot]);
+                destination.BackingBounds[slot] = CloneSet(BackingBounds[slot]);
                 destination.BackingMayBeUnknown[slot] = BackingMayBeUnknown[slot];
                 destination.NativePointerSources[slot] = CloneSet(NativePointerSources[slot]);
                 destination.NativePointerMayBeUnknown[slot] = NativePointerMayBeUnknown[slot];
@@ -856,6 +869,13 @@ public static partial class SemanticVerifier
             foreach (var (expression, value) in CopyOriginCallResults)
             {
                 destination.CopyOriginCallResults.Add(expression, value.Clone());
+            }
+            destination.BackingCallResults.Clear();
+            foreach (var (expression, values) in BackingCallResults)
+            {
+                destination.BackingCallResults.Add(expression,
+                    values.ToDictionary(static pair => pair.Key,
+                        static pair => pair.Value.Clone()));
             }
         }
 
@@ -928,6 +948,43 @@ public static partial class SemanticVerifier
             return changed;
         }
 
+        internal bool MergeBackingCallResults(BackingDependencies other)
+        {
+            if (other.Sources.Length != Sources.Length
+                || other.FunctionActivation != FunctionActivation
+                || !ReferenceEquals(other.CopyOriginSummaries, CopyOriginSummaries))
+            {
+                throw Invalid();
+            }
+
+            var changed = false;
+            foreach (var (call, values) in other.BackingCallResults)
+            {
+                if (!BackingCallResults.TryGetValue(call, out var currentValues))
+                {
+                    BackingCallResults.Add(call,
+                        values.ToDictionary(static pair => pair.Key,
+                            static pair => pair.Value.Clone()));
+                    changed = true;
+                    continue;
+                }
+
+                foreach (var (projection, value) in values)
+                {
+                    if (currentValues.TryGetValue(projection, out var current))
+                    {
+                        changed |= current.Merge(value);
+                    }
+                    else
+                    {
+                        currentValues.Add(projection, value.Clone());
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
         internal void ClearCopyOriginCallResult(BoundExpression expression)
         {
             if (expression is null)
@@ -935,6 +992,15 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             _ = CopyOriginCallResults.Remove(expression);
+        }
+
+        internal void ClearBackingCallResult(BoundExpression expression)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            _ = BackingCallResults.Remove(expression);
         }
 
         internal void ClearNativePointerCallResult(BoundExpression expression)
@@ -998,6 +1064,34 @@ public static partial class SemanticVerifier
             return CopyOriginCallResults.TryGetValue(expression, out value!);
         }
 
+        internal void SetBackingCallResult(BoundExpression expression,
+            IReadOnlyDictionary<StorageProjection, BackingFieldValue> values)
+        {
+            if (expression is null || values is null || values.Count == 0)
+            {
+                throw Invalid();
+            }
+            BackingCallResults[expression] = values.ToDictionary(
+                static pair => pair.Key, static pair => pair.Value.Clone());
+        }
+
+        internal bool TryGetBackingCallResult(BoundExpression expression,
+            StorageProjection projection, out BackingFieldValue value)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            if (BackingCallResults.TryGetValue(expression, out var values)
+                && values.TryGetValue(projection, out var existing))
+            {
+                value = existing.Clone();
+                return true;
+            }
+            value = BackingFieldValue.Unavailable();
+            return false;
+        }
+
         internal bool MergeSlot(int slot, BackingDependencies other)
         {
             if ((uint)slot >= (uint)Sources.Length || other.Sources.Length != Sources.Length)
@@ -1006,6 +1100,7 @@ public static partial class SemanticVerifier
             }
 
             var changed = MergeSet(ref Sources[slot], other.Sources[slot]);
+            changed |= MergeSet(ref BackingBounds[slot], other.BackingBounds[slot]);
             if (other.BackingMayBeUnknown[slot] && !BackingMayBeUnknown[slot])
             {
                 BackingMayBeUnknown[slot] = true;
@@ -1142,6 +1237,7 @@ public static partial class SemanticVerifier
             }
             changed |= MergeCopyOriginCallResults(other);
             changed |= MergeNativePointerCallResults(other);
+            changed |= MergeBackingCallResults(other);
             return changed;
         }
 
@@ -1153,6 +1249,7 @@ public static partial class SemanticVerifier
             }
 
             var changed = !SetEquals(Sources[slot], other.Sources[slot])
+                || !SetEquals(BackingBounds[slot], other.BackingBounds[slot])
                 || BackingMayBeUnknown[slot] != other.BackingMayBeUnknown[slot]
                 || !SetEquals(NativePointerSources[slot], other.NativePointerSources[slot])
                 || NativePointerMayBeUnknown[slot] != other.NativePointerMayBeUnknown[slot]
@@ -1162,6 +1259,7 @@ public static partial class SemanticVerifier
                 || !NativePointerFieldValuesEqualForSlot(slot, other);
             changed |= !CopyOriginFieldValuesEqualForSlot(slot, other);
             Sources[slot] = CloneSet(other.Sources[slot]);
+            BackingBounds[slot] = CloneSet(other.BackingBounds[slot]);
             BackingMayBeUnknown[slot] = other.BackingMayBeUnknown[slot];
             NativePointerSources[slot] = CloneSet(other.NativePointerSources[slot]);
             NativePointerMayBeUnknown[slot] = other.NativePointerMayBeUnknown[slot];
@@ -1218,6 +1316,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             ClearCopyOriginFacts(slot);
+            BackingBounds[slot] = null;
             ClearBackingFieldValues(slot);
             BackingMayBeUnknown[slot] = false;
             StorageInstances[slot] = [new StorageInstance(supportingScopeActivation, generation)];
@@ -1230,6 +1329,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             ClearCopyOriginFacts(slot);
+            BackingBounds[slot] = null;
             ClearBackingFieldValues(slot);
             BackingMayBeUnknown[slot] = false;
             StorageInstances[slot] = [.. StorageInstances[slot]
@@ -1416,6 +1516,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             Sources[slot] = sources.Count == 0 ? null : [.. sources];
+            BackingBounds[slot] = sources.Count == 0 ? null : [.. sources];
             BackingMayBeUnknown[slot] = false;
         }
 
@@ -1426,7 +1527,11 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
-            Sources[slot] = sources.Count == 0 ? null : [.. sources];
+            var aggregate = BackingBounds[slot] is { } bounds
+                ? new HashSet<ProvenanceAnchor>(bounds)
+                : new HashSet<ProvenanceAnchor>();
+            aggregate.UnionWith(sources);
+            Sources[slot] = aggregate.Count == 0 ? null : aggregate;
             BackingMayBeUnknown[slot] = mayBeUnknown;
         }
 
@@ -1437,6 +1542,16 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             _ = MergeSet(ref Sources[slot], sources);
+            _ = MergeSet(ref BackingBounds[slot], sources);
+        }
+
+        internal void AddBackingBoundSource(int slot, ProvenanceAnchor source)
+        {
+            if ((uint)slot >= (uint)BackingBounds.Length)
+            {
+                throw Invalid();
+            }
+            _ = MergeSet(ref BackingBounds[slot], new HashSet<ProvenanceAnchor> { source });
         }
 
         internal void ClearBackingSources(int slot)
@@ -1446,6 +1561,7 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             Sources[slot] = null;
+            BackingBounds[slot] = null;
             BackingMayBeUnknown[slot] = false;
         }
 
@@ -1704,6 +1820,7 @@ public static partial class SemanticVerifier
             }
 
             var sourceBacking = CloneSet(Sources[source]);
+            var sourceBackingBounds = CloneSet(BackingBounds[source]);
             var sourceBackingMayBeUnknown = BackingMayBeUnknown[source];
             var sourcePointers = CloneSet(NativePointerSources[source]);
             var sourcePointerMayBeUnknown = NativePointerMayBeUnknown[source];
@@ -1723,6 +1840,7 @@ public static partial class SemanticVerifier
             for (var slot = 0; slot < Sources.Length; slot++)
             {
                 RemapSource(Sources[slot], source, destination);
+                RemapSource(BackingBounds[slot], source, destination);
             }
             foreach (var value in BackingFieldValues.Values)
             {
@@ -1745,12 +1863,18 @@ public static partial class SemanticVerifier
             {
                 RemapSource(sourceBacking, source, destination);
             }
+            if (sourceBackingBounds is not null)
+            {
+                RemapSource(sourceBackingBounds, source, destination);
+            }
             foreach (var (_, value) in sourceBackingFieldValues)
             {
                 RemapSource(value.Sources, source, destination);
             }
             Sources[destination] = sourceBacking;
             Sources[source] = null;
+            BackingBounds[destination] = sourceBackingBounds;
+            BackingBounds[source] = null;
             BackingMayBeUnknown[destination] = sourceBackingMayBeUnknown;
             BackingMayBeUnknown[source] = false;
             NativePointerSources[destination] = sourcePointers;
@@ -2424,6 +2548,7 @@ public static partial class SemanticVerifier
                     // Negative roots denote incoming backing, not the callee's descriptor place.
                     var incomingBacking = ProvenanceAnchor.ForBackingSource(~slot);
                     AddBackingSource(facts, slot, incomingBacking);
+                    facts.AddBackingBoundSource(slot, incomingBacking);
                     foreach (var leaf in BackingFieldLeaves(function.Variables[slot].Type,
                         program, ref remaining, 0))
                     {
@@ -3581,6 +3706,31 @@ public static partial class SemanticVerifier
         return result;
     }
 
+    private static Dictionary<StorageProjection, BackingFieldValue>?
+        BackingFieldValueSnapshotOfExpression(BoundExpression expression,
+            PrimitiveType valueType, BackingDependencies facts, BoundFunction function,
+            BoundProgram program, ref int remaining, int depth)
+    {
+        var leaves = BackingFieldLeaves(valueType, program, ref remaining, depth + 1);
+        if (leaves.Count == 0)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<StorageProjection, BackingFieldValue>();
+        foreach (var leaf in leaves)
+        {
+            Count(ref remaining, depth + 1);
+            var value = BackingFieldValueOfExpression(expression, valueType,
+                leaf.Projection, facts, function, program, ref remaining, depth + 1);
+            if (!result.TryAdd(leaf.Projection, value))
+            {
+                throw Invalid(expression.Span);
+            }
+        }
+        return result;
+    }
+
     private static CopyOriginFact CopyOriginOfExpression(
         BoundExpression expression, PrimitiveType valueType, StorageProjection relativeProjection,
         BackingDependencies facts, BoundFunction function, BoundProgram program,
@@ -4097,6 +4247,217 @@ public static partial class SemanticVerifier
         return result;
     }
 
+    private static Dictionary<StorageProjection, BackingFieldValue>?
+        CreateBackingCallResult(
+            BoundCall call, BoundFunction target, BoundCopyOriginSummary? summary,
+            IReadOnlyDictionary<int, StagedCopyOriginInput> stagedInputs,
+            BackingDependencies facts, BoundFunction caller, BoundProgram program,
+            ref int remaining, int depth)
+    {
+        var resultLeaves = BackingFieldLeaves(call.Type, program,
+            ref remaining, depth + 1);
+        if (resultLeaves.Count == 0 || summary is null)
+        {
+            return null;
+        }
+        ValidateCopyOriginSummary(target, summary, program);
+
+        var callBounds = BackingBoundsOfCallResult(
+            call, target, facts, program, ref remaining, depth + 1);
+
+        var result = new Dictionary<StorageProjection, BackingFieldValue>();
+        foreach (var leaf in resultLeaves)
+        {
+            if (!result.TryAdd(leaf.Projection, BackingFieldValue.Unavailable()))
+            {
+                throw Invalid(call.Span);
+            }
+        }
+
+        foreach (var fact in summary.Facts)
+        {
+            if (!TryResolveCopyOriginFieldPath(target.ReturnType,
+                    fact.DestinationPath, program, out var destinationType))
+            {
+                throw Invalid(call.Span);
+            }
+
+            var destinationPrefix = CopyOriginStorageProjection(fact.DestinationPath);
+            foreach (var leaf in BackingFieldLeaves(destinationType, program,
+                ref remaining, depth + 1))
+            {
+                Count(ref remaining, depth + 1);
+                var destinationProjection = StorageProjection.Combine(
+                    destinationPrefix, leaf.Projection);
+                var sources = new HashSet<ProvenanceAnchor>(callBounds);
+                var available = true;
+                var hasOrigin = false;
+                foreach (var origin in fact.Origins)
+                {
+                    hasOrigin = true;
+                    var parameterIndex = CopyOriginCallParameterIndex(target, origin);
+                    if (!stagedInputs.TryGetValue(parameterIndex, out var stagedInput)
+                        || stagedInput.SourceView != origin.SourceView
+                        || !TryGetCopyOriginSourceType(target, origin, program,
+                            out var sourceRootType)
+                        || !TryResolveCopyOriginFieldPath(sourceRootType,
+                            origin.SourcePath, program, out var sourceType)
+                        || sourceType != destinationType)
+                    {
+                        throw Invalid(call.Span);
+                    }
+
+                    var sourceProjection = StorageProjection.Combine(
+                        CopyOriginStorageProjection(origin.SourcePath),
+                        leaf.Projection);
+                    BackingFieldValue sourceValue;
+                    if (origin.SourceView == BoundCopyOriginSourceView.EntryValue)
+                    {
+                        if (stagedInput.BackingSnapshot is null
+                            || !stagedInput.BackingSnapshot.TryGetValue(
+                                sourceProjection, out sourceValue!))
+                        {
+                            available = false;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        sourceValue = BackingFieldValueOfExpression(
+                            stagedInput.Argument, sourceRootType, sourceProjection,
+                            facts, caller, program, ref remaining, depth + 1);
+                    }
+
+                    sources.UnionWith(sourceValue.Sources);
+                    available &= sourceValue.IsAvailable;
+                }
+
+                if (!hasOrigin || !result.ContainsKey(destinationProjection))
+                {
+                    throw Invalid(call.Span);
+                }
+                result[destinationProjection] = new BackingFieldValue(
+                    sources, available && hasOrigin);
+            }
+        }
+        return result;
+    }
+
+    private static HashSet<ProvenanceAnchor> BackingBoundsOfCallResult(
+        BoundCall call, BoundFunction target, BackingDependencies facts,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        var relationship = target.IsConstructor
+            ? ReceiverCaptureContract(target) : ResultDependencyContract(target);
+        return relationship is null
+            ? []
+            : BackingSourcesForCallRelationship(
+                call, target, relationship, facts, program, ref remaining, depth + 1);
+    }
+
+    private static HashSet<ProvenanceAnchor> BackingSourcesForCallRelationship(
+        BoundCall call, BoundFunction target, BoundDependencyContract relationship,
+        BackingDependencies facts, BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new HashSet<ProvenanceAnchor>();
+        foreach (var source in relationship.Sources)
+        {
+            Count(ref remaining, depth + 1);
+            var parameterIndex = DependencyCallParameterIndex(target, source);
+            var argument = DependencyCallArgument(call, target, source);
+            if (!TokenSpanContract.IsDependent(argument.Type, program.Structures)
+                && !IsTokenSnapshotType(argument.Type, program)
+                && BackingFieldLeaves(argument.Type, program,
+                    ref remaining, depth + 1).Count == 0)
+            {
+                continue;
+            }
+            var variableIndex = parameterIndex + (target.IsConstructor ? 1 : 0);
+            if ((uint)variableIndex >= (uint)target.Variables.Length)
+            {
+                throw Invalid(call.Span);
+            }
+
+            if (source.Kind == BoundDependencySourceKind.Receiver
+                || target.Variables[variableIndex].IsImplicitRef)
+            {
+                result.UnionWith(BackingOf(argument, facts, program,
+                    ref remaining, depth + 1));
+                continue;
+            }
+
+            var staged = facts.Staged.LastOrDefault(candidate =>
+                ReferenceEquals(candidate.Call, call)
+                && candidate.ParameterIndex == parameterIndex);
+            if (staged.Call is not null)
+            {
+                result.UnionWith(staged.BackingSources);
+            }
+            else
+            {
+                result.UnionWith(BackingOf(argument, facts, program,
+                    ref remaining, depth + 1));
+            }
+        }
+        return result;
+    }
+
+    private static void ApplyBackingCaptureEffects(BoundCall call, BoundFunction callee,
+        InitializationState initialized, BoundFunction caller, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts
+            || callee.IsConstructor || callee.IsClassConstructor)
+        {
+            return;
+        }
+        var capture = callee.DependencyContracts.FirstOrDefault(static contract =>
+            contract.Relation == BoundDependencyRelation.Captures
+            && contract.Destination == BoundDependencyDestination.Receiver);
+        if (capture is null)
+        {
+            return;
+        }
+
+        var receiver = DependencyCallArgument(call, callee,
+            new BoundDependencySource(BoundDependencySourceKind.Receiver, null));
+        if (!TryGetNativePointerFieldPlace(receiver, caller, program,
+            out var receiverVariable, out var receiverProjection))
+        {
+            throw InvalidEffect(call.Span, "Ownership");
+        }
+        var capturedSources = BackingSourcesForCallRelationship(
+            call, callee, capture, facts, program, ref remaining, depth + 1);
+        facts.AddBackingSources(receiverVariable, capturedSources);
+
+        var receiverLeaves = BackingFieldLeaves(receiver.Type, program,
+            ref remaining, depth + 1);
+        foreach (var leaf in receiverLeaves)
+        {
+            Count(ref remaining, depth + 1);
+            var projection = StorageProjection.Combine(
+                receiverProjection, leaf.Projection);
+            if (projection.Kind != StorageProjectionKind.InlineFieldPath)
+            {
+                throw InvalidEffect(call.Span, "Ownership");
+            }
+            facts.TryGetBackingFieldValue(receiverVariable, projection,
+                out var previousValue);
+            var possibleSources = new HashSet<ProvenanceAnchor>(previousValue.Sources);
+            possibleSources.UnionWith(capturedSources);
+            facts.SetBackingFieldValue(receiverVariable, projection,
+                new BackingFieldValue(possibleSources, isAvailable: false));
+        }
+
+        if (receiverLeaves.Count != 0)
+        {
+            facts.BackingMayBeUnknown[receiverVariable] = true;
+            RefreshBackingAggregateProvenance(receiverVariable,
+                caller.Variables[receiverVariable].Type, facts, program,
+                ref remaining, depth + 1);
+        }
+    }
+
     private static Dictionary<StorageProjection, NativePointerFieldValue>?
         CreateNativePointerCallResult(
             BoundCall call, BoundFunction target, BoundCopyOriginSummary? summary,
@@ -4574,6 +4935,9 @@ public static partial class SemanticVerifier
 
         switch (expression)
         {
+            case BoundCall call when facts.TryGetBackingCallResult(
+                call, relativeProjection, out var callValue):
+                return callValue;
             case BoundUnsafeExpression unsafeExpression:
                 return BackingFieldValueOfExpression(unsafeExpression.Expression,
                     valueType, relativeProjection, facts, function, program,
@@ -4601,7 +4965,7 @@ public static partial class SemanticVerifier
                 && facts.TryGetBackingFieldValue(variable, sourceProjection,
                     out var fieldValue))
             {
-                return fieldValue;
+                return BackingFieldValueWithBounds(variable, fieldValue, facts);
             }
         }
 
@@ -4611,6 +4975,17 @@ public static partial class SemanticVerifier
                 BackingOf(expression, facts, program, ref remaining, depth + 1),
                 isAvailable: true)
             : BackingFieldValue.Unavailable();
+    }
+
+    private static BackingFieldValue BackingFieldValueWithBounds(
+        int slot, BackingFieldValue value, BackingDependencies facts)
+    {
+        var sources = new HashSet<ProvenanceAnchor>(value.Sources);
+        if (facts.BackingBounds[slot] is { } bounds)
+        {
+            sources.UnionWith(bounds);
+        }
+        return new BackingFieldValue(sources, value.IsAvailable);
     }
 
     private static void RefreshBackingAggregateProvenance(int slot,
@@ -4985,6 +5360,7 @@ public static partial class SemanticVerifier
         BoundProgram program, TextSpan span)
     {
         if (facts.BackingMayBeUnknown[variable]
+            && facts.BackingBounds[variable] is not { Count: > 0 }
             && (TokenSpanContract.IsDependent(type, program.Structures)
                 || IsTokenSnapshotType(type, program)))
         {
@@ -5139,7 +5515,13 @@ public static partial class SemanticVerifier
                         && facts.TryGetBackingFieldValue(variable, projection, out var fieldValue)
                         && fieldValue.IsAvailable)
                     {
-                        return fieldValue.Sources;
+                        return BackingFieldValueWithBounds(
+                            variable, fieldValue, facts).Sources;
+                    }
+                    if (facts.BackingBounds[variable] is { Count: > 0 }
+                        && facts.Sources[variable] is { Count: > 0 } boundedSources)
+                    {
+                        return boundedSources;
                     }
                     if (!facts.BackingMayBeUnknown[variable]
                         && BackingFieldLeaves(field.Receiver.Type, program,
@@ -5161,6 +5543,9 @@ public static partial class SemanticVerifier
                 return BackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
             case BoundSpanAdvance advance:
                 return BackingOf(advance.View, facts, program, ref remaining, depth + 1);
+            case BoundCall call when facts.TryGetBackingCallResult(
+                call, StorageProjection.WholeObject, out var callBacking):
+                return callBacking.Sources;
             case BoundCall call when (uint)call.Function < (uint)program.Functions.Length
                 && program.Functions[call.Function].IsConstructor
                 && TokenSpanContract.IsCursor(call.Type, program.Structures):
@@ -5252,7 +5637,8 @@ public static partial class SemanticVerifier
         {
             if ((state.Possibilities(slot) & 2) != 0)
             {
-                if (facts.BackingMayBeUnknown[slot]
+                if ((facts.BackingMayBeUnknown[slot]
+                        && facts.BackingBounds[slot] is not { Count: > 0 })
                     || facts.Sources[slot]?.Contains(
                         ProvenanceAnchor.ForBackingSource(owner)) == true)
                 {

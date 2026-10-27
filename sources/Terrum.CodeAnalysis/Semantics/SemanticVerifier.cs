@@ -5622,6 +5622,7 @@ public static partial class SemanticVerifier
                 if (initialized.Dependencies is BackingDependencies copyOriginDependencies)
                 {
                     copyOriginDependencies.ClearCopyOriginCallResult(call);
+                    copyOriginDependencies.ClearBackingCallResult(call);
                     copyOriginDependencies.ClearNativePointerCallResult(call);
                 }
                 if (target.IsCleanup || target.IsClassConstructor)
@@ -5732,6 +5733,8 @@ public static partial class SemanticVerifier
                             throw Invalid();
                         }
                         CopyOriginValue? preMoveCopyOriginSnapshot = null;
+                        Dictionary<StorageProjection, BackingFieldValue>?
+                            preMoveBackingSnapshot = null;
                         Dictionary<StorageProjection, NativePointerFieldValue>?
                             preMoveNativePointerSnapshot = null;
                         if (argumentsComplete && argument is BoundMove
@@ -5744,6 +5747,10 @@ public static partial class SemanticVerifier
                             preMoveCopyOriginSnapshot = CopyOriginValueOfExpression(argument,
                                 argument.Type, copyOriginState, function, program,
                                 ref remaining, depth + 1);
+                            preMoveBackingSnapshot =
+                                BackingFieldValueSnapshotOfExpression(argument,
+                                    argument.Type, copyOriginState, function, program,
+                                    ref remaining, depth + 1);
                             if (CarriesNativePointer(argument.Type, program))
                             {
                                 preMoveNativePointerSnapshot =
@@ -6067,6 +6074,12 @@ public static partial class SemanticVerifier
                                     argument.Type, copyOriginState, function, program,
                                     ref remaining, depth + 1)
                                 : null;
+                            var backingSnapshot = snapshotEntryValue
+                                ? preMoveBackingSnapshot
+                                    ?? BackingFieldValueSnapshotOfExpression(argument,
+                                        argument.Type, copyOriginState, function, program,
+                                        ref remaining, depth + 1)
+                                : null;
                             var nativePointerSnapshot = snapshotEntryValue
                                 && CarriesNativePointer(argument.Type, program)
                                     ? preMoveNativePointerSnapshot
@@ -6076,7 +6089,7 @@ public static partial class SemanticVerifier
                                     : null;
                             if (!stagedCopyOriginInputs.TryAdd(parameterIndex,
                                 new StagedCopyOriginInput(sourceView, argument, snapshot,
-                                    nativePointerSnapshot)))
+                                    backingSnapshot, nativePointerSnapshot)))
                             {
                                 throw Invalid(argument.Span);
                             }
@@ -6105,6 +6118,12 @@ public static partial class SemanticVerifier
                             stagedCopyOriginInputs, copyOriginResultDependencies,
                             function, program, ref remaining, depth + 1)
                         : null;
+                    var backingCallResult =
+                        initialized.Dependencies is BackingDependencies backingResultDependencies
+                        ? CreateBackingCallResult(call, target, copyOriginSummary,
+                            stagedCopyOriginInputs, backingResultDependencies,
+                            function, program, ref remaining, depth + 1)
+                        : null;
                     var nativePointerCallResult =
                         initialized.Dependencies is BackingDependencies
                             nativePointerResultDependencies
@@ -6114,6 +6133,8 @@ public static partial class SemanticVerifier
                             ref remaining, depth + 1)
                         : null;
                     ApplyCopyOriginCallEffects(call, target, initialized, function,
+                        program, ref remaining, depth + 1);
+                    ApplyBackingCaptureEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
                     ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
@@ -6125,6 +6146,11 @@ public static partial class SemanticVerifier
                         && initialized.Dependencies is BackingDependencies resultDependencies)
                     {
                         resultDependencies.SetCopyOriginCallResult(call, copyOriginCallResult);
+                    }
+                    if (backingCallResult is not null
+                        && initialized.Dependencies is BackingDependencies backingCallDependencies)
+                    {
+                        backingCallDependencies.SetBackingCallResult(call, backingCallResult);
                     }
                     if (nativePointerCallResult is not null
                         && initialized.Dependencies is BackingDependencies pointerResultDependencies)

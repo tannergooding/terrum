@@ -24,7 +24,16 @@ public sealed class TokenCursorTests
     private const string ForwardingDeclarations = """
         using Terrum.CodeAnalysis;
         [return: DependsOn(nameof(tokens))]
+        [return: ForwardsBacking(nameof(tokens))]
         internal Span<Token> Identity(Span<Token> tokens) { return tokens; }
+        internal Span<Token> DefaultIdentity(Span<Token> tokens) { return tokens; }
+        [return: ForwardsBacking(nameof(tokens))]
+        internal Span<Token> DefaultForwarded(Span<Token> tokens) { return tokens; }
+        [return: DependsOn(nameof(first), nameof(second))]
+        [return: ForwardsBacking(nameof(first))]
+        internal Span<Token> ForwardFirst(Span<Token> first, Span<Token> second) {
+            return first;
+        }
         [return: DependsOn(nameof(left), nameof(right))]
         internal Span<Token> Choose(Span<Token> left, Span<Token> right, bool useLeft) {
             return useLeft ? left : right;
@@ -334,11 +343,439 @@ public sealed class TokenCursorTests
             }
             """;
         var program = Program(await CompileAsync("alpha 42", entry, policy).ConfigureAwait(true));
+        var identity = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "Identity");
+        var backing = global::System.Linq.Enumerable.Single(identity.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.ForwardsBacking);
+        Assert.That(backing.Destination, Is.EqualTo(BoundDependencyDestination.Result));
+        Assert.That(backing.Sources, Has.Length.EqualTo(1));
+        Assert.That(backing.Sources[0].Kind, Is.EqualTo(BoundDependencySourceKind.Formal));
+        Assert.That(backing.Sources[0].FormalOrdinal, Is.EqualTo(0));
+        var defaultIdentity = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "DefaultIdentity");
+        var defaultDependency = global::System.Linq.Enumerable.Single(
+            defaultIdentity.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.DependsOn);
+        Assert.That(defaultDependency.Sources[0].Kind,
+            Is.EqualTo(BoundDependencySourceKind.Formal));
+        Assert.That(defaultDependency.Sources[0].FormalOrdinal, Is.EqualTo(0));
+        var defaultForwarded = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "DefaultForwarded");
+        Assert.That(global::System.Linq.Enumerable.Single(defaultForwarded.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.DependsOn)
+            .Sources[0].FormalOrdinal, Is.EqualTo(0));
+        Assert.That(global::System.Linq.Enumerable.Single(defaultForwarded.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.ForwardsBacking)
+            .Sources[0].FormalOrdinal, Is.EqualTo(0));
+        var subsetForwarding = global::System.Linq.Enumerable.Single(
+            global::System.Linq.Enumerable.Single(program.Functions,
+                static function => function.Name == "ForwardFirst").DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.ForwardsBacking);
+        Assert.That(subsetForwarding.Sources, Has.Length.EqualTo(1));
+        Assert.That(subsetForwarding.Sources[0].FormalOrdinal, Is.EqualTo(0));
         await ExecuteAsync(program, policy).ConfigureAwait(true);
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(program, ["Main"]))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(program, ["Main"], (NativeRuntimePolicy)policy))!;
         _ = Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "forwarded-span"))!;
     }
+
+    [Test]
+    public async Task VerifierRejectsLegacySpanProjectionDriftAsync()
+    {
+        var program = Program(await CompileAsync("alpha", ForwardingDeclarations + """
+            int32 Main() { return 42; }
+            """, BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        var functionIndex = Array.FindIndex(program.Functions.ToArray(),
+            static function => function.Name == "Identity");
+        var function = program.Functions[functionIndex];
+        var forgedFunction = function with { ResultDependencyParameters = [] };
+
+        _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
+            Functions = program.Functions.SetItem(functionIndex, forgedFunction),
+        }))!;
+    }
+
+    [Test]
+    public async Task ViewResultDefaultRequiresExplicitSetForReceiverAndFormalAsync()
+    {
+        var compilation = await CompileAsync("", "int32 Main() { return 42; }",
+            BoundRuntimePolicy.FailFast, rewrite: static (name, source) =>
+                name == "TokenCursor"
+                    ? source.Replace("    public mut bool TryRead",
+                        "    internal Span<Token> SelectWithInput(Span<Token> tokens) { return tokens; }\n\n"
+                            + "    public mut bool TryRead", StringComparison.Ordinal)
+                    : source).ConfigureAwait(true);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3023"
+                && diagnostic.Message.Contains("multiple eligible sources",
+                    StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public async Task ViewResultDefaultsAndForwardingUseTheSingleCursorReceiverAsync()
+    {
+        var compilation = await CompileAsync("", "int32 Main() { return 42; }",
+            BoundRuntimePolicy.FailFast, rewrite: static (name, source) =>
+                name == "TokenCursor"
+                    ? source.Replace("    public mut bool TryRead",
+                        """
+                            internal Span<Token> Remaining() { return _tokens; }
+
+                            [return: ForwardsBacking(this)]
+                            internal Span<Token> RemainingBacking() { return _tokens; }
+
+                            public mut bool TryRead
+                        """, StringComparison.Ordinal)
+                    : source).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Program(compilation);
+        foreach (var name in new[] { "Terrum.CodeAnalysis.TokenCursor.Remaining",
+            "Terrum.CodeAnalysis.TokenCursor.RemainingBacking" })
+        {
+            var function = global::System.Linq.Enumerable.Single(program.Functions,
+                candidate => candidate.Name == name);
+            var dependency = global::System.Linq.Enumerable.Single(
+                function.DependencyContracts,
+                static contract => contract.Relation == BoundDependencyRelation.DependsOn);
+            Assert.That(dependency.Destination,
+                Is.EqualTo(BoundDependencyDestination.Result));
+            Assert.That(dependency.Sources,
+                Is.EqualTo([new BoundDependencySource(
+                    BoundDependencySourceKind.Receiver, null)]));
+        }
+
+        var forwarded = global::System.Linq.Enumerable.Single(program.Functions,
+            static function =>
+                function.Name == "Terrum.CodeAnalysis.TokenCursor.RemainingBacking");
+        var forwarding = global::System.Linq.Enumerable.Single(
+            forwarded.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.ForwardsBacking);
+        Assert.That(forwarding.Sources,
+            Is.EqualTo([new BoundDependencySource(
+                BoundDependencySourceKind.Receiver, null)]));
+    }
+
+    [Test]
+    public async Task ExplicitEmptyReceiverDependencySuppressesTheDefaultAsync()
+    {
+        var compilation = await CompileAsync("", "int32 Main() { return 42; }",
+            BoundRuntimePolicy.FailFast, rewrite: static (name, source) =>
+                name == "TokenCursor"
+                    ? source.Replace("    public mut bool TryRead",
+                        """
+                            [return: DependsOn()]
+                            internal Span<Token> Independent() { return _tokens; }
+
+                            public mut bool TryRead
+                        """, StringComparison.Ordinal)
+                    : source).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
+    }
+
+    [Test]
+    public async Task SnapshotReceiverDefaultsPreserveItsBackingRelationshipAsync()
+    {
+        var entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                Span<Token> view = owner.CreateView();
+                Span<Token> forwarded = owner.CreateForwardedView();
+                mut TokenSnapshot transferred = move owner;
+                require view.Length == uint64(transferred.GetCount());
+                require forwarded.Length == uint64(transferred.GetCount());
+                view = _;
+                forwarded = _;
+                transferred = _;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("", entry, BoundRuntimePolicy.FailFast,
+            rewrite: static (name, source) =>
+                name == "TokenSnapshot"
+                    ? source.Replace("    public int32 GetCount()",
+                        """
+                            internal Span<Token> CreateView() { return this.AsSpan(); }
+
+                            [return: ForwardsBacking(this)]
+                            internal Span<Token> CreateForwardedView() { return this.AsSpan(); }
+
+                            public int32 GetCount()
+                        """, StringComparison.Ordinal)
+                    : source).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = Program(compilation);
+        foreach (var name in new[] {
+            "Terrum.CodeAnalysis.TokenSnapshot.CreateView",
+            "Terrum.CodeAnalysis.TokenSnapshot.CreateForwardedView",
+        })
+        {
+            var function = global::System.Linq.Enumerable.Single(program.Functions,
+                candidate => candidate.Name == name);
+            var dependency = global::System.Linq.Enumerable.Single(
+                function.DependencyContracts,
+                static contract => contract.Relation == BoundDependencyRelation.DependsOn);
+            Assert.That(dependency.Sources,
+                Is.EqualTo([new BoundDependencySource(
+                    BoundDependencySourceKind.Receiver, null)]));
+        }
+    }
+
+    [Test]
+    public async Task SnapshotReceiverViewKeepsItsOwnerAliveAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                Span<Token> view = owner.CreateForwardedView();
+                owner = _;
+                require view.Length == uint64(0);
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("", entry, BoundRuntimePolicy.FailFast,
+            rewrite: static (name, source) =>
+                name == "TokenSnapshot"
+                    ? source.Replace("    public int32 GetCount()",
+                        """
+                            [return: ForwardsBacking(this)]
+                            internal Span<Token> CreateForwardedView() { return this.AsSpan(); }
+
+                            public int32 GetCount()
+                        """, StringComparison.Ordinal)
+                    : source).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
+    }
+
+    [Test]
+    public async Task CursorCapturePreservesBackingAcrossSummaryCallAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                require TokenSnapshot.TryScan(init var secondScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenSnapshot second = move secondScanned;
+                mut TokenCursor cursor = new TokenCursor(first.AsSpan());
+                cursor.ReplaceThroughIdentity(second.AsSpan());
+                second = _;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("", entry, BoundRuntimePolicy.FailFast,
+            rewrite: static (name, source) =>
+                name == "TokenCursor"
+                    ? source.Replace("    public mut bool TryRead",
+                        """
+                            internal static Span<Token> Identity(Span<Token> tokens) {
+                                return tokens;
+                            }
+
+                            [Captures(nameof(tokens))]
+                            internal mut void ReplaceThroughIdentity(Span<Token> tokens) {
+                                _tokens = Identity(tokens);
+                            }
+
+                            public mut bool TryRead
+                        """, StringComparison.Ordinal)
+                    : source).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
+    }
+
+    [Test]
+    public async Task SnapshotByValueInputCannotOutliveItsTransferredOwnerAsync()
+    {
+        var compilation = await CompileAsync("", """
+            using Terrum.CodeAnalysis;
+            internal Span<Token> Escape(TokenSnapshot snapshot) {
+                return snapshot.AsSpan();
+            }
+            int32 Main() { return 42; }
+            """, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
+    }
+
+    [Test]
+    public async Task ViewResultWithMultipleEligibleSourcesRequiresExplicitSetAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            internal Span<Token> SelectWithoutAContract(
+                Span<Token> left, Span<Token> right, bool useLeft) {
+                return useLeft ? left : right;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3023"
+                && diagnostic.Message.Contains("multiple eligible sources",
+                    StringComparison.Ordinal)), Is.True);
+    }
+
+    [Test]
+    public async Task ExplicitEmptyDependencySuppressesViewSourceDefaultAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            [return: DependsOn()]
+            internal Span<Token> Independent(Span<Token> tokens) { return tokens; }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
+    }
+
+    [Test]
+    public async Task SpanBackingSurvivesTransferOfItsOwnerAsync()
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                Span<Token> view = owner.AsSpan();
+                mut TokenSnapshot transferred = move owner;
+                require view.Length == uint64(transferred.GetCount());
+                require view[0].Kind == 2;
+                view = _;
+                transferred = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha", Entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task SpanStillDependsOnTheTransferredOwnerAsync()
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                Span<Token> view = owner.AsSpan();
+                mut TokenSnapshot transferred = move owner;
+                transferred = _;
+                require view.Length == 2;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("alpha", Entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public async Task ReinitializedOwnerKeepsDistinctViewSourcesAsync()
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                mut TokenSnapshot owner = move firstScanned;
+                Span<Token> firstView = owner.AsSpan();
+                mut TokenSnapshot firstOwner = move owner;
+
+                require TokenSnapshot.TryScan(init var secondScanned);
+                owner = move secondScanned;
+                Span<Token> secondView = owner.AsSpan();
+                require firstView.Length == uint64(firstOwner.GetCount());
+                require secondView.Length == uint64(owner.GetCount());
+                require firstView[0].Kind == 2;
+                require secondView[0].Kind == 2;
+
+                firstView = _;
+                secondView = _;
+                owner = _;
+                firstOwner = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha", Entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task ViewSourcesFollowBranchAssignmentsAndJoinAsync()
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            bool Pick() { return Host.Tokens[0] == 2; }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                require TokenSnapshot.TryScan(init var secondScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenSnapshot second = move secondScanned;
+                Span<Token> view = Pick() ? first.AsSpan() : second.AsSpan();
+                require view.Length == 2;
+                require view[0].Kind == 2;
+                view = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha", Entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task LoopLocalViewsRetireBeforeOwnerSlotsAreReusedAsync()
+    {
+        const string Entry = """
+            using Terrum.CodeAnalysis;
+            int32 Main() {
+                mut int32 iteration = 0;
+                while (iteration < 2) {
+                    require TokenSnapshot.TryScan(init var scanned);
+                    mut TokenSnapshot owner = move scanned;
+                    Span<Token> view = owner.AsSpan();
+                    require view[0].Kind == 2;
+                    view = _;
+                    owner = _;
+                    iteration = iteration + 1;
+                }
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha", Entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+    }
+
     [TestCase(false)]
     [TestCase(true)]
     public async Task DirectCursorConstructorArgumentsRetainForwardedBackingAsync(bool throughForwarder)
@@ -556,7 +993,10 @@ public sealed class TokenCursorTests
         await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
     }
     [TestCase("""
-        internal Span<Token> MissingSources(Span<Token> tokens) { return tokens; }
+        internal Span<Token> MissingSourceSet(
+            Span<Token> left, Span<Token> right, bool useLeft) {
+            return useLeft ? left : right;
+        }
         """)]
     [TestCase("""
         [return: DependsOn(nameof(left))]
@@ -578,7 +1018,7 @@ public sealed class TokenCursorTests
         public Span<Token> NonInternal(Span<Token> tokens) { return tokens; }
         """)]
     [TestCase("""
-        [DependsOn(nameof(tokens))]
+        [param(tokens): DependsOn(nameof(tokens))]
         internal Span<Token> WrongDependencyTarget(Span<Token> tokens) { return tokens; }
         """)]
     [TestCase("""
@@ -853,17 +1293,33 @@ public sealed class TokenCursorTests
         await ExecuteAsync(Program(await CompileAsync("alpha 42", entry, BoundRuntimePolicy.CheckedExceptions,
             trace: true)), BoundRuntimePolicy.CheckedExceptions);
     }
-    [TestCase("-1")]
     [TestCase("-18446744073709551616")]
     [TestCase("18446744073709551616")]
     [TestCase("0x1_0000_0000_0000_0000")]
-    public async Task NegativeAndOversizedIndexLiteralsAreRejectedAsync(string literal)
+    public async Task OversizedIndexLiteralsAreRejectedAsync(string literal)
     {
         var compilation = await CompileAsync("", EntryPrefix
             + $"Span<Token> tokens = owner.AsSpan(); Token bad = tokens[{literal}]; return 42;}}",
             BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public async Task NegativeIndexLiteralUsesCheckedConversionBeforeElementAccessAsync()
+    {
+        var entry = EntryPrefix + """
+            Span<Token> tokens = owner.AsSpan();
+            unsafe {
+                try { Token bad = tokens[-1]; return 1; }
+                catch { require tokens[0].Kind == 0; }
+            }
+            return 42;
+        }
+        """;
+        var compilation = await CompileAsync("", entry, BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        await ExecuteAsync(Program(compilation), BoundRuntimePolicy.CheckedExceptions);
     }
     [TestCase("int32","-1")]
     [TestCase("int32","-2147483648")]
@@ -1005,7 +1461,7 @@ public sealed class TokenCursorTests
     }
     [TestCase("unique struct Stored { private Span<Token> Value; public Stored(Span<Token> value) { Value = value; } }")]
     [TestCase("class Stored { private Span<Token> Value; public Stored(Span<Token> value) { Value = value; } }")]
-    [TestCase("Span<Token> Escape(Span<Token> value) { return value; }")]
+    [TestCase("[return: DependsOn()] Span<Token> Escape(Span<Token> value) { return value; }")]
     [TestCase("TokenCursor Escape(TokenCursor value) { return move value; }")]
     [TestCase("[Captures(nameof(value))] void Capture(Span<Token> value) { }")]
     public async Task StorageEscapesAndMisplacedCapturesRemainUnsupportedAsync(string declaration)
@@ -1250,7 +1706,8 @@ public sealed class TokenCursorTests
             }),
         };
         var error = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Probe"]))!;
-        Assert.That(error.Message, Is.EqualTo("Compilation-local span and capture metadata cannot be persisted."));
+        Assert.That(error.Message, Is.EqualTo(
+            "Compilation-local spans are not supported in private semantic modules."));
     }
 
     [Test]
@@ -1297,7 +1754,7 @@ public sealed class TokenCursorTests
         var program = Program(await CompileAsync("", Entry, BoundRuntimePolicy.CheckedExceptions, (name, source) => name switch {
             "TokenCursor" => source.Replace("_tokens = tokens;", "_tokens = tokens; require false;", StringComparison.Ordinal),
             "TokenSnapshot" => source.Replace("public int32 GetCount()", """
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ 1; }
+                 [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ 1; }
                 public int32 GetCount()
                 """, StringComparison.Ordinal),
             _ => source,
@@ -1319,7 +1776,7 @@ public sealed class TokenCursorTests
             """;
         var staged = Program(await CompileAsync("", Staged, BoundRuntimePolicy.CheckedExceptions,
             (name, source) => name == "TokenSnapshot" ? source.Replace("public int32 GetCount()", """
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ 1; }
+                 [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ 1; }
                 public int32 GetCount()
                 """, StringComparison.Ordinal) : source, trace: true));
         await ExecuteAsync(staged, BoundRuntimePolicy.CheckedExceptions);
@@ -1399,7 +1856,7 @@ public sealed class TokenCursorTests
                         return true;
                     }
 
-                    [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ 1; }
+                     [Cleanup] public void Close() { Host.Trace[0] = Host.Trace[0] ^ 1; }
                     """;
                 return source.Remove(start, end - start).Insert(start, uncheckedFactory);
             }, trace: true));
