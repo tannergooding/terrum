@@ -4402,7 +4402,7 @@ public static partial class SemanticVerifier
         return result;
     }
 
-    private static void ApplyBackingCaptureEffects(BoundCall call, BoundFunction callee,
+    private static void ApplyBackingCallEffects(BoundCall call, BoundFunction callee,
         InitializationState initialized, BoundFunction caller, BoundProgram program,
         ref int remaining, int depth)
     {
@@ -4411,23 +4411,40 @@ public static partial class SemanticVerifier
         {
             return;
         }
+        var hasReceiver = callee.DeclaringStruct is not null && !callee.IsStatic;
         var capture = callee.DependencyContracts.FirstOrDefault(static contract =>
             contract.Relation == BoundDependencyRelation.Captures
             && contract.Destination == BoundDependencyDestination.Receiver);
-        if (capture is null)
+        if (!hasReceiver)
         {
+            if (capture is not null)
+            {
+                throw InvalidEffect(call.Span, "Ownership");
+            }
             return;
         }
 
         var receiver = DependencyCallArgument(call, callee,
             new BoundDependencySource(BoundDependencySourceKind.Receiver, null));
+        var isMutableReceiver = receiver is BoundMutableReceiverLoan or BoundMutableFieldLoan;
+        if (!isMutableReceiver && capture is null)
+        {
+            return;
+        }
+
+        var capturedSources = capture is null
+            ? new HashSet<ProvenanceAnchor>()
+            : BackingSourcesForCallRelationship(
+                call, callee, capture, facts, program, ref remaining, depth + 1);
         if (!TryGetNativePointerFieldPlace(receiver, caller, program,
             out var receiverVariable, out var receiverProjection))
         {
-            throw InvalidEffect(call.Span, "Ownership");
+            if (capturedSources.Count != 0)
+            {
+                throw InvalidEffect(call.Span, "Ownership");
+            }
+            return;
         }
-        var capturedSources = BackingSourcesForCallRelationship(
-            call, callee, capture, facts, program, ref remaining, depth + 1);
         facts.AddBackingSources(receiverVariable, capturedSources);
 
         var receiverLeaves = BackingFieldLeaves(receiver.Type, program,

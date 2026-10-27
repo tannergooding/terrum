@@ -6134,7 +6134,7 @@ public static partial class SemanticVerifier
                         : null;
                     ApplyCopyOriginCallEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
-                    ApplyBackingCaptureEffects(call, target, initialized, function,
+                    ApplyBackingCallEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
                     ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
