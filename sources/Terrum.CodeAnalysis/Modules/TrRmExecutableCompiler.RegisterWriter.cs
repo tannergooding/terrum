@@ -230,18 +230,11 @@ public static partial class TrRmExecutableCompiler
 
         code[6] = 0x17;
         code[7] = resultRegister;
-        var body = new byte[53];
-        body[0] = 0x01;
-        body[1] = 0x01;
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(5), 1);
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(9), 1);
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(13), (uint)code.Length);
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(21), (uint)code.Length);
-        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(33), 8);
-        body[37] = 0x01;
-        code.CopyTo(body.AsSpan(45));
-        _ = new TrRmRegisterBodyReader(body);
-        return body;
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        return TrRmRegisterBodyWriter.Encode(default, default, default, default,
+            default, [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            [entryState], code);
     }
 
     private static byte GetParameterRegister(BoundExpression expression, BoundFunction function)
