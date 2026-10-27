@@ -10,11 +10,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using Terrum.CodeAnalysis.Tests.Semantics.Generics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -23,6 +25,28 @@ public sealed class TrRmExecutableCompilerTests
 {
     private const uint ScalarInitOutputInitialRuleRevision = 1;
     private const uint ScalarInitOutputRuleRevision = 8;
+    public static IEnumerable<object[]> StandardIntegerOperationCases
+    {
+        get
+        {
+            byte[] typeCodes = [0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F];
+            byte[] operationCodes = [0x20, 0x21, 0x22, 0x23, 0x24, 0x25];
+            foreach (var typeCode in typeCodes)
+            {
+                foreach (var operationCode in operationCodes)
+                {
+                    yield return [typeCode, operationCode];
+                }
+            }
+        }
+    }
+
+    private static readonly byte[] s_nonFloatingBuiltinTypeCodes =
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0B, 0x0C, 0x0D, 0x0E];
+    private const int NonFloatingBuiltinTypeSpecCount = 14;
+    private const int FirstOptionalTypeSpecRow = NonFloatingBuiltinTypeSpecCount + 1;
+    private const int Float32TypeSpecRow = NonFloatingBuiltinTypeSpecCount + 1;
+    private const int OptionalFloat32TypeSpecRow = Float32TypeSpecRow + 1;
 
     private static BoundProgram Compile(string source, bool library = false)
     {
@@ -44,6 +68,522 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeJit.Execute(original, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void ExecutesStandardRegisterScalarReturnsWithoutDevelopmentFallback()
+    {
+        foreach (var (register, expected) in new (byte Register, int Expected)[] {
+            (0x0E, 0),
+            (0x0F, -1),
+        })
+        {
+            var artifact = TrRmRegisterBodyTestData.StandardInt32EntryArtifact(register);
+            var loaded = TrRmExecutableCompiler.LoadStandardScalarReturn(artifact);
+            var image = NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast);
+
+            Assert.That(image.Length, Is.GreaterThan(2));
+            Assert.That(image[0], Is.EqualTo((byte)'M'));
+            Assert.That(image[1], Is.EqualTo((byte)'Z'));
+            Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+                Is.EqualTo(expected));
+        }
+
+        var developmentArtifact = TrRmExecutableCompiler.Emit(
+            Compile("int32 Main() { return 0; }"), "development-profile");
+        var exception = Assert.Catch<Exception>(() =>
+            TrRmExecutableCompiler.LoadStandardScalarReturn(developmentArtifact));
+        Assert.That(exception, Is.InstanceOf<InvalidDataException>()
+            .Or.InstanceOf<NotSupportedException>());
+    }
+
+    [TestCase((byte)0x14)]
+    [TestCase((byte)0x15)]
+    public async Task StandardRegisterBodyExecutesFloatingRemainder(byte typeCode)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var program = TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(
+            TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(typeCode));
+        var image = NativeEmitter.EmitLibrary(
+            program, ["Remainder"], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-register-remainder-{Guid.NewGuid():N}.dll");
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            if (typeCode == 0x14)
+            {
+                var remainder = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Remainder"));
+                Assert.That(SingleBits(remainder(5.5F, 2.0F)),
+                    Is.EqualTo(SingleBits(1.5F)));
+                Assert.That(SingleBits(remainder(-5.5F, 2.0F)),
+                    Is.EqualTo(SingleBits(-1.5F)));
+                Assert.That(SingleBits(remainder(5.5F, -2.0F)),
+                    Is.EqualTo(SingleBits(1.5F)));
+                Assert.That(SingleBits(remainder(-0.0F, 2.0F)),
+                    Is.EqualTo(unchecked((int)0x80000000)));
+                Assert.That(SingleBits(remainder(5.5F, float.PositiveInfinity)),
+                    Is.EqualTo(SingleBits(5.5F)));
+                Assert.That(float.IsNaN(remainder(float.PositiveInfinity, 2.0F)), Is.True);
+                Assert.That(float.IsNaN(remainder(5.5F, 0.0F)), Is.True);
+            }
+            else
+            {
+                var remainder = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Remainder"));
+                Assert.That(DoubleBits(remainder(5.5, 2.0)), Is.EqualTo(DoubleBits(1.5)));
+                Assert.That(DoubleBits(remainder(-5.5, 2.0)), Is.EqualTo(DoubleBits(-1.5)));
+                Assert.That(DoubleBits(remainder(5.5, -2.0)), Is.EqualTo(DoubleBits(1.5)));
+                Assert.That(DoubleBits(remainder(-0.0, 2.0)), Is.EqualTo(long.MinValue));
+                Assert.That(DoubleBits(remainder(5.5, double.PositiveInfinity)),
+                    Is.EqualTo(DoubleBits(5.5)));
+                Assert.That(double.IsNaN(remainder(double.PositiveInfinity, 2.0)), Is.True);
+                Assert.That(double.IsNaN(remainder(5.5, 0.0)), Is.True);
+            }
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
+    [TestCase((byte)0x14, (byte)0x0E)]
+    [TestCase((byte)0x14, (byte)0x0F)]
+    [TestCase((byte)0x15, (byte)0x0E)]
+    [TestCase((byte)0x15, (byte)0x0F)]
+    public async Task StandardFloatingRemainderUsesTypedSpecialSourceRegisters(
+        byte typeCode, byte sourceRegister)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var program = TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(
+            TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(
+                typeCode, binarySourceRegister: sourceRegister));
+        var image = NativeEmitter.EmitLibrary(
+            program, ["Remainder"], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-register-remainder-special-{Guid.NewGuid():N}.dll");
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            if (typeCode == 0x14)
+            {
+                var remainder = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Remainder"));
+                Assert.That(float.IsNaN(remainder(5.5F, 2.0F)), Is.True);
+            }
+            else
+            {
+                var remainder = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Remainder"));
+                Assert.That(double.IsNaN(remainder(5.5, 2.0)), Is.True);
+            }
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
+    [TestCase((byte)0x14, (byte)0x26)]
+    [TestCase((byte)0x14, (byte)0x27)]
+    [TestCase((byte)0x14, (byte)0x28)]
+    [TestCase((byte)0x14, (byte)0x29)]
+    [TestCase((byte)0x14, (byte)0x2A)]
+    [TestCase((byte)0x15, (byte)0x26)]
+    [TestCase((byte)0x15, (byte)0x27)]
+    [TestCase((byte)0x15, (byte)0x28)]
+    [TestCase((byte)0x15, (byte)0x29)]
+    [TestCase((byte)0x15, (byte)0x2A)]
+    public async Task StandardRegisterBodyExecutesAssignedFloatingArithmetic(
+        byte typeCode, byte operationCode)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var program = TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(
+            TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(
+                typeCode, operationCode, "Compute"));
+        var image = NativeEmitter.EmitLibrary(
+            program, ["Compute"], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-register-float-{Guid.NewGuid():N}.dll");
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var expected = operationCode switch {
+                0x26 => -1.5,
+                0x27 => 3.5,
+                0x28 => -0.5,
+                0x29 => 3.0,
+                0x2A => 0.75,
+                _ => throw new ArgumentOutOfRangeException(nameof(operationCode)),
+            };
+            if (typeCode == 0x14)
+            {
+                var operation = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Compute"));
+                Assert.That(SingleBits(operation(1.5F, 2.0F)),
+                    Is.EqualTo(SingleBits((float)expected)));
+            }
+            else
+            {
+                var operation = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Compute"));
+                Assert.That(DoubleBits(operation(1.5, 2.0)), Is.EqualTo(DoubleBits(expected)));
+            }
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void StandardFloatingRemainderRejectsInvalidFormalAndOperandTypes()
+    {
+        var mismatchedTypes = TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(
+            0x14, secondParameterTypeCode: 0x15);
+        TrRmStructuralMetadataValidator.Validate(mismatchedTypes);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(mismatchedTypes));
+
+        var invalidFormal = TrRmRegisterBodyTestData.StandardFloatingRemainderLibraryArtifact(
+            0x14, firstFormalOrdinal: 2);
+        TrRmStructuralMetadataValidator.Validate(invalidFormal);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(invalidFormal));
+    }
+
+    [TestCase((byte)0x14, (byte)0x26)]
+    [TestCase((byte)0x14, (byte)0x27)]
+    [TestCase((byte)0x14, (byte)0x28)]
+    [TestCase((byte)0x14, (byte)0x29)]
+    [TestCase((byte)0x14, (byte)0x2A)]
+    [TestCase((byte)0x14, (byte)0x2B)]
+    [TestCase((byte)0x15, (byte)0x26)]
+    [TestCase((byte)0x15, (byte)0x27)]
+    [TestCase((byte)0x15, (byte)0x28)]
+    [TestCase((byte)0x15, (byte)0x29)]
+    [TestCase((byte)0x15, (byte)0x2A)]
+    [TestCase((byte)0x15, (byte)0x2B)]
+    public void StandardFloatingScalarWriterRoundTripsAssignedOperations(
+        byte typeCode, byte operationCode)
+    {
+        var type = typeCode == 0x14 ? "float32" : "float64";
+        var operatorText = operationCode == 0x26 ? string.Empty : operationCode switch
+        {
+            0x27 => "+",
+            0x28 => "-",
+            0x29 => "*",
+            0x2A => "/",
+            0x2B => "%",
+            _ => throw new ArgumentOutOfRangeException(nameof(operationCode)),
+        };
+        var reversed = operationCode is 0x28 or 0x2A or 0x2B;
+        var expression = operationCode == 0x26
+            ? "-right"
+            : reversed ? $"right {operatorText} left" : $"left {operatorText} right";
+        var source = $"public {type} Compute({type} left, {type} right) {{ return {expression}; }}";
+        var program = TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(
+            TrRmExecutableCompiler.EmitStandardFloatingScalarLibrary(
+                Compile(source, library: true), "standard-floating"));
+        var operation = ((BoundLocal)program.Functions[0].Body.Statements[2]).Initializer;
+
+        if (operationCode == 0x26)
+        {
+            Assert.That(operation, Is.TypeOf<BoundUnary>());
+            var unary = (BoundUnary)operation;
+            Assert.That(unary.Operator, Is.EqualTo(TokenKind.Minus));
+            Assert.That(((BoundRead)unary.Operand).Variable, Is.EqualTo(3));
+        }
+        else
+        {
+            Assert.That(operation, Is.TypeOf<BoundBinary>());
+            var binary = (BoundBinary)operation;
+            Assert.That(binary.Operator, Is.EqualTo(operationCode switch
+            {
+                0x27 => TokenKind.Plus,
+                0x28 => TokenKind.Minus,
+                0x29 => TokenKind.Star,
+                0x2A => TokenKind.Slash,
+                _ => TokenKind.Percent,
+            }));
+            Assert.That(((BoundRead)binary.Left).Variable, Is.EqualTo(reversed ? 3 : 2));
+            Assert.That(((BoundRead)binary.Right).Variable, Is.EqualTo(reversed ? 2 : 3));
+        }
+    }
+
+    [TestCase((byte)0x14)]
+    [TestCase((byte)0x15)]
+    public async Task StandardFloatingScalarWriterArtifactExecutesRemainder(byte typeCode)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var type = typeCode == 0x14 ? "float32" : "float64";
+        var source = $"public {type} Remainder({type} left, {type} right) {{ return left % right; }}";
+        var artifact = TrRmExecutableCompiler.EmitStandardFloatingScalarLibrary(
+            Compile(source, library: true), "standard-floating-remainder");
+        var program = TrRmExecutableCompiler.LoadStandardFloatingScalarFunction(artifact);
+        var image = NativeEmitter.EmitLibrary(
+            program, ["Remainder"], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-register-remainder-writer-{Guid.NewGuid():N}.dll");
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            if (typeCode == 0x14)
+            {
+                var remainder = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
+                    NativeLibrary.GetExport(handle, "Remainder"));
+                Assert.That(SingleBits(remainder(5.5F, 2.0F)),
+                    Is.EqualTo(SingleBits(1.5F)));
+            }
+            else
+            {
+                var remainder = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
+                    NativeLibrary.GetExport(handle, "Remainder"));
+                Assert.That(DoubleBits(remainder(5.5, 2.0)),
+                    Is.EqualTo(DoubleBits(1.5)));
+            }
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
+    [TestCase((byte)0x20)]
+    [TestCase((byte)0x21)]
+    [TestCase((byte)0x22)]
+    [TestCase((byte)0x23)]
+    [TestCase((byte)0x24)]
+    [TestCase((byte)0x25)]
+    public void StandardIntegerScalarWriterRoundTripsAssignedOperations(byte operationCode)
+    {
+        var operatorText = operationCode == 0x20 ? string.Empty : operationCode switch
+        {
+            0x21 => "+",
+            0x22 => "-",
+            0x23 => "*",
+            0x24 => "/",
+            0x25 => "%",
+            _ => throw new ArgumentOutOfRangeException(nameof(operationCode)),
+        };
+        var reversed = operationCode is 0x22 or 0x24 or 0x25;
+        var expression = operationCode == 0x20
+            ? "-right"
+            : reversed ? $"right {operatorText} left" : $"left {operatorText} right";
+        var source = $"public int32 Compute(int32 left, int32 right) {{ return {expression}; }}";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            new CompilationOptions { SourceArithmeticProfile = SourceArithmeticProfile.Release });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandardIntegerScalarLibrary(
+            compilation.Program!, "standard-integer");
+        var program = TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact);
+        var operation = ((BoundLocal)program.Functions[0].Body.Statements[2]).Initializer;
+
+        if (operationCode == 0x20)
+        {
+            Assert.That(operation, Is.TypeOf<BoundUnary>());
+            var unary = (BoundUnary)operation;
+            Assert.That(unary.Operator, Is.EqualTo(TokenKind.Minus));
+            Assert.That(unary.OverflowBehavior, Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+            Assert.That(((BoundRead)unary.Operand).Variable, Is.EqualTo(3));
+            return;
+        }
+
+        Assert.That(operation, Is.TypeOf<BoundBinary>());
+        var binary = (BoundBinary)operation;
+        Assert.That(binary.Operator, Is.EqualTo(operationCode switch
+        {
+            0x21 => TokenKind.Plus,
+            0x22 => TokenKind.Minus,
+            0x23 => TokenKind.Star,
+            0x24 => TokenKind.Slash,
+            _ => TokenKind.Percent,
+        }));
+        Assert.That(binary.OverflowBehavior, Is.EqualTo(operationCode is >= 0x21 and <= 0x23
+            ? BoundIntegerOverflowBehavior.Wrapping
+            : BoundIntegerOverflowBehavior.Checked));
+        Assert.That(((BoundRead)binary.Left).Variable, Is.EqualTo(reversed ? 3 : 2));
+        Assert.That(((BoundRead)binary.Right).Variable, Is.EqualTo(reversed ? 2 : 3));
+    }
+
+    [Test]
+    public async Task StandardIntegerScalarWriterArtifactExecutesRemainder()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            public int32 Remainder(int32 left, int32 right) { return left % right; }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandardIntegerScalarLibrary(
+            compilation.Program!, "standard-integer-remainder");
+        var program = TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact);
+        var image = NativeEmitter.EmitLibrary(
+            program, ["Remainder"], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-register-int-remainder-writer-{Guid.NewGuid():N}.dll");
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var remainder = Marshal.GetDelegateForFunctionPointer<Int32Binary>(
+                NativeLibrary.GetExport(handle, "Remainder"));
+            Assert.That(remainder(-7, 3), Is.EqualTo(-1));
+            Assert.That(remainder(int.MinValue, -1), Is.EqualTo(0));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
+    }
+
+    [TestCaseSource(nameof(StandardIntegerOperationCases))]
+    public void StandardIntegerScalarReaderReconstructsAssignedOperations(
+        byte typeCode, byte operationCode)
+    {
+        var artifact = TrRmRegisterBodyTestData.StandardIntegerOperationLibraryArtifact(
+            typeCode, operationCode);
+        var program = TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact);
+        var expectedType = typeCode switch
+        {
+            0x06 => PrimitiveType.Int8,
+            0x07 => PrimitiveType.Int16,
+            0x08 => PrimitiveType.Int32,
+            0x09 => PrimitiveType.Int64,
+            0x0A => PrimitiveType.Int128,
+            0x0B => PrimitiveType.UInt8,
+            0x0C => PrimitiveType.UInt16,
+            0x0D => PrimitiveType.UInt32,
+            0x0E => PrimitiveType.UInt64,
+            _ => PrimitiveType.UInt128,
+        };
+        Assert.That(program.Functions[0].ReturnType, Is.EqualTo(expectedType));
+        var operation = ((BoundLocal)program.Functions[0].Body.Statements[2]).Initializer;
+
+        if (operationCode == 0x20)
+        {
+            Assert.That(operation, Is.TypeOf<BoundUnary>());
+            var unary = (BoundUnary)operation;
+            Assert.That(unary.Operator, Is.EqualTo(TokenKind.Minus));
+            Assert.That(unary.OverflowBehavior, Is.EqualTo(BoundIntegerOverflowBehavior.Wrapping));
+            Assert.That(((BoundRead)unary.Operand).Variable, Is.EqualTo(2));
+            return;
+        }
+
+        Assert.That(operation, Is.TypeOf<BoundBinary>());
+        var binary = (BoundBinary)operation;
+        Assert.That(binary.Operator, Is.EqualTo(operationCode switch
+        {
+            0x21 => TokenKind.Plus,
+            0x22 => TokenKind.Minus,
+            0x23 => TokenKind.Star,
+            0x24 => TokenKind.Slash,
+            _ => TokenKind.Percent,
+        }));
+        Assert.That(binary.OverflowBehavior, Is.EqualTo(operationCode is >= 0x21 and <= 0x23
+            ? BoundIntegerOverflowBehavior.Wrapping
+            : BoundIntegerOverflowBehavior.Checked));
+        Assert.That(((BoundRead)binary.Left).Variable, Is.EqualTo(2));
+        Assert.That(((BoundRead)binary.Right).Variable, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void StandardIntegerScalarReaderRejectsMismatchedParameterTypes()
+    {
+        var artifact = TrRmRegisterBodyTestData.StandardIntegerOperationLibraryArtifact(
+            0x08, 0x21, secondParameterTypeCode: 0x09);
+        TrRmStructuralMetadataValidator.Validate(artifact);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact));
+    }
+
+    [Test]
+    public void StandardIntegerScalarReaderPreservesTypedR15ForUInt128()
+    {
+        var artifact = TrRmRegisterBodyTestData.StandardIntegerOperationLibraryArtifact(
+            0x0F, 0x20, unarySourceRegister: 0x0F);
+        var program = TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact);
+        var unary = (BoundUnary)((BoundLocal)program.Functions[0].Body.Statements[2]).Initializer;
+
+        Assert.That(unary.Operand, Is.TypeOf<BoundConstant>());
+        var constant = (BoundConstant)unary.Operand;
+        Assert.That(constant.Type, Is.EqualTo(PrimitiveType.UInt128));
+        Assert.That(constant.Bits.Low, Is.EqualTo(ulong.MaxValue));
+        Assert.That(constant.Bits.High, Is.EqualTo(ulong.MaxValue));
+    }
+
+    [TestCase((byte)0x20, int.MinValue, 0, int.MinValue)]
+    [TestCase((byte)0x21, int.MaxValue, 1, int.MinValue)]
+    [TestCase((byte)0x22, int.MinValue, 1, int.MaxValue)]
+    [TestCase((byte)0x23, int.MaxValue, 2, -2)]
+    [TestCase((byte)0x24, 7, 2, 3)]
+    [TestCase((byte)0x25, int.MinValue, -1, 0)]
+    public async Task StandardIntegerRegisterOperationsExecute(
+        byte operationCode, int left, int right, int expected)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var artifact = TrRmRegisterBodyTestData.StandardIntegerOperationLibraryArtifact(
+            0x08, operationCode, methodName: "Compute");
+        var program = TrRmExecutableCompiler.LoadStandardIntegerScalarFunction(artifact);
+        var image = NativeEmitter.EmitLibrary(
+            program, ["Compute"], NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-register-int-{Guid.NewGuid():N}.dll");
+        IntPtr handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var operation = Marshal.GetDelegateForFunctionPointer<Int32Binary>(
+                NativeLibrary.GetExport(handle, "Compute"));
+            Assert.That(operation(left, right), Is.EqualTo(expected));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
+        }
     }
 
     [TestCase("""
@@ -980,12 +1520,14 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
-    public void FloatingRemainderRemainsUnsupported()
+    public void FloatingRemainderIsAcceptedButOutsideDevelopmentScalarProfile()
     {
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "public float32 Remainder(float32 left, float32 right) { return left % right; }"));
+        var program = Compile(
+            "public float32 Remainder(float32 left, float32 right) { return left % right; }",
+            library: true);
 
-        Assert.That(compilation.HasErrors, Is.True);
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "float-remainder"));
     }
     [TestCase((byte)(0))]
     [TestCase((byte)(7))]
@@ -1087,7 +1629,8 @@ public sealed class TrRmExecutableCompilerTests
     public void OptionalFloatingTypesRemainOutsideExecutableTrRm()
     {
         var artifact = OptionalScalarArtifact(
-            IndexedOptionalPresenceBody(8, true, 9),
+            IndexedOptionalPresenceBody(
+                Float32TypeSpecRow, true, OptionalFloat32TypeSpecRow),
             optionalChar16: false,
             optionalInt32: false,
             optionalFloat32: true);
@@ -1164,30 +1707,38 @@ public sealed class TrRmExecutableCompilerTests
                 var narrowIf = Marshal.GetDelegateForFunctionPointer<Float64ToFloat32>(
                     NativeLibrary.GetExport(handle, "NarrowIf"));
 
-                Assert.That(widen(0x3DCCCCCD), Is.EqualTo(0x3FB99999A0000000L));
-                Assert.That(widen(int.MinValue), Is.EqualTo(long.MinValue));
-                Assert.That(widenIf(int.MinValue), Is.EqualTo(long.MinValue));
-                Assert.That(double.IsPositiveInfinity(BitConverter.Int64BitsToDouble(widenIf(0x7F800000))), Is.True);
-                Assert.That(double.IsNegativeInfinity(BitConverter.Int64BitsToDouble(
-                    widenIf(unchecked((int)0xFF800000)))), Is.True);
-                Assert.That(double.IsNaN(BitConverter.Int64BitsToDouble(widenIf(0x7FC00001))), Is.True);
-                Assert.That(narrow(0x3FF0000010000000L), Is.EqualTo(0x3F800000));
-                Assert.That(narrow(BitConverter.DoubleToInt64Bits(double.MaxValue)), Is.EqualTo(0x7F800000));
-                Assert.That(narrow(BitConverter.DoubleToInt64Bits(double.Epsilon)), Is.EqualTo(0));
-                Assert.That(narrow(long.MinValue | 1), Is.EqualTo(int.MinValue));
-                Assert.That(float.IsNaN(BitConverter.Int32BitsToSingle(narrow(
-                    BitConverter.DoubleToInt64Bits(double.NaN)))), Is.True);
-                Assert.That(narrow(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)), Is.EqualTo(0x7F800000));
-                Assert.That(widenIf(0x3DCCCCCD), Is.EqualTo(0x3FB99999A0000000L));
-                Assert.That(narrowIf(BitConverter.DoubleToInt64Bits(double.NegativeInfinity)), Is.EqualTo(unchecked((int)0xFF800000)));
-                Assert.That(narrowIf(BitConverter.DoubleToInt64Bits(double.PositiveInfinity)), Is.EqualTo(0x7F800000));
-                Assert.That(narrowIf(BitConverter.DoubleToInt64Bits(double.MaxValue)), Is.EqualTo(unchecked((int)0x7F800000)));
-                Assert.That(narrowIf(BitConverter.DoubleToInt64Bits(double.Epsilon)), Is.EqualTo(0));
-                Assert.That(narrowIf(long.MinValue | 1), Is.EqualTo(int.MinValue));
-                Assert.That(float.IsNaN(BitConverter.Int32BitsToSingle(
-                    narrowIf(BitConverter.DoubleToInt64Bits(double.NaN)))), Is.True);
-                Assert.That(narrowIf(0x3FF0000010000000L), Is.EqualTo(0x3F800000));
-                Assert.That(narrowIf(0x4000000000000000L), Is.EqualTo(0x40000000));
+                Assert.That(DoubleBits(widen(SingleFromBits(0x3DCCCCCD))),
+                    Is.EqualTo(0x3FB99999A0000000L));
+                Assert.That(DoubleBits(widen(SingleFromBits(int.MinValue))),
+                    Is.EqualTo(long.MinValue));
+                Assert.That(DoubleBits(widenIf(SingleFromBits(int.MinValue))),
+                    Is.EqualTo(long.MinValue));
+                Assert.That(double.IsPositiveInfinity(widenIf(SingleFromBits(0x7F800000))), Is.True);
+                Assert.That(double.IsNegativeInfinity(widenIf(SingleFromBits(unchecked((int)0xFF800000)))),
+                    Is.True);
+                Assert.That(double.IsNaN(widenIf(SingleFromBits(0x7FC00001))), Is.True);
+                Assert.That(SingleBits(narrow(DoubleFromBits(0x3FF0000010000000L))),
+                    Is.EqualTo(0x3F800000));
+                Assert.That(SingleBits(narrow(double.MaxValue)), Is.EqualTo(0x7F800000));
+                Assert.That(SingleBits(narrow(double.Epsilon)), Is.EqualTo(0));
+                Assert.That(SingleBits(narrow(DoubleFromBits(long.MinValue | 1))),
+                    Is.EqualTo(int.MinValue));
+                Assert.That(float.IsNaN(narrow(double.NaN)), Is.True);
+                Assert.That(SingleBits(narrow(double.PositiveInfinity)), Is.EqualTo(0x7F800000));
+                Assert.That(DoubleBits(widenIf(SingleFromBits(0x3DCCCCCD))),
+                    Is.EqualTo(0x3FB99999A0000000L));
+                Assert.That(SingleBits(narrowIf(double.NegativeInfinity)),
+                    Is.EqualTo(unchecked((int)0xFF800000)));
+                Assert.That(SingleBits(narrowIf(double.PositiveInfinity)), Is.EqualTo(0x7F800000));
+                Assert.That(SingleBits(narrowIf(double.MaxValue)), Is.EqualTo(unchecked((int)0x7F800000)));
+                Assert.That(SingleBits(narrowIf(double.Epsilon)), Is.EqualTo(0));
+                Assert.That(SingleBits(narrowIf(DoubleFromBits(long.MinValue | 1))),
+                    Is.EqualTo(int.MinValue));
+                Assert.That(float.IsNaN(narrowIf(double.NaN)), Is.True);
+                Assert.That(SingleBits(narrowIf(DoubleFromBits(0x3FF0000010000000L))),
+                    Is.EqualTo(0x3F800000));
+                Assert.That(SingleBits(narrowIf(DoubleFromBits(0x4000000000000000L))),
+                    Is.EqualTo(0x40000000));
             }
         }
         finally
@@ -1355,44 +1906,47 @@ public sealed class TrRmExecutableCompilerTests
                 var float32ToUInt64IfZero = Marshal.GetDelegateForFunctionPointer<Float32ToUInt64>(
                     NativeLibrary.GetExport(handle, "Float32ToUInt64IfZero"));
 
-                Assert.That(float64ToInt32(BitConverter.DoubleToInt64Bits(1.9)), Is.EqualTo(1));
-                Assert.That(float64ToInt32(BitConverter.DoubleToInt64Bits(-1.9)), Is.EqualTo(-1));
-                Assert.That(float64ToInt32(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0));
-                Assert.That(float64ToInt32(BitConverter.DoubleToInt64Bits(-2147483648.9)), Is.EqualTo(int.MinValue));
-                Assert.That(float64ToInt32(BitConverter.DoubleToInt64Bits(2147483647.9)), Is.EqualTo(int.MaxValue));
-                Assert.That(float64ToUInt32(BitConverter.DoubleToInt64Bits(-0.5)), Is.EqualTo(0u));
-                Assert.That(float64ToUInt32(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0u));
-                Assert.That(float64ToUInt32(BitConverter.DoubleToInt64Bits(4294967295.75)), Is.EqualTo(uint.MaxValue));
-                Assert.That(float64ToInt64(BitConverter.DoubleToInt64Bits(long.MinValue)), Is.EqualTo(long.MinValue));
-                Assert.That(float64ToInt64(BitConverter.DoubleToInt64Bits(
-                        Math.BitDecrement(9223372036854775808.0))), Is.EqualTo(9_223_372_036_854_774_784L));
-                Assert.That(float64ToUInt64(BitConverter.DoubleToInt64Bits(
-                        Math.BitDecrement(18446744073709551616.0))), Is.EqualTo(18_446_744_073_709_549_568UL));
-                Assert.That(float64ToUInt64(BitConverter.DoubleToInt64Bits(-0.5)), Is.EqualTo(0UL));
-                Assert.That(float64ToUInt64(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0UL));
-                Assert.That(float32ToInt32(BitConverter.SingleToInt32Bits(3.75F)), Is.EqualTo(3));
-                Assert.That(float32ToInt32(BitConverter.SingleToInt32Bits(-0.0F)), Is.EqualTo(0));
-                Assert.That(float32ToUInt32(BitConverter.SingleToInt32Bits(-0.5F)), Is.EqualTo(0U));
-                Assert.That(float32ToUInt32(unchecked((int)0x4F7FFFFF)), Is.EqualTo(4_294_967_040U));
-                Assert.That(float32ToInt64(unchecked((int)0xDF000000)), Is.EqualTo(long.MinValue));
-                Assert.That(float32ToUInt64(0x5F000000), Is.EqualTo(9_223_372_036_854_775_808UL));
-                Assert.That(float32ToUInt64(BitConverter.SingleToInt32Bits(1.9F)), Is.EqualTo(1UL));
-                Assert.That(float64ToInt32IfZero(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0));
-                Assert.That(float64ToInt32IfZero(BitConverter.DoubleToInt64Bits(1.0)), Is.EqualTo(42));
-                Assert.That(float64ToUInt32IfZero(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0U));
-                Assert.That(float64ToUInt32IfZero(BitConverter.DoubleToInt64Bits(1.0)), Is.EqualTo(42U));
-                Assert.That(float64ToInt64IfZero(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0L));
-                Assert.That(float64ToInt64IfZero(BitConverter.DoubleToInt64Bits(1.0)), Is.EqualTo(42L));
-                Assert.That(float64ToUInt64IfZero(BitConverter.DoubleToInt64Bits(-0.0)), Is.EqualTo(0UL));
-                Assert.That(float64ToUInt64IfZero(BitConverter.DoubleToInt64Bits(1.0)), Is.EqualTo(42UL));
-                Assert.That(float32ToInt32IfZero(BitConverter.SingleToInt32Bits(-0.0F)), Is.EqualTo(0));
-                Assert.That(float32ToInt32IfZero(BitConverter.SingleToInt32Bits(1.0F)), Is.EqualTo(42));
-                Assert.That(float32ToUInt32IfZero(BitConverter.SingleToInt32Bits(-0.0F)), Is.EqualTo(0U));
-                Assert.That(float32ToUInt32IfZero(BitConverter.SingleToInt32Bits(1.0F)), Is.EqualTo(42U));
-                Assert.That(float32ToInt64IfZero(BitConverter.SingleToInt32Bits(-0.0F)), Is.EqualTo(0L));
-                Assert.That(float32ToInt64IfZero(BitConverter.SingleToInt32Bits(1.0F)), Is.EqualTo(42L));
-                Assert.That(float32ToUInt64IfZero(BitConverter.SingleToInt32Bits(-0.0F)), Is.EqualTo(0UL));
-                Assert.That(float32ToUInt64IfZero(BitConverter.SingleToInt32Bits(1.0F)), Is.EqualTo(42UL));
+                Assert.That(float64ToInt32(1.9), Is.EqualTo(1));
+                Assert.That(float64ToInt32(-1.9), Is.EqualTo(-1));
+                Assert.That(float64ToInt32(-0.0), Is.EqualTo(0));
+                Assert.That(float64ToInt32(-2147483648.9), Is.EqualTo(int.MinValue));
+                Assert.That(float64ToInt32(2147483647.9), Is.EqualTo(int.MaxValue));
+                Assert.That(float64ToUInt32(-0.5), Is.EqualTo(0u));
+                Assert.That(float64ToUInt32(-0.0), Is.EqualTo(0u));
+                Assert.That(float64ToUInt32(4294967295.75), Is.EqualTo(uint.MaxValue));
+                Assert.That(float64ToInt64((double)long.MinValue), Is.EqualTo(long.MinValue));
+                Assert.That(float64ToInt64(Math.BitDecrement(9223372036854775808.0)),
+                    Is.EqualTo(9_223_372_036_854_774_784L));
+                Assert.That(float64ToUInt64(Math.BitDecrement(18446744073709551616.0)),
+                    Is.EqualTo(18_446_744_073_709_549_568UL));
+                Assert.That(float64ToUInt64(-0.5), Is.EqualTo(0UL));
+                Assert.That(float64ToUInt64(-0.0), Is.EqualTo(0UL));
+                Assert.That(float32ToInt32(3.75F), Is.EqualTo(3));
+                Assert.That(float32ToInt32(-0.0F), Is.EqualTo(0));
+                Assert.That(float32ToUInt32(-0.5F), Is.EqualTo(0U));
+                Assert.That(float32ToUInt32(SingleFromBits(unchecked((int)0x4F7FFFFF))),
+                    Is.EqualTo(4_294_967_040U));
+                Assert.That(float32ToInt64(SingleFromBits(unchecked((int)0xDF000000))),
+                    Is.EqualTo(long.MinValue));
+                Assert.That(float32ToUInt64(SingleFromBits(0x5F000000)),
+                    Is.EqualTo(9_223_372_036_854_775_808UL));
+                Assert.That(float32ToUInt64(1.9F), Is.EqualTo(1UL));
+                Assert.That(float64ToInt32IfZero(-0.0), Is.EqualTo(0));
+                Assert.That(float64ToInt32IfZero(1.0), Is.EqualTo(42));
+                Assert.That(float64ToUInt32IfZero(-0.0), Is.EqualTo(0U));
+                Assert.That(float64ToUInt32IfZero(1.0), Is.EqualTo(42U));
+                Assert.That(float64ToInt64IfZero(-0.0), Is.EqualTo(0L));
+                Assert.That(float64ToInt64IfZero(1.0), Is.EqualTo(42L));
+                Assert.That(float64ToUInt64IfZero(-0.0), Is.EqualTo(0UL));
+                Assert.That(float64ToUInt64IfZero(1.0), Is.EqualTo(42UL));
+                Assert.That(float32ToInt32IfZero(-0.0F), Is.EqualTo(0));
+                Assert.That(float32ToInt32IfZero(1.0F), Is.EqualTo(42));
+                Assert.That(float32ToUInt32IfZero(-0.0F), Is.EqualTo(0U));
+                Assert.That(float32ToUInt32IfZero(1.0F), Is.EqualTo(42U));
+                Assert.That(float32ToInt64IfZero(-0.0F), Is.EqualTo(0L));
+                Assert.That(float32ToInt64IfZero(1.0F), Is.EqualTo(42L));
+                Assert.That(float32ToUInt64IfZero(-0.0F), Is.EqualTo(0UL));
+                Assert.That(float32ToUInt64IfZero(1.0F), Is.EqualTo(42UL));
             }
         }
         finally
@@ -1464,15 +2018,17 @@ public sealed class TrRmExecutableCompilerTests
             "[NoThrow] public int32 Convert(float64 value) { return int32(value); }"));
 
         Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3017"), Is.True);
     }
 
     [Test]
-    public void NoThrowArtifactsCannotRetainFloatToIntegerOperations()
+    public void ExecutableWriterRejectsRetiredNoThrowClaimsForFloatConversions()
     {
         const string source = """
-            [NoThrow] public int32 Convert(float64 value) { return 0; }
+             public int32 Convert(float64 value) { return 0; }
             public int32 ConvertChecked(float64 value) { return int32(value); }
-            [NoThrow] public int32 ConvertIf(float64 value) {
+             public int32 ConvertIf(float64 value) {
                 if (value == 0.0) { return 0; }
                 return 42;
             }
@@ -1481,12 +2037,11 @@ public sealed class TrRmExecutableCompilerTests
                 return 42;
             }
             """;
-        var artifact = TrRmExecutableCompiler.Emit(Compile(source, true), "float-to-integer-no-throw");
+        var program = BoundProgramTestHelpers.MarkNoThrow(
+            Compile(source, true), "Convert", "ConvertIf");
 
-        Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.Load(ReplaceBodyRow(artifact, 1, 2)));
-        Assert.Throws<InvalidDataException>(() =>
-            TrRmExecutableCompiler.Load(ReplaceBodyRow(artifact, 3, 4)));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "retired-float-to-integer-nothrow"));
     }
 
     [Test]
@@ -1503,8 +2058,8 @@ public sealed class TrRmExecutableCompilerTests
     public void Char16ToFloatingConversionsPreserveCodeUnitValues()
     {
         const string source = """
-            [NoThrow] public float32 ToFloat32(char16 value) { return float32(value); }
-            [NoThrow] public float64 ToFloat64(char16 value) { return float64(value); }
+             public float32 ToFloat32(char16 value) { return float32(value); }
+             public float64 ToFloat64(char16 value) { return float64(value); }
             public float32 ToFloat32IfBoundary(char16 value) {
                 if (value == char16(0) || value == char16(55296) || value == char16(65535)) {
                     return float32(value);
@@ -1550,18 +2105,27 @@ public sealed class TrRmExecutableCompilerTests
                 var toFloat64If = Marshal.GetDelegateForFunctionPointer<Char16ToFloat64>(
                     NativeLibrary.GetExport(handle, "ToFloat64IfBoundary"));
 
-                Assert.That(toFloat32(0), Is.EqualTo(0));
-                Assert.That(toFloat32(0xD800), Is.EqualTo(BitConverter.SingleToInt32Bits(55296.0F)));
-                Assert.That(toFloat32(ushort.MaxValue), Is.EqualTo(BitConverter.SingleToInt32Bits(65535.0F)));
-                Assert.That(toFloat64(0), Is.EqualTo(0L));
-                Assert.That(toFloat64(0xD800), Is.EqualTo(BitConverter.DoubleToInt64Bits(55296.0)));
-                Assert.That(toFloat64(ushort.MaxValue), Is.EqualTo(BitConverter.DoubleToInt64Bits(65535.0)));
-                Assert.That(toFloat32If(0), Is.EqualTo(BitConverter.SingleToInt32Bits(0.0F)));
-                Assert.That(toFloat32If(0xD800), Is.EqualTo(BitConverter.SingleToInt32Bits(55296.0F)));
-                Assert.That(toFloat32If(0xFFFF), Is.EqualTo(BitConverter.SingleToInt32Bits(65535.0F)));
-                Assert.That(toFloat64If(0), Is.EqualTo(0L));
-                Assert.That(toFloat64If(0xD800), Is.EqualTo(BitConverter.DoubleToInt64Bits(55296.0)));
-                Assert.That(toFloat64If(0xFFFF), Is.EqualTo(BitConverter.DoubleToInt64Bits(65535.0)));
+                Assert.That(SingleBits(toFloat32(0)), Is.EqualTo(0));
+                Assert.That(SingleBits(toFloat32(0xD800)),
+                    Is.EqualTo(BitConverter.SingleToInt32Bits(55296.0F)));
+                Assert.That(SingleBits(toFloat32(ushort.MaxValue)),
+                    Is.EqualTo(BitConverter.SingleToInt32Bits(65535.0F)));
+                Assert.That(DoubleBits(toFloat64(0)), Is.EqualTo(0L));
+                Assert.That(DoubleBits(toFloat64(0xD800)),
+                    Is.EqualTo(BitConverter.DoubleToInt64Bits(55296.0)));
+                Assert.That(DoubleBits(toFloat64(ushort.MaxValue)),
+                    Is.EqualTo(BitConverter.DoubleToInt64Bits(65535.0)));
+                Assert.That(SingleBits(toFloat32If(0)),
+                    Is.EqualTo(BitConverter.SingleToInt32Bits(0.0F)));
+                Assert.That(SingleBits(toFloat32If(0xD800)),
+                    Is.EqualTo(BitConverter.SingleToInt32Bits(55296.0F)));
+                Assert.That(SingleBits(toFloat32If(0xFFFF)),
+                    Is.EqualTo(BitConverter.SingleToInt32Bits(65535.0F)));
+                Assert.That(DoubleBits(toFloat64If(0)), Is.EqualTo(0L));
+                Assert.That(DoubleBits(toFloat64If(0xD800)),
+                    Is.EqualTo(BitConverter.DoubleToInt64Bits(55296.0)));
+                Assert.That(DoubleBits(toFloat64If(0xFFFF)),
+                    Is.EqualTo(BitConverter.DoubleToInt64Bits(65535.0)));
             }
         }
         finally
@@ -1640,22 +2204,35 @@ public sealed class TrRmExecutableCompilerTests
                 var negate64If = Marshal.GetDelegateForFunctionPointer<Float64Unary>(
                     NativeLibrary.GetExport(handle, "Negate64If"));
 
-                Assert.That(negate32(0), Is.EqualTo(unchecked((int)0x80000000)));
-                Assert.That(negate32(unchecked((int)0x80000000)), Is.EqualTo(0));
-                Assert.That(negate32(0x7F800000), Is.EqualTo(unchecked((int)0xFF800000)));
-                Assert.That(negate32(unchecked((int)0xFF800000)), Is.EqualTo(0x7F800000));
-                Assert.That(negate32(unchecked((int)0x7FC12345)), Is.EqualTo(unchecked((int)0xFFC12345)));
-                Assert.That(negate32(unchecked((int)0xFFC54321)), Is.EqualTo(unchecked((int)0x7FC54321)));
-                Assert.That(negate64(0), Is.EqualTo(long.MinValue));
-                Assert.That(negate64(long.MinValue), Is.EqualTo(0L));
-                Assert.That(negate64(unchecked((long)0x7FF0000000000000UL)), Is.EqualTo(unchecked((long)0xFFF0000000000000UL)));
-                Assert.That(negate64(unchecked((long)0xFFF0000000000000UL)), Is.EqualTo(0x7FF0000000000000L));
-                Assert.That(negate64(unchecked((long)0x7FF8123456789ABCUL)), Is.EqualTo(unchecked((long)0xFFF8123456789ABCUL)));
-                Assert.That(negate64(unchecked((long)0xFFF8ABCDEF012345UL)), Is.EqualTo(unchecked((long)0x7FF8ABCDEF012345UL)));
-                Assert.That(negate32If(0), Is.EqualTo(unchecked((int)0x80000000)));
-                Assert.That(negate32If(0x3F800000), Is.EqualTo(unchecked((int)0xBF800000)));
-                Assert.That(negate64If(0), Is.EqualTo(long.MinValue));
-                Assert.That(negate64If(0x3FF0000000000000L), Is.EqualTo(unchecked((long)0xBFF0000000000000UL)));
+                Assert.That(SingleBits(negate32(SingleFromBits(0))),
+                    Is.EqualTo(unchecked((int)0x80000000)));
+                Assert.That(SingleBits(negate32(SingleFromBits(unchecked((int)0x80000000)))),
+                    Is.EqualTo(0));
+                Assert.That(SingleBits(negate32(SingleFromBits(0x7F800000))),
+                    Is.EqualTo(unchecked((int)0xFF800000)));
+                Assert.That(SingleBits(negate32(SingleFromBits(unchecked((int)0xFF800000)))),
+                    Is.EqualTo(0x7F800000));
+                Assert.That(SingleBits(negate32(SingleFromBits(0x7FC12345))),
+                    Is.EqualTo(unchecked((int)0xFFC12345)));
+                Assert.That(SingleBits(negate32(SingleFromBits(unchecked((int)0xFFC54321)))),
+                    Is.EqualTo(unchecked((int)0x7FC54321)));
+                Assert.That(DoubleBits(negate64(DoubleFromBits(0))), Is.EqualTo(long.MinValue));
+                Assert.That(DoubleBits(negate64(DoubleFromBits(long.MinValue))), Is.EqualTo(0L));
+                Assert.That(DoubleBits(negate64(DoubleFromBits(0x7FF0000000000000L))),
+                    Is.EqualTo(unchecked((long)0xFFF0000000000000UL)));
+                Assert.That(DoubleBits(negate64(DoubleFromBits(unchecked((long)0xFFF0000000000000UL)))),
+                    Is.EqualTo(0x7FF0000000000000L));
+                Assert.That(DoubleBits(negate64(DoubleFromBits(0x7FF8123456789ABCL))),
+                    Is.EqualTo(unchecked((long)0xFFF8123456789ABCUL)));
+                Assert.That(DoubleBits(negate64(DoubleFromBits(unchecked((long)0xFFF8ABCDEF012345UL)))),
+                    Is.EqualTo(unchecked((long)0x7FF8ABCDEF012345UL)));
+                Assert.That(SingleBits(negate32If(SingleFromBits(0))),
+                    Is.EqualTo(unchecked((int)0x80000000)));
+                Assert.That(SingleBits(negate32If(SingleFromBits(0x3F800000))),
+                    Is.EqualTo(unchecked((int)0xBF800000)));
+                Assert.That(DoubleBits(negate64If(DoubleFromBits(0))), Is.EqualTo(long.MinValue));
+                Assert.That(DoubleBits(negate64If(DoubleFromBits(0x3FF0000000000000L))),
+                    Is.EqualTo(unchecked((long)0xBFF0000000000000UL)));
             }
         }
         finally
@@ -1690,15 +2267,22 @@ public sealed class TrRmExecutableCompilerTests
     [Test]
     public void FloatingArithmeticExecutesThroughLinearAndIndexedBodies()
     {
+        static float Single(uint bits) =>
+            BitConverter.Int32BitsToSingle(unchecked((int)bits));
+        static int SingleBits(float value) => BitConverter.SingleToInt32Bits(value);
+        static double Double(ulong bits) =>
+            BitConverter.Int64BitsToDouble(unchecked((long)bits));
+        static long DoubleBits(double value) => BitConverter.DoubleToInt64Bits(value);
+
         const string source = """
-            [NoThrow] public float32 Add32(float32 left, float32 right) { return left + right; }
-            [NoThrow] public float32 Subtract32(float32 left, float32 right) { return left - right; }
-            [NoThrow] public float32 Multiply32(float32 left, float32 right) { return left * right; }
-            [NoThrow] public float32 Divide32(float32 left, float32 right) { return left / right; }
-            [NoThrow] public float64 Add64(float64 left, float64 right) { return left + right; }
-            [NoThrow] public float64 Subtract64(float64 left, float64 right) { return left - right; }
-            [NoThrow] public float64 Multiply64(float64 left, float64 right) { return left * right; }
-            [NoThrow] public float64 Divide64(float64 left, float64 right) { return left / right; }
+             public float32 Add32(float32 left, float32 right) { return left + right; }
+             public float32 Subtract32(float32 left, float32 right) { return left - right; }
+             public float32 Multiply32(float32 left, float32 right) { return left * right; }
+             public float32 Divide32(float32 left, float32 right) { return left / right; }
+             public float64 Add64(float64 left, float64 right) { return left + right; }
+             public float64 Subtract64(float64 left, float64 right) { return left - right; }
+             public float64 Multiply64(float64 left, float64 right) { return left * right; }
+             public float64 Divide64(float64 left, float64 right) { return left / right; }
             public float32 Add32IfZero(float32 left, float32 right) {
                 if (left == 0.0) { return left + right; }
                 return 0.0;
@@ -1733,8 +2317,9 @@ public sealed class TrRmExecutableCompilerTests
                 handles[index] = NativeLibrary.Load(paths[index]);
             }
 
-            foreach (var handle in handles)
+            for (var imageIndex = 0; imageIndex < handles.Length; imageIndex++)
             {
+                var handle = handles[imageIndex];
                 var add32 = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
                     NativeLibrary.GetExport(handle, "Add32"));
                 var subtract32 = Marshal.GetDelegateForFunctionPointer<Float32Binary>(
@@ -1756,37 +2341,51 @@ public sealed class TrRmExecutableCompilerTests
                 var add64IfZero = Marshal.GetDelegateForFunctionPointer<Float64Binary>(
                     NativeLibrary.GetExport(handle, "Add64IfZero"));
 
-                Assert.That(add32(0x3FC00000, 0x40100000), Is.EqualTo(0x40700000));
-                Assert.That(subtract32(0x40800000, 0x3FC00000), Is.EqualTo(0x40200000));
-                Assert.That(multiply32(0x40000000, 0x40400000), Is.EqualTo(0x40C00000));
-                Assert.That(divide32(0x40400000, 0x40000000), Is.EqualTo(0x3FC00000));
-                Assert.That(float.IsNaN(BitConverter.Int32BitsToSingle(
-                    add32(0x7F800000, unchecked((int)0xFF800000)))), Is.True);
-                Assert.That(float.IsNaN(BitConverter.Int32BitsToSingle(
-                    subtract32(0x7F800000, 0x7F800000))), Is.True);
-                Assert.That(float.IsNaN(BitConverter.Int32BitsToSingle(
-                    multiply32(0, 0x7F800000))), Is.True);
-                Assert.That(float.IsNaN(BitConverter.Int32BitsToSingle(divide32(0, 0))), Is.True);
-                Assert.That(add32(unchecked((int)0xFFC12345), 0x3F800000), Is.EqualTo(unchecked((int)0xFFC12345)));
-                Assert.That(multiply32(unchecked((int)0x80000000), 0x3F800000), Is.EqualTo(unchecked((int)0x80000000)));
+                Assert.That(SingleBits(add32(Single(0x3FC00000), Single(0x40100000))),
+                    Is.EqualTo(0x40700000),
+                    $"Floating arithmetic image {imageIndex}.");
+                Assert.That(SingleBits(subtract32(Single(0x40800000), Single(0x3FC00000))),
+                    Is.EqualTo(0x40200000));
+                Assert.That(SingleBits(multiply32(Single(0x40000000), Single(0x40400000))),
+                    Is.EqualTo(0x40C00000));
+                Assert.That(SingleBits(divide32(Single(0x40400000), Single(0x40000000))),
+                    Is.EqualTo(0x3FC00000));
+                Assert.That(float.IsNaN(add32(Single(0x7F800000), Single(0xFF800000))), Is.True);
+                Assert.That(float.IsNaN(subtract32(Single(0x7F800000), Single(0x7F800000))), Is.True);
+                Assert.That(float.IsNaN(multiply32(Single(0), Single(0x7F800000))), Is.True);
+                Assert.That(float.IsNaN(divide32(Single(0), Single(0))), Is.True);
+                Assert.That(SingleBits(add32(Single(0xFFC12345), Single(0x3F800000))),
+                    Is.EqualTo(unchecked((int)0xFFC12345)));
+                Assert.That(SingleBits(multiply32(Single(0x80000000), Single(0x3F800000))),
+                    Is.EqualTo(unchecked((int)0x80000000)));
 
-                Assert.That(add64(0x3FF8000000000000L, 0x4002000000000000L), Is.EqualTo(0x400E000000000000L));
-                Assert.That(subtract64(0x4010000000000000L, 0x3FF8000000000000L), Is.EqualTo(0x4004000000000000L));
-                Assert.That(multiply64(0x4000000000000000L, 0x4008000000000000L), Is.EqualTo(0x4018000000000000L));
-                Assert.That(divide64(0x4008000000000000L, 0x4000000000000000L), Is.EqualTo(0x3FF8000000000000L));
-                Assert.That(double.IsNaN(BitConverter.Int64BitsToDouble(
-                    add64(0x7FF0000000000000L, unchecked((long)0xFFF0000000000000UL)))), Is.True);
-                Assert.That(double.IsNaN(BitConverter.Int64BitsToDouble(
-                    subtract64(0x7FF0000000000000L, 0x7FF0000000000000L))), Is.True);
-                Assert.That(double.IsNaN(BitConverter.Int64BitsToDouble(
-                    multiply64(0, 0x7FF0000000000000L))), Is.True);
-                Assert.That(double.IsNaN(BitConverter.Int64BitsToDouble(divide64(0, 0))), Is.True);
-                Assert.That(add64(unchecked((long)0xFFF8123456789ABCUL), 0x3FF0000000000000L), Is.EqualTo(unchecked((long)0xFFF8123456789ABCUL)));
-                Assert.That(multiply64(long.MinValue, 0x3FF0000000000000L), Is.EqualTo(long.MinValue));
-                Assert.That(add32IfZero(unchecked((int)0x80000000), unchecked((int)0x80000000)), Is.EqualTo(unchecked((int)0x80000000)));
-                Assert.That(add32IfZero(0x3F800000, 0x40000000), Is.EqualTo(0));
-                Assert.That(add64IfZero(long.MinValue, long.MinValue), Is.EqualTo(long.MinValue));
-                Assert.That(add64IfZero(0x3FF0000000000000L, 0x4000000000000000L), Is.EqualTo(0L));
+                Assert.That(DoubleBits(add64(Double(0x3FF8000000000000), Double(0x4002000000000000))),
+                    Is.EqualTo(0x400E000000000000L));
+                Assert.That(DoubleBits(subtract64(Double(0x4010000000000000), Double(0x3FF8000000000000))),
+                    Is.EqualTo(0x4004000000000000L));
+                Assert.That(DoubleBits(multiply64(Double(0x4000000000000000), Double(0x4008000000000000))),
+                    Is.EqualTo(0x4018000000000000L));
+                Assert.That(DoubleBits(divide64(Double(0x4008000000000000), Double(0x4000000000000000))),
+                    Is.EqualTo(0x3FF8000000000000L));
+                Assert.That(double.IsNaN(add64(Double(0x7FF0000000000000),
+                    Double(0xFFF0000000000000))), Is.True);
+                Assert.That(double.IsNaN(subtract64(Double(0x7FF0000000000000),
+                    Double(0x7FF0000000000000))), Is.True);
+                Assert.That(double.IsNaN(multiply64(Double(0),
+                    Double(0x7FF0000000000000))), Is.True);
+                Assert.That(double.IsNaN(divide64(Double(0), Double(0))), Is.True);
+                Assert.That(DoubleBits(add64(Double(0xFFF8123456789ABC),
+                    Double(0x3FF0000000000000))), Is.EqualTo(unchecked((long)0xFFF8123456789ABCUL)));
+                Assert.That(DoubleBits(multiply64(Double(0x8000000000000000),
+                    Double(0x3FF0000000000000))), Is.EqualTo(long.MinValue));
+                Assert.That(SingleBits(add32IfZero(Single(0x80000000), Single(0x80000000))),
+                    Is.EqualTo(unchecked((int)0x80000000)));
+                Assert.That(SingleBits(add32IfZero(Single(0x3F800000), Single(0x40000000))),
+                    Is.EqualTo(0));
+                Assert.That(DoubleBits(add64IfZero(Double(0x8000000000000000),
+                    Double(0x8000000000000000))), Is.EqualTo(long.MinValue));
+                Assert.That(DoubleBits(add64IfZero(Double(0x3FF0000000000000),
+                    Double(0x4000000000000000))), Is.EqualTo(0L));
             }
         }
         finally
@@ -1906,18 +2505,28 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(loaded.Functions[0].Variables, Has.Exactly(1).Items);
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
-    [TestCase("[NoThrow] ",true,false)]
-    [TestCase("[DoesNotReturn] ",false,true)]
-    [TestCase("[NoThrow][DoesNotReturn] ",true,true)]
-    public void EffectsRoundTripWithoutFabricatedProof(string attributes, bool noThrow, bool doesNotReturn)
+    [TestCase(" ",false)]
+    [TestCase("[DoesNotReturn] ",true)]
+    public void EffectsRoundTripWithoutFabricatedProof(string attributes, bool doesNotReturn)
     {
         var haltBody = doesNotReturn ? "while (true) { }" : string.Empty;
         var source = attributes + $"void Halt() {{ {haltBody} }} int32 Main() {{ return 42; }}";
+        var compiled = Compile(source);
         var program = TrRmExecutableCompiler.Load(
-            TrRmExecutableCompiler.Emit(Compile(source), "effects"));
+            TrRmExecutableCompiler.Emit(compiled, "effects"));
         var function = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Halt");
-        Assert.That(function.IsNoThrow, Is.EqualTo(noThrow));
+        Assert.That(function.IsNoThrow, Is.False);
         Assert.That(function.DoesNotReturn, Is.EqualTo(doesNotReturn));
+    }
+
+    [Test]
+    public void ExecutableWriterRejectsRetiredNoThrowClaims()
+    {
+        var program = BoundProgramTestHelpers.MarkNoThrow(
+            Compile("void Halt() { } int32 Main() { return 42; }"), "Halt");
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "retired-nothrow"));
     }
     [TestCase("out int32 value")]
     public void ExecutableWriterRejectsOutputParameters(string parameter)
@@ -1949,15 +2558,17 @@ public sealed class TrRmExecutableCompilerTests
     [Test]
     public void LoadsMultipleEffectContractsFromOneTableIndex()
     {
-        const string source = "[NoThrow] void Safe() { } "
+        const string source = " unsafe void Unsafe() { } "
             + "[DoesNotReturn] void Halt() { while (true) { } } "
-            + "int32 Main() { Safe(); return 42; }";
+            + "int32 Main() { unsafe { Unsafe(); } return 42; }";
+        var compiled = Compile(source);
         var program = TrRmExecutableCompiler.Load(
-            TrRmExecutableCompiler.Emit(Compile(source), "multiple-effects"));
-        var safe = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Safe");
+            TrRmExecutableCompiler.Emit(compiled, "multiple-effects"));
+        var unsafeFunction = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "Unsafe");
         var halt = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Halt");
-        Assert.That(safe.IsNoThrow, Is.True);
-        Assert.That(safe.DoesNotReturn, Is.False);
+        Assert.That(unsafeFunction.IsNoThrow, Is.False);
+        Assert.That(unsafeFunction.RequiresUnsafeCaller, Is.True);
         Assert.That(halt.IsNoThrow, Is.False);
         Assert.That(halt.DoesNotReturn, Is.True);
     }
@@ -2053,38 +2664,44 @@ public sealed class TrRmExecutableCompilerTests
     private delegate long LongBinary(long left, long right);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate ulong ULongBinary(ulong left, ulong right);
+    private static float SingleFromBits(int bits) => BitConverter.Int32BitsToSingle(bits);
+    private static int SingleBits(float value) => BitConverter.SingleToInt32Bits(value);
+    private static double DoubleFromBits(long bits) => BitConverter.Int64BitsToDouble(bits);
+    private static long DoubleBits(double value) => BitConverter.DoubleToInt64Bits(value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float32ToFloat64(int value);
+    private delegate double Float32ToFloat64(float value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float64ToFloat32(long value);
+    private delegate float Float64ToFloat32(double value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float32Unary(int value);
+    private delegate float Float32Unary(float value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float64Unary(long value);
+    private delegate double Float64Unary(double value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float32Binary(int left, int right);
+    private delegate float Float32Binary(float left, float right);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float64Binary(long left, long right);
+    private delegate double Float64Binary(double left, double right);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Char16ToFloat32(ushort value);
+    private delegate int Int32Binary(int left, int right);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Char16ToFloat64(ushort value);
+    private delegate float Char16ToFloat32(ushort value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float64ToInt32(long value);
+    private delegate double Char16ToFloat64(ushort value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint Float64ToUInt32(long value);
+    private delegate int Float64ToInt32(double value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float64ToInt64(long value);
+    private delegate uint Float64ToUInt32(double value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate ulong Float64ToUInt64(long value);
+    private delegate long Float64ToInt64(double value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int Float32ToInt32(int value);
+    private delegate ulong Float64ToUInt64(double value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate uint Float32ToUInt32(int value);
+    private delegate int Float32ToInt32(float value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate long Float32ToInt64(int value);
+    private delegate uint Float32ToUInt32(float value);
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate ulong Float32ToUInt64(int value);
+    private delegate long Float32ToInt64(float value);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate ulong Float32ToUInt64(float value);
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate void VoidAction();
     [TestCase("public void V() { }")]
@@ -2126,7 +2743,12 @@ public sealed class TrRmExecutableCompilerTests
     public async Task SourceFreeOptionalScalarBodyExecutesPresenceCopySelectAndAot()
     {
         var body = OptionalLinearBody(
-            [2, 4, 6, 8],
+            [
+                BuiltinTypeSpecRow(0x01),
+                BuiltinTypeSpecRow(0x08),
+                BuiltinTypeSpecRow(0x09),
+                FirstOptionalTypeSpecRow,
+            ],
             [
                 1, 1, 3, 0,
                 8, 2, 4, 1,
@@ -2152,22 +2774,27 @@ public sealed class TrRmExecutableCompilerTests
         Assert.That(await StaticProtocolTests.RunAsync(
             NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
-    [TestCase((byte)(2),true,42)]
-    [TestCase((byte)(2),false,0)]
-    [TestCase((byte)(4),true,42)]
-    [TestCase((byte)(4),false,0)]
-    [TestCase((byte)(5),true,42)]
-    [TestCase((byte)(5),false,0)]
-    [TestCase((byte)(7),true,42)]
-    [TestCase((byte)(7),false,0)]
+    [TestCase((byte)(0x01),true,42)]
+    [TestCase((byte)(0x01),false,0)]
+    [TestCase((byte)(0x08),true,42)]
+    [TestCase((byte)(0x08),false,0)]
+    [TestCase((byte)(0x0D),true,42)]
+    [TestCase((byte)(0x0D),false,0)]
+    [TestCase((byte)(0x0E),true,42)]
+    [TestCase((byte)(0x0E),false,0)]
     public async Task SourceFreeOptionalScalarPayloadTypesPreservePresenceInAotAndJit(
         byte payloadTypeCode, bool present, int expected)
     {
-        var typeRows = new[] { 2, 4, (int)payloadTypeCode, 8 }
-            .Distinct().ToArray();
-        var payloadTypeId = Array.IndexOf(typeRows, payloadTypeCode) + 1;
-        var int32TypeId = Array.IndexOf(typeRows, 4) + 1;
-        var optionalTypeId = Array.IndexOf(typeRows, 8) + 1;
+        var payloadTypeSpecRow = BuiltinTypeSpecRow(payloadTypeCode);
+        var typeRows = new SortedSet<int> {
+            BuiltinTypeSpecRow(0x01),
+            BuiltinTypeSpecRow(0x08),
+            payloadTypeSpecRow,
+            FirstOptionalTypeSpecRow,
+        }.ToArray();
+        var payloadTypeId = Array.IndexOf(typeRows, payloadTypeSpecRow) + 1;
+        var int32TypeId = Array.IndexOf(typeRows, BuiltinTypeSpecRow(0x08)) + 1;
+        var optionalTypeId = Array.IndexOf(typeRows, FirstOptionalTypeSpecRow) + 1;
         var operations = new List<byte> { 1, 1, (byte)payloadTypeId, 0 };
         if (present)
         {
@@ -2186,12 +2813,8 @@ public sealed class TrRmExecutableCompilerTests
         ]);
         var body = OptionalLinearBody(typeRows, [.. operations], 7, 7);
         var loaded = TrRmExecutableCompiler.Load(OptionalScalarArtifact(body,
-            optionalChar16: false,
-            optionalInt32: payloadTypeCode == 4,
-            optionalInt64: false,
-            optionalBool: payloadTypeCode == 2,
-            optionalUInt32: payloadTypeCode == 5,
-            optionalUInt64: payloadTypeCode == 7));
+            optionalChar16: false, optionalInt32: false,
+            optionalPayloadTypeSpecRow: payloadTypeSpecRow));
 
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(expected));
         Assert.That(await StaticProtocolTests.RunAsync(
@@ -2202,7 +2825,12 @@ public sealed class TrRmExecutableCompilerTests
     public async Task SourceFreeOptionalChar16EqualityDistinguishesPresenceAndPayload()
     {
         var body = OptionalLinearBody(
-            [2, 4, 3, 8],
+            [
+                BuiltinTypeSpecRow(0x01),
+                BuiltinTypeSpecRow(0x08),
+                BuiltinTypeSpecRow(0x03),
+                FirstOptionalTypeSpecRow,
+            ],
             [
                 1, 1, 3, 65,
                 1, 2, 3, 66,
@@ -2260,30 +2888,31 @@ public sealed class TrRmExecutableCompilerTests
     }
     [TestCase(2,false,0)]
     [TestCase(2,true,42)]
-    [TestCase(3,false,0)]
-    [TestCase(3,true,42)]
     [TestCase(4,false,0)]
     [TestCase(4,true,42)]
-    [TestCase(5,false,0)]
-    [TestCase(5,true,42)]
-    [TestCase(6,false,0)]
-    [TestCase(6,true,42)]
-    [TestCase(7,false,0)]
-    [TestCase(7,true,42)]
+    [TestCase(9,false,0)]
+    [TestCase(9,true,42)]
+    [TestCase(13,false,0)]
+    [TestCase(13,true,42)]
+    [TestCase(10,false,0)]
+    [TestCase(10,true,42)]
+    [TestCase(14,false,0)]
+    [TestCase(14,true,42)]
     public async Task IndexedOptionalSelectionPreservesPresenceForEveryPayload(
         int payloadTypeSpecRow, bool selectPresent, int expected)
     {
-        var body = IndexedOptionalPresenceBody(payloadTypeSpecRow, selectPresent);
+        var body = IndexedOptionalPresenceBody(
+            payloadTypeSpecRow, selectPresent, FirstOptionalTypeSpecRow);
         var artifact = payloadTypeSpecRow switch {
             2 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
                 optionalBool: true),
-            3 => OptionalScalarArtifact(body, optionalChar16: true, optionalInt32: false),
-            4 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: true),
-            5 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+            4 => OptionalScalarArtifact(body, optionalChar16: true, optionalInt32: false),
+            9 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: true),
+            13 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
                 optionalUInt32: true),
-            6 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+            10 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
                 optionalInt64: true),
-            7 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
+            14 => OptionalScalarArtifact(body, optionalChar16: false, optionalInt32: false,
                 optionalUInt64: true),
             _ => throw new ArgumentOutOfRangeException(nameof(payloadTypeSpecRow)),
         };
@@ -2409,7 +3038,8 @@ public sealed class TrRmExecutableCompilerTests
                 break;
         }
         operations.AddRange(payload);
-        return OptionalLinearBody([4], [.. operations], 1, 1);
+        return OptionalLinearBody(
+            [BuiltinTypeSpecRow(0x08)], [.. operations], 1, 1);
     }
 
     private static byte[] OptionalLinearBody(int[] typeRows, byte[] operations,
@@ -2448,7 +3078,10 @@ public sealed class TrRmExecutableCompilerTests
             0x83, 7,
         };
         var body = new List<byte> { 0x08, 2, 7, 0, 4 };
-        foreach (var row in new[] { 6, 8, 2, 4 })
+        foreach (var row in new[] {
+            BuiltinTypeSpecRow(0x09), FirstOptionalTypeSpecRow,
+            BuiltinTypeSpecRow(0x01), BuiltinTypeSpecRow(0x08),
+        })
         {
             var bytes = new byte[sizeof(uint)];
             BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
@@ -2527,7 +3160,10 @@ public sealed class TrRmExecutableCompilerTests
         block.Add(27);
 
         var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
-        foreach (var row in new[] { 2, 4, 3, 8 })
+        foreach (var row in new[] {
+            BuiltinTypeSpecRow(0x01), BuiltinTypeSpecRow(0x08),
+            BuiltinTypeSpecRow(0x03), FirstOptionalTypeSpecRow,
+        })
         {
             var bytes = new byte[sizeof(uint)];
             BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
@@ -2583,7 +3219,10 @@ public sealed class TrRmExecutableCompilerTests
         block.Add(13);
 
         var body = new List<byte> { 0x08, 1, (byte)valueTypeIds.Length, 0, 4 };
-        foreach (var row in new[] { 2, 4, 3, 8 })
+        foreach (var row in new[] {
+            BuiltinTypeSpecRow(0x01), BuiltinTypeSpecRow(0x08),
+            BuiltinTypeSpecRow(0x03), FirstOptionalTypeSpecRow,
+        })
         {
             var bytes = new byte[sizeof(uint)];
             BinaryPrimitives.WriteUInt32LittleEndian(bytes, (uint)row);
@@ -2602,11 +3241,15 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     private static byte[] IndexedOptionalPresenceBody(int payloadTypeSpecRow,
-        bool selectPresent, int optionalTypeSpecRow = 8)
+        bool selectPresent, int optionalTypeSpecRow)
     {
-        var typeRows = new SortedSet<int> { 2, 4, payloadTypeSpecRow, optionalTypeSpecRow }.ToArray();
-        var booleanTypeId = (byte)(Array.IndexOf(typeRows, 2) + 1);
-        var integerTypeId = (byte)(Array.IndexOf(typeRows, 4) + 1);
+        var booleanTypeSpecRow = BuiltinTypeSpecRow(0x01);
+        var integerTypeSpecRow = BuiltinTypeSpecRow(0x08);
+        var typeRows = new SortedSet<int> {
+            booleanTypeSpecRow, integerTypeSpecRow, payloadTypeSpecRow, optionalTypeSpecRow,
+        }.ToArray();
+        var booleanTypeId = (byte)(Array.IndexOf(typeRows, booleanTypeSpecRow) + 1);
+        var integerTypeId = (byte)(Array.IndexOf(typeRows, integerTypeSpecRow) + 1);
         var payloadTypeId = (byte)(Array.IndexOf(typeRows, payloadTypeSpecRow) + 1);
         var optionalTypeId = (byte)(Array.IndexOf(typeRows, optionalTypeSpecRow) + 1);
         byte[] valueTypeIds =
@@ -2666,7 +3309,8 @@ public sealed class TrRmExecutableCompilerTests
 
     private static byte[] OptionalScalarArtifact(byte[] body, bool optionalChar16,
         bool optionalInt32, bool optionalInt64 = false, bool optionalBool = false,
-        bool optionalUInt32 = false, bool optionalUInt64 = false, bool optionalFloat32 = false)
+        bool optionalUInt32 = false, bool optionalUInt64 = false, bool optionalFloat32 = false,
+        int optionalPayloadTypeSpecRow = 0)
     {
         var original = TrRmExecutableCompiler.Emit(
             Compile("int32 Main() { return 0; }"), "optional-body");
@@ -2678,29 +3322,40 @@ public sealed class TrRmExecutableCompilerTests
         {
             rows.Add(existingTypes.GetRow(row).ToArray());
         }
+        if (optionalPayloadTypeSpecRow != 0)
+        {
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)optionalPayloadTypeSpecRow));
+        }
         if (optionalChar16)
         {
-            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 3));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)BuiltinTypeSpecRow(0x03)));
         }
         if (optionalInt32)
         {
-            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 4));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)BuiltinTypeSpecRow(0x08)));
         }
         if (optionalInt64)
         {
-            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 6));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)BuiltinTypeSpecRow(0x09)));
         }
         if (optionalBool)
         {
-            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 2));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)BuiltinTypeSpecRow(0x01)));
         }
         if (optionalUInt32)
         {
-            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 5));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)BuiltinTypeSpecRow(0x0D)));
         }
         if (optionalUInt64)
         {
-            rows.Add(TrRmTypeSpecTableWriter.Wrapped(0x06, 7));
+            rows.Add(TrRmTypeSpecTableWriter.Wrapped(
+                0x06, (uint)BuiltinTypeSpecRow(0x0E)));
         }
         if (optionalFloat32)
         {
@@ -2723,6 +3378,13 @@ public sealed class TrRmExecutableCompilerTests
             }));
         }
         return TrRmArtifactWriter.EncodeDevelopment(sections);
+    }
+
+    private static int BuiltinTypeSpecRow(byte typeCode)
+    {
+        var index = Array.IndexOf(s_nonFloatingBuiltinTypeCodes, typeCode);
+        return index >= 0 ? index + 1
+            : throw new ArgumentOutOfRangeException(nameof(typeCode));
     }
 
     private static byte[] ReplaceBodyRow(byte[] artifact, int destinationRow, int sourceRow)

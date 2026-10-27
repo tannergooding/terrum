@@ -16,11 +16,14 @@ public static partial class TrRmExecutableCompiler
 {
     private static readonly PrimitiveType[] s_types =
     [
-        PrimitiveType.Void, PrimitiveType.Bool, PrimitiveType.Char16,
-        PrimitiveType.Int32, PrimitiveType.UInt32, PrimitiveType.Int64, PrimitiveType.UInt64,
+        PrimitiveType.Void, PrimitiveType.Bool, PrimitiveType.Char8, PrimitiveType.Char16,
+        PrimitiveType.Char32, PrimitiveType.Rune, PrimitiveType.Int8, PrimitiveType.Int16,
+        PrimitiveType.Int32, PrimitiveType.Int64, PrimitiveType.UInt8, PrimitiveType.UInt16,
+        PrimitiveType.UInt32, PrimitiveType.UInt64,
         PrimitiveType.Float32, PrimitiveType.Float64,
     ];
-    private static readonly byte[] s_codes = [0, 1, 3, 8, 0x0D, 9, 0x0E, 0x14, 0x15];
+    private static readonly byte[] s_codes =
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0x0B, 0x0C, 0x0D, 0x0E, 0x14, 0x15];
     private static readonly ReadOnlyMemory<byte>[] s_typeRows = CreateTypeRows(s_codes);
     private static readonly ReadOnlyMemory<byte>[] s_nonFloatTypeRows = CreateTypeRows(s_codes[..^2]);
     private static readonly ReadOnlyMemory<byte>[] s_effectPayloads =
@@ -136,6 +139,11 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
+            if (function.IsNoThrow)
+            {
+                throw Unsupported(
+                    $"Function '{function.Name}' carries a retired NoThrow claim.");
+            }
             if (function.IsExternal && function.DirectNativeImport is not null
                 && !DirectNativeImportContract.IsValid(function, program.Structures,
                     program.NativeFunctionPointerSignatures, program.NativePointerTypes))
@@ -178,7 +186,7 @@ public static partial class TrRmExecutableCompiler
                         .Any(static variable => IsFloat(variable.Type));
             }
             parameterCount = checked(parameterCount + function.ParameterCount);
-            effectCount += function.IsNoThrow || function.DoesNotReturn || function.RequiresUnsafeCaller ? 1 : 0;
+            effectCount += function.DoesNotReturn || function.RequiresUnsafeCaller ? 1 : 0;
             exportCount += !function.IsPrivate && !function.IsInternal
                 && function.ModuleImport is null ? 1 : 0;
             nativeImportCount += function.DirectNativeImport is not null ? 1 : 0;
@@ -506,8 +514,7 @@ public static partial class TrRmExecutableCompiler
                             nativePointerTypeRows));
             }
 
-            var effectMask = (function.IsNoThrow ? 1u : 0u)
-                | (function.DoesNotReturn ? 2u : 0u)
+            var effectMask = (function.DoesNotReturn ? 2u : 0u)
                 | (function.RequiresUnsafeCaller ? 4u : 0u);
             var contractFirst = effectMask != 0 || function.DirectNativeImport is not null
                 || function.NativeFunctionPointerType is not null || hasNativeVTable
@@ -592,7 +599,7 @@ public static partial class TrRmExecutableCompiler
                 0, first, signature.ParameterTypes.Length, 0, 0));
             var contractFirst = contracts.Count + 1;
             contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
-                s_effectPayloads[5]));
+                s_effectPayloads[4]));
             contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 0x10,
                 NativeAbiPayload(3)));
             var nameRow = names.Count + 1;
@@ -1151,7 +1158,6 @@ public static partial class TrRmExecutableCompiler
             }
 
             var (contractFirst, contracts) = defs.GetContractRange(row);
-            var noThrow = false;
             var doesNotReturn = false;
             var requiresUnsafeCaller = false;
             if (contracts != 0)
@@ -1169,11 +1175,10 @@ public static partial class TrRmExecutableCompiler
 
                     var effectMask = clause.Length == 12
                         ? BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) : 0;
-                    if (clause.Length != 12 || kind != 1 || effectMask is < 1 or > 7)
+                    if (clause.Length != 12 || kind != 1 || (effectMask & ~6u) != 0)
                     {
                         throw Invalid("Unsupported method contract.");
                     }
-                    noThrow = (effectMask & 1) != 0;
                     doesNotReturn = (effectMask & 2) != 0;
                     requiresUnsafeCaller = (effectMask & 4) != 0;
                 }
@@ -1275,7 +1280,6 @@ public static partial class TrRmExecutableCompiler
             functions.Add(new BoundFunction(name, returnType,
                 variables.ToImmutable(), count, new BoundBlock([], default), default)
             {
-                IsNoThrow = noThrow,
                 DoesNotReturn = doesNotReturn,
                 RequiresUnsafeCaller = requiresUnsafeCaller,
                 IsExternal = isNativeImport || isImportedNativeCallable,
@@ -1319,7 +1323,6 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
             var count = declaration.ParameterCount;
-            var noThrow = declaration.IsNoThrow;
             var body = bodies.GetRow(defs.GetBodyRow(row));
             TrRmScalarGraph? indexed = null;
             ImmutableArray<BoundVariable>.Builder variables;
@@ -1331,7 +1334,7 @@ public static partial class TrRmExecutableCompiler
                     parameters, types, featureTable, nativeCallables, nativeImports,
                     nativeFunctionPointerSignatureTable, nativeVTables, declaration.DoesNotReturn);
                 indexed = IndexedBuilder.DecodeIndexedBody(body, count,
-                    declaration.ReturnType, noThrow, declaration.DoesNotReturn, types, functions,
+                    declaration.ReturnType, declaration.DoesNotReturn, types, functions,
                     functionIndexByMethodRow,
                     nativeFunctionPointerSignatureDefinitions.ToImmutable(),
                     nativePointerTypeDefinitions, structureTypeByTypeDef);
@@ -1348,7 +1351,7 @@ public static partial class TrRmExecutableCompiler
                 variables = declaration.Variables.ToBuilder();
                 _ = new TrRmCompactLinearBodyReader(bodies, row, modules, defs, sigs,
                     parameters, types, typeDefs, imports, nativeImports);
-                statements = DecodeBody(body, count, variables, noThrow, types, functions,
+                statements = DecodeBody(body, count, variables, types, functions,
                     functionIndexByMethodRow,
                     nativeFunctionPointerSignatureDefinitions.ToImmutable(),
                     nativePointerTypeDefinitions: nativePointerTypeDefinitions,
@@ -1375,7 +1378,7 @@ public static partial class TrRmExecutableCompiler
                             operations, 0, null, null,
                             returned.Value is BoundRead read ? read.Variable + 1 : 0, 0)],
                         variableTypes.MoveToImmutable(),
-                        count, declaration.ReturnType, noThrow, declaration.DoesNotReturn);
+                        count, declaration.ReturnType, declaration.DoesNotReturn);
                     statements = [];
                 }
             }

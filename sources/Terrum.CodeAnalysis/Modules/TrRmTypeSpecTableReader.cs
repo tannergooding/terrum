@@ -158,7 +158,8 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         if (reference.Form == 0x01 && reference.TypeCode < 0x80
-            && reference.TypeCode is 1 or 3 or 8 or 9 or 0x0D or 0x0E or 0x14 or 0x15)
+            && reference.TypeCode is 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9
+                or 0x0B or 0x0C or 0x0D or 0x0E or 0x14 or 0x15)
         {
             return reference.TypeCode;
         }
@@ -483,7 +484,8 @@ public readonly ref struct TrRmTypeSpecTableReader
 
         static bool IsCompactAtom(byte code)
         {
-            return IsCompactOptionalAtom(code) || code is 0x14 or 0x15;
+            return code is 1 or 2 or 3 or 4 or 5 or 6 or 7 or 8 or 9
+                or 0x0B or 0x0C or 0x0D or 0x0E or 0x14 or 0x15;
         }
 
         static bool IsCompactOptionalAtom(byte code)
