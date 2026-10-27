@@ -1512,6 +1512,92 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public void NativeAddressInfersOrdinaryTerrumFunctionContract()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Increment(int32 value) { return value + 1; }
+
+            int32 Main() {
+                unsafe {
+                    fnptr<int32, int32> typed = &Increment;
+                    var inferred = &Increment;
+                    return typed(20) == inferred(21) - 1 ? 0 : -1;
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var target = program.Functions.Single(static function => function.Name == "Increment");
+        var main = program.Functions.Single(static function => function.Name == "Main");
+        var addressTypes = new List<PrimitiveType>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body, expression =>
+        {
+            if (expression is BoundNativeFunctionAddress address)
+            {
+                addressTypes.Add(address.Type);
+            }
+        }), Is.True);
+        Assert.That(addressTypes.Count, Is.EqualTo(2));
+        Assert.That(addressTypes[0], Is.EqualTo(addressTypes[1]));
+        Assert.That(NativeFunctionPointerContract.MatchesAddressableFunction(
+            target, addressTypes[0], program.NativeFunctionPointerSignatures), Is.True);
+        Assert.That(program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(addressTypes[0])].CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Native));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void NativeAddressRejectsOrdinaryInstanceMethods()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Counter {
+                int32 Get() { return 42; }
+            }
+
+            int32 Main() {
+                unsafe {
+                    var callback = &Counter.Get;
+                    return 0;
+                }
+            }
+            """));
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"),
+            Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void OrdinaryTerrumFunctionAddressSurvivesPrivateModuleRoundTrip()
+    {
+        var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 Increment(int32 value) { return value + 1; }
+
+            public int32 Invoke(int32 value) {
+                unsafe {
+                    var callback = &Increment;
+                    return callback(value);
+                }
+            }
+            """));
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(providerCompilation.Program!, ["Invoke"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return Invoke(41) == 42 ? 0 : -1; }"), reference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(consumerCompilation.Program!, producer);
+
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer),
+            NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
     public void IndirectNoReturnContractSuppressesNormalFlowAndEmitsNoReturnTrap()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""

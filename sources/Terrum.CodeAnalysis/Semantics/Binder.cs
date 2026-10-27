@@ -4400,6 +4400,40 @@ internal sealed partial class Binder
         return type;
     }
 
+    private PrimitiveType? GetAddressableFunctionPointerType(Signature signature)
+    {
+        if (signature.NativeFunctionPointerType is PrimitiveType nativeCallableType)
+        {
+            return nativeCallableType;
+        }
+        if (signature.External is not null || signature.NativeCallableConvention is not null
+            || signature.NativeCallableConventionExpression is not null
+            || (signature.StructName is not null && !signature.IsStatic)
+            || signature.IsConstructor || signature.IsClassConstructor || signature.IsOperator
+            || signature.IsCleanup || signature.PropertyName is not null
+            || signature.Generic is not null
+            || signature.GenericOwnerTypeArguments is { Count: > 0 }
+            || signature.Parameters.Any(static parameter => parameter.IsOut || parameter.IsInit
+                || parameter.IsImplicitRef || parameter.IsWritableNativePointer)
+            || !NativeFunctionPointerContract.TryCreateDependencies(
+                signature.DependencyContracts, out var dependencies))
+        {
+            return null;
+        }
+
+        var pointerSignature = new NativeFunctionPointerSignatureDefinition(
+            NativeCallingConvention.Native, signature.ReturnType,
+            [.. signature.Parameters.Select(static parameter => parameter.Type)]) {
+            EffectsMask = NativeFunctionPointerContract.GetDeclaredEffectsMask(
+                signature.DoesNotReturn, signature.DeclaredRequiresUnsafeCaller),
+            Dependencies = dependencies,
+        };
+        return NativeFunctionPointerContract.IsValidSignature(pointerSignature,
+            [.. _nativeFunctionPointerSignatures])
+            ? GetNativeFunctionPointerType(pointerSignature)
+            : null;
+    }
+
     private PrimitiveType GetPendingNativeFunctionPointerType(
         NativeFunctionPointerSignatureDefinition signature, SyntaxNode expression)
     {
@@ -6883,19 +6917,20 @@ internal sealed partial class Binder
                     var functionName = NameText(operandNode);
                     if (operandNode.Kind is SyntaxKind.NameExpression or SyntaxKind.MemberAccessExpression
                         && !TryFindVariable(functionName, out _)
-                        && TryFindFunction(functionName, out var nativeCallable))
+                        && TryFindFunction(functionName, out var addressTarget))
                     {
-                        var signature = _signatures[nativeCallable];
+                        var signature = _signatures[addressTarget];
+                        var actualType = GetAddressableFunctionPointerType(signature);
                         PrimitiveType? expectedFunctionPointerType = expected is PrimitiveType functionPointerExpectedType
                             && NativeFunctionPointerTypes.IsType(functionPointerExpectedType)
                                 ? functionPointerExpectedType
                                 : null;
                         var functionPointerType = expectedFunctionPointerType
-                            ?? (expected is null ? signature.NativeFunctionPointerType : null);
+                            ?? (expected is null ? actualType : null);
                         if (functionPointerType is not PrimitiveType addressType
-                            || signature.NativeFunctionPointerType is not PrimitiveType actualType
+                            || actualType is not PrimitiveType targetType
                             || (signature.NativeCallableConventionExpression is null
-                                && !NativeFunctionPointerContract.CanProject(actualType,
+                                && !NativeFunctionPointerContract.CanProject(targetType,
                                     addressType, [.. _nativeFunctionPointerSignatures])))
                         {
                             Report("TRM3030",
@@ -6911,7 +6946,7 @@ internal sealed partial class Binder
                                     "Taking a native function address requires an explicit unsafe context.",
                                     node.Span);
                             }
-                            expression = new BoundNativeFunctionAddress(nativeCallable,
+                            expression = new BoundNativeFunctionAddress(addressTarget,
                                 addressType, node.Span) {
                                 IsUnsafeAuthorized = _unsafeDepth != 0,
                             };

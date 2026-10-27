@@ -1607,7 +1607,8 @@ public static partial class ModuleCompiler
                 ? function with { Name = ownerName + "." + function.Name[prefix.Length..] }
                 : function;
         }).ToImmutableArray();
-        var valueTypes = new ModuleUnsafeValueTypeCache(combinedStructures);
+        var valueTypes = new ModuleUnsafeValueTypeCache(
+            combinedStructures, nativeFunctionPointerSignatures);
         foreach (var owner in consumerOwned)
         {
             functions[owner] = functions[owner] with {
@@ -2808,9 +2809,13 @@ public static partial class ModuleCompiler
         type is PrimitiveType.Bool or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Char16
             or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
-    private sealed class ModuleUnsafeValueTypeCache(ImmutableArray<BoundStruct> structures)
+    private sealed class ModuleUnsafeValueTypeCache(
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default)
     {
         private readonly Dictionary<int, CopyValueTypeState> _copyValueTypeStates = [];
+        internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; }
+            = functionPointerSignatures.IsDefault ? [] : functionPointerSignatures;
 
         public bool IsSupported(PrimitiveType type)
         {
@@ -6845,7 +6850,8 @@ public static partial class ModuleCompiler
     private static BoundProgram Resolve(BoundProgram program, IReadOnlyDictionary<string, int> names)
     {
         var declarations = program.Functions;
-        var valueTypes = new ModuleUnsafeValueTypeCache(program.Structures);
+        var valueTypes = new ModuleUnsafeValueTypeCache(
+            program.Structures, program.NativeFunctionPointerSignatures);
         var functions = declarations.Select(function => function with {
             Body = (BoundBlock)ResolveStatement(function.Body, names, declarations, program.Structures, valueTypes),
         }).ToImmutableArray();
@@ -6970,7 +6976,8 @@ public static partial class ModuleCompiler
                 throw new ModuleContractException($"Unresolved call target '{call.Name}'."),
             SymbolicNativeFunctionAddress address
                 when names.TryGetValue(address.Name, out var index)
-                    && functions[index].NativeFunctionPointerType == address.Type =>
+                    && NativeFunctionPointerContract.MatchesAddressableFunction(
+                        functions[index], address.Type, valueTypes.NativeFunctionPointerSignatures) =>
                 new BoundNativeFunctionAddress(index, address.Type, address.Span) {
                     IsUnsafeAuthorized = inUnsafe || inUnsafeExpression,
                 },

@@ -5739,6 +5739,11 @@ internal sealed partial class PeCompiler
             case BoundNativeFunctionAddress address:
                 NativeEmitter.EnsureNativeFunctionPointerConventionSupported(address.Type,
                     _program.NativeFunctionPointerSignatures);
+                if (_sourceDependent?[address.Function] == true)
+                {
+                    throw new NotSupportedException(
+                        "A function pointer cannot target an entry with hidden invocation-scoped inputs.");
+                }
                 _code.Bytes(0x48, 0x8D, 0x05); // lea rax,[rip+function]
                 var functionAddress = _code.Position;
                 _code.Int32(0);

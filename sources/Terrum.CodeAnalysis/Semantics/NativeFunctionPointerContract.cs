@@ -529,9 +529,76 @@ internal static class NativeFunctionPointerContract
     internal static bool MatchesAddressableFunction(BoundFunction function,
         PrimitiveType expectedType,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures)
-        => function.NativeFunctionPointerType is PrimitiveType actualType
-            && MatchesFunction(function, actualType, signatures)
+    {
+        return TryGetAddressableFunctionType(function, signatures, out var actualType)
             && CanProject(actualType, expectedType, signatures);
+    }
+
+    internal static bool TryGetAddressableFunctionType(BoundFunction function,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
+        out PrimitiveType functionPointerType)
+    {
+        if (function.NativeFunctionPointerType is PrimitiveType nativeCallableType)
+        {
+            functionPointerType = nativeCallableType;
+            return MatchesFunction(function, nativeCallableType, signatures);
+        }
+        if (!IsOrdinaryAddressableFunction(function))
+        {
+            functionPointerType = default;
+            return false;
+        }
+
+        for (var index = 0; index < signatures.Length; index++)
+        {
+            if (MatchesOrdinaryFunction(function, signatures[index]))
+            {
+                functionPointerType = NativeFunctionPointerTypes.Type(index);
+                return true;
+            }
+        }
+        functionPointerType = default;
+        return false;
+    }
+
+    private static bool IsOrdinaryAddressableFunction(BoundFunction function) =>
+        !function.IsExternal && !function.IsModuleReference
+            && function.DirectNativeImport is null && function.NativeVTableMethod is null
+            && function.NativeCallableEntryName is null && function.NativeOutputRole is null
+            && function.NativeFunctionPointerType is null
+            && function.NativeCallableConvention is null
+            && !function.IsConstructor && !function.IsClassConstructor
+            && !function.IsOperator && !function.IsCleanup && function.PropertyName is null
+            && function.Intrinsic == BoundIntrinsic.None
+            && (function.DeclaringStruct is null || function.IsStatic)
+            && function.ParameterCount <= function.Variables.Length;
+
+    private static bool MatchesOrdinaryFunction(BoundFunction function,
+        NativeFunctionPointerSignatureDefinition signature)
+    {
+        if (signature.CallingConvention != NativeCallingConvention.Native
+            || function.ReturnType != signature.ReturnType
+            || function.ParameterCount != signature.ParameterTypes.Length
+            || signature.EffectsMask != GetDeclaredEffectsMask(
+                function.DoesNotReturn, function.DeclaredRequiresUnsafeCaller)
+            || !signature.Selectors.IsEmpty || !signature.OutputStates.IsEmpty
+            || !TryCreateDependencies(function.DependencyContracts, out var dependencies)
+            || !SameDependencies(signature.Dependencies, dependencies))
+        {
+            return false;
+        }
+
+        for (var index = 0; index < signature.ParameterTypes.Length; index++)
+        {
+            if (function.Variables[index] is { IsOut: false, IsInit: false, IsImplicitRef: false } parameter
+                && parameter.Type == signature.ParameterTypes[index])
+            {
+                continue;
+            }
+            return false;
+        }
+        return true;
+    }
 
     internal static bool IsSupportedValueType(PrimitiveType type,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures) =>
