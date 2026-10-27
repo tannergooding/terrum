@@ -3933,7 +3933,7 @@ internal sealed partial class Binder
             }
 
             return BindNativeFunctionPointerType(functionPointerTypeNode, callingConvention,
-                hasLegacyAbiPrefix: false, pendingConventionExpression: conventionExpression);
+                allowLegacyAbiPrefix: false, pendingConventionExpression: conventionExpression);
         }
 
         var name = TypeNameIdentifier(node);
@@ -3943,7 +3943,7 @@ internal sealed partial class Binder
         if (name == "fnptr")
         {
             return BindNativeFunctionPointerType(node, NativeCallingConvention.Native,
-                hasLegacyAbiPrefix: true);
+                allowLegacyAbiPrefix: true);
         }
         if (name == "ptr")
         {
@@ -4081,25 +4081,18 @@ internal sealed partial class Binder
     }
 
     private PrimitiveType BindNativeFunctionPointerType(SyntaxNode node,
-        NativeCallingConvention callingConvention, bool hasLegacyAbiPrefix,
+        NativeCallingConvention callingConvention, bool allowLegacyAbiPrefix,
         SyntaxNode? pendingConventionExpression = null)
     {
         var typeArgumentNodes = node.Children.OfType<SyntaxNode>().ToArray();
         var firstParameter = 0;
-        if (hasLegacyAbiPrefix)
+        if (allowLegacyAbiPrefix && typeArgumentNodes.Length >= 2
+            && (TypeNameIdentifier(typeArgumentNodes[0]) is "NativeAbi" or "Terrum.Interop.NativeAbi")
+            && !typeArgumentNodes[0].Children.OfType<SyntaxNode>().Any())
         {
-            if (typeArgumentNodes.Length < 2
-                || TypeNameIdentifier(typeArgumentNodes[0]) is not ("NativeAbi" or "Terrum.Interop.NativeAbi")
-                || typeArgumentNodes[0].Children.OfType<SyntaxNode>().Any())
-            {
-                Report("TRM3005",
-                    "The provisional legacy function-pointer type requires fnptr<NativeAbi, parameter types..., return type>.",
-                    node.Span);
-                return PrimitiveType.Int32;
-            }
             firstParameter = 1;
         }
-        else if (typeArgumentNodes.Length == 0)
+        if (typeArgumentNodes.Length == 0)
         {
             Report("TRM3005",
                 "A native function-pointer type requires a return type.",
@@ -9419,7 +9412,7 @@ internal sealed partial class Binder
             return;
         }
         var signature = _nativeFunctionPointerSignatures[index];
-        AppendTypeNameText(builder, "fnptr<NativeAbi, ", ref remainingCharacters);
+        AppendTypeNameText(builder, "fnptr<", ref remainingCharacters);
         foreach (var parameterType in signature.ParameterTypes)
         {
             if (remainingCharacters <= 3 || remainingNodes <= 0)

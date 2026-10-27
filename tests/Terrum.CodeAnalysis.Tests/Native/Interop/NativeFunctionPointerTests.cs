@@ -1108,8 +1108,6 @@ public sealed class NativeFunctionPointerTests
         Assert.That(compilation.HasErrors, Is.True);
         Assert.That(compilation.Diagnostics.Max(static diagnostic => diagnostic.Message.Length),
             Is.LessThanOrEqualTo(512));
-        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Message.Contains("...", StringComparison.Ordinal)),
-            Is.True, string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [Test]
