@@ -245,14 +245,22 @@ floor. [Scalar output reader cases](../../tests/Terrum.CodeAnalysis.Tests/Module
 are not the complete accepted reference/output model.
 The source verifier also derives provisional in-memory CopyOrigin summaries
 for supported Copy results and fresh inline construction. It composes selected
-declaration summaries without callee-body inspection, while preserving
-whole-source DependsOn/Captures bounds separately. The current codecs do not
-persist those summaries; bodyless providers and standard transport remain
-unsupported under the unapproved
+declaration summaries without callee-body inspection. Native-pointer field
+backing sets and unknown-state now follow those summaries: EntryValue is
+snapshotted at argument evaluation, while EntryReferentValue is resolved at
+Invoke. This preserves exact selected pointer-field provenance through fresh
+construction, by-value forwarding and borrowed receivers, without narrowing
+whole-source DependsOn/Captures bounds. Source summary candidates now use a
+callee-first mandatory verification pass; each body is checked before its
+summary can be consumed. If summary inference exceeds its supported budget,
+ordinary full verification remains available with source summaries unavailable.
+The current codecs do not persist summaries; bodyless providers and standard
+transport remain unsupported under the unapproved
 [field-provenance proposal](../proposals/reference-field-value-provenance.md).
 Mutable receiver/reference and known pointer-write call effects invalidate
 affected local origin facts conservatively; general field backing/capability
-transfer and alias-place refinements remain unfinished.
+transfer beyond native-pointer field backing, other capability facts and
+alias-place refinements remain unfinished.
 
 **Routes/gate:** preserve complete descriptor types, receiver versus formal
 identity, eligible storage borrow versus backing forwarding, explicit/default

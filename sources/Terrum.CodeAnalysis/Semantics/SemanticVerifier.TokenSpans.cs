@@ -217,7 +217,8 @@ public static partial class SemanticVerifier
     private sealed record StagedCopyOriginInput(
         BoundCopyOriginSourceView SourceView,
         BoundExpression Argument,
-        CopyOriginValue? Snapshot);
+        CopyOriginValue? Snapshot,
+        Dictionary<StorageProjection, NativePointerFieldValue>? NativePointerSnapshot);
 
     private sealed class CopyOriginSummaryBuilder
     {
@@ -714,6 +715,9 @@ public static partial class SemanticVerifier
         internal HashSet<ProvenanceAnchor>?[] NativePointerSources { get; }
         internal bool[] NativePointerMayBeUnknown { get; }
         private Dictionary<StorageKey, NativePointerFieldValue> NativePointerFieldValues { get; } = [];
+        private Dictionary<BoundExpression,
+            Dictionary<StorageProjection, NativePointerFieldValue>> NativePointerCallResults { get; }
+            = new(ReferenceEqualityComparer.Instance);
         private CopyOriginFact[] CopyOriginRoots { get; }
         private Dictionary<StorageKey, CopyOriginFact> CopyOriginFieldValues { get; } = [];
         private Dictionary<BoundExpression, CopyOriginValue> CopyOriginCallResults { get; }
@@ -797,6 +801,13 @@ public static partial class SemanticVerifier
             {
                 destination.NativePointerFieldValues.Add(key, value.Clone());
             }
+            destination.NativePointerCallResults.Clear();
+            foreach (var (expression, values) in NativePointerCallResults)
+            {
+                destination.NativePointerCallResults.Add(expression,
+                    values.ToDictionary(static pair => pair.Key,
+                        static pair => pair.Value.Clone()));
+            }
             destination.CopyOriginFieldValues.Clear();
             foreach (var (key, value) in CopyOriginFieldValues)
             {
@@ -834,6 +845,50 @@ public static partial class SemanticVerifier
             return changed;
         }
 
+        internal bool MergeNativePointerCallResults(BackingDependencies other)
+        {
+            if (other.Sources.Length != Sources.Length
+                || other.FunctionActivation != FunctionActivation
+                || !ReferenceEquals(other.CopyOriginSummaries, CopyOriginSummaries))
+            {
+                throw Invalid();
+            }
+
+            var changed = false;
+            foreach (var (call, values) in other.NativePointerCallResults)
+            {
+                if (!NativePointerCallResults.TryGetValue(call, out var currentValues))
+                {
+                    NativePointerCallResults.Add(call,
+                        values.ToDictionary(static pair => pair.Key,
+                            static pair => pair.Value.Clone()));
+                    changed = true;
+                    continue;
+                }
+
+                foreach (var (projection, value) in values)
+                {
+                    if (currentValues.TryGetValue(projection, out var current))
+                    {
+                        var priorCount = current.Sources.Count;
+                        current.Sources.UnionWith(value.Sources);
+                        changed |= priorCount != current.Sources.Count;
+                        if (value.MayBeUnknown && !current.MayBeUnknown)
+                        {
+                            current.MayBeUnknown = true;
+                            changed = true;
+                        }
+                    }
+                    else
+                    {
+                        currentValues.Add(projection, value.Clone());
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
         internal void ClearCopyOriginCallResult(BoundExpression expression)
         {
             if (expression is null)
@@ -841,6 +896,48 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             _ = CopyOriginCallResults.Remove(expression);
+        }
+
+        internal void ClearNativePointerCallResult(BoundExpression expression)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            _ = NativePointerCallResults.Remove(expression);
+        }
+
+        internal void SetNativePointerCallResult(BoundExpression expression,
+            IReadOnlyDictionary<StorageProjection, NativePointerFieldValue> values)
+        {
+            if (expression is null || values is null || values.Count == 0)
+            {
+                throw Invalid();
+            }
+
+            NativePointerCallResults[expression] = values.ToDictionary(
+                static pair => pair.Key, static pair => pair.Value.Clone());
+        }
+
+        internal bool TryGetNativePointerCallResult(BoundExpression expression,
+            StorageProjection projection, out HashSet<ProvenanceAnchor> sources,
+            out bool mayBeUnknown)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+
+            if (NativePointerCallResults.TryGetValue(expression, out var values)
+                && values.TryGetValue(projection, out var value))
+            {
+                sources = [.. value.Sources];
+                mayBeUnknown = value.MayBeUnknown;
+                return true;
+            }
+            sources = [];
+            mayBeUnknown = true;
+            return false;
         }
 
         internal void SetCopyOriginCallResult(BoundExpression expression, CopyOriginValue value)
@@ -962,6 +1059,7 @@ public static partial class SemanticVerifier
                 }
             }
             changed |= MergeCopyOriginCallResults(other);
+            changed |= MergeNativePointerCallResults(other);
             return changed;
         }
 
@@ -2655,7 +2753,10 @@ public static partial class SemanticVerifier
         }
         foreach (var result in nativePointerReturns)
         {
-            if (!hasNativePointerFieldFlow
+            var hasPublishedCopyOriginSummary = result is BoundCall call
+                && (uint)call.Function < (uint)facts.CopyOriginSummaries.Length
+                && facts.CopyOriginSummaries[call.Function] is not null;
+            if (!hasNativePointerFieldFlow && !hasPublishedCopyOriginSummary
                 && NativePointerBackingOf(result, facts, program, ref remaining, 0).Count != 0)
             {
                 throw InvalidEffect(result.Span, "NativePointer");
@@ -2964,6 +3065,28 @@ public static partial class SemanticVerifier
                 projection = StorageProjection.WholeObject;
                 return IsInlineStructStorage(move.Type, program);
 
+            case BoundReceiverLoan loan:
+                ValidateCopyOriginVariable(loan.Variable, loan.Type, function);
+                variable = loan.Variable;
+                projection = StorageProjection.WholeObject;
+                return IsInlineStructStorage(loan.Type, program);
+
+            case BoundMutableReceiverLoan loan:
+                ValidateCopyOriginVariable(loan.Variable, loan.Type, function);
+                variable = loan.Variable;
+                projection = StorageProjection.WholeObject;
+                return IsInlineStructStorage(loan.Type, program);
+
+            case BoundFieldLoan loan when loan.Place is not null
+                && loan.Place.Type == loan.Type:
+                return TryGetNativePointerFieldPlace(loan.Place, function,
+                    program, out variable, out projection);
+
+            case BoundMutableFieldLoan loan when loan.Place is not null
+                && loan.Place.Type == loan.Type:
+                return TryGetNativePointerFieldPlace(loan.Place, function,
+                    program, out variable, out projection);
+
             case BoundFieldRead field:
                 if (field.Receiver is null
                     || !TryGetNativePointerFieldPlace(field.Receiver, function,
@@ -3096,6 +3219,9 @@ public static partial class SemanticVerifier
                 return NativePointerValueFactsOfExpression(unsafeExpression.Expression,
                     valueType, relativeProjection, facts, function, program,
                     ref remaining, depth + 1);
+            case BoundCall call when facts.TryGetNativePointerCallResult(call,
+                relativeProjection, out var callSources, out var callMayBeUnknown):
+                return (callSources, callMayBeUnknown);
             case BoundConditional conditional when CarriesNativePointer(valueType, program):
                 var (whenTrueSources, whenTrueMayBeUnknown) = NativePointerValueFactsOfExpression(conditional.WhenTrue,
                     valueType, relativeProjection, facts, function, program,
@@ -3134,6 +3260,28 @@ public static partial class SemanticVerifier
 
         return (new HashSet<ProvenanceAnchor>(NativePointerBackingOf(
                 expression, facts, program, ref remaining, depth + 1)), true);
+    }
+
+    private static Dictionary<StorageProjection, NativePointerFieldValue>
+        NativePointerFieldValueSnapshotOfExpression(BoundExpression expression,
+            PrimitiveType valueType, BackingDependencies facts, BoundFunction function,
+            BoundProgram program, ref int remaining, int depth)
+    {
+        var result = new Dictionary<StorageProjection, NativePointerFieldValue>();
+        foreach (var leaf in NativePointerFieldLeaves(valueType, program,
+            ref remaining, depth + 1))
+        {
+            Count(ref remaining, depth + 1);
+            var (sources, mayBeUnknown) = NativePointerValueFactsOfExpression(
+                expression, valueType, leaf.Projection, facts, function, program,
+                ref remaining, depth + 1);
+            if (!result.TryAdd(leaf.Projection,
+                new NativePointerFieldValue(sources, mayBeUnknown)))
+            {
+                throw Invalid(expression.Span);
+            }
+        }
+        return result;
     }
 
     private static CopyOriginFact CopyOriginOfExpression(
@@ -3652,6 +3800,114 @@ public static partial class SemanticVerifier
         return result;
     }
 
+    private static Dictionary<StorageProjection, NativePointerFieldValue>?
+        CreateNativePointerCallResult(
+            BoundCall call, BoundFunction target, BoundCopyOriginSummary? summary,
+            IReadOnlyDictionary<int, StagedCopyOriginInput> stagedInputs,
+            BackingDependencies facts, BoundFunction caller, BoundProgram program,
+            ref int remaining, int depth)
+    {
+        if (!CarriesNativePointer(call.Type, program) || summary is null)
+        {
+            return null;
+        }
+        ValidateCopyOriginSummary(target, summary, program);
+
+        var result = new Dictionary<StorageProjection, NativePointerFieldValue>();
+        foreach (var leaf in NativePointerFieldLeaves(call.Type, program,
+            ref remaining, depth + 1))
+        {
+            Count(ref remaining, depth + 1);
+            if (!result.TryAdd(leaf.Projection,
+                new NativePointerFieldValue(EmptyBackingSources, mayBeUnknown: true)))
+            {
+                throw Invalid(call.Span);
+            }
+        }
+
+        foreach (var fact in summary.Facts)
+        {
+            if (!TryResolveCopyOriginFieldPath(target.ReturnType,
+                    fact.DestinationPath, program, out var destinationType))
+            {
+                throw Invalid(call.Span);
+            }
+
+            var destinationPrefix = CopyOriginStorageProjection(fact.DestinationPath);
+            foreach (var leaf in NativePointerFieldLeaves(destinationType, program,
+                ref remaining, depth + 1))
+            {
+                Count(ref remaining, depth + 1);
+                var destinationProjection = StorageProjection.Combine(
+                    destinationPrefix, leaf.Projection);
+                var sources = new HashSet<ProvenanceAnchor>();
+                var mayBeUnknown = false;
+                var hasOrigin = false;
+                foreach (var origin in fact.Origins)
+                {
+                    hasOrigin = true;
+                    var parameterIndex = CopyOriginCallParameterIndex(target, origin);
+                    if (!stagedInputs.TryGetValue(parameterIndex, out var stagedInput)
+                        || stagedInput.SourceView != origin.SourceView
+                        || !TryGetCopyOriginSourceType(target, origin, program,
+                            out var sourceRootType)
+                        || !TryResolveCopyOriginFieldPath(sourceRootType,
+                            origin.SourcePath, program, out var sourceType)
+                        || sourceType != destinationType)
+                    {
+                        throw Invalid(call.Span);
+                    }
+
+                    var sourceProjection = StorageProjection.Combine(
+                        CopyOriginStorageProjection(origin.SourcePath),
+                        leaf.Projection);
+                    NativePointerFieldValue sourceValue;
+                    if (origin.SourceView == BoundCopyOriginSourceView.EntryValue)
+                    {
+                        if (stagedInput.NativePointerSnapshot is null
+                            || !stagedInput.NativePointerSnapshot.TryGetValue(
+                                sourceProjection, out sourceValue!))
+                        {
+                            mayBeUnknown = true;
+                            continue;
+                        }
+                    }
+                    else
+                    {
+                        var (sourceValueSources, sourceValueMayBeUnknown) =
+                            NativePointerValueFactsOfExpression(stagedInput.Argument,
+                                stagedInput.Argument.Type, sourceProjection, facts,
+                                caller, program, ref remaining, depth + 1);
+                        sourceValue = new NativePointerFieldValue(
+                            sourceValueSources, sourceValueMayBeUnknown);
+                    }
+
+                    sources.UnionWith(sourceValue.Sources);
+                    mayBeUnknown |= sourceValue.MayBeUnknown;
+                }
+
+                if (!hasOrigin || !result.ContainsKey(destinationProjection))
+                {
+                    throw Invalid(call.Span);
+                }
+                result[destinationProjection] = new NativePointerFieldValue(
+                    sources, mayBeUnknown);
+            }
+        }
+        return result;
+    }
+
+    private static StorageProjection CopyOriginStorageProjection(
+        BoundCopyOriginFieldPath path)
+    {
+        var projection = StorageProjection.WholeObject;
+        foreach (var step in path.Steps)
+        {
+            projection = projection.AppendField(step.OwnerType, step.FieldOrdinal);
+        }
+        return projection;
+    }
+
     private static void ValidateCopyOriginSummary(
         BoundFunction function, BoundCopyOriginSummary summary, BoundProgram program)
     {
@@ -4083,6 +4339,11 @@ public static partial class SemanticVerifier
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerBackingOf(unsafeExpression.Expression, facts, program, ref remaining, depth + 1);
             case BoundCall call when CarriesNativePointer(call.Type, program):
+                if (facts.TryGetNativePointerCallResult(call,
+                    StorageProjection.WholeObject, out var resultSources, out _))
+                {
+                    return resultSources;
+                }
                 if (call.Arguments.IsDefault
                     || (uint)call.Function >= (uint)program.Functions.Length)
                 {
@@ -4182,6 +4443,11 @@ public static partial class SemanticVerifier
                 return NativePointerMayBeUnknownOf(unsafeExpression.Expression, facts,
                     program, ref remaining, depth + 1);
             case BoundCall call when CarriesNativePointer(call.Type, program):
+                if (facts.TryGetNativePointerCallResult(call,
+                    StorageProjection.WholeObject, out _, out var resultMayBeUnknown))
+                {
+                    return resultMayBeUnknown;
+                }
                 return true;
             case BoundIndirectCall indirectCall when CarriesNativePointer(indirectCall.Type, program):
                 return true;

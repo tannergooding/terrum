@@ -357,6 +357,81 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
+    public void NativePointerFieldProvenanceFlowsThroughCopyOriginCallSummary()
+    {
+        const string source = """
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe PointerPair(ptr<int32> left, ptr<int32> right) {
+                    Left = left;
+                    Right = right;
+                }
+            }
+
+            unsafe ptr<int32> Select(ptr<int32> safe) {
+                int32 local = 1;
+                unsafe {
+                    PointerPair pair = new PointerPair(safe, &local);
+                    PointerPair copy = Identity(pair);
+                    return copy.Left;
+                }
+            }
+
+            unsafe PointerPair Identity(PointerPair value) { return value; }
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase("SelectLeft", false)]
+    [TestCase("SelectRight", true)]
+    public void NativePointerFieldProvenanceFlowsThroughBorrowedReceiverSummary(
+        string selectedMethod, bool shouldReject)
+    {
+        var source = $$"""
+            struct PointerPair {
+                public mut ptr<int32> Left;
+                public mut ptr<int32> Right;
+                public unsafe PointerPair(ptr<int32> left, ptr<int32> right) {
+                    Left = left;
+                    Right = right;
+                }
+                public unsafe ptr<int32> SelectLeft() { return Left; }
+                public unsafe ptr<int32> SelectRight() { return Right; }
+            }
+
+            unsafe ptr<int32> Select(ptr<int32> safe) {
+                int32 local = 1;
+                unsafe {
+                    PointerPair pair = new PointerPair(safe, &local);
+                    return pair.{{selectedMethod}}();
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        if (shouldReject)
+        {
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3016"
+                && diagnostic.Message.Contains("NativePointer", StringComparison.Ordinal)), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            Assert.That(compilation.Program, Is.Null);
+        }
+        else
+        {
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+        }
+    }
+
+    [Test]
     public void NativePointerFieldReplacementPreservesEarlierDescriptorCopies()
     {
         const string source = """
