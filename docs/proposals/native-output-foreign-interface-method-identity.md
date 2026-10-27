@@ -484,12 +484,12 @@ dispatch rule and standard record candidate are concrete**. Their formal
 approval and registry/catalog integration remain outstanding; the candidate
 number above is not assigned by this document.
 
-The genuinely unresolved adjacent format decision is the **complete private
-interface identity representation and its exact composed schema/revision**.
-It must be selected by the private-persistence integration before that path
-is enabled; this document deliberately does not pretend the numeric vtable
-record can carry it. This does not block review of the selected source and
-standard-record direction.
+The adjacent private-persistence decision is specified, still unapproved, by
+[Private persistence of foreign-interface method identity](native-output-foreign-interface-private-persistence.md).
+It selects candidate 96 as the exact candidate-95 composition plus private
+nominal/interface/member identity and typed call-target records. Implementation
+still depends on the complete base revisions and the outer-3 foreign-aware
+draft; this proposal does not claim that path is implemented.
 
 Inheritance/adjustments, other target mappings, stored checked interface
 values, runtime interface authentication, IID protocols, COM/resource
