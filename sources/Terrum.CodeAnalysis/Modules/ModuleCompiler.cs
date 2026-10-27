@@ -4042,6 +4042,9 @@ public static partial class ModuleCompiler
                     var candidate = source with {
                         ReturnType = MapType(source.ReturnType),
                         ParameterTypes = [.. source.ParameterTypes.Select(MapType)],
+                        NativeParameters = [.. source.NativeParameters.Select(parameter => parameter with {
+                            PointeeType = MapType(parameter.PointeeType),
+                        })],
                     };
                     var mergedIndex = -1;
                     for (var existing = 0; existing < combined.Count; existing++)

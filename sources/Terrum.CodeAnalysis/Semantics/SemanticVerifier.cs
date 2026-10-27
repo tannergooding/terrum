@@ -113,6 +113,12 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "NativePointer");
         }
+        if (!NativeFunctionPointerContract.IsValidNativeImportContractTable(
+            program.NativeFunctionPointerSignatures, program.NativePointerTypes,
+            program.Structures))
+        {
+            throw InvalidEffect(default, "NativeImport");
+        }
         VerifyNativePointerUnsafeScopes(program);
         var inspectFunctionManagedNodes = program.Classes.IsDefaultOrEmpty;
         var usesManagedFunctionNodes = false;
@@ -6368,6 +6374,10 @@ public static partial class SemanticVerifier
         }
 
         var signature = program.NativeFunctionPointerSignatures[NativeFunctionPointerTypes.Index(call.Target.Type)];
+        if (!signature.OutputStates.IsEmpty || !signature.NativeParameters.IsEmpty)
+        {
+            throw InvalidEffect(call.Span, "NativeImport");
+        }
         if (call.Type != signature.ReturnType || call.Arguments.Length != signature.ParameterTypes.Length)
         {
             throw Invalid();

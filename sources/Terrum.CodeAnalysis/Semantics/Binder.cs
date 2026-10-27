@@ -7615,6 +7615,15 @@ internal sealed partial class Binder
         }
 
         var signature = _nativeFunctionPointerSignatures[typeIndex];
+        if (!signature.OutputStates.IsEmpty
+            || !signature.NativeParameters.IsEmpty)
+        {
+            Report("TRM3030",
+                "Indirect calls with NativeOutput or NativeParameter contracts require their complete call protocol.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+
         var target = BindExpression(callee, functionPointerType);
         var argumentList = (SyntaxNode)node.Children[1];
         var argumentNodes = argumentList.Children.OfType<SyntaxNode>().ToArray();

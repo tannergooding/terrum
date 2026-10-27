@@ -35,6 +35,7 @@ internal sealed record NativeFunctionPointerSignatureDefinition(
     internal ImmutableArray<NativeFunctionPointerSelector> Selectors { get; init; } = [];
     internal ImmutableArray<NativeFunctionPointerOutputState> OutputStates { get; init; } = [];
     internal ImmutableArray<NativeFunctionPointerDependency> Dependencies { get; init; } = [];
+    internal ImmutableArray<DirectNativeParameter> NativeParameters { get; init; } = [];
 }
 
 internal static class NativeFunctionPointerTypes
@@ -74,6 +75,59 @@ internal static class NativeFunctionPointerContract
         NativeFunctionPointerTypes.IsType(type)
             && (uint)NativeFunctionPointerTypes.Index(type) < (uint)signatures.Length;
 
+    internal static bool IsValidNativeImportContractTable(
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        ImmutableArray<BoundStruct> structures)
+    {
+        if (signatures.IsDefault || pointerTypes.IsDefault || structures.IsDefault)
+        {
+            return false;
+        }
+
+        foreach (var signature in signatures)
+        {
+            foreach (var formal in signature.OutputStates
+                .Select(static state => state.FormalOrdinal).Distinct())
+            {
+                if (formal >= (uint)signature.ParameterTypes.Length)
+                {
+                    return false;
+                }
+
+                var parameterType = signature.ParameterTypes[checked((int)formal)];
+                if (!NativePointerTypeContract.IsValidType(parameterType, pointerTypes))
+                {
+                    return false;
+                }
+
+                var pointer = pointerTypes[NativePointerTypes.Index(parameterType)];
+                if (!pointer.IsWritable
+                    || !DirectNativeImportContract.IsNativeOutputCellType(
+                        pointer.PointeeType, structures, signatures, pointerTypes))
+                {
+                    return false;
+                }
+            }
+
+            foreach (var parameter in signature.NativeParameters)
+            {
+                if (!DirectNativeImportContract.IsInputPointee(
+                    parameter.PointeeType, structures)
+                    || (NativePointerTypes.IsType(parameter.PointeeType)
+                        && !NativePointerTypeContract.IsValidType(
+                            parameter.PointeeType, pointerTypes))
+                    || (NativeFunctionPointerTypes.IsType(parameter.PointeeType)
+                        && !IsValidType(parameter.PointeeType, signatures)))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     internal static bool IsValidSignature(NativeFunctionPointerSignatureDefinition signature,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> signatures)
     {
@@ -83,14 +137,16 @@ internal static class NativeFunctionPointerContract
             || signature.Selectors.IsDefault
             || signature.OutputStates.IsDefault
             || signature.Dependencies.IsDefault
+            || signature.NativeParameters.IsDefault
             || !IsSupportedReturnType(signature.ReturnType, signatures))
         {
             return false;
         }
 
         if (!ValidSelectors(signature)
-            || !signature.OutputStates.IsEmpty
-            || !ValidDependencies(signature))
+            || !ValidOutputStates(signature)
+            || !ValidDependencies(signature)
+            || !ValidNativeParameterContracts(signature))
         {
             return false;
         }
@@ -102,6 +158,109 @@ internal static class NativeFunctionPointerContract
                 return false;
             }
         }
+        return true;
+    }
+
+    private static bool ValidOutputStates(
+        NativeFunctionPointerSignatureDefinition signature)
+    {
+        if (signature.OutputStates.IsEmpty)
+        {
+            return true;
+        }
+        if (signature.CallingConvention == NativeCallingConvention.Native
+            || signature.OutputStates.Length % 2 != 0)
+        {
+            return false;
+        }
+
+        var selectorsByOrdinal = signature.Selectors.ToDictionary(
+            static selector => selector.PhaseLocalOrdinal);
+        var statesByFormal = new Dictionary<uint, List<NativeFunctionPointerOutputState>>();
+        foreach (var outputState in signature.OutputStates)
+        {
+            if (outputState.FormalOrdinal >= (uint)signature.ParameterTypes.Length
+                || outputState.State is not (0 or 1)
+                || !selectorsByOrdinal.ContainsKey(outputState.SelectorOrdinal))
+            {
+                return false;
+            }
+
+            if (!statesByFormal.TryGetValue(outputState.FormalOrdinal, out var states))
+            {
+                states = [];
+                statesByFormal.Add(outputState.FormalOrdinal, states);
+            }
+            if (states.Any(state => state.SelectorOrdinal == outputState.SelectorOrdinal))
+            {
+                return false;
+            }
+            states.Add(outputState);
+        }
+
+        foreach (var states in statesByFormal.Values)
+        {
+            if (states.Count != 2 || states[0].State == states[1].State
+                || !selectorsByOrdinal.TryGetValue(states[0].SelectorOrdinal,
+                    out var firstSelector)
+                || !selectorsByOrdinal.TryGetValue(states[1].SelectorOrdinal,
+                    out var secondSelector)
+                || firstSelector.PhaseTag != 3 || secondSelector.PhaseTag != 3)
+            {
+                return false;
+            }
+
+            var pair = (firstSelector.NodeKind, states[0].State,
+                secondSelector.NodeKind, states[1].State);
+            if (pair is not ((3, 1, 4, 0) or (4, 0, 3, 1)
+                or (5, 1, 6, 0) or (6, 0, 5, 1)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ValidNativeParameterContracts(
+        NativeFunctionPointerSignatureDefinition signature)
+    {
+        if (signature.NativeParameters.IsEmpty)
+        {
+            return true;
+        }
+        if (signature.CallingConvention == NativeCallingConvention.Native)
+        {
+            return false;
+        }
+
+        var claimedParameters = new HashSet<int>(signature.OutputStates
+            .Select(static outputState => checked((int)outputState.FormalOrdinal)));
+        var previousParameter = -1;
+        foreach (var parameter in signature.NativeParameters)
+        {
+            if (parameter is null
+                || parameter.ParameterIndex <= previousParameter
+                || parameter.ParameterIndex < 0
+                || parameter.ParameterIndex >= signature.ParameterTypes.Length
+                || claimedParameters.Contains(parameter.ParameterIndex)
+                || signature.ParameterTypes[parameter.ParameterIndex]
+                    != PrimitiveType.NativeRawPointer
+                || parameter.Access is not (NativeParameterAccess.Read
+                    or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
+                || parameter.Retention != NativeParameterRetention.NoEscape
+                || parameter.Extent < 0
+                || (parameter.PointeeType == PrimitiveType.Void
+                    && (parameter.Access != NativeParameterAccess.Read
+                        || parameter.Extent != 0)))
+            {
+                return false;
+            }
+
+            _ = claimedParameters.Add(parameter.ParameterIndex);
+            previousParameter = parameter.ParameterIndex;
+        }
+
         return true;
     }
 
@@ -149,7 +308,11 @@ internal static class NativeFunctionPointerContract
         if (!signature.Selectors.IsEmpty || !signature.OutputStates.IsEmpty
             || !TryCreateDependencies(function.DependencyContracts,
                 out var dependencies)
-            || !SameDependencies(signature.Dependencies, dependencies))
+            || !SameDependencies(signature.Dependencies, dependencies)
+            || !function.NativeOutputContracts.IsEmpty
+            || !SameNativeParameterContracts(signature.NativeParameters,
+                function.DirectNativeImport is DirectNativeImport import
+                    ? import.Parameters : []))
         {
             return false;
         }
@@ -345,12 +508,15 @@ internal static class NativeFunctionPointerContract
             && left.ParameterTypes.AsSpan().SequenceEqual(right.ParameterTypes.AsSpan())
             && left.Selectors.ToHashSet().SetEquals(right.Selectors)
             && left.OutputStates.ToHashSet().SetEquals(right.OutputStates)
-            && SameDependencies(left.Dependencies, right.Dependencies);
+            && SameDependencies(left.Dependencies, right.Dependencies)
+            && SameNativeParameterContracts(left.NativeParameters,
+                right.NativeParameters);
 
     internal static bool CanPersistRevision92(
         NativeFunctionPointerSignatureDefinition signature)
         => signature.EffectsMask == 0 && signature.Selectors.IsEmpty
-            && signature.OutputStates.IsEmpty && signature.Dependencies.IsEmpty;
+            && signature.OutputStates.IsEmpty && signature.Dependencies.IsEmpty
+            && signature.NativeParameters.IsDefaultOrEmpty;
 
     private static bool ValidSelectors(NativeFunctionPointerSignatureDefinition signature)
     {
@@ -382,8 +548,32 @@ internal static class NativeFunctionPointerContract
     }
 
     private static bool ValidDependencies(NativeFunctionPointerSignatureDefinition signature)
-        => ValidDependencyRows(signature.Dependencies,
-            signature.ParameterTypes.Length);
+    {
+        var rows = signature.Dependencies;
+        if (!ValidDependencyRows(rows, signature.ParameterTypes.Length))
+        {
+            return false;
+        }
+
+        var outputFormals = signature.OutputStates
+            .Select(static outputState => outputState.FormalOrdinal).ToHashSet();
+        foreach (var dependency in rows)
+        {
+            if (dependency.DestinationKind == 2
+                && (!outputFormals.Contains(dependency.DestinationOrdinal)
+                    || dependency.Phase != 1
+                    || (dependency.SourceKind == 1
+                        && outputFormals.Contains(dependency.SourceOrdinal))))
+            {
+                return false;
+            }
+        }
+
+        return outputFormals.All(formal => rows.Any(dependency =>
+            dependency.DestinationKind == 2
+            && dependency.DestinationOrdinal == formal
+            && dependency.Phase == 1));
+    }
 
     private static bool ValidDependencyRows(
         ImmutableArray<NativeFunctionPointerDependency> rows, int parameterCount)
@@ -399,7 +589,7 @@ internal static class NativeFunctionPointerContract
             var destinationValid = dependency.DestinationKind switch
             {
                 1 => dependency.DestinationOrdinal == 0,
-                3 => dependency.DestinationOrdinal < (uint)parameterCount,
+                2 or 3 => dependency.DestinationOrdinal < (uint)parameterCount,
                 _ => false,
             };
             var sourceValid = dependency.SourceKind switch
@@ -436,6 +626,12 @@ internal static class NativeFunctionPointerContract
         ImmutableArray<NativeFunctionPointerDependency> left,
         ImmutableArray<NativeFunctionPointerDependency> right)
         => left.Length == right.Length && left.ToHashSet().SetEquals(right);
+
+    private static bool SameNativeParameterContracts(
+        ImmutableArray<DirectNativeParameter> left,
+        ImmutableArray<DirectNativeParameter> right)
+        => !left.IsDefault && !right.IsDefault
+            && left.AsSpan().SequenceEqual(right.AsSpan());
 
     private static bool DependenciesSatisfy(
         ImmutableArray<NativeFunctionPointerDependency> actual,
@@ -522,6 +718,8 @@ internal static class NativeFunctionPointerContract
             && actual.OutputStates.ToHashSet().SetEquals(expected.OutputStates)
             && DependenciesSatisfy(actual.Dependencies, expected.Dependencies,
                 actual.ParameterTypes.Length)
+            && SameNativeParameterContracts(actual.NativeParameters,
+                expected.NativeParameters)
             && ((expected.EffectsMask & 2) == 0
                 || (actual.EffectsMask & 2) != 0);
     }
@@ -542,14 +740,11 @@ internal static class NativeFunctionPointerContract
         if (function.DirectNativeImport is not DirectNativeImport import
             || !function.IsExternal || !function.RequiresUnsafeCaller
             || import.CallingConvention == NativeCallingConvention.Native
-            || import.Outputs.IsDefault || !import.Outputs.IsEmpty
-            || import.Parameters.IsDefault || !import.Parameters.IsEmpty
-            || function.NativeOutputRole is not null
+            || import.Outputs.IsDefault || import.Parameters.IsDefault
             || function.NativeOutputContracts.IsDefault
-            || !function.NativeOutputContracts.IsEmpty
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
-            || !TryCreateDependencies(function.DependencyContracts,
+            || !TryCreateNativeImportDependencies(function,
                 out var dependencies))
         {
             return false;
@@ -572,7 +767,10 @@ internal static class NativeFunctionPointerContract
             parameterTypes.MoveToImmutable()) {
             EffectsMask = GetDeclaredEffectsMask(
                 function.DoesNotReturn, function.DeclaredRequiresUnsafeCaller),
+            Selectors = CreateNativeOutputSelectors(function.NativeOutputContracts),
+            OutputStates = CreateNativeOutputStates(function.NativeOutputContracts),
             Dependencies = dependencies,
+            NativeParameters = import.Parameters,
         };
         if (!IsValidSignature(candidate, signatures))
         {
@@ -581,6 +779,131 @@ internal static class NativeFunctionPointerContract
 
         signature = candidate;
         return true;
+    }
+
+    private static bool TryCreateNativeImportDependencies(BoundFunction function,
+        out ImmutableArray<NativeFunctionPointerDependency> dependencies)
+    {
+        dependencies = [];
+        if (!TryCreateDependencies(function.DependencyContracts,
+            out var allDependencies))
+        {
+            return false;
+        }
+
+        var outputDependencies = ImmutableArray.CreateBuilder<NativeFunctionPointerDependency>();
+        var outputFormals = new HashSet<int>();
+        foreach (var output in function.NativeOutputContracts)
+        {
+            if (output is null || output.FormalOrdinal < 0
+                || !outputFormals.Add(output.FormalOrdinal)
+                || output.Dependencies.IsDefaultOrEmpty)
+            {
+                return false;
+            }
+
+            foreach (var dependency in output.Dependencies)
+            {
+                if (dependency.DestinationKind != 2
+                    || dependency.DestinationOrdinal != output.FormalOrdinal
+                    || dependency.Phase != NativeOutputPublicationPhase.NormalCompletion)
+                {
+                    return false;
+                }
+
+                var (sourceKind, relationship) = dependency.SourceKind switch
+                {
+                    NativeOutputDependencySourceKind.Empty
+                        when dependency.Relationship == NativeOutputDependencyRelationship.Empty
+                            && dependency.SourceOrdinal == 0 => ((byte)0, (byte)0),
+                    NativeOutputDependencySourceKind.Formal
+                        when dependency.SourceOrdinal >= 0
+                            && dependency.Relationship == NativeOutputDependencyRelationship.Forward
+                            => ((byte)1, (byte)2),
+                    NativeOutputDependencySourceKind.Formal
+                        when dependency.SourceOrdinal >= 0
+                            && dependency.Relationship == NativeOutputDependencyRelationship.Union
+                            => ((byte)1, (byte)3),
+                    _ => ((byte)byte.MaxValue, (byte)byte.MaxValue),
+                };
+                if (sourceKind == byte.MaxValue
+                    || (sourceKind == 1
+                        && dependency.SourceOrdinal >= function.ParameterCount))
+                {
+                    return false;
+                }
+
+                outputDependencies.Add(new NativeFunctionPointerDependency(
+                    2, sourceKind, relationship, 1,
+                    checked((uint)dependency.DestinationOrdinal),
+                    checked((uint)dependency.SourceOrdinal)));
+            }
+        }
+
+        if (allDependencies.Any(dependency => dependency.DestinationKind == 2
+            && (dependency.DestinationOrdinal >= (uint)function.ParameterCount
+                || !outputFormals.Contains(checked((int)dependency.DestinationOrdinal)))))
+        {
+            return false;
+        }
+
+        foreach (var formal in outputFormals)
+        {
+            var actualRows = allDependencies.Where(dependency =>
+                dependency.DestinationKind == 2
+                && dependency.DestinationOrdinal == (uint)formal).ToHashSet();
+            var expectedRows = outputDependencies.Where(dependency =>
+                dependency.DestinationOrdinal == (uint)formal).ToHashSet();
+            if (actualRows.Count != 0 && !actualRows.SetEquals(expectedRows))
+            {
+                return false;
+            }
+        }
+
+        var combined = allDependencies.Where(static dependency =>
+                dependency.DestinationKind != 2)
+            .Concat(outputDependencies)
+            .OrderBy(static dependency => dependency.DestinationKind)
+            .ThenBy(static dependency => dependency.DestinationOrdinal)
+            .ThenBy(static dependency => dependency.Phase)
+            .ThenBy(static dependency => dependency.SourceKind)
+            .ThenBy(static dependency => dependency.SourceOrdinal);
+        dependencies = [.. combined];
+        return true;
+    }
+
+    private static ImmutableArray<NativeFunctionPointerSelector> CreateNativeOutputSelectors(
+        ImmutableArray<NativeOutputContract> outputs)
+    {
+        var selectors = ImmutableArray.CreateBuilder<NativeFunctionPointerSelector>(
+            checked(outputs.Length * 2));
+        uint ordinal = 0;
+        foreach (var output in outputs)
+        {
+            selectors.Add(new NativeFunctionPointerSelector(3, ordinal++,
+                (byte)output.SuccessSelector));
+            selectors.Add(new NativeFunctionPointerSelector(3, ordinal++,
+                (byte)output.ComplementSelector));
+        }
+        return selectors.MoveToImmutable();
+    }
+
+    private static ImmutableArray<NativeFunctionPointerOutputState> CreateNativeOutputStates(
+        ImmutableArray<NativeOutputContract> outputs)
+    {
+        var states = ImmutableArray.CreateBuilder<NativeFunctionPointerOutputState>(
+            checked(outputs.Length * 2));
+        uint selectorOrdinal = 0;
+        foreach (var output in outputs)
+        {
+            states.Add(new NativeFunctionPointerOutputState(
+                checked((uint)output.FormalOrdinal), selectorOrdinal++,
+                (byte)output.SuccessState));
+            states.Add(new NativeFunctionPointerOutputState(
+                checked((uint)output.FormalOrdinal), selectorOrdinal++,
+                (byte)output.ComplementState));
+        }
+        return states.MoveToImmutable();
     }
 
     internal static bool TryGetAddressableFunctionType(BoundFunction function,
@@ -650,6 +973,7 @@ internal static class NativeFunctionPointerContract
             || signature.EffectsMask != GetDeclaredEffectsMask(
                 function.DoesNotReturn, function.DeclaredRequiresUnsafeCaller)
             || !signature.Selectors.IsEmpty || !signature.OutputStates.IsEmpty
+            || !signature.NativeParameters.IsEmpty
             || !TryCreateDependencies(function.DependencyContracts, out var dependencies)
             || !SameDependencies(signature.Dependencies, dependencies))
         {
@@ -704,6 +1028,14 @@ internal static class NativeFunctionPointerContract
         if (signature is null || !IsKnownConvention(signature.CallingConvention)
             || (signature.EffectsMask & ~6u) != 0
             || signature.ParameterTypes.IsDefault
+            || signature.Selectors.IsDefault
+            || signature.OutputStates.IsDefault
+            || signature.Dependencies.IsDefault
+            || signature.NativeParameters.IsDefault
+            || !ValidSelectors(signature)
+            || !ValidOutputStates(signature)
+            || !ValidDependencies(signature)
+            || !ValidNativeParameterContracts(signature)
             || !IsValidType(signature.ReturnType, signatures, state, allowVoid: true, depth: depth + 1))
         {
             return false;
@@ -711,6 +1043,14 @@ internal static class NativeFunctionPointerContract
         foreach (var parameterType in signature.ParameterTypes)
         {
             if (!IsValidType(parameterType, signatures, state, allowVoid: false, depth: depth + 1))
+            {
+                return false;
+            }
+        }
+        foreach (var parameter in signature.NativeParameters)
+        {
+            if (!IsValidType(parameter.PointeeType, signatures, state,
+                allowVoid: true, depth: depth + 1))
             {
                 return false;
             }

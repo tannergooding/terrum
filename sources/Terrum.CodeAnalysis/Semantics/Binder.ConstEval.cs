@@ -423,6 +423,18 @@ internal sealed partial class Binder
                 }
                 parameterTypes.Add(mappedParameterType);
             }
+            var nativeParameters = ImmutableArray.CreateBuilder<DirectNativeParameter>(
+                source.NativeParameters.Length);
+            foreach (var parameter in source.NativeParameters)
+            {
+                if (parameter is null || !TryMapType(parameter.PointeeType,
+                    out var mappedPointeeType))
+                {
+                    invalidTypeReference = true;
+                    return false;
+                }
+                nativeParameters.Add(parameter with { PointeeType = mappedPointeeType });
+            }
 
             var convention = resolvedConventions.TryGetValue(index, out var resolvedConvention)
                 ? resolvedConvention : source.CallingConvention;
@@ -435,6 +447,7 @@ internal sealed partial class Binder
                 CallingConvention = convention,
                 ReturnType = returnType,
                 ParameterTypes = parameterTypes.MoveToImmutable(),
+                NativeParameters = nativeParameters.MoveToImmutable(),
             };
             var normalizedIndex = normalizedFunctionPointers.FindIndex(existing =>
                 NativeFunctionPointerContract.AreEquivalent(existing, normalized));

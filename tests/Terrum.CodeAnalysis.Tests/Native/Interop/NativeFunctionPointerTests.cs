@@ -323,6 +323,148 @@ public sealed class NativeFunctionPointerTests
     }
 
     [Test]
+    public void NativeImportPointerIdentityRetainsOutputAndParameterContracts()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("synthetic.dll", "ReadAndProbe")]
+            [param(result): DependsOn(nameof(source))]
+            [param(result): ForwardsBacking(nameof(source))]
+            [Terrum.Interop.NativeParameter(3, Read, NoEscape, 4)]
+            extern unsafe int32 ReadAndProbe(
+                ptr<int32> source,
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<ptr<int32>> result,
+                ptr<uint32> values);
+
+            int32 Address() {
+                unsafe {
+                    var readAndProbe = &ReadAndProbe;
+                    return 0;
+                }
+            }
+            """), reference, BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var imported = program.Functions.Single(static function =>
+            function.Name == "ReadAndProbe");
+        var addressFunction = program.Functions.Single(static function =>
+            function.Name == "Address");
+        var address = new List<BoundNativeFunctionAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(addressFunction.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFunctionAddress functionAddress)
+                {
+                    address.Add(functionAddress);
+                }
+            }), Is.True);
+
+        var functionPointer = address.Single();
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(functionPointer.Type)];
+        Assert.That(functionPointer.Function,
+            Is.EqualTo(program.Functions.IndexOf(imported)));
+        Assert.That(signature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Unmanaged));
+        Assert.That(signature.Selectors, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerSelector(3, 0,
+                (byte)NativeOutputSelector.NonZero),
+            new NativeFunctionPointerSelector(3, 1,
+                (byte)NativeOutputSelector.Zero),
+        }));
+        Assert.That(signature.OutputStates, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerOutputState(1, 0,
+                (byte)NativeOutputState.Live),
+            new NativeFunctionPointerOutputState(1, 1,
+                (byte)NativeOutputState.Vacant),
+        }));
+        Assert.That(signature.Dependencies, Is.EqualTo(new[]
+        {
+            new NativeFunctionPointerDependency(2, 1, 2, 1, 1, 0),
+        }));
+        Assert.That(signature.NativeParameters,
+            Is.EqualTo(new[]
+            {
+                new DirectNativeParameter(2, PrimitiveType.UInt32,
+                    NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 4),
+            }));
+        Assert.That(NativeFunctionPointerContract.MatchesAddressableFunction(
+            imported, functionPointer.Type, program.NativeFunctionPointerSignatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.CanPersistRevision92(signature), Is.False);
+    }
+
+    [Test]
+    public void NativeImportPointerTypeComparisonPreservesRawContracts()
+    {
+        var readParameter = new DirectNativeParameter(1, PrimitiveType.UInt32,
+            NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 4);
+        var signature = new NativeFunctionPointerSignatureDefinition(
+            NativeCallingConvention.Unmanaged, PrimitiveType.Int32,
+            [NativePointerTypes.Type(0), PrimitiveType.NativeRawPointer]) {
+            Selectors =
+            [
+                new NativeFunctionPointerSelector(3, 0,
+                    (byte)NativeOutputSelector.NonZero),
+                new NativeFunctionPointerSelector(3, 1,
+                    (byte)NativeOutputSelector.Zero),
+            ],
+            OutputStates =
+            [
+                new NativeFunctionPointerOutputState(0, 0,
+                    (byte)NativeOutputState.Live),
+                new NativeFunctionPointerOutputState(0, 1,
+                    (byte)NativeOutputState.Vacant),
+            ],
+            Dependencies = [new NativeFunctionPointerDependency(2, 0, 0, 1, 0, 0)],
+            NativeParameters = [readParameter],
+        };
+        var noOutput = signature with {
+            Selectors = [],
+            OutputStates = [],
+            Dependencies = [],
+        };
+        var differentOutput = signature with {
+            Selectors =
+            [
+                new NativeFunctionPointerSelector(3, 0,
+                    (byte)NativeOutputSelector.NonNegative),
+                new NativeFunctionPointerSelector(3, 1,
+                    (byte)NativeOutputSelector.Negative),
+            ],
+        };
+        var writableParameter = signature with {
+            NativeParameters = [readParameter with {
+                Access = NativeParameterAccess.ReadWrite,
+            }],
+        };
+
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(signature, [signature]),
+            Is.True);
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(signature with {
+            OutputStates = [signature.OutputStates[0]],
+        }, [signature]), Is.False);
+        Assert.That(NativeFunctionPointerContract.IsValidSignature(signature with {
+            Dependencies = [],
+        }, [signature]), Is.False);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(signature, noOutput),
+            Is.False);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(signature, differentOutput),
+            Is.False);
+        Assert.That(NativeFunctionPointerContract.AreEquivalent(signature, writableParameter),
+            Is.False);
+        Assert.That(NativeFunctionPointerContract.CanProject(
+            NativeFunctionPointerTypes.Type(0), NativeFunctionPointerTypes.Type(1),
+            [signature, noOutput]), Is.False);
+        Assert.That(NativeFunctionPointerContract.CanPersistRevision92(signature), Is.False);
+    }
+
+    [Test]
     public void NativeFunctionAddressSurvivesPrivateModuleProducerConsumerRoundTrip()
     {
         var providerCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(NativeCallbackProvider));
