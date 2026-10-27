@@ -362,7 +362,7 @@ public readonly ref struct TrRmTypeSpecTableReader
             throw InvalidType();
         }
 
-        return Read(bytes, 6 + ordinal * sizeof(uint));
+        return Read(bytes, 6 + (ordinal * sizeof(uint)));
     }
 
     internal bool ContainsNativeFunctionPointerValue(uint typeSpecRef,
@@ -653,11 +653,14 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         static long FamilyIdentity(byte qualifiers, byte familyCode, byte argumentCode)
-            => TypeIdentityBase + 0x50000 + ((long)qualifiers << 16)
+        {
+            return TypeIdentityBase + 0x50000 + ((long)qualifiers << 16)
                 + ((long)familyCode << 8) + argumentCode;
+        }
 
         static long TypeIdentity(TrRmTypeSpecRefInfo reference)
-            => reference.Form switch
+        {
+            return reference.Form switch
             {
                 0x01 when reference.TypeCode < 0x80
                     => AtomicIdentity(reference.TypeCode),
@@ -666,6 +669,7 @@ public readonly ref struct TrRmTypeSpecTableReader
                 0x0F => TypeIdentityBase + 0x40000,
                 _ => 0,
             };
+        }
     }
 
     private void Validate(int row)
@@ -839,7 +843,7 @@ public readonly ref struct TrRmTypeSpecTableReader
         return count;
     }
 
-    private void ValidateTypedReference(ReadOnlySpan<byte> bytes, int tableCount)
+    private static void ValidateTypedReference(ReadOnlySpan<byte> bytes, int tableCount)
     {
         RequireLength(bytes, 6);
         var reference = Read(bytes, 2);
@@ -875,7 +879,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     }
 
     private static bool IsAssignedInlineFamily(byte familyCode)
-        => familyCode is >= 0x80 and <= 0x84 or 0x8A or >= 0x8B and <= 0x8F;
+        => familyCode is (>= 0x80 and <= 0x84) or 0x8A or (>= 0x8B and <= 0x8F);
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;

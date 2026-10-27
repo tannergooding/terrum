@@ -72,13 +72,14 @@ public static class TrRmTypeSpecTableWriter
                 nameof(argumentReferences));
         }
 
-        var bytes = new byte[checked(6 + argumentReferences.Length * sizeof(uint))];
+        var bytes = new byte[checked(
+            6 + (argumentReferences.Length * sizeof(uint)))];
         bytes[0] = 0x05;
         bytes[1] = qualifiers;
         Write(bytes, 2, genericTypeSpec);
         for (var index = 0; index < argumentReferences.Length; index++)
         {
-            Write(bytes, 6 + index * sizeof(uint), argumentReferences[index]);
+            Write(bytes, 6 + (index * sizeof(uint)), argumentReferences[index]);
         }
 
         return bytes;
