@@ -173,7 +173,8 @@ public static class TrRmStructuralMetadataValidator
 
         internal void ValidateRegisterBodyMapsForMethod(int methodDefRow)
         {
-            if (Schema != TrRmArtifactSchema.Standard
+            if (Schema is not (TrRmArtifactSchema.Standard
+                    or TrRmArtifactSchema.ForeignInvocationDraft)
                 || methodDefRow <= 0 || methodDefRow > Methods.Count)
             {
                 throw InvalidMetadata();
@@ -415,6 +416,11 @@ public static class TrRmStructuralMetadataValidator
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
             copyOriginDraft: true);
 
+    internal static ValidatedExecutionTables ValidateForeignInvocationDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationDraft: true);
+
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
         => _ = ValidateCore(new TrRmArtifactIndex(artifact,
                 TrRmArtifactSchema.Development), BodyInspection.CompactLinear,
@@ -647,12 +653,15 @@ public static class TrRmStructuralMetadataValidator
 
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
         BodyInspection inspection, bool developmentProfile,
-        bool copyOriginDraft = false)
+        bool copyOriginDraft = false, bool foreignInvocationDraft = false)
     {
         var selectedSchema = developmentProfile
             ? TrRmArtifactSchema.Development
             : copyOriginDraft
-                ? TrRmArtifactSchema.CopyOriginDraft : TrRmArtifactSchema.Standard;
+                ? TrRmArtifactSchema.CopyOriginDraft
+                : foreignInvocationDraft
+                    ? TrRmArtifactSchema.ForeignInvocationDraft
+                    : TrRmArtifactSchema.Standard;
         if (index.Schema != selectedSchema)
         {
             throw InvalidMetadata();
@@ -1039,6 +1048,11 @@ public static class TrRmStructuralMetadataValidator
             ? new TrRmNativeVTableTableReader(nativeVTableBytes,
                 nativeVTableCount, methods, signatures, parameters, typeSpecs, contracts)
             : default;
+        if (foreignInvocationDraft)
+        {
+            ValidateForeignInvocationContractOwners(contracts, imports,
+                standardNativeImports, nativeFunctionPointerAnchors, methods);
+        }
         if (developmentProfile)
         {
             for (var method = 1; method <= methods.Count; method++)
@@ -1067,7 +1081,7 @@ public static class TrRmStructuralMetadataValidator
             if (!copyOriginDraft)
             {
                 ValidateStandardNativeImportFeatureAssignments(standardNativeImports,
-                    features, modules, methods, types, fields);
+                    features, modules, methods, types, fields, index.Schema);
             }
         }
         var sourceFiles = sourceFileCount == 0 ? default
@@ -1294,7 +1308,8 @@ public static class TrRmStructuralMetadataValidator
     private static void ValidateStandardNativeImportFeatureAssignments(
         TrRmNativeImportTableReader nativeImports, TrRmFeatureTableReader features,
         TrRmModuleTableReader modules, TrRmMethodDefTableReader methods,
-        TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields)
+        TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
+        TrRmArtifactSchema schema)
     {
         for (var row = 1; row <= nativeImports.Count; row++)
         {
@@ -1309,12 +1324,12 @@ public static class TrRmStructuralMetadataValidator
             };
             if (!TrRmFeatureManifestValidator.Requires(features, modules, module,
                     TrRmFeatureTableReader.NativeBoundaryContractsFeatureId,
-                    TrRmArtifactSchema.Standard)
+                    schema)
                 || !TrRmFeatureManifestValidator.Requires(features, modules, module,
                     TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
-                    TrRmArtifactSchema.Standard)
+                    schema)
                 || !TrRmFeatureManifestValidator.Requires(features, modules, module,
-                    requiredFeature, TrRmArtifactSchema.Standard))
+                    requiredFeature, schema))
             {
                 throw InvalidMetadata();
             }
@@ -1415,6 +1430,26 @@ public static class TrRmStructuralMetadataValidator
             {
                 throw InvalidMetadata();
             }
+        }
+    }
+
+    private static void ValidateForeignInvocationContractOwners(
+        TrRmContractTableReader contracts, TrRmImportTableReader imports,
+        TrRmNativeImportTableReader nativeImports,
+        TrRmNativeFunctionPointerAnchorTableReader anchors,
+        TrRmMethodDefTableReader methods)
+    {
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            if (contracts.GetNativeParameters(method).IsDefaultOrEmpty
+                || nativeImports.HasImportForMethod(method)
+                || anchors.IsAnchorMethodDef(method)
+                || imports.IsExpectedDefinition(0x1600_0000u | (uint)method))
+            {
+                continue;
+            }
+
+            throw InvalidMetadata();
         }
     }
 

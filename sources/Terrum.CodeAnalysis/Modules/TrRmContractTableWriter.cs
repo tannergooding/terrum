@@ -50,6 +50,16 @@ public static class TrRmContractTableWriter
             fieldPathCount: 0, predicateGraphCount, features, modules,
             TrRmArtifactSchema.Standard, profileAware: true);
 
+    internal static byte[] EncodeForeignInvocationDraft(
+        IReadOnlyList<TrRmContractRow> rows, TrRmTypeDefTableReader types,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        int predicateGraphCount)
+        => EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
+            fieldPathCount: 0, predicateGraphCount, features, modules,
+            TrRmArtifactSchema.ForeignInvocationDraft, profileAware: true);
+
     private static TrRmContractRow[] CanonicalizeCopyOriginRows(
         IReadOnlyList<TrRmContractRow> rows,
         TrRmFieldPathTableReader fieldPaths)

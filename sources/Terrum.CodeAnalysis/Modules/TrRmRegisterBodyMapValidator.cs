@@ -887,10 +887,12 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var targetSignature = methods.GetSignature(targetMethod);
+        var nativeParameters = contracts.GetNativeParameters(targetMethod);
         if (signatures.GetReceiverTypeSpec(targetSignature) != 0
             || signatures.GetGenericCount(targetSignature) != 0
             || !contracts.GetNativeOutputs(targetMethod).IsDefaultOrEmpty
-            || !contracts.GetNativeParameters(targetMethod).IsDefaultOrEmpty)
+            || (!nativeParameters.IsDefaultOrEmpty
+                && contracts.Schema != TrRmArtifactSchema.ForeignInvocationDraft))
         {
             return false;
         }

@@ -68,6 +68,11 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint RuleRevision)
     public static TrRmFeatureRow LayoutQueries
         => new(TrRmFeatureTableReader.LayoutQueriesFeatureId,
             TrRmFeatureTableReader.RuleRevision);
+
+    internal static TrRmFeatureRow ForeignInvocationContractsCandidate
+        => new(TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId, 1);
+    internal static TrRmFeatureRow NativeOutputCellsCandidate
+        => new(TrRmFeatureTableReader.NativeOutputCellsCandidateFeatureId, 1);
 }
 
 /// <summary>Structurally validates eight-byte Feature rows without assuming row order.</summary>
@@ -99,6 +104,8 @@ public readonly ref struct TrRmFeatureTableReader
     /// <summary>The assigned identifier for LayoutQueries.</summary>
     public const uint LayoutQueriesFeatureId = 13;
     internal const uint CopyOriginContractsCandidateFeatureId = 15;
+    internal const uint ForeignInvocationContractsCandidateFeatureId = 16;
+    internal const uint NativeOutputCellsCandidateFeatureId = 8;
     /// <summary>The assigned Feature rule revision shared by currently assigned features.</summary>
     public const uint RuleRevision = 1;
 
@@ -124,7 +131,8 @@ public readonly ref struct TrRmFeatureTableReader
         if (recordCount < 0 || recordCount > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || schema is not (TrRmArtifactSchema.Standard
-                or TrRmArtifactSchema.Development or TrRmArtifactSchema.CopyOriginDraft))
+                or TrRmArtifactSchema.Development or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.ForeignInvocationDraft))
         {
             throw InvalidFeature();
         }
@@ -196,8 +204,19 @@ public readonly ref struct TrRmFeatureTableReader
             return true;
         }
 
+        if (schema == TrRmArtifactSchema.ForeignInvocationDraft
+            && featureId is NativeOutputCellsCandidateFeatureId
+                or ForeignInvocationContractsCandidateFeatureId)
+        {
+            ruleRevision = featureId == NativeOutputCellsCandidateFeatureId
+                ? TrRmProvisionalFeatureRevisions.NativeOutputCellsRuleRevision
+                : TrRmProvisionalFeatureRevisions.ForeignInvocationContractsRuleRevision;
+            return true;
+        }
+
         if (schema is not (TrRmArtifactSchema.Standard
-            or TrRmArtifactSchema.CopyOriginDraft))
+            or TrRmArtifactSchema.CopyOriginDraft
+            or TrRmArtifactSchema.ForeignInvocationDraft))
         {
             ruleRevision = 0;
             return false;
@@ -220,6 +239,8 @@ internal static class TrRmProvisionalFeatureRevisions
     internal const uint ScalarInitOutputInitialRuleRevision = 1;
     internal const uint ScalarInitOutputRuleRevision = 8;
     internal const uint CopyOriginContractsRuleRevision = 1;
+    internal const uint ForeignInvocationContractsRuleRevision = 1;
+    internal const uint NativeOutputCellsRuleRevision = 1;
 }
 
 internal static class TrRmFeatureManifestValidator
@@ -229,11 +250,12 @@ internal static class TrRmFeatureManifestValidator
         TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
         if (schema is not (TrRmArtifactSchema.Standard
-            or TrRmArtifactSchema.CopyOriginDraft))
+            or TrRmArtifactSchema.CopyOriginDraft
+            or TrRmArtifactSchema.ForeignInvocationDraft))
         {
             throw InvalidManifest();
         }
-        Span<uint> revisions = stackalloc uint[16];
+        Span<uint> revisions = stackalloc uint[17];
         for (var module = 1; module <= modules.Count; module++)
         {
             ExpandModuleRequirements(features, modules, module, revisions, schema);
@@ -249,7 +271,8 @@ internal static class TrRmFeatureManifestValidator
         TrRmArtifactSchema schema)
     {
         if (schema is not (TrRmArtifactSchema.Standard
-            or TrRmArtifactSchema.CopyOriginDraft))
+            or TrRmArtifactSchema.CopyOriginDraft
+            or TrRmArtifactSchema.ForeignInvocationDraft))
         {
             throw InvalidManifest();
         }
@@ -258,7 +281,7 @@ internal static class TrRmFeatureManifestValidator
             throw InvalidManifest();
         }
 
-        Span<uint> revisions = stackalloc uint[16];
+        Span<uint> revisions = stackalloc uint[17];
         ExpandModuleRequirements(features, modules, module, revisions, schema);
         return revisions[(int)featureId] != 0;
     }
@@ -322,7 +345,8 @@ internal static class TrRmFeatureManifestValidator
 
     private static int PrerequisiteCount(uint featureId) => featureId switch
     {
-        2 or 7 => 1,
+        2 or 7 or 16 => 1,
+        8 => 3,
         3 or 5 or 6 or 12 => 2,
         4 => 1,
         _ => 0,
@@ -330,7 +354,13 @@ internal static class TrRmFeatureManifestValidator
 
     private static uint Prerequisite(uint featureId, int index) => featureId switch
     {
-        2 or 7 => 1,
+        2 or 7 or 16 => 1,
+        8 => index switch {
+            0 => 1,
+            1 => 2,
+            2 => 10,
+            _ => throw InvalidManifest(),
+        },
         3 or 5 or 6 => index == 0 ? 1u : 2u,
         4 => 3,
         12 => index == 0 ? 10u : 11u,

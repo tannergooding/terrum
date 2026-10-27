@@ -390,6 +390,97 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void ForeignInvocationDraftNativeParameterPreservesUnsignedExtentAndWritableType()
+    {
+        Create(Section(StandardNativeParameter(ordinal: 0, access: 3,
+                retention: 1, extentKind: 1, extent: uint.MaxValue)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            writeRows: true, developmentProfile: false,
+            foreignInvocationDraft: true, expectedNativeParameterExtent: uint.MaxValue);
+        Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
+                retention: 1, extentKind: 1, extent: 1)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, foreignInvocationDraft: true,
+            expectedNativeParameterExtent: 1);
+        Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            pointerParameterWritable: false, pointerPointeeCode: 0x0D,
+            developmentProfile: false, foreignInvocationDraft: true,
+            expectedNativeParameterExtent: 0);
+        Create(Section(StandardNativeParameter(ordinal: 0, access: 1,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            pointerParameterWritable: false, pointerPointeeCode: 0,
+            developmentProfile: false, foreignInvocationDraft: true,
+            expectedNativeParameterExtent: 0);
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 2,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            pointerParameterWritable: false,
+            developmentProfile: false, foreignInvocationDraft: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 0,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, foreignInvocationDraft: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 1,
+                retention: 1, extentKind: 0, extent: 1)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, foreignInvocationDraft: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 2,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            pointerParameterWritable: true, pointerPointeeCode: 0,
+            developmentProfile: false, foreignInvocationDraft: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 3,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, foreignInvocationDraft: true,
+            includeForeignInvocationFeature: false,
+            includeNativeBoundaryFeature: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 3,
+                retention: 1, extentKind: 1, extent: 1),
+                StandardNativeParameter(ordinal: 0, access: 3,
+                    retention: 1, extentKind: 1, extent: 1)),
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false, foreignInvocationDraft: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(StandardNativeParameter(ordinal: 0, access: 1,
+                retention: 1, extentKind: 0, extent: 0)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            hasOutputParam: true, paramMode: 0, pointerParameter: true,
+            developmentProfile: false));
+    }
+
+    [Test]
     public void CopyOriginDraftContractUsesTypedWholeValueReferences()
     {
         Create(Section(CopyOriginContract()), recordCount: 1, declaredCount: 1,
@@ -590,7 +681,8 @@ public sealed class TrRmContractTableReaderTests
         uint typeFirst = 1, uint typeCount = 1, uint methodFirst = 2, uint methodCount = 1,
         bool hasOutputParam = false, byte paramMode = 1, bool nonBooleanResult = false,
         bool writeRows = false, bool frameArtifact = false,
-        bool pointerParameter = false, int methodOwnerType = 1, uint typeFlags = 4,
+        bool pointerParameter = false, bool pointerParameterWritable = true,
+        byte pointerPointeeCode = 8, int methodOwnerType = 1, uint typeFlags = 4,
         int typeRows = 1, uint secondTypeFirst = 0, uint secondTypeCount = 0,
         bool developmentProfile = true, bool copyOriginDraft = false,
         int fieldPathCount = 0, bool includeCopyOriginFeature = true,
@@ -598,12 +690,21 @@ public sealed class TrRmContractTableReaderTests
         bool twoParameters = false, bool canonicalizeCopyOrigin = false,
         byte? expectedNativeCallableConvention = null,
         bool includeNativeBoundaryFeature = false,
+        bool foreignInvocationDraft = false,
+        bool includeForeignInvocationFeature = true,
         int predicateGraphCount = 0,
         bool includePublishedPredicatesFeature = false,
         int? expectedPredicateGraphContractCount = null,
-        bool verifyPublishedPredicatePrerequisites = false)
+        bool verifyPublishedPredicatePrerequisites = false,
+        uint? expectedNativeParameterExtent = null)
     {
+        if (copyOriginDraft && foreignInvocationDraft)
+        {
+            throw new ArgumentException("The selected fixture profiles are distinct.");
+        }
+
         var schema = copyOriginDraft ? TrRmArtifactSchema.CopyOriginDraft
+            : foreignInvocationDraft ? TrRmArtifactSchema.ForeignInvocationDraft
             : developmentProfile ? TrRmArtifactSchema.Development
             : TrRmArtifactSchema.Standard;
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
@@ -621,7 +722,17 @@ public sealed class TrRmContractTableReaderTests
                 : includeCopyOriginFeature
                     ? [new TrRmFeatureRow(15, 1)]
                     : Array.Empty<TrRmFeatureRow>()
-                : (includeNativeBoundaryFeature, includePublishedPredicatesFeature) switch
+            : foreignInvocationDraft
+                ? (includeNativeBoundaryFeature, includeForeignInvocationFeature) switch
+                {
+                    (true, true) =>
+                        [TrRmFeatureRow.NativeBoundaryContracts,
+                            TrRmFeatureRow.ForeignInvocationContractsCandidate],
+                    (true, false) => [TrRmFeatureRow.NativeBoundaryContracts],
+                    (false, true) => [TrRmFeatureRow.ForeignInvocationContractsCandidate],
+                    _ => Array.Empty<TrRmFeatureRow>(),
+                }
+            : (includeNativeBoundaryFeature, includePublishedPredicatesFeature) switch
                 {
                     (true, true) =>
                         [new TrRmFeatureRow(1, 1), TrRmFeatureRow.PublishedPredicates],
@@ -679,7 +790,9 @@ public sealed class TrRmContractTableReaderTests
         byte[] spec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         if (pointerParameter)
         {
-            spec = [0, 0, 0, 0, 4, 0, 0, 0, 1, 1, 0x8C, 8];
+            spec = [0, 0, 0, 0, 4, 0, 0, 0, 1,
+                pointerParameterWritable ? (byte)1 : (byte)0,
+                0x8C, pointerPointeeCode];
         }
         else if (referentParameter || initializationParameter)
         {
@@ -697,7 +810,7 @@ public sealed class TrRmContractTableReaderTests
 
         var typeSpecCount = referentParameter || initializationParameter ? 2 : 1;
         var typeSpecs = new TrRmTypeSpecTableReader(
-            spec, typeSpecCount, 1, 0, 0, 0);
+            spec, typeSpecCount, 1, 0, 0, 0, schema, methodDefCount: 1);
         var parameterCount = twoParameters ? 2 : hasOutputParam ? 1 : 0;
         var signature = new byte[24];
         Write(signature, 0, 1);
@@ -748,6 +861,10 @@ public sealed class TrRmContractTableReaderTests
                 ? TrRmContractTableWriter.EncodeCopyOriginDraft(
                     rows, types, methods, signatures, parameters, typeSpecs,
                     default, fieldPathCount, features, modules)
+                : foreignInvocationDraft
+                    ? TrRmContractTableWriter.EncodeForeignInvocationDraft(
+                        rows, types, methods, signatures, parameters, typeSpecs,
+                        features, modules, predicateGraphCount)
                 : !developmentProfile && predicateGraphCount != 0
                     ? TrRmContractTableWriter.EncodeWithPredicateGraphs(
                         rows, types, methods, signatures, parameters, typeSpecs,
@@ -767,6 +884,16 @@ public sealed class TrRmContractTableReaderTests
             contractReader = new TrRmContractTableReader(section, recordCount, types, methods,
                 signatures, parameters, typeSpecs, fieldPathCount, features,
                 modules, schema, predicateGraphCount);
+            if (expectedNativeCallableConvention is { } expectedConvention)
+            {
+                AssertNativeCallable(contractReader, expectedConvention);
+            }
+        }
+        else if (foreignInvocationDraft)
+        {
+            contractReader = new TrRmContractTableReader(section, recordCount,
+                types, methods, signatures, parameters, typeSpecs, fieldPathCount,
+                features, modules, schema, predicateGraphCount);
             if (expectedNativeCallableConvention is { } expectedConvention)
             {
                 AssertNativeCallable(contractReader, expectedConvention);
@@ -796,6 +923,12 @@ public sealed class TrRmContractTableReaderTests
         {
             Assert.That(contractReader.GetPredicateGraphContracts(1).Length,
                 Is.EqualTo(expectedPredicateCount));
+        }
+        if (expectedNativeParameterExtent is uint expectedExtent)
+        {
+            var nativeParameters = contractReader.GetNativeParameters(1);
+            Assert.That(nativeParameters, Has.Length.EqualTo(1));
+            Assert.That(nativeParameters[0].Extent, Is.EqualTo(expectedExtent));
         }
         if (frameArtifact)
         {
@@ -842,6 +975,12 @@ public sealed class TrRmContractTableReaderTests
                 _ = TrRmStructuralMetadataValidator
                     .ValidateCopyOriginDraftAndGetExecutionTables(
                         TrRmArtifactIndex.ForCopyOriginDraft(artifact));
+            }
+            else if (foreignInvocationDraft)
+            {
+                _ = TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationDraftAndGetExecutionTables(
+                        TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
             }
             else if (developmentProfile)
             {
@@ -1154,6 +1293,18 @@ public sealed class TrRmContractTableReaderTests
         data[10] = extent == 0 ? (byte)0 : (byte)1;
         Write(data, 12, extent);
         return Contract(0x1600_0001, 0x11, data);
+    }
+
+    private static byte[] StandardNativeParameter(uint ordinal, byte access,
+        byte retention, byte extentKind, uint extent)
+    {
+        var data = new byte[12];
+        Write(data, 0, ordinal);
+        data[4] = access;
+        data[5] = retention;
+        data[6] = extentKind;
+        Write(data, 8, extent);
+        return Contract(0x1600_0001, 0x0E, data);
     }
 
     private static byte[] Contract(uint owner, ushort kind, byte[] data)

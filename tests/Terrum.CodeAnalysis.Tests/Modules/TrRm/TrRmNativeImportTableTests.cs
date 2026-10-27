@@ -587,6 +587,75 @@ public sealed class TrRmNativeImportTableTests
             ValidateNativeAddressArtifact(wrongConvention));
     }
 
+    [Test]
+    public void ForeignInvocationDraftNativeImportRetainsFullWidthParameterContract()
+    {
+        var features = new[] {
+            TrRmFeatureRow.DirectNativeCalls,
+            TrRmFeatureRow.NativeDataImports,
+            TrRmFeatureRow.ForeignInvocationContractsCandidate,
+        };
+        Assert.That(features.Select(static feature => feature.FeatureId),
+            Is.EquivalentTo(new uint[] { 3, 6, 16 }));
+        var fixture = CreateFixture([
+                new TrRmNativeImportRow(1, 1, 0, 1, 1, 6, 7),
+            ],
+            features: features,
+            methodParameterMode: 0,
+            foreignInvocationDraft: true,
+            nativeParameterContract: StandardNativeParameterContract(
+                ordinal: 0, access: 2, extentKind: 1, extent: uint.MaxValue),
+            methodParameterPointeeCode: 0x0D,
+            methodParameterWritable: true);
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(fixture.Artifact));
+        Assert.That(tables.StandardNativeImports.HasImportForMethod(1), Is.True);
+        var parameter = tables.Contracts.GetNativeParameters(1).Single();
+        Assert.That(parameter.ParameterOrdinal, Is.Zero);
+        Assert.That(parameter.Access, Is.EqualTo(2));
+        Assert.That(parameter.Extent, Is.EqualTo(uint.MaxValue));
+
+        Assert.Throws<InvalidDataException>(() => CreateFixture([
+                new TrRmNativeImportRow(1, 1, 0, 1, 1, 6, 7),
+            ],
+            features: [TrRmFeatureRow.DirectNativeCalls,
+                TrRmFeatureRow.NativeDataImports],
+            methodParameterMode: 0,
+            foreignInvocationDraft: true,
+            nativeParameterContract: StandardNativeParameterContract(
+                ordinal: 0, access: 2, extentKind: 0, extent: 0),
+            methodParameterPointeeCode: 0x0D,
+            methodParameterWritable: true));
+
+        Assert.Throws<InvalidDataException>(() => CreateFixture([
+                new TrRmNativeImportRow(1, 1, 0, 1, 1, 6, 7),
+            ],
+            features: features,
+            methodParameterMode: 0,
+            nativeParameterContract: StandardNativeParameterContract(
+                ordinal: 0, access: 2, extentKind: 0, extent: 0),
+            methodParameterPointeeCode: 0x0D,
+            methodParameterWritable: true));
+    }
+
+    [Test]
+    public void ForeignInvocationDraftNativeAddressRequiresExactParameterProjection()
+    {
+        var equalContracts = CreateForeignInvocationNativeAddressArtifact(1, 1);
+        Assert.DoesNotThrow(() =>
+            ValidateForeignInvocationNativeAddressArtifact(equalContracts));
+
+        var differentExtent = CreateForeignInvocationNativeAddressArtifact(1, 2);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateForeignInvocationNativeAddressArtifact(differentExtent));
+
+        var missingAnchorContract = CreateForeignInvocationNativeAddressArtifact(1, null);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateForeignInvocationNativeAddressArtifact(missingAnchorContract));
+    }
+
     private static Fixture CreateFixture(
         IReadOnlyList<TrRmNativeImportRow> rows,
         IReadOnlyList<TrRmFeatureRow>? features = null,
@@ -613,8 +682,15 @@ public sealed class TrRmNativeImportTableTests
         byte nativeExportFlags = 0,
         ushort nativeExportReserved = 0,
         int? standardNativeFunctionPointerAnchorMethodDefRow = null,
-        bool encodeWithWriter = true)
+        bool encodeWithWriter = true,
+        bool foreignInvocationDraft = false,
+        TrRmContractRow? nativeParameterContract = null,
+        byte? methodParameterPointeeCode = null,
+        bool methodParameterWritable = false)
     {
+        var schema = foreignInvocationDraft
+            ? TrRmArtifactSchema.ForeignInvocationDraft
+            : TrRmArtifactSchema.Standard;
         if (features is null)
         {
             var defaultFeatures = new List<TrRmFeatureRow>();
@@ -636,6 +712,10 @@ public sealed class TrRmNativeImportTableTests
             {
                 defaultFeatures.Add(TrRmFeatureRow.PublishedPredicates);
             }
+            if (foreignInvocationDraft && nativeParameterContract is not null)
+            {
+                defaultFeatures.Add(TrRmFeatureRow.ForeignInvocationContractsCandidate);
+            }
             if (defaultFeatures.Count == 0)
             {
                 defaultFeatures.Add(TrRmFeatureRow.DirectNativeCalls);
@@ -652,14 +732,19 @@ public sealed class TrRmNativeImportTableTests
         };
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
         var strings = new TrRmStringTableReader(stringBytes, stringRows.Count);
-        var featureBytes = features.Count == 0 ? [] : TrRmFeatureTableWriter.Encode(features);
-        var featureTable = new TrRmFeatureTableReader(featureBytes, features.Count);
+        var featureBytes = features.Count == 0 ? []
+            : TrRmFeatureTableWriter.Encode(features, schema);
+        var featureTable = new TrRmFeatureTableReader(featureBytes, features.Count, schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, moduleTargetRequirement, 0, 0, 1, 1, 1, 1,
                 features.Count == 0 ? 0 : 1, features.Count),
         ], strings, 0, 1, 1, 0, features.Count);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             0, 1, 1, 0, features.Count);
+        if (foreignInvocationDraft)
+        {
+            TrRmFeatureManifestValidator.Validate(featureTable, modules, schema);
+        }
         List<ReadOnlyMemory<byte>> typeSpecRows =
         [
             TrRmTypeSpecTableWriter.Builtin(0x0D),
@@ -687,8 +772,17 @@ public sealed class TrRmNativeImportTableTests
 
             typeSpecRows.Add(TrRmTypeSpecTableWriter.Builtin(1));
         }
-        var typeSpecSchema = nativeFunctionPointerSignatureCount == 0
-            ? TrRmArtifactSchema.Standard : TrRmArtifactSchema.Development;
+        uint methodParameterTypeSpecRef = 1;
+        if (methodParameterPointeeCode is byte pointeeCode)
+        {
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.InlineFamily(0x8C,
+                pointeeCode, methodParameterWritable ? (byte)1 : (byte)0));
+            methodParameterTypeSpecRef = checked((uint)typeSpecRows.Count);
+        }
+        var typeSpecSchema = foreignInvocationDraft
+            ? TrRmArtifactSchema.ForeignInvocationDraft
+            : nativeFunctionPointerSignatureCount == 0
+                ? TrRmArtifactSchema.Standard : TrRmArtifactSchema.Development;
         if (standardNativeFunctionPointerAnchorMethodDefRow.HasValue
             && nativeFunctionPointerSignatureCount != 0)
         {
@@ -703,7 +797,8 @@ public sealed class TrRmNativeImportTableTests
             1, 0, 0, nativeFunctionPointerSignatureCount, typeSpecSchema,
             standardNativeFunctionPointerAnchorMethodDefRow.HasValue ? 1 : 0);
         var contractRecordCount = 1 + (includeNativeCallableContract ? 1 : 0)
-            + (standardAnchorPredicatePhase.HasValue ? 1 : 0);
+            + (standardAnchorPredicatePhase.HasValue ? 1 : 0)
+            + (nativeParameterContract.HasValue ? 1 : 0);
         var layoutCount = blittableProfileId.HasValue ? 2 : 1;
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(1, 3, 6, 1, 1, 0, 0, 1, layoutCount, 0, 0),
@@ -743,8 +838,8 @@ public sealed class TrRmNativeImportTableTests
         var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
             typeSpecs, parameterCount, 0);
         var parameterBytes = parameterCount == 0 ? [] : TrRmParamTableWriter.Encode([
-            new TrRmParamRow(1, 0, 1, methodParameterMode!.Value),
-        ], signatures, typeSpecs);
+            new TrRmParamRow(1, 0, methodParameterTypeSpecRef, methodParameterMode!.Value),
+        ], signatures, typeSpecs, schema);
         var parameters = parameterCount == 0 ? default
             : new TrRmParamTableReader(parameterBytes, parameterCount, signatures, typeSpecs);
         var contractRows = new List<TrRmContractRow>();
@@ -755,6 +850,10 @@ public sealed class TrRmNativeImportTableTests
         {
             contractRows.Add(new TrRmContractRow(0x1600_0001, 0x0C,
                 new byte[] { 3, 0, 0, 0 }));
+        }
+        if (nativeParameterContract is TrRmContractRow nativeParameterRow)
+        {
+            contractRows.Add(nativeParameterRow);
         }
         if (standardAnchorPredicatePhase is byte predicatePhase)
         {
@@ -770,13 +869,22 @@ public sealed class TrRmNativeImportTableTests
         ], strings, modules, typeDefs, signatures, contractRows.Count, 0);
         var methods = new TrRmMethodDefTableReader(methodBytes, 1, strings,
             modules, typeDefs, signatures, contractRows.Count, 0);
-        var contractBytes = standardAnchorPredicatePhase.HasValue
+        var contractBytes = foreignInvocationDraft
+            ? TrRmContractTableWriter.EncodeForeignInvocationDraft(contractRows,
+                typeDefs, methods, signatures, parameters, typeSpecs,
+                featureTable, modules, standardAnchorPredicatePhase.HasValue ? 1 : 0)
+            : standardAnchorPredicatePhase.HasValue
             ? TrRmContractTableWriter.EncodeWithPredicateGraphs(contractRows,
                 typeDefs, methods, signatures, parameters, typeSpecs,
                 featureTable, modules, predicateGraphCount: 1)
             : TrRmContractTableWriter.Encode(contractRows,
                 typeDefs, methods, signatures, parameters, typeSpecs);
-        var contracts = standardAnchorPredicatePhase.HasValue
+        var contracts = foreignInvocationDraft
+            ? new TrRmContractTableReader(contractBytes, contractRows.Count,
+                typeDefs, methods, signatures, parameters, typeSpecs, 0,
+                featureTable, modules, schema,
+                predicateGraphCount: standardAnchorPredicatePhase.HasValue ? 1 : 0)
+            : standardAnchorPredicatePhase.HasValue
             ? new TrRmContractTableReader(contractBytes, contractRows.Count,
                 typeDefs, methods, signatures, parameters, typeSpecs, 0,
                 featureTable, modules, TrRmArtifactSchema.Standard,
@@ -887,8 +995,20 @@ public sealed class TrRmNativeImportTableTests
             sections.Add(new TrRmSection(0x0048, 0, 1, targetProfileBytes));
         }
 
-        return new Fixture(TrRmArtifactWriter.Encode(sections),
+        return new Fixture(TrRmArtifactWriter.Encode(sections, schema),
             nativeImportBytes, entryNames, nativeExportBytes, nativeExportNames);
+    }
+
+    private static TrRmContractRow StandardNativeParameterContract(
+        uint ordinal, byte access, byte extentKind, uint extent)
+    {
+        var payload = new byte[12];
+        BinaryPrimitives.WriteUInt32LittleEndian(payload, ordinal);
+        payload[4] = access;
+        payload[5] = 1;
+        payload[6] = extentKind;
+        BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8), extent);
+        return new TrRmContractRow(0x1600_0001, 0x0E, payload);
     }
 
     private static byte[] EncodeRawRows(IReadOnlyList<TrRmNativeImportRow> rows)
@@ -1340,6 +1460,132 @@ public sealed class TrRmNativeImportTableTests
                 ])),
             new TrRmSection(0x0021, 0, 1, nativeImportBytes),
         ]);
+    }
+
+    private static byte[] CreateForeignInvocationNativeAddressArtifact(
+        uint? targetExtent, uint? anchorExtent)
+    {
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("target", 0), ("anchor", 0),
+            ("caller", 0), ("test.dll", 0), ("Read", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 7);
+        TrRmFeatureRow[] featureRows = [
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.RootlessNativeValues,
+            TrRmFeatureRow.DirectNativeCalls,
+            TrRmFeatureRow.NativeExportEntries,
+            TrRmFeatureRow.ForeignInvocationContractsCandidate,
+        ];
+        var featureBytes = TrRmFeatureTableWriter.Encode(
+            featureRows, TrRmArtifactSchema.ForeignInvocationDraft);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1,
+                featureRows.Length, 1),
+        ], strings, 0, 0, 3, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 3, 0, featureRows.Length);
+        var typeSpecRows = new ReadOnlyMemory<byte>[] {
+            TrRmTypeSpecTableWriter.Builtin(0x0D),
+            TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D),
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 2),
+            TrRmTypeSpecTableWriter.Builtin(0),
+        };
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            0, 0, 0, 0, TrRmArtifactSchema.ForeignInvocationDraft,
+            methodDefCount: 3);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecRows.Length,
+            0, 0, 0, 0, TrRmArtifactSchema.ForeignInvocationDraft,
+            methodDefCount: 3);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 1, 1, 0, 0),
+            new TrRmMethodSigRow(4, 0, 0, 0, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 2,
+            typeSpecs, 1, 0);
+        var parameters = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, 2, 0),
+        ], signatures, typeSpecs, TrRmArtifactSchema.ForeignInvocationDraft);
+        var parameterReader = new TrRmParamTableReader(parameters, 1,
+            signatures, typeSpecs, TrRmArtifactSchema.ForeignInvocationDraft);
+        var contractRows = new List<TrRmContractRow>();
+        AddTargetContract(contractRows, 1, targetExtent);
+        var targetContractCount = contractRows.Count;
+        var anchorContractFirst = contractRows.Count + 1;
+        AddTargetContract(contractRows, 2, anchorExtent);
+        var anchorContractCount = contractRows.Count - anchorContractFirst + 1;
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, contractRows.Count);
+        var methodRows = new List<TrRmMethodDefRow>
+        {
+            new(0, 3, 1, 0, 1, targetContractCount, 0),
+            new(0, 4, 1, 0, anchorContractCount == 0 ? 0 : anchorContractFirst,
+                anchorContractCount, 0),
+            new(0, 5, 2, 0, 0, 0, 1),
+        };
+        var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
+            modules, typeDefs, signatures, contractRows.Count, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes, methodRows.Count,
+            strings, modules, typeDefs, signatures, contractRows.Count, 1);
+        var contractBytes = TrRmContractTableWriter.EncodeForeignInvocationDraft(
+            contractRows, typeDefs, methods, signatures, parameterReader,
+            typeSpecs, new TrRmFeatureTableReader(featureBytes, featureRows.Length,
+                TrRmArtifactSchema.ForeignInvocationDraft),
+            modules, predicateGraphCount: 0);
+        var contracts = new TrRmContractTableReader(contractBytes, contractRows.Count,
+            typeDefs, methods, signatures, parameterReader, typeSpecs, 0,
+            new TrRmFeatureTableReader(featureBytes, featureRows.Length,
+                TrRmArtifactSchema.ForeignInvocationDraft),
+            modules, TrRmArtifactSchema.ForeignInvocationDraft);
+        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var layouts = new TrRmLayoutTableReader([], 0, typeDefs,
+            targetProfiles, 0);
+        var nativeImports = TrRmNativeImportTableWriter.Encode([
+            new TrRmNativeImportRow(1, 1, 0, 1, 1, 6, 7),
+        ], strings, methods, default, typeDefs, default, modules,
+            signatures, parameterReader, typeSpecs, contracts, layouts);
+        var body = CreateNativeAddressBody(0x1600_0001, 0x1100_0003, 1, null);
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 7, stringBytes),
+            new(0x0004, 0, (uint)featureRows.Length, featureBytes),
+            new(0x0011, 0, (uint)typeSpecRows.Length, typeSpecBytes),
+            new(0x0016, 0, (uint)methodRows.Count, methodBytes),
+            new(0x0017, 0, 2, signatureBytes),
+            new(0x0018, 0, 1, parameters),
+            new(0x001B, 0, (uint)contractRows.Count, contractBytes),
+            new(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+            new(0x0021, 0, 1, nativeImports),
+        };
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ForeignInvocationDraft);
+
+        static void AddTargetContract(List<TrRmContractRow> rows, int methodRow,
+            uint? extent)
+        {
+            var effectPayload = new byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(effectPayload, 4);
+            rows.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
+                effectPayload));
+            if (extent is uint nativeExtent)
+            {
+                rows.Add(TrRmNativeImportTableTests.StandardNativeParameterContract(
+                    0, 1, nativeExtent == 0 ? (byte)0 : (byte)1, nativeExtent) with
+                {
+                    OwnerDefId = 0x1600_0000u | (uint)methodRow,
+                });
+            }
+        }
+    }
+
+    private static void ValidateForeignInvocationNativeAddressArtifact(byte[] artifact)
+    {
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(3);
     }
 
     private static void WriteUInt16(List<byte> bytes, ushort value)

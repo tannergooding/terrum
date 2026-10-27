@@ -266,7 +266,8 @@ public readonly ref struct TrRmNativeImportTableReader
 
         TrRmNativeImportSignatureValidator.Validate((uint)ownerRef, methods,
             signatures, parameters, types, contracts.GetNativeOutputs(ownerRef),
-            contracts.GetNativeParameters(ownerRef), layouts);
+            contracts.GetNativeParameters(ownerRef), layouts,
+            validateNativeParameterAccess: true);
     }
 
     internal static bool IsNativeAbiFieldType(TrRmTypeSpecTableReader types,

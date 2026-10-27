@@ -417,7 +417,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     private bool ContractsSatisfy(int actualMethod, int expectedMethod)
     {
         if (!_contracts.GetNativeOutputs(actualMethod).IsDefaultOrEmpty
-            || !_contracts.GetNativeParameters(actualMethod).IsDefaultOrEmpty)
+            || !SameNativeParameterContracts(actualMethod, expectedMethod))
         {
             return false;
         }
@@ -496,6 +496,14 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         }
 
         return true;
+    }
+
+    private bool SameNativeParameterContracts(int leftMethod, int rightMethod)
+    {
+        var left = _contracts.GetNativeParameters(leftMethod);
+        var right = _contracts.GetNativeParameters(rightMethod);
+        return left.Length == right.Length
+            && new HashSet<TrRmNativeParameterContract>(left).SetEquals(right);
     }
 
     private bool SameDependencyContracts(int leftMethod, int rightMethod)
@@ -594,6 +602,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
                 == _contracts.GetEffectsMask(rightMethod)
             && SamePredicateContracts(leftMethod, rightMethod)
             && SameOutputStateContracts(leftMethod, rightMethod)
+            && SameNativeParameterContracts(leftMethod, rightMethod)
             && SameDependencyContracts(leftMethod, rightMethod);
 
     private (byte Phase, uint Ordinal, byte SelectorKind) GetPredicateIdentity(
@@ -769,7 +778,9 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         {
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(
                 contracts.GetRow(first + offset)[4..]);
-            if (kind is not (1 or 2 or 4 or 0x0B))
+            if (kind is not (1 or 2 or 4 or 0x0B)
+                && !(kind == 0x0E
+                    && contracts.Schema == TrRmArtifactSchema.ForeignInvocationDraft))
             {
                 return true;
             }

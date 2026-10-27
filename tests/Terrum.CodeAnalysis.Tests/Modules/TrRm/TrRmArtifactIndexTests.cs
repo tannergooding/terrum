@@ -255,6 +255,46 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void ForeignInvocationFeatureIsSelectedOutOfBandAndComposesOutputClosure()
+    {
+        var featureBytes = TrRmFeatureTableWriter.Encode([
+            TrRmFeatureRow.NativeOutputCellsCandidate,
+        ], TrRmArtifactSchema.ForeignInvocationDraft);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([TrRmFeatureRow.NativeOutputCellsCandidate]));
+
+        var artifact = FeatureArtifact(1, 1, featureBytes);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(artifact));
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        _ = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+
+        Assert.That(index.TryGetSection(0x0002, out var stringBytes,
+            out var stringCount), Is.True);
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes,
+            out var moduleCount), Is.True);
+        Assert.That(index.TryGetSection(0x0004, out var selectedFeatureBytes,
+            out var selectedFeatureCount), Is.True);
+        var features = new TrRmFeatureTableReader(selectedFeatureBytes,
+            selectedFeatureCount, TrRmArtifactSchema.ForeignInvocationDraft);
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            strings, 0, 0, 0, 0, selectedFeatureCount);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.NativeOutputCellsCandidateFeatureId), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.NativeBoundaryContractsFeatureId), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.RootlessNativeValuesFeatureId), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.PublishedPredicatesFeatureId), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId), Is.False);
+    }
+
+    [Test]
     public void DerivesPrerequisiteClosurePerModule()
     {
         var artifact = FeatureArtifact(1, 1,

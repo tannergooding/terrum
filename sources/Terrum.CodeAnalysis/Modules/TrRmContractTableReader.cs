@@ -36,6 +36,7 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmMethodSigTableReader _signatures;
     private readonly TrRmParamTableReader _parameters;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
+    private readonly TrRmArtifactSchema _schema;
     private readonly ImmutableArray<TrRmNativeParameterContract>[] _nativeParameters;
     private readonly TrRmNativeAbiContract[] _nativeAbis;
     private readonly bool[] _hasNativeAbis;
@@ -49,6 +50,7 @@ public readonly ref struct TrRmContractTableReader
 
     internal int Count => _rows.Count;
     internal int PredicateGraphAttachmentCount => _predicateGraphReferences.Count;
+    internal TrRmArtifactSchema Schema => _schema;
 
     public TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
@@ -87,7 +89,8 @@ public readonly ref struct TrRmContractTableReader
             || fieldPathCount is < 0 or > 0xFF_FFFF
             || predicateGraphCount is < 0 or > 0xFF_FFFF
             || schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
-                or TrRmArtifactSchema.CopyOriginDraft)
+                or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.ForeignInvocationDraft)
             || (schema == TrRmArtifactSchema.CopyOriginDraft && !profileAware))
         {
             throw InvalidContract();
@@ -99,6 +102,7 @@ public readonly ref struct TrRmContractTableReader
         _signatures = signatures;
         _parameters = parameters;
         _typeSpecs = typeSpecs;
+        _schema = schema;
         _nativeParameters = new ImmutableArray<TrRmNativeParameterContract>[methods.Count + 1];
         _nativeAbis = new TrRmNativeAbiContract[methods.Count + 1];
         _hasNativeAbis = new bool[methods.Count + 1];
@@ -371,6 +375,67 @@ public readonly ref struct TrRmContractTableReader
                         throw InvalidContract();
                     }
                     break;
+                case 0x0E:
+                    if (schema != TrRmArtifactSchema.ForeignInvocationDraft
+                        || !profileAware || data.Length != 20 || owner >> 24 != 0x16
+                        || data[12] is < 1 or > 3 || data[13] != 1
+                        || data[14] is not (0 or 1) || data[15] != 0
+                        || (data[14] == 0 ? Read(data, 16) != 0 : Read(data, 16) == 0))
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var nativeParameterMethod = checked((int)(owner & 0xFF_FFFF));
+                    var nativeParameterOrdinal = Read(data, 8);
+                    var nativeParameterSignature = methods.GetSignature(nativeParameterMethod);
+                    var (pointerParameterFirst, pointerParameterCount) =
+                        signatures.GetParamRange(nativeParameterSignature);
+                    if (nativeParameterOrdinal >= pointerParameterCount)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var pointerParameterRow = pointerParameterFirst
+                        + checked((int)nativeParameterOrdinal);
+                    var nativeParameterTypeSpec = parameters.GetTypeSpec(pointerParameterRow);
+                    if (parameters.GetMode(pointerParameterRow) != 0
+                        || parameters.GetFlags(pointerParameterRow) != 0
+                        || !IsNativeParameterPointerTypeSpec(typeSpecs,
+                            nativeParameterTypeSpec, data[12]))
+                    {
+                        throw new InvalidDataException(
+                            "Invalid TRRM NativeParameter formal type.");
+                    }
+
+                    var nativeParameterType = typeSpecs.GetTypeSpecRef(
+                        nativeParameterTypeSpec);
+                    if (IsVoidNativeParameterTypeSpec(typeSpecs, nativeParameterTypeSpec)
+                        && (data[12] != 1 || data[14] != 0
+                            || Read(data, 16) != 0
+                            || nativeParameterType.Qualifiers != 0))
+                    {
+                        throw new InvalidDataException(
+                            "Opaque TRRM NativeParameter pointers are read-only and unbounded.");
+                    }
+                    if (!nativeParameterOrdinals.Add((owner, nativeParameterOrdinal)))
+                    {
+                        throw new InvalidDataException(
+                            "Duplicate TRRM NativeParameter formal contract.");
+                    }
+                    if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                        methods.GetOwnerModule(nativeParameterMethod),
+                        TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId,
+                        schema))
+                    {
+                        throw new InvalidDataException(
+                            "TRRM NativeParameter requires Feature 16/1.");
+                    }
+
+                    var pointerParameter = new TrRmNativeParameterContract(
+                        checked((int)nativeParameterOrdinal), data[12], data[13],
+                        data[14], Read(data, 16), 1, 0);
+                    AddNativeParameter(nativeParameterMethod, pointerParameter);
+                    break;
                 case 0x10:
                     if (data.Length != 16 || owner >> 24 != 0x16
                         || Read(data, 8) != 1 || data[12] is < 1 or > 4
@@ -457,6 +522,16 @@ public readonly ref struct TrRmContractTableReader
         if (emptyDependencyDestinations.Overlaps(sourcedDependencyDestinations))
         {
             throw InvalidContract();
+        }
+        foreach (var nativeParameter in nativeParameterOrdinals)
+        {
+            if (outputs.Contains(nativeParameter)
+                || outputStates.Any(outputState =>
+                    outputState.Owner == nativeParameter.Owner
+                    && outputState.Ordinal == nativeParameter.Ordinal))
+            {
+                throw InvalidContract();
+            }
         }
 
         for (var method = 1; method <= methods.Count; method++)
@@ -625,13 +700,55 @@ public readonly ref struct TrRmContractTableReader
 
     internal ImmutableArray<TrRmNativeParameterContract> GetNativeParameters(int methodDefRow)
         => methodDefRow > 0 && methodDefRow < _nativeParameters.Length
-            ? _nativeParameters[methodDefRow] : [];
+            ? _nativeParameters[methodDefRow].IsDefault
+                ? [] : _nativeParameters[methodDefRow]
+            : throw InvalidContract();
 
     private static bool IsPointerTypeSpec(TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
     {
         var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
         return (type.Length == 4 && type[0] == 1 && type[2] == 0x8C)
             || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C);
+    }
+
+    private static bool IsNativeParameterPointerTypeSpec(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef, byte access)
+    {
+        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
+        if (type[1] is not (0 or 1)
+            || (access is 2 or 3 && type[1] != 1)
+            || (type.Length == 4 && (type[0] != 1 || type[2] != 0x8C))
+            || (type.Length == 7 && (type[0] != 0x0C || type[2] != 0x8C))
+            || type.Length is not (4 or 7))
+        {
+            return false;
+        }
+
+        if (type.Length == 4)
+        {
+            return type[3] is 0 or (>= 1 and <= 9) or (>= 0x0B and <= 0x0E)
+                or 0x14 or 0x15;
+        }
+
+        _ = typeSpecs.GetTypeSpecRef(Read(type, 3));
+        return true;
+    }
+
+    private static bool IsVoidNativeParameterTypeSpec(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 4 && type[0] == 1 && type[2] == 0x8C)
+        {
+            return type[3] == 0;
+        }
+        if (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C)
+        {
+            var innerType = typeSpecs.GetTypeSpecBytes(Read(type, 3));
+            return innerType is [1, 0, 0];
+        }
+
+        return false;
     }
 
     private static bool IsInitializationDestinationType(

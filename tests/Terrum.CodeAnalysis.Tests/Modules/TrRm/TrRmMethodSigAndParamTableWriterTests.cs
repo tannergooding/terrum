@@ -12,7 +12,9 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
     [Test]
     public void EmitsCallableRowsInAFramedArtifact()
     {
-        var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 0, 0, 0, 0);
+        var specBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 0, 0, 0, 0);
         var types = new TrRmTypeSpecTableReader(specBytes, 1, 0, 0, 0, 0);
         var rows = new[] { new TrRmMethodSigRow(1, 0, 1, 2, 0, 0) };
         var sigBytes = TrRmMethodSigTableWriter.Encode(rows, types, 2, 0);
@@ -20,18 +22,19 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         var paramRows = new[]
         {
             new TrRmParamRow(1, 0, 1, 0),
-            new TrRmParamRow(1, 1, 1, 4),
+            new TrRmParamRow(1, 1, 0xF300_8B08, 0, 1),
         };
         var paramBytes = TrRmParamTableWriter.Encode(paramRows, sigs, types);
         var parameters = new TrRmParamTableReader(paramBytes, 2, sigs, types);
         Assert.That(sigBytes.Length, Is.EqualTo(24));
         Assert.That(paramBytes.Length, Is.EqualTo(32));
-        Assert.That(parameters.GetMode(2), Is.EqualTo((byte)4));
+        Assert.That(parameters.GetMode(2), Is.Zero);
+        Assert.That(parameters.GetFlags(2), Is.EqualTo((byte)1));
 
         rows[0] = rows[0] with { ResultTypeSpecRef = 0 };
-        paramRows[1] = paramRows[1] with { Mode = 9 };
+        paramRows[1] = paramRows[1] with { Flags = 0 };
         Assert.That(sigs.GetResultTypeSpec(1), Is.EqualTo(1));
-        Assert.That(parameters.GetMode(2), Is.EqualTo((byte)4));
+        Assert.That(parameters.GetFlags(2), Is.EqualTo((byte)1));
 
         var nameBytes = TrRmStringTableWriter.EncodeNames([("Only", 0), ("Run", 0)]);
         var strings = new TrRmStringTableReader(nameBytes, 2);
@@ -68,7 +71,7 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         var sigs = new TrRmMethodSigTableReader(bytes, 2, types, 2, 0);
         var parameters = TrRmParamTableWriter.Encode([
             new TrRmParamRow(2, 0, 1, 0),
-            new TrRmParamRow(1, 0, 1, 4),
+            new TrRmParamRow(1, 0, 1, 0),
         ], sigs, types);
         _ = new TrRmParamTableReader(parameters, 2, sigs, types);
         Assert.That(sigs.GetParamOwner(1), Is.EqualTo(2));
@@ -112,13 +115,43 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
     public void RejectsBadParameterOwnershipOrdinalsTypesAndModes()
     {
         var first = new TrRmParamRow(1, 0, 1, 0);
-        var second = new TrRmParamRow(1, 1, 1, 4);
+        var second = new TrRmParamRow(1, 1, 1, 0);
         Assert.Throws<ArgumentOutOfRangeException>(() => EncodeParams([]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first with { OwnerMethodSigRow = 2 }, second]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { Ordinal = 0 }]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { TypeSpecRef = 0 }]));
-        Assert.Throws<InvalidDataException>(() => EncodeParams([first, second with { Mode = 5 }]));
+        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Mode = 1 }, second]));
+        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Mode = 4 }, second]));
+        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Flags = 2 }, second]));
+        Assert.Throws<InvalidDataException>(() => EncodeParams([first with { Flags = 1 }, second]));
         Assert.Throws<InvalidDataException>(() => EncodeParams([first]));
+    }
+
+    [Test]
+    public void ImplicitAdaptationFlagRequiresReadonlyReference()
+    {
+        var first = new TrRmParamRow(1, 0, 0xF300_8B08, 0, 1);
+        var second = new TrRmParamRow(1, 1, 1, 0);
+        _ = EncodeParams([first, second]);
+
+        first = first with { TypeSpecRef = 0xF301_8B08 };
+        Assert.Throws<InvalidDataException>(() =>
+            EncodeParams([first, second]));
+    }
+
+    [Test]
+    public void DevelopmentParamModesRemainProfileSpecific()
+    {
+        var rows = new[]
+        {
+            new TrRmParamRow(1, 0, 1, 1),
+            new TrRmParamRow(1, 1, 1, 4),
+        };
+        var bytes = EncodeParams(rows, schema: TrRmArtifactSchema.Development);
+        Assert.That(bytes[12], Is.EqualTo((byte)1));
+        Assert.That(bytes[28], Is.EqualTo((byte)4));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateParams(bytes, TrRmArtifactSchema.Standard));
     }
 
     [Test]
@@ -142,15 +175,31 @@ public sealed class TrRmMethodSigAndParamTableWriterTests
         return TrRmMethodSigTableWriter.Encode(rows, types, 2, 0);
     }
 
-    private static byte[] EncodeParams(TrRmParamRow[] rows)
+    private static byte[] EncodeParams(TrRmParamRow[] rows,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
-        var specBytes = TrRmTypeSpecTableWriter.Encode([new byte[] { 1, 0, 8 }], 0, 0, 0, 0);
+        ReadOnlyMemory<byte>[] typeSpecRows = [TrRmTypeSpecTableWriter.Builtin(8)];
+        var specBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows, 0, 0, 0, 0);
+        var types = new TrRmTypeSpecTableReader(specBytes, typeSpecRows.Length,
+            0, 0, 0, 0);
+        var sigBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(1, 0, 1, 2, 0, 0),
+        ], types, 2, 0);
+        var sigs = new TrRmMethodSigTableReader(sigBytes, 1, types, 2, 0);
+        return TrRmParamTableWriter.Encode(rows, sigs, types, schema);
+    }
+
+    private static void ValidateParams(byte[] parameters, TrRmArtifactSchema schema)
+    {
+        var specBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 0, 0, 0, 0);
         var types = new TrRmTypeSpecTableReader(specBytes, 1, 0, 0, 0, 0);
         var sigBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(1, 0, 1, 2, 0, 0),
         ], types, 2, 0);
         var sigs = new TrRmMethodSigTableReader(sigBytes, 1, types, 2, 0);
-        return TrRmParamTableWriter.Encode(rows, sigs, types);
+        _ = new TrRmParamTableReader(parameters, 2, sigs, types, schema);
     }
 
     private static byte[] EncodeMethods(TrRmMethodDefRow[] rows)

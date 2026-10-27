@@ -11,6 +11,7 @@ internal enum TrRmArtifactSchema
     Standard,
     Development,
     CopyOriginDraft,
+    ForeignInvocationDraft,
 }
 
 /// <summary>Validates TRRM (1, 0) framing and indexes present sections without binding them.</summary>
@@ -33,7 +34,8 @@ public readonly ref struct TrRmArtifactIndex
     internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact, TrRmArtifactSchema schema)
     {
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
-            or TrRmArtifactSchema.CopyOriginDraft)
+            or TrRmArtifactSchema.CopyOriginDraft
+            or TrRmArtifactSchema.ForeignInvocationDraft)
             || artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
             || ReadU16(artifact, 4) != 1 || ReadU16(artifact, 6) != 0
             || ReadU32(artifact, 8) != 32 || ReadU32(artifact, 16) != artifact.Length
@@ -212,6 +214,9 @@ public readonly ref struct TrRmArtifactIndex
 
     internal static TrRmArtifactIndex ForCopyOriginDraft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.CopyOriginDraft);
+
+    internal static TrRmArtifactIndex ForForeignInvocationDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.ForeignInvocationDraft);
 
     public bool TryGetSection(ushort kind, out ReadOnlySpan<byte> section, out int recordCount)
     {

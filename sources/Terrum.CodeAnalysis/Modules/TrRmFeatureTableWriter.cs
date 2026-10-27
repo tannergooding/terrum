@@ -21,7 +21,8 @@ public static class TrRmFeatureTableWriter
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (schema is not (TrRmArtifactSchema.Standard
-            or TrRmArtifactSchema.CopyOriginDraft))
+            or TrRmArtifactSchema.CopyOriginDraft
+            or TrRmArtifactSchema.ForeignInvocationDraft))
         {
             throw InvalidFeature();
         }
