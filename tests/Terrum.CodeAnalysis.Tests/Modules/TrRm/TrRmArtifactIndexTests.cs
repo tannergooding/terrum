@@ -355,10 +355,18 @@ public sealed class TrRmArtifactIndexTests
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeBody: true));
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeSourceMap: true));
         TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(includeOutputState: true));
+        TrRmStructuralMetadataValidator.Validate(ArtifactWithCallableMetadata(
+            includeOutputState: true, doesNotReturn: true));
         TrRmStructuralMetadataValidator.Validate(WithReferenceSlottedExtension());
 
+        var ambiguousOutput = ArtifactWithCallableMetadata(
+            includeOutputState: true, conflictingOutputStates: true);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(ambiguousOutput));
+
         var invalidOutput = ArtifactWithCallableMetadata(includeOutputState: true);
-        invalidOutput[^8] = 1;
+        var contractOffset = GetSectionDataOffset(invalidOutput, 0x001B);
+        invalidOutput[contractOffset + 48] = 2;
         Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(invalidOutput));
 
@@ -883,7 +891,9 @@ public sealed class TrRmArtifactIndexTests
     }
 
     private static byte[] ArtifactWithCallableMetadata(bool includeEmptyBlob = false,
-        bool includeBody = false, bool includeSourceMap = false, bool includeOutputState = false)
+        bool includeBody = false, bool includeSourceMap = false,
+        bool includeOutputState = false, bool doesNotReturn = false,
+        bool conflictingOutputStates = false)
     {
         var strings = includeSourceMap
             ? TrRmStringTableWriter.EncodeNames([("Module", 0), ("Run", 0), ("src/file", 0)])
@@ -895,6 +905,12 @@ public sealed class TrRmArtifactIndexTests
         Write(module, 36, 1);
         Write(module, 40, 1);
         Write(module, 44, 1);
+        if (includeOutputState)
+        {
+            Write(module, 24, 1);
+            Write(module, 28, 1);
+        }
+
         byte[] typeSpec = [0, 0, 0, 0, 3, 0, 0, 0, 1, 0, 8];
         if (includeOutputState)
         {
@@ -908,7 +924,9 @@ public sealed class TrRmArtifactIndexTests
         if (includeOutputState)
         {
             Write(method, 16, 1);
-            Write(method, 20, 1);
+            Write(method, 20, conflictingOutputStates
+                ? (doesNotReturn ? 5u : 4u)
+                : (doesNotReturn ? 3u : 2u));
         }
         if (includeBody || includeSourceMap)
         {
@@ -932,15 +950,66 @@ public sealed class TrRmArtifactIndexTests
             : [0x0001, 0x0002, 0x0011, 0x0016, 0x0017];
         if (includeOutputState)
         {
+            typeSpec = TrRmTypeSpecTableWriter.Encode([
+                TrRmTypeSpecTableWriter.Builtin(
+                    conflictingOutputStates ? (byte)8 : (byte)1),
+                new byte[]
+                {
+                    0x0E, 0,
+                    conflictingOutputStates ? (byte)8 : (byte)1,
+                    0, 0, 0xF2,
+                },
+            ], 0, 0, 0);
+            var typeSpecIndex = includeEmptyBlob ? 3 : 2;
+            sections[typeSpecIndex] = typeSpec;
+            var featureBytes = TrRmFeatureTableWriter.Encode([
+                TrRmFeatureRow.PublishedPredicates,
+            ]);
+            sections = [
+                .. sections[..typeSpecIndex],
+                featureBytes,
+                .. sections[typeSpecIndex..],
+            ];
+            kinds = [
+                .. kinds[..typeSpecIndex],
+                0x0004,
+                .. kinds[typeSpecIndex..],
+            ];
+
             var param = new byte[16];
             Write(param, 0, 1);
-            Write(param, 8, 1);
-            param[12] = 2;
-            var contract = new byte[24];
-            Write(contract, 4, 16);
-            Write(contract, 8, 0x1600_0001);
-            WriteU16(contract, 12, 2);
-            contract[20] = 1;
+            Write(param, 8, 2);
+            var contractRows = new List<ReadOnlyMemory<byte>>();
+            if (doesNotReturn)
+            {
+                var effectContract = new byte[12];
+                Write(effectContract, 0, 0x1600_0001);
+                WriteU16(effectContract, 4, 1);
+                Write(effectContract, 8, 2);
+                contractRows.Add(effectContract);
+            }
+            var selectorCount = conflictingOutputStates ? 2 : 1;
+            for (var selector = 0; selector < selectorCount; selector++)
+            {
+                var predicateContract = new byte[20];
+                Write(predicateContract, 0, 0x1600_0001);
+                WriteU16(predicateContract, 4, 0x000B);
+                predicateContract[8] = 3;
+                Write(predicateContract, 12, (uint)selector);
+                Write(predicateContract, 16, (uint)(selector + 1));
+                contractRows.Add(predicateContract);
+            }
+            for (var selector = 0; selector < selectorCount; selector++)
+            {
+                var outputStateContract = new byte[20];
+                Write(outputStateContract, 0, 0x1600_0001);
+                WriteU16(outputStateContract, 4, 0x0002);
+                Write(outputStateContract, 8, 0);
+                Write(outputStateContract, 12, (uint)(selector + 1));
+                outputStateContract[16] = selector == 0 ? (byte)1 : (byte)0;
+                contractRows.Add(outputStateContract);
+            }
+            var contract = TrRmVariableTableWriter.EncodeBodies(contractRows);
             sections = [.. sections, param, contract];
             kinds = [.. kinds, 0x0018, 0x001B];
         }
@@ -958,6 +1027,55 @@ public sealed class TrRmArtifactIndexTests
             sections = [.. sections, TrRmVariableTableWriter.EncodeBodies(
                 [TrRmRegisterBodyTestData.MinimalReturnBody()])];
             kinds = [.. kinds, 0x0020];
+        }
+
+        if (includeOutputState)
+        {
+            var selectorCount = conflictingOutputStates ? 2 : 1;
+            var graphRows = new TrRmPredicateGraphRow[selectorCount];
+            var footprintRows = new TrRmPredicateReadFootprintRow[selectorCount];
+            var roots = new byte[selectorCount * 8];
+            var nodes = new byte[selectorCount * 16];
+            var operands = new byte[selectorCount * 8];
+            for (var selector = 0; selector < selectorCount; selector++)
+            {
+                var row = selector + 1;
+                graphRows[selector] = new TrRmPredicateGraphRow(row, row);
+                footprintRows[selector] = new TrRmPredicateReadFootprintRow(row, 1, 0, 0);
+                roots[selector * 8] = 5;
+                var nodeOffset = selector * 16;
+                Write(nodes, nodeOffset,
+                    conflictingOutputStates
+                        ? selector == 0 ? 3u : 5u
+                        : 1u);
+                Write(nodes, nodeOffset + 4,
+                    conflictingOutputStates ? 0xF200_0008 : 0xF200_0001);
+                Write(nodes, nodeOffset + 8, (uint)row);
+                Write(nodes, nodeOffset + 12, 1);
+                var operandOffset = selector * 8;
+                operands[operandOffset] = 1;
+                Write(operands, operandOffset + 4, (uint)row);
+            }
+            var graphs = TrRmPredicateGraphTableWriter.Encode(graphRows,
+                nodeCount: selectorCount, readFootprintCount: selectorCount);
+            var footprints = TrRmPredicateReadFootprintTableWriter.Encode(
+                footprintRows, rootCount: selectorCount, dependencyCount: 0);
+            sections = [
+                .. sections,
+                graphs,
+                footprints,
+                roots,
+                nodes,
+                operands,
+            ];
+            kinds = [
+                .. kinds,
+                0x0037,
+                0x0038,
+                0x0039,
+                0x003B,
+                0x003C,
+            ];
         }
 
         if (includeSourceMap)
@@ -995,7 +1113,18 @@ public sealed class TrRmArtifactIndexTests
             var directory = 32 + entry * 16;
             WriteU16(artifact, directory, kinds[entry]);
             Write(artifact, directory + 4,
-                entry == 1 ? (includeSourceMap ? 3u : 2u) : 1u);
+                kinds[entry] switch
+                {
+                    0x0002 => includeSourceMap ? 3u : 2u,
+                    0x0011 => includeOutputState ? 2u : 1u,
+                    0x001B => includeOutputState
+                        ? (conflictingOutputStates ? 4u : 2u)
+                            + (doesNotReturn ? 1u : 0u)
+                        : 1u,
+                    0x0037 or 0x0038 or 0x0039 or 0x003B or 0x003C
+                        => conflictingOutputStates ? 2u : 1u,
+                    _ => 1u,
+                });
             if (kinds[entry] == 0x7F00)
             {
                 WriteU16(artifact, directory + 2, 2);
@@ -1007,6 +1136,23 @@ public sealed class TrRmArtifactIndexTests
         }
 
         return artifact;
+    }
+
+    private static int GetSectionDataOffset(byte[] artifact, ushort kind)
+    {
+        var sectionCount = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(12)));
+        for (var entry = 0; entry < sectionCount; entry++)
+        {
+            var directory = 32 + entry * 16;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(directory)) == kind)
+            {
+                return checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    artifact.AsSpan(directory + 8)));
+            }
+        }
+
+        throw new InvalidDataException($"Missing TRRM section 0x{kind:X4}.");
     }
 
     private static void Write(byte[] bytes, int offset, uint value)

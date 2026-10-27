@@ -21,6 +21,8 @@ internal readonly record struct TrRmNativeAbiContract(uint AbiId, byte Role, byt
 
 internal readonly record struct TrRmPredicateGraphContract(
     byte PhaseTag, uint PhaseLocalOrdinal, int PredicateGraphRow);
+internal readonly record struct TrRmOutputStateContract(
+    int ParameterOrdinal, int PredicateGraphRow, byte State);
 
 /// <summary>Validates Contract row framing, owner ranges and assigned clause shapes.</summary>
 /// <remarks>Structural decoding does not prove the promises or make unassigned clause modes executable.</remarks>
@@ -35,6 +37,7 @@ public readonly ref struct TrRmContractTableReader
     private readonly TrRmNativeAbiContract[] _nativeAbis;
     private readonly bool[] _hasNativeAbis;
     private readonly ImmutableArray<TrRmPredicateGraphContract>[] _predicateGraphContracts;
+    private readonly ImmutableArray<TrRmOutputStateContract>[] _outputStateContracts;
     private readonly byte[] _nativeCallableConventions;
     private readonly int[] _nativeCallableContractRows;
     private readonly HashSet<int> _cleanupMethodRows;
@@ -97,6 +100,8 @@ public readonly ref struct TrRmContractTableReader
         _hasNativeAbis = new bool[methods.Count + 1];
         _predicateGraphContracts =
             new ImmutableArray<TrRmPredicateGraphContract>[methods.Count + 1];
+        _outputStateContracts =
+            new ImmutableArray<TrRmOutputStateContract>[methods.Count + 1];
         _nativeCallableConventions = new byte[methods.Count + 1];
         _nativeCallableContractRows = new int[methods.Count + 1];
         _cleanupMethodRows = new HashSet<int>();
@@ -116,7 +121,7 @@ public readonly ref struct TrRmContractTableReader
 
         var singletons = new HashSet<(uint Owner, ushort Kind)>();
         var outputs = new HashSet<(uint Owner, uint Ordinal)>();
-        var outputStates = new HashSet<(uint Owner, uint Ordinal)>();
+        var outputStates = new HashSet<(uint Owner, uint Ordinal, uint Predicate)>();
         var cleanupTypes = new HashSet<int>();
         var predicateOrdinals = new Dictionary<(uint Owner, byte Phase), HashSet<uint>>();
         var nativeParameterOrdinals = new HashSet<(uint Owner, uint Ordinal)>();
@@ -144,24 +149,57 @@ public readonly ref struct TrRmContractTableReader
                     }
                     break;
                 case 2:
-                    if (data.Length != 16 || data[12] > 1 || data[13] > 1
-                        || data[14] > 1 || data[15] != 0 || owner >> 24 != 0x16)
+                    if (owner >> 24 != 0x16)
                     {
                         throw InvalidContract();
                     }
 
-                    var signature = methods.GetSignature((int)(owner & 0xFF_FFFF));
-                    var result = typeSpecs.GetTypeSpecBytes(
-                        signatures.GetResultTypeSpec(signature));
+                    var outputMethod = checked((int)(owner & 0xFF_FFFF));
+                    var signature = methods.GetSignature(outputMethod);
                     var (paramFirst, paramCount) = signatures.GetParamRange(signature);
                     var ordinal = Read(data, 8);
-                    if (result.Length != 3 || result[0] != 1 || result[1] != 0
-                        || result[2] != 1 || ordinal >= paramCount
-                        || parameters.GetMode(paramFirst + (int)ordinal) is not (1 or 2)
-                        || !outputStates.Add((owner, ordinal)))
+                    if (developmentProfile)
+                    {
+                        if (data.Length != 16 || data[12] > 1 || data[13] > 1
+                            || data[14] > 1 || data[15] != 0
+                            || typeSpecs.GetTypeSpecBytes(
+                                signatures.GetResultTypeSpec(signature)) is not
+                                    [1, 0, 1]
+                            || ordinal >= paramCount
+                            || parameters.GetMode(paramFirst + (int)ordinal) is not (1 or 2)
+                            || !outputStates.Add((owner, ordinal, 0)))
+                        {
+                            throw InvalidContract();
+                        }
+
+                        break;
+                    }
+
+                    if (data.Length != 20 || data[16] > 1 || data[17] != 0
+                        || data[18] != 0 || data[19] != 0)
                     {
                         throw InvalidContract();
                     }
+
+                    var outputPredicateGraph = Read(data, 12);
+                    if (ordinal >= paramCount
+                        || outputPredicateGraph is 0 or > 0xFF_FFFF
+                        || outputPredicateGraph > (uint)predicateGraphCount
+                        || parameters.GetMode(paramFirst + (int)ordinal) != 0
+                        || !IsInitializationDestinationType(typeSpecs,
+                            parameters.GetTypeSpec(paramFirst + (int)ordinal))
+                        || !outputStates.Add((owner, ordinal, outputPredicateGraph)))
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var outputState = new TrRmOutputStateContract((int)ordinal,
+                        checked((int)outputPredicateGraph), data[16]);
+                    var methodOutputStates = _outputStateContracts[outputMethod];
+                    _outputStateContracts[outputMethod] =
+                        methodOutputStates.IsDefault
+                            ? [outputState]
+                            : methodOutputStates.Add(outputState);
                     break;
                 case 3:
                     if (data.Length != 16 || data[14] != 0 || data[15] != 0)
@@ -223,8 +261,8 @@ public readonly ref struct TrRmContractTableReader
                     var methodPredicates = _predicateGraphContracts[predicateMethod];
                     _predicateGraphContracts[predicateMethod] =
                         methodPredicates.IsDefault
-                            ? ImmutableArray.Create(new TrRmPredicateGraphContract(
-                                data[8], predicateOrdinal, checked((int)predicateGraph)))
+                            ? [new TrRmPredicateGraphContract(data[8],
+                                predicateOrdinal, checked((int)predicateGraph))]
                             : methodPredicates.Add(new TrRmPredicateGraphContract(
                                 data[8], predicateOrdinal, checked((int)predicateGraph)));
                     break;
@@ -360,6 +398,28 @@ public readonly ref struct TrRmContractTableReader
                 }
             }
         }
+
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            foreach (var outputState in GetOutputStateContracts(method))
+            {
+                var matchingPredicate = false;
+                foreach (var predicate in GetPredicateGraphContracts(method))
+                {
+                    if (predicate.PhaseTag == 3
+                        && predicate.PredicateGraphRow == outputState.PredicateGraphRow)
+                    {
+                        matchingPredicate = true;
+                        break;
+                    }
+                }
+
+                if (!matchingPredicate)
+                {
+                    throw InvalidContract();
+                }
+            }
+        }
     }
 
     internal ReadOnlySpan<byte> GetRow(int row)
@@ -467,6 +527,13 @@ public readonly ref struct TrRmContractTableReader
                 ? [] : _predicateGraphContracts[methodRow]
             : throw InvalidContract();
 
+    internal ImmutableArray<TrRmOutputStateContract> GetOutputStateContracts(
+        int methodRow)
+        => methodRow > 0 && methodRow < _outputStateContracts.Length
+            ? _outputStateContracts[methodRow].IsDefault
+                ? [] : _outputStateContracts[methodRow]
+            : throw InvalidContract();
+
     internal TrRmNativeAbiContract GetNativeAbi(int methodRow)
         => HasNativeAbi(methodRow) ? _nativeAbis[methodRow] : throw InvalidContract();
 
@@ -479,6 +546,25 @@ public readonly ref struct TrRmContractTableReader
         var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
         return (type.Length == 4 && type[0] == 1 && type[2] == 0x8C)
             || (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C);
+    }
+
+    private static bool IsInitializationDestinationType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 6 && type[0] == 0x0E)
+        {
+            return true;
+        }
+
+        if (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8A)
+        {
+            var argument = typeSpecs.GetTypeSpecRef(Read(type, 3),
+                allowInitQualifier: true);
+            return (argument.Qualifiers & 0x04) != 0;
+        }
+
+        return false;
     }
 
     private static void ValidateCopyOriginClause(ReadOnlySpan<byte> data,

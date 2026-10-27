@@ -272,30 +272,55 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void OutputStateRequiresBooleanResultAndAnOutputParameterOrdinal()
+    public void StandardOutputStateRequiresAnAttachedPredicateAndInitializationOutput()
     {
-        var output = Contract(0x1600_0001, 2, [0, 0, 0, 0, 1, 0, 0, 0]);
-        var section = Section(output);
-        Create(section, recordCount: 1, declaredCount: 1,
-            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
-            hasOutputParam: true, paramMode: 2);
-        Assert.Throws<InvalidDataException>(() => Create(section,
-            recordCount: 1, declaredCount: 1,
-            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1));
-        Assert.Throws<InvalidDataException>(() => Create(section,
-            recordCount: 1, declaredCount: 1,
-            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
-            hasOutputParam: true, paramMode: 0));
-        Assert.Throws<InvalidDataException>(() => Create(section,
-            recordCount: 1, declaredCount: 1,
-            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
-            hasOutputParam: true, nonBooleanResult: true));
+        var predicate = PredicateGraphContract(phase: 3, ordinal: 0, graphRow: 1);
+        var output = OutputStateContract(ordinal: 0, graphRow: 1, state: 1);
+        var section = Section(predicate, output);
+        Create(section, recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            hasOutputParam: true, paramMode: 0, initializationParameter: true,
+            predicateGraphCount: 1, includePublishedPredicatesFeature: true,
+            writeRows: true, developmentProfile: false);
 
-        output[8] = 1;
         Assert.Throws<InvalidDataException>(() => Create(Section(output),
             recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
-            hasOutputParam: true));
+            hasOutputParam: true, paramMode: 0, initializationParameter: true,
+            predicateGraphCount: 1, includePublishedPredicatesFeature: true,
+            developmentProfile: false));
+        Assert.Throws<InvalidDataException>(() => Create(section,
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            predicateGraphCount: 1, includePublishedPredicatesFeature: true,
+            developmentProfile: false));
+        Assert.Throws<InvalidDataException>(() => Create(section,
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            hasOutputParam: true, paramMode: 1, initializationParameter: true,
+            predicateGraphCount: 1, includePublishedPredicatesFeature: true,
+            developmentProfile: false));
+        Assert.Throws<InvalidDataException>(() => Create(section,
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            hasOutputParam: true, paramMode: 0, predicateGraphCount: 1,
+            includePublishedPredicatesFeature: true, developmentProfile: false));
+
+        output = OutputStateContract(ordinal: 0, graphRow: 1, state: 2);
+        Assert.Throws<InvalidDataException>(() => Create(Section(predicate, output),
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            hasOutputParam: true, paramMode: 0, initializationParameter: true,
+            predicateGraphCount: 1, includePublishedPredicatesFeature: true,
+            developmentProfile: false));
+
+        output = OutputStateContract(ordinal: 0, graphRow: 2, state: 1);
+        Assert.Throws<InvalidDataException>(() => Create(Section(predicate, output),
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            hasOutputParam: true, paramMode: 0, initializationParameter: true,
+            predicateGraphCount: 2, includePublishedPredicatesFeature: true,
+            developmentProfile: false));
     }
 
     [Test]
@@ -1084,6 +1109,16 @@ public sealed class TrRmContractTableReaderTests
         Write(data, 4, ordinal);
         Write(data, 8, graphRow);
         return Contract(0x1600_0001, 0x0B, data);
+    }
+
+    private static byte[] OutputStateContract(uint ordinal, uint graphRow,
+        byte state)
+    {
+        var data = new byte[12];
+        Write(data, 0, ordinal);
+        Write(data, 4, graphRow);
+        data[8] = state;
+        return Contract(0x1600_0001, 2, data);
     }
 
     private static byte[] NativeParameter(uint ordinal, byte access, byte retention, uint extent)

@@ -36,18 +36,9 @@ internal static class TrRmPublishedPredicateSelectorValidator
         var usedReadRoots = new HashSet<int>();
         var usedNodes = new HashSet<int>();
         var usedOperands = new HashSet<int>();
+        var nodeKindsByGraph = new byte[graphCount + 1];
         for (var method = 1; method <= methods.Count; method++)
         {
-            if ((contracts.GetEffectsMask(method) & 2) != 0)
-            {
-                if (!contracts.GetPredicateGraphContracts(method).IsEmpty)
-                {
-                    throw InvalidPredicateSelector();
-                }
-
-                continue;
-            }
-
             var predicateContracts = contracts.GetPredicateGraphContracts(method);
             foreach (var predicate in predicateContracts)
             {
@@ -94,6 +85,7 @@ internal static class TrRmPublishedPredicateSelectorValidator
                 {
                     throw InvalidPredicateSelector();
                 }
+                nodeKindsByGraph[graph] = checked((byte)nodeKind);
 
                 var operand = GetRow(operands, operandFirst, 8);
                 if (!usedOperands.Add(checked((int)operandFirst))
@@ -113,7 +105,52 @@ internal static class TrRmPublishedPredicateSelectorValidator
         {
             throw InvalidPredicateSelector();
         }
+
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            var outputs = contracts.GetOutputStateContracts(method);
+            for (var first = 0; first < outputs.Length; first++)
+            {
+                var firstOutput = outputs[first];
+                var firstKind = GetOutputSelectorKind(firstOutput);
+                for (var second = first + 1; second < outputs.Length; second++)
+                {
+                    var secondOutput = outputs[second];
+                    if (firstOutput.ParameterOrdinal != secondOutput.ParameterOrdinal)
+                    {
+                        continue;
+                    }
+
+                    var secondKind = GetOutputSelectorKind(secondOutput);
+                    if (firstKind == secondKind
+                        || (firstOutput.State != secondOutput.State
+                            && SelectorsOverlap(firstKind, secondKind)))
+                    {
+                        throw InvalidPredicateSelector();
+                    }
+                }
+            }
+        }
+
+        byte GetOutputSelectorKind(TrRmOutputStateContract output)
+        {
+            var graph = output.PredicateGraphRow;
+            if (graph <= 0 || graph >= nodeKindsByGraph.Length
+                || nodeKindsByGraph[graph] == 0)
+            {
+                throw InvalidPredicateSelector();
+            }
+
+            return nodeKindsByGraph[graph];
+        }
     }
+
+    private static bool SelectorsOverlap(byte left, byte right)
+        => (left, right) switch
+        {
+            (3, 5) or (5, 3) or (3, 6) or (6, 3) or (4, 5) or (5, 4) => true,
+            _ => false,
+        };
 
     private static bool HasSupportedOwnerResult(uint nodeKind,
         uint resultTypeSpec, TrRmTypeSpecTableReader typeSpecs)
