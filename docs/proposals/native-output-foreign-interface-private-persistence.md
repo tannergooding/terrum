@@ -319,7 +319,8 @@ The absent variant is exactly four bytes. The present variant's fixed extent
 is **28 bytes**, including the reference, both counts and zero native-input
 rows; each formal adds `String extent + 8`, each native input **14** bytes.
 No optional convention, implicit receiver default or body signature follows.
-These convention bytes are a new field's explicit private projection,
+These convention bytes are a new field's explicit private projection of the
+[proposed effective NativeCallable contract](native-calling-convention-source-schema.md),
 **not a cast of** the current single-case `NativeCallingConvention.Native`
 enum or a standard Contract payload. Preserve the three convention identities
 even where Windows uses identical physical carriers. Vectorcall rejects.
