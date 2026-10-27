@@ -495,6 +495,66 @@ public static partial class SemanticVerifier
         internal bool IsKnown => Activation >= 0 && Instance.IsKnown;
     }
 
+    private enum CapabilityKind : byte
+    {
+        Owner,
+        Lease,
+        Guard,
+        Root,
+        Pin,
+    }
+
+    private readonly record struct CapabilityContract(
+        CapabilityKind Kind, PrimitiveType Type, int SupportingPlace, StorageProjection Projection)
+    {
+        internal bool IsKnown => (byte)Kind <= (byte)CapabilityKind.Pin
+            && SupportingPlace >= 0
+            && Projection.Kind is StorageProjectionKind.WholeObject
+                or StorageProjectionKind.InlineFieldPath
+                or StorageProjectionKind.ElementRange
+                or StorageProjectionKind.ArrayElement
+                or StorageProjectionKind.UnknownElement;
+    }
+
+    // Acquisition identity is separate from the storage generation that supports it.
+    private readonly record struct CapabilityKey(
+        int FunctionActivation, int AcquisitionSite, int ExecutionActivation,
+        CapabilityContract Contract)
+    {
+        internal bool IsKnown => FunctionActivation >= 0 && AcquisitionSite >= 0
+            && ExecutionActivation >= 0 && Contract.IsKnown;
+    }
+
+    private sealed class CapabilityAcquisitionContext
+    {
+        private readonly Dictionary<BoundViewScope, int> _acquisitionSites = new(
+            ReferenceEqualityComparer.Instance);
+        private int _nextAcquisitionSite;
+
+        internal CapabilityKey Acquire(int functionActivation, BoundViewScope operation,
+            int executionActivation, CapabilityContract contract)
+        {
+            if (functionActivation < 0 || operation is null || executionActivation < 0
+                || !contract.IsKnown)
+            {
+                throw Invalid();
+            }
+            if (!_acquisitionSites.TryGetValue(operation, out var acquisitionSite))
+            {
+                acquisitionSite = _nextAcquisitionSite++;
+                _acquisitionSites.Add(operation, acquisitionSite);
+            }
+
+            var key = new CapabilityKey(functionActivation, acquisitionSite,
+                executionActivation, contract);
+            if (!key.IsKnown)
+            {
+                throw Invalid(operation.Span);
+            }
+            return key;
+        }
+    }
+
     private readonly record struct ProvenanceAnchor(
         ProvenanceAnchorKind Kind, int Identity, StorageKey? Storage)
     {

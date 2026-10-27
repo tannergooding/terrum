@@ -840,7 +840,8 @@ public static partial class SemanticVerifier
                 VerifyManagedRoots(function);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program,
                     ref functionRemaining, 0);
-                VerifyViewScopes(function.Body, function, initialized.StatementInputs);
+                VerifyViewScopes(functionIndex, function.Body, function,
+                    initialized.StatementInputs);
                 if (function.DoesNotReturn && !returns)
                 {
                     throw InvalidEffect(function.Body.Span, "DoesNotReturn");
@@ -1467,18 +1468,29 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyViewScopes(BoundBlock body, BoundFunction function,
+    private static void VerifyViewScopes(int functionActivation, BoundBlock body, BoundFunction function,
         Dictionary<BoundStatement, InitializationState>? inputs)
     {
         var roots = new int[function.Variables.Length];
         var exclusive = new bool[roots.Length];
-        var active = new bool[roots.Length];
+        var activeCapabilitiesByView = new CapabilityKey?[roots.Length];
+        var activeCapabilities = new HashSet<CapabilityKey>();
+        var capabilityAcquisitionContext = new CapabilityAcquisitionContext();
         var backing = new int[roots.Length];
         var declared = new HashSet<int>();
         var nativeLocals = function.Variables.Any(static variable =>
             NativeFixedArrayContract.IsCarrier(variable.Type))
             ? new HashSet<int>() : null;
         var remaining = MaximumAnalysisVisits;
+
+        bool IsActiveLease(int variable)
+            => (uint)variable < (uint)activeCapabilitiesByView.Length
+                && activeCapabilitiesByView[variable] is CapabilityKey capability
+                && capability.Contract.Kind == CapabilityKind.Lease
+                && capability.Contract.Type == function.Variables[variable].Type
+                && capability.Contract.SupportingPlace == backing[variable]
+                && capability.Contract.Projection.Kind == StorageProjectionKind.WholeObject
+                && activeCapabilities.Contains(capability);
 
         void Expression(BoundExpression expression, int depth, int acquiringRoot = -1)
         {
@@ -1536,13 +1548,13 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundViewLength length:
-                    if (length.Variable < 0 || length.Variable >= active.Length || !active[length.Variable])
+                    if (!IsActiveLease(length.Variable))
                     {
                         throw InvalidEffect(length.Span, "Ownership");
                     }
                     break;
                 case BoundViewRead viewRead:
-                    if (viewRead.Variable < 0 || viewRead.Variable >= active.Length || !active[viewRead.Variable])
+                    if (!IsActiveLease(viewRead.Variable))
                     {
                         throw InvalidEffect(viewRead.Span, "Ownership");
                     }
@@ -1698,9 +1710,9 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
-            for (var slot = 0; slot < active.Length; slot++)
+            for (var slot = 0; slot < activeCapabilitiesByView.Length; slot++)
             {
-                if (active[slot] && inputs is not null && !inputs[statement].IsVacant(slot))
+                if (IsActiveLease(slot) && inputs is not null && !inputs[statement].IsVacant(slot))
                 {
                     if (function.Variables[slot].Type == PrimitiveType.MutableInt32BufferView)
                     {
@@ -1736,7 +1748,8 @@ public static partial class SemanticVerifier
                         || function.Variables[view.Variable].Type != (view.IsMutable
                             ? PrimitiveType.MutableInt32BufferView : PrimitiveType.ReadonlyInt32BufferView)
                         || function.Variables[view.Variable].IsMutable != view.IsMutable
-                        || !declared.Add(view.Variable) || active[view.Variable]
+                        || !declared.Add(view.Variable)
+                        || activeCapabilitiesByView[view.Variable] is not null
                         || view.Body is null || view.Owner is null)
                     {
                         throw InvalidEffect(view.Span, "Ownership");
@@ -1761,9 +1774,32 @@ public static partial class SemanticVerifier
                     }
                     Expression(view.Start, depth + 1, view.IsMutable ? root : -1);
                     Expression(view.RangeEnd ?? view.Length, depth + 1, view.IsMutable ? root : -1);
-                    active[view.Variable] = true;
-                    Statement(view.Body, depth + 1);
-                    active[view.Variable] = false;
+                    var executionActivation = inputs is null
+                        ? BackingDependencies.RootScopeActivation
+                        : inputs[view].ScopeActivation;
+                    var capability = capabilityAcquisitionContext.Acquire(
+                        functionActivation, view, executionActivation,
+                        new CapabilityContract(CapabilityKind.Lease,
+                            function.Variables[view.Variable].Type, root,
+                            StorageProjection.WholeObject));
+                    if (!activeCapabilities.Add(capability))
+                    {
+                        throw InvalidEffect(view.Span, "Ownership");
+                    }
+                    activeCapabilitiesByView[view.Variable] = capability;
+                    try
+                    {
+                        Statement(view.Body, depth + 1);
+                    }
+                    finally
+                    {
+                        if (activeCapabilitiesByView[view.Variable] != capability
+                            || !activeCapabilities.Remove(capability))
+                        {
+                            throw Invalid(view.Span);
+                        }
+                        activeCapabilitiesByView[view.Variable] = null;
+                    }
                     break;
                 case BoundLocal local:
                     if (local.Variable < 0 || local.Variable >= roots.Length
@@ -1823,7 +1859,7 @@ public static partial class SemanticVerifier
                     Expression(write.Value, depth + 1);
                     break;
                 case BoundViewSet viewWrite:
-                    if (viewWrite.Variable < 0 || viewWrite.Variable >= active.Length || !active[viewWrite.Variable]
+                    if (!IsActiveLease(viewWrite.Variable)
                         || function.Variables[viewWrite.Variable].Type != PrimitiveType.MutableInt32BufferView)
                     {
                         throw InvalidEffect(viewWrite.Span, "Ownership");
@@ -1882,6 +1918,11 @@ public static partial class SemanticVerifier
         }
 
         Statement(body, 0);
+        if (activeCapabilities.Count != 0
+            || activeCapabilitiesByView.Any(static capability => capability.HasValue))
+        {
+            throw Invalid(function.Span);
+        }
         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0); slot < roots.Length; slot++)
         {
             if (!declared.Contains(slot) && function.Variables[slot].Type is

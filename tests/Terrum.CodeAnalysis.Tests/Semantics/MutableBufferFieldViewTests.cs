@@ -61,6 +61,27 @@ public sealed class MutableBufferFieldViewTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3023"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
+
+    [Test]
+    public void NestedReadonlyViewsReleaseOnlyTheirOwnLease()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Owner + """
+            int32 Main() {
+                require OwnedInt32Buffer.TryCreate(1, out var first);
+                require OwnedInt32Buffer.TryCreate(1, out var second);
+                mut Owner owner = new Owner(move first, move second);
+                ReadonlyInt32BufferView outer = owner.Words.Slice(0, 0);
+                if (true) {
+                    ReadonlyInt32BufferView inner = owner.Words.Slice(0, 0);
+                    int32 innerLength = inner.Length;
+                }
+                return outer.Length;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Not.Null);
+    }
     [TestCase("Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(0, 0);")]
     [TestCase("mut MutableInt32BufferView view = new Owner(move first, move second).Words.SliceMutable(0, 0);")]
     [TestCase("mut Owner owner = new Owner(move first, move second); mut MutableInt32BufferView view = owner.Words.SliceMutable(ToInt(Replace(out owner)), 0);")]
