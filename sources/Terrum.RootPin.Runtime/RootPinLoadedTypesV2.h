@@ -85,6 +85,51 @@ typedef struct RootPinTypeBatchV2
     uint32_t reserved;
 } RootPinTypeBatchV2;
 
+typedef struct RootPinMethodNodeV1
+{
+    uint64_t methodKey;
+    RootPinLoadedTypeV1* resultType;
+    uint32_t formalCount;
+    uint32_t entrySlotCount;
+    uint32_t inputFirst;
+    uint32_t inputCount;
+    uint32_t originFirst;
+    uint32_t originCount;
+    uint32_t declarationOrigin;
+    uint32_t entryOrigin;
+    uint32_t flags;
+    uint32_t reserved;
+} RootPinMethodNodeV1;
+
+typedef struct RootPinMethodInputV1
+{
+    uint32_t formalOrdinal;
+    uint32_t entrySlot;
+    RootPinLoadedTypeV1* completeType;
+    uint8_t sourceRole;
+    uint8_t handoffKind;
+    uint16_t reserved16;
+    uint32_t reserved32;
+} RootPinMethodInputV1;
+
+typedef struct RootPinMethodBatchV1
+{
+    uint32_t abiRevision;
+    uint32_t byteSize;
+    uint32_t targetProfileId;
+    uint32_t targetProfileRevision;
+    uint32_t methodCount;
+    uint32_t inputCount;
+    uint32_t originCount;
+    uint32_t originUseCount;
+    const RootPinMethodNodeV1* methods;
+    const RootPinMethodInputV1* inputs;
+    const RootPinTypeOriginV1* origins;
+    const uint32_t* originUses;
+    uint32_t flags;
+    uint32_t reserved;
+} RootPinMethodBatchV1;
+
 typedef struct RootPinPlaceRequestV1
 {
     uint64_t offset;
@@ -137,22 +182,15 @@ typedef struct RootPinCallTransferV1
     RootPinInputTransferV1* inputs;
 } RootPinCallTransferV1;
 
-#if defined(TERRUM_ROOT_PIN_TESTS)
-typedef struct RootPinTestMethodInputV1
-{
-    uint32_t formalOrdinal;
-    uint32_t entrySlot;
-    RootPinLoadedTypeV1* completeType;
-    uint8_t sourceRole;
-    uint8_t flags;
-    uint16_t reserved;
-} RootPinTestMethodInputV1;
-#endif
-
 enum
 {
     ROOTPIN_ACCESS_READ = 1,
-    ROOTPIN_ACCESS_READ_WRITE = 3
+    ROOTPIN_ACCESS_READ_WRITE = 3,
+    ROOTPIN_METHOD_FLAG_HAS_RECEIVER = 1,
+    ROOTPIN_METHOD_SOURCE_FORMAL = 0,
+    ROOTPIN_METHOD_SOURCE_RECEIVER = 1,
+    ROOTPIN_METHOD_HANDOFF_BORROWED = 0,
+    ROOTPIN_METHOD_HANDOFF_OWNED = 1
 };
 
 typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootPinRootExactEntryV1)(
@@ -173,6 +211,62 @@ typedef uint64_t (ROOTPIN_LOADED_TYPES_CALL *RootPinResolveExactEntryV1)(
     RootPinRootCellV1 root);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinPollEntryV1)(
     RootPinDomainV1 domain);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinRetainSupportEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinReleaseSupportEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinEnterFrameEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinSupportFrameV1* frame);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinExitFrameEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinSupportFrameV1* frame);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinBeginCallEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinReturnSupportEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinSupportSlotV1* savedResult);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinFinishCallEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer,
+    uint32_t completion);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootPinAdmitLoadedMethodsEntryV1)(
+    RootPinDomainV1 domain,
+    const RootPinMethodBatchV1* batch,
+    RootPinLoadedMethodV1* vacantOutMethods,
+    uint32_t outCount);
+
+typedef struct RootPinRuntimeFunctionTableV1
+{
+    uint32_t abiRevision;
+    uint32_t byteSize;
+    RootPinRootExactEntryV1 rootExact;
+    RootPinPinExactEntryV1 pinExact;
+    RootPinPinObjectEntryV1 pinObject;
+    RootPinResolveExactEntryV1 resolveExact;
+    RootPinRetainSupportEntryV1 retainSupport;
+    RootPinReleaseSupportEntryV1 releaseSupport;
+    RootPinEnterFrameEntryV1 enterFrame;
+    RootPinExitFrameEntryV1 exitFrame;
+    RootPinPollEntryV1 poll;
+    RootPinBeginCallEntryV1 beginCall;
+    RootPinReturnSupportEntryV1 returnSupport;
+    RootPinFinishCallEntryV1 finishCall;
+} RootPinRuntimeFunctionTableV1;
+
+typedef struct RootPinRuntimeInfoV1
+{
+    RootPinDomainV1 domain;
+    RootPinRuntimeFunctionTableV1 functionTable;
+} RootPinRuntimeInfoV1;
+
+ROOTPIN_LOADED_TYPES_API const RootPinRuntimeInfoV1* ROOTPIN_LOADED_TYPES_CALL
+TerrumRootPinGetRuntimeV1(void);
 
 enum
 {
@@ -207,6 +301,13 @@ TerrumRootPinAdmitLoadedTypesV2(
     RootPinDomainV1 domain,
     const RootPinTypeBatchV2* batch,
     RootPinLoadedTypeV1** vacantOutTypes,
+    uint32_t outCount);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+TerrumRootPinAdmitLoadedMethodsV1(
+    RootPinDomainV1 domain,
+    const RootPinMethodBatchV1* batch,
+    RootPinLoadedMethodV1* vacantOutMethods,
     uint32_t outCount);
 
 #if defined(TERRUM_ROOT_PIN_TESTS)
@@ -299,15 +400,6 @@ RootPinTestReleaseSupportV1(
     RootPinDomainV1 domain,
     RootPinLoadedTypeV1* completeType,
     const void* value);
-
-ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
-RootPinTestRegisterLoadedMethodV1(
-    RootPinDomainV1 domain,
-    uint64_t methodIdentity,
-    RootPinLoadedTypeV1* resultType,
-    const RootPinTestMethodInputV1* inputs,
-    uint32_t inputCount,
-    RootPinLoadedMethodV1* vacantOut);
 
 ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
 RootPinTestEnterFrameV1(

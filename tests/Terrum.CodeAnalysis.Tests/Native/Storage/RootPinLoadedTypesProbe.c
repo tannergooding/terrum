@@ -13,6 +13,7 @@ typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *AdmitFunction)(
     RootPinLoadedTypeV1**,
     uint32_t);
 typedef RootPinDomainV1 (ROOTPIN_LOADED_TYPES_CALL *GetDomainFunction)(void);
+typedef const RootPinRuntimeInfoV1* (ROOTPIN_LOADED_TYPES_CALL *GetRuntimeInfoFunction)(void);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *SetFailureFunction)(uint32_t);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *RetireFunction)(RootPinDomainV1, void*);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *OriginCallback)(void*);
@@ -42,9 +43,7 @@ typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *GetObjectCountsFunction)(
     RootPinDomainV1, RootPinObjectCellV1, uint64_t*, uint64_t*);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *SupportValueFunction)(
     RootPinDomainV1, RootPinLoadedTypeV1*, const void*);
-typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RegisterLoadedMethodFunction)(
-    RootPinDomainV1, uint64_t, RootPinLoadedTypeV1*,
-    const RootPinTestMethodInputV1*, uint32_t, RootPinLoadedMethodV1*);
+typedef RootPinAdmitLoadedMethodsEntryV1 AdmitLoadedMethodsFunction;
 typedef void (ROOTPIN_LOADED_TYPES_CALL *EnterFrameFunction)(
     RootPinDomainV1, RootPinSupportFrameV1*);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *ExitFrameFunction)(
@@ -77,6 +76,17 @@ typedef struct RootPinTestMutatorContext
     volatile LONG polls;
     volatile LONG failed;
 } RootPinTestMutatorContext;
+
+typedef char AssertRuntimeFunctionTableSize[
+    sizeof(RootPinRuntimeFunctionTableV1) == 104 ? 1 : -1];
+typedef char AssertRuntimeInfoSize[
+    sizeof(RootPinRuntimeInfoV1) == 112 ? 1 : -1];
+typedef char AssertRuntimeFunctionTableOffset[
+    offsetof(RootPinRuntimeInfoV1, functionTable) == 8 ? 1 : -1];
+typedef char AssertRuntimeRootExactOffset[
+    offsetof(RootPinRuntimeFunctionTableV1, rootExact) == 8 ? 1 : -1];
+typedef char AssertRuntimeFinishCallOffset[
+    offsetof(RootPinRuntimeFunctionTableV1, finishCall) == 96 ? 1 : -1];
 
 #define CHECK(expression) \
     do { \
@@ -542,7 +552,8 @@ static int RunCellCases(
     HMODULE library,
     RootPinDomainV1 domain,
     RootPinLoadedTypeV1** types,
-    SetFailureFunction setFailure)
+    SetFailureFunction setFailure,
+    const RootPinRuntimeInfoV1* runtimeInfo)
 {
     RegisterObjectFunction registerObject = NULL;
     CanRootFunction canRoot = NULL;
@@ -582,10 +593,10 @@ static int RunCellCases(
     LOAD_FUNCTION("RootPinTestRegisterObjectV2", registerObject);
     LOAD_FUNCTION("RootPinTestCanRootV2", canRoot);
     LOAD_FUNCTION("RootPinTestCanPinObjectV2", canPinObject);
-    LOAD_FUNCTION("RootPinTestRootExactV2", rootExact);
-    LOAD_FUNCTION("RootPinTestPinExactV2", pinExact);
-    LOAD_FUNCTION("RootPinTestPinObjectV2", pinObject);
-    LOAD_FUNCTION("RootPinTestResolveExactV2", resolveExact);
+    rootExact = runtimeInfo->functionTable.rootExact;
+    pinExact = runtimeInfo->functionTable.pinExact;
+    pinObject = runtimeInfo->functionTable.pinObject;
+    resolveExact = runtimeInfo->functionTable.resolveExact;
     LOAD_FUNCTION("RootPinTestReplaceObjectPayloadV2", replacePayload);
     LOAD_FUNCTION("RootPinTestReleaseRootV2", releaseRoot);
     LOAD_FUNCTION("RootPinTestReleasePinV2", releasePin);
@@ -594,6 +605,8 @@ static int RunCellCases(
     CHECK(sizeof(payload) == 40
         && offsetof(RootPinTestPayloadV2, packed) == 32
         && offsetof(RootPinTestPackedV2, value) == 1);
+    CHECK(rootExact != NULL && pinExact != NULL && pinObject != NULL
+        && resolveExact != NULL);
     payload.values[0] = 10;
     payload.values[1] = 11;
     payload.values[2] = 20;
@@ -855,7 +868,11 @@ static int RunSupportCases(
     HMODULE library,
     RootPinDomainV1 domain,
     AdmitFunction admit,
-    uint32_t* originCounts)
+    AdmitLoadedMethodsFunction admitMethods,
+    SetFailureFunction setFailure,
+    uint32_t* originCounts,
+    uint32_t* methodOriginCounts,
+    const RootPinRuntimeInfoV1* runtimeInfo)
 {
     RegisterObjectFunction registerObject = NULL;
     RootExactFunction rootExact = NULL;
@@ -865,7 +882,6 @@ static int RunSupportCases(
     GetObjectCountsFunction getObjectCounts = NULL;
     SupportValueFunction retainSupport = NULL;
     SupportValueFunction releaseSupport = NULL;
-    RegisterLoadedMethodFunction registerMethod = NULL;
     EnterFrameFunction enterFrame = NULL;
     ExitFrameFunction exitFrame = NULL;
     BeginCallFunction beginCall = NULL;
@@ -882,6 +898,13 @@ static int RunSupportCases(
     RootPinTypeFieldV1 fields[7] = { 0 };
     RootPinTypeOriginV1 origins[3] = { 0 };
     uint32_t originUses[12] = { 0 };
+    RootPinTypeOriginV1 methodOrigins[2] = { 0 };
+    uint32_t methodOriginUses[4] = { 0, 1, 0, 1 };
+    RootPinMethodBatchV1 methodBatch = { 0 };
+    RootPinMethodNodeV1 methodNodes[2] = { 0 };
+    RootPinMethodInputV1 methodInputs[2] = { 0 };
+    RootPinLoadedMethodV1 methodOutputs[2] = { NULL, NULL };
+    RootPinLoadedMethodV1 repeatedMethods[2] = { NULL, NULL };
     RootPinLoadedTypeV1* types[10] = { 0 };
     RootPinTestSupportPayloadV1 payloadA = { 0 };
     RootPinTestSupportPayloadV1 payloadB = { 0 };
@@ -907,7 +930,6 @@ static int RunSupportCases(
     RootPinTestSupportAggregateV1 aggregate = { 0 };
     RootPinSupportSlotV1 traceSlot;
     RootPinSupportFrameV1 traceFrame = { 0 };
-    RootPinTestMethodInputV1 methodInput = { 0 };
     RootPinLoadedMethodV1 method = NULL;
     RootPinSupportSlotV1 callerSlots[3];
     RootPinSupportFrameV1 callerFrame = { 0 };
@@ -924,7 +946,7 @@ static int RunSupportCases(
     RootPinRootCellV1 exceptionalRoot = NULL;
     RootPinSupportSlotV1 exceptionalCallerSlots[3];
     RootPinSupportFrameV1 exceptionalCallerFrame = { 0 };
-    RootPinSupportSlotV1 exceptionalCalleeSlots[1];
+    RootPinSupportSlotV1 exceptionalCalleeSlots[2];
     RootPinSupportFrameV1 exceptionalCalleeFrame = { 0 };
     RootPinInputTransferV1 exceptionalInput;
     RootPinCallTransferV1 exceptionalCall;
@@ -941,25 +963,28 @@ static int RunSupportCases(
     uint32_t status;
 
     LOAD_FUNCTION("RootPinTestRegisterObjectV2", registerObject);
-    LOAD_FUNCTION("RootPinTestRootExactV2", rootExact);
-    LOAD_FUNCTION("RootPinTestPinExactV2", pinExact);
-    LOAD_FUNCTION("RootPinTestPinObjectV2", pinObject);
+    rootExact = runtimeInfo->functionTable.rootExact;
+    pinExact = runtimeInfo->functionTable.pinExact;
+    pinObject = runtimeInfo->functionTable.pinObject;
     LOAD_FUNCTION("RootPinTestReleaseRootV2", releaseRoot);
     LOAD_FUNCTION("RootPinTestGetObjectCountsV2", getObjectCounts);
-    LOAD_FUNCTION("RootPinTestRetainSupportV1", retainSupport);
-    LOAD_FUNCTION("RootPinTestReleaseSupportV1", releaseSupport);
-    LOAD_FUNCTION("RootPinTestRegisterLoadedMethodV1", registerMethod);
-    LOAD_FUNCTION("RootPinTestEnterFrameV1", enterFrame);
-    LOAD_FUNCTION("RootPinTestExitFrameV1", exitFrame);
-    LOAD_FUNCTION("RootPinTestBeginCallV1", beginCall);
-    LOAD_FUNCTION("RootPinTestReturnSupportV1", returnSupport);
-    LOAD_FUNCTION("RootPinTestFinishCallV1", finishCall);
+    retainSupport = runtimeInfo->functionTable.retainSupport;
+    releaseSupport = runtimeInfo->functionTable.releaseSupport;
+    enterFrame = runtimeInfo->functionTable.enterFrame;
+    exitFrame = runtimeInfo->functionTable.exitFrame;
+    beginCall = runtimeInfo->functionTable.beginCall;
+    returnSupport = runtimeInfo->functionTable.returnSupport;
+    finishCall = runtimeInfo->functionTable.finishCall;
     LOAD_FUNCTION("RootPinTestTraceCurrentFramesV1", traceCurrentFrames);
-    LOAD_FUNCTION("RootPinTestResolveExactV2", resolveExact);
-    LOAD_FUNCTION("RootPinTestPollV1", poll);
+    resolveExact = runtimeInfo->functionTable.resolveExact;
+    poll = runtimeInfo->functionTable.poll;
     LOAD_FUNCTION("RootPinTestTraceAllFramesV1", traceAllFrames);
     LOAD_FUNCTION("RootPinTestFailRelocationAllocationAtV1", failRelocation);
     LOAD_FUNCTION("RootPinTestRelocateReachableV1", relocateReachable);
+    CHECK(rootExact != NULL && pinExact != NULL && pinObject != NULL
+        && resolveExact != NULL && retainSupport != NULL && releaseSupport != NULL
+        && enterFrame != NULL && exitFrame != NULL && poll != NULL
+        && beginCall != NULL && returnSupport != NULL && finishCall != NULL);
 
     SetNode(&nodes[0], 15000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_LEAF, 4, 4,
@@ -1149,12 +1174,123 @@ static int RunSupportCases(
     CHECK(getObjectCounts(domain, objectB, &rootEdges, &activePins)
         == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 0);
 
-    methodInput.formalOrdinal = 0;
-    methodInput.entrySlot = 0;
-    methodInput.completeType = types[3];
-    methodInput.sourceRole = 0;
-    CHECK(registerMethod(domain, 1, types[4], &methodInput, 1, &method)
-        == ROOTPIN_TYPE_STATUS_SUCCESS && method != NULL);
+    SetOrigin(&methodOrigins[0], 10, (uint64_t)(uintptr_t)&originCounts[0],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT, RetainOrigin, ReleaseOrigin);
+    SetOrigin(&methodOrigins[1], 40, (uint64_t)(uintptr_t)&methodOriginCounts[0],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_CODE_UNWIND, RetainOrigin, ReleaseOrigin);
+    for (uint32_t index = 0; index < 2; index++)
+    {
+        methodNodes[index].methodKey = 1;
+        methodNodes[index].resultType = types[4];
+        methodNodes[index].formalCount = 1;
+        methodNodes[index].entrySlotCount = 2;
+        methodNodes[index].inputFirst = index;
+        methodNodes[index].inputCount = 1;
+        methodNodes[index].originFirst = index * 2;
+        methodNodes[index].originCount = 2;
+        methodNodes[index].declarationOrigin = 0;
+        methodNodes[index].entryOrigin = 1;
+        methodInputs[index].formalOrdinal = 0;
+        methodInputs[index].entrySlot = 0;
+        methodInputs[index].completeType = types[3];
+        methodInputs[index].sourceRole = (uint8_t)ROOTPIN_METHOD_SOURCE_FORMAL;
+        methodInputs[index].handoffKind = (uint8_t)ROOTPIN_METHOD_HANDOFF_OWNED;
+    }
+    methodBatch.abiRevision = 1;
+    methodBatch.byteSize = sizeof(methodBatch);
+    methodBatch.targetProfileId = 2;
+    methodBatch.targetProfileRevision = 1;
+    methodBatch.methodCount = 2;
+    methodBatch.inputCount = 2;
+    methodBatch.originCount = 2;
+    methodBatch.originUseCount = 4;
+    methodBatch.methods = methodNodes;
+    methodBatch.inputs = methodInputs;
+    methodBatch.origins = methodOrigins;
+    methodBatch.originUses = methodOriginUses;
+    methodBatch.targetProfileId = 3;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 2)
+        == ROOTPIN_TYPE_STATUS_UNSUPPORTED
+        && methodOutputs[0] == NULL && methodOutputs[1] == NULL);
+    methodBatch.targetProfileId = 2;
+    methodInputs[0].entrySlot = 2;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 2)
+        == ROOTPIN_TYPE_STATUS_INVALID
+        && methodOutputs[0] == NULL && methodOutputs[1] == NULL);
+    methodInputs[0].entrySlot = 0;
+    methodBatch.methodCount = 1;
+    methodBatch.inputCount = 0;
+    methodBatch.inputs = NULL;
+    methodBatch.originUseCount = 2;
+    methodNodes[0].inputCount = 0;
+    methodNodes[0].entrySlotCount = 0;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_INVALID
+        && methodOutputs[0] == NULL);
+    methodBatch.methodCount = 2;
+    methodBatch.inputCount = 2;
+    methodBatch.inputs = methodInputs;
+    methodBatch.originUseCount = 4;
+    methodNodes[0].inputCount = 1;
+    methodNodes[0].entrySlotCount = 2;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 2)
+        == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(methodOutputs[0] != NULL && methodOutputs[0] == methodOutputs[1]);
+    method = methodOutputs[0];
+    CHECK(methodOriginCounts[0] == 1
+        && originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
+    CHECK(admitMethods(domain, &methodBatch, repeatedMethods, 2)
+        == ROOTPIN_TYPE_STATUS_SUCCESS
+        && repeatedMethods[0] == method && repeatedMethods[1] == method);
+    CHECK(methodOriginCounts[0] == 1);
+
+    methodInputs[0].entrySlot = 1;
+    memset(repeatedMethods, 0, sizeof(repeatedMethods));
+    CHECK(admitMethods(domain, &methodBatch, repeatedMethods, 2)
+        == ROOTPIN_TYPE_STATUS_INVALID
+        && repeatedMethods[0] == NULL && repeatedMethods[1] == NULL);
+    methodInputs[0].entrySlot = 0;
+
+    methodBatch.methodCount = 1;
+    methodBatch.inputCount = 1;
+    methodBatch.originUseCount = 2;
+    methodNodes[0].methodKey = 2;
+    methodNodes[0].originFirst = 0;
+    methodOriginUses[0] = 0;
+    methodOriginUses[1] = 1;
+    SetOrigin(&methodOrigins[1], 50, (uint64_t)(uintptr_t)&methodOriginCounts[1],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_CODE_UNWIND, RetainOrigin, ReleaseOrigin);
+    memset(methodOutputs, 0, sizeof(methodOutputs));
+    setFailure(7);
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_EXHAUSTED
+        && methodOutputs[0] == NULL && methodOriginCounts[1] == 0);
+
+    methodNodes[0].methodKey = 3;
+    SetOrigin(&methodOrigins[1], 60, (uint64_t)(uintptr_t)&methodOriginCounts[2],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_CODE_UNWIND, RetainOrigin, ReleaseOrigin);
+    setFailure(8);
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_EXHAUSTED
+        && methodOutputs[0] == NULL && methodOriginCounts[2] == 0);
+
+    methodNodes[0].methodKey = 4;
+    methodNodes[0].resultType = types[0];
+    methodNodes[0].formalCount = 0;
+    methodNodes[0].entrySlotCount = 1;
+    methodNodes[0].flags = 0;
+    methodInputs[0].formalOrdinal = 0;
+    methodInputs[0].entrySlot = 0;
+    methodInputs[0].sourceRole = (uint8_t)ROOTPIN_METHOD_SOURCE_RECEIVER;
+    methodInputs[0].handoffKind = (uint8_t)ROOTPIN_METHOD_HANDOFF_BORROWED;
+    memset(methodOutputs, 0, sizeof(methodOutputs));
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_INVALID
+        && methodOutputs[0] == NULL);
+    methodNodes[0].flags = ROOTPIN_METHOD_FLAG_HAS_RECEIVER;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_SUCCESS
+        && methodOutputs[0] != NULL && methodOriginCounts[2] == 1);
 
     rootedObject = objectA;
     callerSlots[0] = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };
@@ -1232,8 +1368,10 @@ static int RunSupportCases(
     exceptionalCalleeRoot = exceptionalRoot;
     exceptionalCalleeSlots[0] = (RootPinSupportSlotV1){
         &exceptionalCalleeRoot, types[3], 0, 0 };
+    exceptionalCalleeSlots[1] = (RootPinSupportSlotV1){
+        &calleeResult, types[4], 0, 0 };
     exceptionalCalleeFrame = (RootPinSupportFrameV1){
-        NULL, 1, 0, exceptionalCalleeSlots, method };
+        NULL, 2, 0, exceptionalCalleeSlots, method };
     enterFrame(domain, &exceptionalCalleeFrame);
     exitFrame(domain, &exceptionalCalleeFrame);
     finishCall(domain, &exceptionalCall, 0);
@@ -1327,8 +1465,11 @@ static int RunProbe(const char* libraryPath, int invalidSupport)
     FARPROC procedure;
     AdmitFunction admit = NULL;
     GetDomainFunction getDomain = NULL;
+    GetRuntimeInfoFunction getRuntimeInfo = NULL;
     SetFailureFunction setFailure = NULL;
     SupportValueFunction retainSupport = NULL;
+    AdmitLoadedMethodsFunction admitMethods = NULL;
+    const RootPinRuntimeInfoV1* runtimeInfo;
     RootPinDomainV1 domain;
     RootPinTypeBatchV2 batch;
     RootPinTypeNodeV2 nodes[19];
@@ -1336,6 +1477,7 @@ static int RunProbe(const char* libraryPath, int invalidSupport)
     RootPinTypeOriginV1 origins[3];
     uint32_t originUses[23];
     uint32_t originCounts[3] = { 0, 0, 0 };
+    uint32_t methodOriginCounts[3] = { 0, 0, 0 };
     RootPinLoadedTypeV1* outputs[19];
     RootPinLoadedTypeV1* repeated[19];
     uint32_t status;
@@ -1343,23 +1485,45 @@ static int RunProbe(const char* libraryPath, int invalidSupport)
 
     CHECK(library != NULL);
 
+    procedure = GetProcAddress(library, "TerrumRootPinGetRuntimeV1");
+    CHECK(procedure != NULL && sizeof(getRuntimeInfo) == sizeof(procedure));
+    memcpy(&getRuntimeInfo, &procedure, sizeof(getRuntimeInfo));
+    runtimeInfo = getRuntimeInfo();
+    CHECK(runtimeInfo != NULL && runtimeInfo->domain != NULL
+        && runtimeInfo->functionTable.abiRevision == 1
+        && runtimeInfo->functionTable.byteSize == 104);
+    CHECK(runtimeInfo->functionTable.rootExact != NULL
+        && runtimeInfo->functionTable.pinExact != NULL
+        && runtimeInfo->functionTable.pinObject != NULL
+        && runtimeInfo->functionTable.resolveExact != NULL
+        && runtimeInfo->functionTable.retainSupport != NULL
+        && runtimeInfo->functionTable.releaseSupport != NULL
+        && runtimeInfo->functionTable.enterFrame != NULL
+        && runtimeInfo->functionTable.exitFrame != NULL
+        && runtimeInfo->functionTable.poll != NULL
+        && runtimeInfo->functionTable.beginCall != NULL
+        && runtimeInfo->functionTable.returnSupport != NULL
+        && runtimeInfo->functionTable.finishCall != NULL);
+
     procedure = GetProcAddress(library, "TerrumRootPinAdmitLoadedTypesV2");
     CHECK(procedure != NULL && sizeof(admit) == sizeof(procedure));
     memcpy(&admit, &procedure, sizeof(admit));
     CHECK(GetProcAddress(library, "TerrumRootPinAdmitLoadedTypesV1") == NULL);
+    procedure = GetProcAddress(library, "TerrumRootPinAdmitLoadedMethodsV1");
+    CHECK(procedure != NULL && sizeof(admitMethods) == sizeof(procedure));
+    memcpy(&admitMethods, &procedure, sizeof(admitMethods));
     procedure = GetProcAddress(library, "RootPinTestGetDomainV1");
     CHECK(procedure != NULL && sizeof(getDomain) == sizeof(procedure));
     memcpy(&getDomain, &procedure, sizeof(getDomain));
     procedure = GetProcAddress(library, "RootPinTestFailAdmissionAtStageV2");
     CHECK(procedure != NULL && sizeof(setFailure) == sizeof(procedure));
     memcpy(&setFailure, &procedure, sizeof(setFailure));
-    procedure = GetProcAddress(library, "RootPinTestRetainSupportV1");
-    CHECK(procedure != NULL && sizeof(retainSupport) == sizeof(procedure));
-    memcpy(&retainSupport, &procedure, sizeof(retainSupport));
-    CHECK(admit != NULL && getDomain != NULL && setFailure != NULL && retainSupport != NULL);
+    CHECK(admit != NULL && admitMethods != NULL && getDomain != NULL
+        && setFailure != NULL);
+    retainSupport = runtimeInfo->functionTable.retainSupport;
 
-    domain = getDomain();
-    CHECK(domain != NULL);
+    domain = runtimeInfo->domain;
+    CHECK(domain == getDomain());
     BuildValidBatch(&batch, nodes, fields, origins, originUses, originCounts);
     memset(outputs, 0xA5, sizeof(outputs));
     status = admit(domain, &batch, outputs, 19);
@@ -1378,14 +1542,17 @@ static int RunProbe(const char* libraryPath, int invalidSupport)
         && outputs[12] != outputs[1] && outputs[13] != outputs[14]
         && outputs[13] == outputs[18]);
     CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
-    if (RunCellCases(library, domain, outputs, setFailure) != 0)
+    if (RunCellCases(library, domain, outputs, setFailure, runtimeInfo) != 0)
     {
         return 1;
     }
-    if (RunSupportCases(library, domain, admit, originCounts) != 0)
+    if (RunSupportCases(library, domain, admit, admitMethods,
+            setFailure, originCounts, methodOriginCounts, runtimeInfo) != 0)
     {
         return 1;
     }
+    CHECK(methodOriginCounts[0] == 1
+        && methodOriginCounts[1] == 0 && methodOriginCounts[2] == 1);
 
     status = admit(domain, &batch, repeated, 19);
     CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS);

@@ -26,12 +26,30 @@ static_assert(sizeof(RootPinTypeNodeV2) == 96);
 static_assert(sizeof(RootPinTypeFieldV1) == 32);
 static_assert(sizeof(RootPinTypeOriginV1) == 40);
 static_assert(sizeof(RootPinTypeBatchV2) == 72);
+static_assert(sizeof(RootPinMethodNodeV1) == 56);
+static_assert(sizeof(RootPinMethodInputV1) == 24);
+static_assert(sizeof(RootPinMethodBatchV1) == 72);
 static_assert(sizeof(RootPinPlaceRequestV1) == 40);
 static_assert(sizeof(RootPinStableValue16V1) == 16);
 static_assert(sizeof(RootPinSupportSlotV1) == 24);
 static_assert(sizeof(RootPinSupportFrameV1) == 32);
 static_assert(sizeof(RootPinInputTransferV1) == 16);
 static_assert(sizeof(RootPinCallTransferV1) == 40);
+static_assert(sizeof(RootPinRuntimeFunctionTableV1) == 104);
+static_assert(sizeof(RootPinRuntimeInfoV1) == 112);
+static_assert(offsetof(RootPinRuntimeInfoV1, functionTable) == 8);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, rootExact) == 8);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, pinExact) == 16);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, pinObject) == 24);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, resolveExact) == 32);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, retainSupport) == 40);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, releaseSupport) == 48);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, enterFrame) == 56);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, exitFrame) == 64);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, poll) == 72);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, beginCall) == 80);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, returnSupport) == 88);
+static_assert(offsetof(RootPinRuntimeFunctionTableV1, finishCall) == 96);
 static_assert(offsetof(RootPinSupportSlotV1, residence) == 0);
 static_assert(offsetof(RootPinSupportSlotV1, completeType) == 8);
 static_assert(offsetof(RootPinSupportSlotV1, live) == 16);
@@ -85,6 +103,26 @@ static_assert(offsetof(RootPinTypeBatchV2, fields) == 40);
 static_assert(offsetof(RootPinTypeBatchV2, origins) == 48);
 static_assert(offsetof(RootPinTypeBatchV2, originUses) == 56);
 static_assert(offsetof(RootPinTypeBatchV2, flags) == 64);
+static_assert(offsetof(RootPinMethodNodeV1, resultType) == 8);
+static_assert(offsetof(RootPinMethodNodeV1, formalCount) == 16);
+static_assert(offsetof(RootPinMethodNodeV1, inputFirst) == 24);
+static_assert(offsetof(RootPinMethodNodeV1, originFirst) == 32);
+static_assert(offsetof(RootPinMethodNodeV1, declarationOrigin) == 40);
+static_assert(offsetof(RootPinMethodNodeV1, flags) == 48);
+static_assert(offsetof(RootPinMethodNodeV1, reserved) == 52);
+static_assert(offsetof(RootPinMethodInputV1, formalOrdinal) == 0);
+static_assert(offsetof(RootPinMethodInputV1, entrySlot) == 4);
+static_assert(offsetof(RootPinMethodInputV1, completeType) == 8);
+static_assert(offsetof(RootPinMethodInputV1, sourceRole) == 16);
+static_assert(offsetof(RootPinMethodInputV1, handoffKind) == 17);
+static_assert(offsetof(RootPinMethodInputV1, reserved16) == 18);
+static_assert(offsetof(RootPinMethodInputV1, reserved32) == 20);
+static_assert(offsetof(RootPinMethodBatchV1, targetProfileId) == 8);
+static_assert(offsetof(RootPinMethodBatchV1, methodCount) == 16);
+static_assert(offsetof(RootPinMethodBatchV1, methods) == 32);
+static_assert(offsetof(RootPinMethodBatchV1, inputs) == 40);
+static_assert(offsetof(RootPinMethodBatchV1, origins) == 48);
+static_assert(offsetof(RootPinMethodBatchV1, originUses) == 56);
 static_assert(offsetof(RootPinPlaceRequestV1, exactT) == 24);
 static_assert(offsetof(RootPinPlaceRequestV1, accessBits) == 32);
 static_assert(offsetof(RootPinStableValue16V1, support) == 8);
@@ -228,6 +266,15 @@ namespace
             && left.cookie == right.cookie
             && left.retainOrigin == right.retainOrigin
             && left.releaseOrigin == right.releaseOrigin
+            && left.kind == right.kind;
+    }
+
+    bool SameOrigin(const Origin& left, const Origin& right)
+    {
+        return left.key == right.key
+            && left.cookie == right.cookie
+            && left.retain == right.retain
+            && left.release == right.release
             && left.kind == right.kind;
     }
 
@@ -860,6 +907,9 @@ struct MethodInputSlot
     uint32_t entrySlot;
     RootPinLoadedTypeV1* completeType;
     uint8_t sourceRole;
+    uint8_t handoffKind;
+
+    bool operator==(const MethodInputSlot&) const = default;
 };
 
 struct RootPinLoadedMethodImpl
@@ -867,8 +917,33 @@ struct RootPinLoadedMethodImpl
     RootPinDomainV1 domain;
     uint64_t identity;
     RootPinLoadedTypeV1* resultType;
+    uint32_t formalCount;
+    uint32_t entrySlotCount;
+    uint32_t flags;
+    uint64_t declarationOrigin;
+    uint64_t entryOrigin;
     std::vector<MethodInputSlot> inputs;
+    std::vector<uint64_t> origins;
 };
+
+namespace
+{
+    bool SameLoadedMethod(
+        const RootPinLoadedMethodImpl& left,
+        const RootPinLoadedMethodImpl& right)
+    {
+        return left.domain == right.domain
+            && left.identity == right.identity
+            && left.resultType == right.resultType
+            && left.formalCount == right.formalCount
+            && left.entrySlotCount == right.entrySlotCount
+            && left.flags == right.flags
+            && left.declarationOrigin == right.declarationOrigin
+            && left.entryOrigin == right.entryOrigin
+            && left.inputs == right.inputs
+            && left.origins == right.origins;
+    }
+}
 
 struct RootPinObjectCellImpl
 {
@@ -2862,6 +2937,412 @@ TerrumRootPinAdmitLoadedTypesV2(
     }
 }
 
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+TerrumRootPinAdmitLoadedMethodsV1(
+    RootPinDomainV1 domain,
+    const RootPinMethodBatchV1* batch,
+    RootPinLoadedMethodV1* vacantOutMethods,
+    uint32_t outCount)
+{
+    if (vacantOutMethods == nullptr
+        || outCount > std::numeric_limits<size_t>::max() / sizeof(*vacantOutMethods))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange outputRange;
+    if (!ValidArray(vacantOutMethods, outCount, sizeof(*vacantOutMethods),
+            alignof(RootPinLoadedMethodV1), outputRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+    for (uint32_t index = 0; index < outCount; index++)
+    {
+        if (vacantOutMethods[index] != nullptr)
+        {
+            ContractViolation();
+        }
+    }
+    if (batch == nullptr)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange batchRange;
+    if (reinterpret_cast<uintptr_t>(batch) % alignof(RootPinMethodBatchV1) != 0
+        || !GetMemoryRange(batch, sizeof(*batch), batchRange)
+        || Overlaps(outputRange, batchRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+    if (domain != &s_domain)
+    {
+        ContractViolation();
+    }
+    if (batch->abiRevision != 1
+        || batch->targetProfileId != 2
+        || batch->targetProfileRevision != 1)
+    {
+        return ROOTPIN_TYPE_STATUS_UNSUPPORTED;
+    }
+    if (batch->byteSize != sizeof(RootPinMethodBatchV1)
+        || batch->flags != 0 || batch->reserved != 0
+        || batch->methodCount == 0 || batch->methodCount != outCount)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange methodsRange;
+    MemoryRange inputsRange;
+    MemoryRange originsRange;
+    MemoryRange originUsesRange;
+    if (!ValidArray(batch->methods, batch->methodCount, sizeof(*batch->methods),
+            alignof(RootPinMethodNodeV1), methodsRange)
+        || !ValidArray(batch->inputs, batch->inputCount, sizeof(*batch->inputs),
+            alignof(RootPinMethodInputV1), inputsRange)
+        || !ValidArray(batch->origins, batch->originCount, sizeof(*batch->origins),
+            alignof(RootPinTypeOriginV1), originsRange)
+        || !ValidArray(batch->originUses, batch->originUseCount,
+            sizeof(*batch->originUses), alignof(uint32_t), originUsesRange)
+        || Overlaps(batchRange, methodsRange)
+        || Overlaps(batchRange, inputsRange)
+        || Overlaps(batchRange, originsRange)
+        || Overlaps(batchRange, originUsesRange)
+        || Overlaps(outputRange, methodsRange)
+        || Overlaps(outputRange, inputsRange)
+        || Overlaps(outputRange, originsRange)
+        || Overlaps(outputRange, originUsesRange)
+        || Overlaps(methodsRange, inputsRange)
+        || Overlaps(methodsRange, originsRange)
+        || Overlaps(methodsRange, originUsesRange)
+        || Overlaps(inputsRange, originsRange)
+        || Overlaps(inputsRange, originUsesRange)
+        || Overlaps(originsRange, originUsesRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    std::vector<Origin> newOrigins;
+    size_t retainedOriginCount = 0;
+    try
+    {
+        ExclusiveLock lock(&domain->gate);
+        std::vector<uint8_t> inputOwnership(batch->inputCount);
+        std::vector<uint8_t> originUseOwnership(batch->originUseCount);
+        std::vector<uint8_t> originOwnership(batch->originCount);
+        std::unordered_map<uint64_t, Origin> batchOrigins;
+        batchOrigins.reserve(batch->originCount);
+
+        for (uint32_t index = 0; index < batch->originCount; index++)
+        {
+            const auto& source = batch->origins[index];
+            if (source.originKey == 0 || source.retainOrigin == nullptr
+                || source.releaseOrigin == nullptr
+                || source.kind < ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT
+                || source.kind > ROOTPIN_TYPE_ORIGIN_ALLOCATOR_RUNTIME
+                || source.reserved != 0)
+            {
+                return ROOTPIN_TYPE_STATUS_INVALID;
+            }
+
+            const Origin origin = {
+                source.originKey,
+                source.cookie,
+                source.retainOrigin,
+                source.releaseOrigin,
+                source.kind,
+            };
+            const auto [existing, inserted] = batchOrigins.emplace(source.originKey, origin);
+            if (!inserted && !SameOrigin(existing->second, origin))
+            {
+                return ROOTPIN_TYPE_STATUS_INVALID;
+            }
+        }
+
+        std::vector<RootPinLoadedMethodV1> canonical(batch->methodCount);
+        std::vector<std::unique_ptr<RootPinLoadedMethodImpl>> newMethods;
+        newMethods.reserve(batch->methodCount);
+        std::unordered_map<uint64_t, RootPinLoadedMethodImpl*> stagedByKey;
+        stagedByKey.reserve(batch->methodCount);
+
+        for (uint32_t index = 0; index < batch->methodCount; index++)
+        {
+            const auto& node = batch->methods[index];
+            if (node.methodKey == 0 || node.resultType == nullptr
+                || !IsLoadedTypeRegistered(domain, node.resultType, ROOTPIN_TYPE_ROLE_VALUE)
+                || (node.flags & ~ROOTPIN_METHOD_FLAG_HAS_RECEIVER) != 0
+                || node.reserved != 0
+                || !ValidRange(node.inputFirst, node.inputCount, batch->inputCount)
+                || !ValidRange(node.originFirst, node.originCount, batch->originUseCount)
+                || node.originCount == 0
+                || node.declarationOrigin >= batch->originCount
+                || node.entryOrigin >= batch->originCount
+                || node.entrySlotCount
+                    > std::numeric_limits<size_t>::max() / sizeof(RootPinSupportSlotV1)
+                || (ContainsSupport(node.resultType) && node.entrySlotCount == 0))
+            {
+                return ROOTPIN_TYPE_STATUS_INVALID;
+            }
+
+            const auto& declarationOrigin = batch->origins[node.declarationOrigin];
+            const auto& entryOrigin = batch->origins[node.entryOrigin];
+            if (declarationOrigin.kind != ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT
+                || entryOrigin.kind != ROOTPIN_TYPE_ORIGIN_CODE_UNWIND)
+            {
+                return ROOTPIN_TYPE_STATUS_INVALID;
+            }
+
+            auto candidate = std::make_unique<RootPinLoadedMethodImpl>();
+            candidate->domain = domain;
+            candidate->identity = node.methodKey;
+            candidate->resultType = node.resultType;
+            candidate->formalCount = node.formalCount;
+            candidate->entrySlotCount = node.entrySlotCount;
+            candidate->flags = node.flags;
+            candidate->declarationOrigin = declarationOrigin.originKey;
+            candidate->entryOrigin = entryOrigin.originKey;
+            candidate->inputs.reserve(node.inputCount);
+            candidate->origins.reserve(node.originCount);
+
+            std::unordered_set<uint32_t> entrySlots;
+            entrySlots.reserve(node.inputCount);
+            bool sawReceiver = false;
+            bool sawFormal = false;
+            bool hasPreviousFormal = false;
+            uint32_t previousFormal = 0;
+            for (uint32_t ordinal = 0; ordinal < node.inputCount; ordinal++)
+            {
+                const auto inputIndex = node.inputFirst + ordinal;
+                if (inputOwnership[inputIndex] != 0)
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                inputOwnership[inputIndex] = 1;
+                const auto& input = batch->inputs[inputIndex];
+                if (input.sourceRole > ROOTPIN_METHOD_SOURCE_RECEIVER
+                    || input.handoffKind > ROOTPIN_METHOD_HANDOFF_OWNED
+                    || input.reserved16 != 0 || input.reserved32 != 0
+                    || input.entrySlot >= node.entrySlotCount
+                    || input.completeType == nullptr
+                    || !IsLoadedTypeRegistered(domain, input.completeType,
+                        ROOTPIN_TYPE_ROLE_VALUE)
+                    || !ContainsSupport(input.completeType)
+                    || !entrySlots.insert(input.entrySlot).second)
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+
+                if (input.sourceRole == ROOTPIN_METHOD_SOURCE_RECEIVER)
+                {
+                    if (ordinal != 0 || sawReceiver || sawFormal
+                        || input.formalOrdinal != 0
+                        || (node.flags & ROOTPIN_METHOD_FLAG_HAS_RECEIVER) == 0)
+                    {
+                        return ROOTPIN_TYPE_STATUS_INVALID;
+                    }
+                    sawReceiver = true;
+                }
+                else
+                {
+                    if (input.formalOrdinal >= node.formalCount
+                        || (hasPreviousFormal
+                            && input.formalOrdinal <= previousFormal))
+                    {
+                        return ROOTPIN_TYPE_STATUS_INVALID;
+                    }
+                    sawFormal = true;
+                    previousFormal = input.formalOrdinal;
+                    hasPreviousFormal = true;
+                }
+
+                candidate->inputs.push_back({
+                    input.formalOrdinal,
+                    input.entrySlot,
+                    input.completeType,
+                    input.sourceRole,
+                    input.handoffKind,
+                });
+            }
+
+            uint64_t previousOriginKey = 0;
+            for (uint32_t ordinal = 0; ordinal < node.originCount; ordinal++)
+            {
+                const auto useIndex = node.originFirst + ordinal;
+                if (originUseOwnership[useIndex] != 0)
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                originUseOwnership[useIndex] = 1;
+                const auto originIndex = batch->originUses[useIndex];
+                if (originIndex >= batch->originCount)
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                originOwnership[originIndex] = 1;
+                const auto originKey = batch->origins[originIndex].originKey;
+                if (originKey <= previousOriginKey)
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                candidate->origins.push_back(originKey);
+                previousOriginKey = originKey;
+            }
+            if (!std::binary_search(candidate->origins.begin(), candidate->origins.end(),
+                    candidate->declarationOrigin)
+                || !std::binary_search(candidate->origins.begin(), candidate->origins.end(),
+                    candidate->entryOrigin))
+            {
+                return ROOTPIN_TYPE_STATUS_INVALID;
+            }
+
+            const auto existing = domain->methods.find(node.methodKey);
+            if (existing != domain->methods.end())
+            {
+                if (!SameLoadedMethod(*existing->second, *candidate))
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                canonical[index] = existing->second;
+                continue;
+            }
+
+            const auto duplicate = stagedByKey.find(node.methodKey);
+            if (duplicate != stagedByKey.end())
+            {
+                if (!SameLoadedMethod(*duplicate->second, *candidate))
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                canonical[index] = duplicate->second;
+                continue;
+            }
+
+            auto* pointer = candidate.get();
+            stagedByKey.emplace(node.methodKey, pointer);
+            newMethods.push_back(std::move(candidate));
+            canonical[index] = pointer;
+        }
+
+        if (!std::all_of(inputOwnership.begin(), inputOwnership.end(),
+                [](uint8_t owned) { return owned == 1; })
+            || !std::all_of(originUseOwnership.begin(), originUseOwnership.end(),
+                [](uint8_t owned) { return owned == 1; })
+            || !std::all_of(originOwnership.begin(), originOwnership.end(),
+                [](uint8_t owned) { return owned == 1; }))
+        {
+            return ROOTPIN_TYPE_STATUS_INVALID;
+        }
+
+        const auto maximumSize = std::numeric_limits<size_t>::max();
+        if (newMethods.size() > maximumSize - domain->methods.size()
+            || newMethods.size() > maximumSize - domain->ownedMethods.size()
+            || batchOrigins.size() > maximumSize - domain->origins.size())
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+
+        auto nextMethods = domain->methods;
+        auto nextOrigins = domain->origins;
+        nextMethods.reserve(domain->methods.size() + newMethods.size());
+        nextOrigins.reserve(domain->origins.size() + batchOrigins.size());
+        for (const auto& method : newMethods)
+        {
+            if (!nextMethods.emplace(method->identity, method.get()).second)
+            {
+                ContractViolation();
+            }
+        }
+
+        std::vector<std::pair<uint64_t, Origin>> orderedOrigins;
+        orderedOrigins.reserve(batchOrigins.size());
+        for (const auto& entry : batchOrigins)
+        {
+            orderedOrigins.push_back(entry);
+        }
+        std::sort(orderedOrigins.begin(), orderedOrigins.end(),
+            [](const auto& left, const auto& right) {
+                return left.first < right.first;
+            });
+        newOrigins.reserve(orderedOrigins.size());
+        for (const auto& [key, origin] : orderedOrigins)
+        {
+            const auto existing = domain->origins.find(key);
+            if (existing != domain->origins.end())
+            {
+                if (!SameOrigin(existing->second, origin))
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+                continue;
+            }
+            nextOrigins.emplace(key, origin);
+            newOrigins.push_back(origin);
+        }
+
+        domain->ownedMethods.reserve(domain->ownedMethods.size() + newMethods.size());
+        MaybeFailAtStage(7);
+        for (const auto& origin : newOrigins)
+        {
+            try
+            {
+                origin.retain(reinterpret_cast<void*>(static_cast<uintptr_t>(origin.cookie)));
+            }
+            catch (...)
+            {
+                ContractViolation();
+            }
+            retainedOriginCount++;
+        }
+        MaybeFailAtStage(8);
+
+        for (auto& method : newMethods)
+        {
+            domain->ownedMethods.push_back(std::move(method));
+        }
+        domain->methods.swap(nextMethods);
+        domain->origins.swap(nextOrigins);
+        for (uint32_t index = 0; index < batch->methodCount; index++)
+        {
+            vacantOutMethods[index] = canonical[index];
+        }
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        ExclusiveLock rollbackLock(&domain->gate);
+        while (retainedOriginCount != 0)
+        {
+            const auto& origin = newOrigins[--retainedOriginCount];
+            try
+            {
+                origin.release(reinterpret_cast<void*>(static_cast<uintptr_t>(origin.cookie)));
+            }
+            catch (...)
+            {
+                ContractViolation();
+            }
+        }
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        ExclusiveLock rollbackLock(&domain->gate);
+        while (retainedOriginCount != 0)
+        {
+            const auto& origin = newOrigins[--retainedOriginCount];
+            try
+            {
+                origin.release(reinterpret_cast<void*>(static_cast<uintptr_t>(origin.cookie)));
+            }
+            catch (...)
+            {
+                ContractViolation();
+            }
+        }
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+}
+
 #if defined(TERRUM_ROOT_PIN_TESTS)
 extern "C" ROOTPIN_LOADED_TYPES_API RootPinDomainV1 ROOTPIN_LOADED_TYPES_CALL
 RootPinTestGetDomainV1(void)
@@ -3196,112 +3677,11 @@ RootPinTestReleaseSupportV1(
     ReleaseSupportLocked(domain, completeType, value);
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
-RootPinTestRegisterLoadedMethodV1(
-    RootPinDomainV1 domain,
-    uint64_t methodIdentity,
-    RootPinLoadedTypeV1* resultType,
-    const RootPinTestMethodInputV1* inputs,
-    uint32_t inputCount,
-    RootPinLoadedMethodV1* vacantOut)
+#endif
+
+namespace
 {
-    if (domain != &s_domain || methodIdentity == 0 || vacantOut == nullptr
-        || reinterpret_cast<uintptr_t>(vacantOut) % alignof(RootPinLoadedMethodV1) != 0
-        || *vacantOut != nullptr)
-    {
-        return ROOTPIN_TYPE_STATUS_INVALID;
-    }
-
-    MemoryRange inputsRange;
-    MemoryRange outputRange;
-    if (!ValidArray(inputs, inputCount, sizeof(*inputs), alignof(RootPinTestMethodInputV1),
-            inputsRange)
-        || !GetMemoryRange(vacantOut, sizeof(*vacantOut), outputRange)
-        || Overlaps(inputsRange, outputRange))
-    {
-        return ROOTPIN_TYPE_STATUS_INVALID;
-    }
-
-    try
-    {
-        ExclusiveLock lock(&domain->gate);
-        if ((resultType != nullptr
-                && !IsLoadedTypeRegistered(domain, resultType, ROOTPIN_TYPE_ROLE_VALUE))
-            || domain->methods.contains(methodIdentity)
-            || domain->methods.size() == std::numeric_limits<size_t>::max()
-            || domain->ownedMethods.size() == std::numeric_limits<size_t>::max())
-        {
-            return ROOTPIN_TYPE_STATUS_INVALID;
-        }
-
-        auto candidate = std::make_unique<RootPinLoadedMethodImpl>();
-        candidate->domain = domain;
-        candidate->identity = methodIdentity;
-        candidate->resultType = resultType;
-        candidate->inputs.reserve(inputCount);
-        bool sawFormal = false;
-        bool sawReceiver = false;
-        uint32_t lastFormalOrdinal = 0;
-        for (uint32_t index = 0; index < inputCount; index++)
-        {
-            const auto& input = inputs[index];
-            if (input.sourceRole > 1 || input.flags != 0 || input.reserved != 0
-                || (input.sourceRole == 1
-                    && (input.formalOrdinal != 0 || sawFormal || sawReceiver))
-                || !IsLoadedTypeRegistered(domain, input.completeType, ROOTPIN_TYPE_ROLE_VALUE)
-                || (input.sourceRole == 0 && sawFormal
-                    && input.formalOrdinal <= lastFormalOrdinal))
-            {
-                return ROOTPIN_TYPE_STATUS_INVALID;
-            }
-            if (input.sourceRole == 0)
-            {
-                sawFormal = true;
-                lastFormalOrdinal = input.formalOrdinal;
-            }
-            else
-            {
-                sawReceiver = true;
-            }
-            for (const auto& previous : candidate->inputs)
-            {
-                if (previous.entrySlot == input.entrySlot
-                    || (previous.sourceRole == input.sourceRole
-                        && previous.formalOrdinal == input.formalOrdinal))
-                {
-                    return ROOTPIN_TYPE_STATUS_INVALID;
-                }
-            }
-            candidate->inputs.push_back({
-                input.formalOrdinal,
-                input.entrySlot,
-                input.completeType,
-                input.sourceRole,
-            });
-        }
-
-        auto nextMethods = domain->methods;
-        nextMethods.reserve(nextMethods.size() + 1);
-        auto* published = candidate.get();
-        nextMethods.emplace(methodIdentity, published);
-        domain->ownedMethods.reserve(domain->ownedMethods.size() + 1);
-        domain->ownedMethods.push_back(std::move(candidate));
-        domain->methods.swap(nextMethods);
-        *vacantOut = published;
-        return ROOTPIN_TYPE_STATUS_SUCCESS;
-    }
-    catch (const std::bad_alloc&)
-    {
-        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
-    }
-    catch (const std::length_error&)
-    {
-        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
-    }
-}
-
-extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestEnterFrameV1(
+void ROOTPIN_LOADED_TYPES_CALL EnterFrameEntry(
     RootPinDomainV1 domain,
     RootPinSupportFrameV1* frame)
 {
@@ -3345,6 +3725,12 @@ RootPinTestEnterFrameV1(
         : RequireLoadedMethod(domain, frame->entryMethod);
     auto* call = s_threadState.callTop;
     const bool enteringCall = call != nullptr && call->state == 1;
+    if (method != nullptr
+        && (frame->slotCount != method->entrySlotCount
+            || (!enteringCall && !method->inputs.empty())))
+    {
+        ContractViolation();
+    }
     if (enteringCall && (method == nullptr || call->target != frame->entryMethod))
     {
         ContractViolation();
@@ -3393,6 +3779,23 @@ RootPinTestEnterFrameV1(
             ContractViolation();
         }
 
+        for (const auto& input : method->inputs)
+        {
+            if (input.entrySlot >= frame->slotCount)
+            {
+                ContractViolation();
+            }
+            const auto& destination = frame->slots[input.entrySlot];
+            if (destination.completeType != input.completeType
+                || (input.handoffKind == ROOTPIN_METHOD_HANDOFF_BORROWED
+                    && (destination.live != 1 || destination.ownsHold != 0))
+                || (input.handoffKind == ROOTPIN_METHOD_HANDOFF_OWNED
+                    && (destination.live != 0 || destination.ownsHold != 0)))
+            {
+                ContractViolation();
+            }
+        }
+
         size_t previousMapIndex = 0;
         bool hasPreviousMapIndex = false;
         for (uint32_t index = 0; index < call->inputCount; index++)
@@ -3414,6 +3817,7 @@ RootPinTestEnterFrameV1(
 
             const auto& mapped = method->inputs[mapIndex];
             if (mapped.completeType != input.stagedSource->completeType
+                || mapped.handoffKind != ROOTPIN_METHOD_HANDOFF_OWNED
                 || mapped.entrySlot >= frame->slotCount)
             {
                 ContractViolation();
@@ -3462,8 +3866,7 @@ RootPinTestEnterFrameV1(
     }
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestExitFrameV1(
+void ROOTPIN_LOADED_TYPES_CALL ExitFrameEntry(
     RootPinDomainV1 domain,
     RootPinSupportFrameV1* frame)
 {
@@ -3513,8 +3916,7 @@ RootPinTestExitFrameV1(
     }
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestPollV1(RootPinDomainV1 domain)
+void ROOTPIN_LOADED_TYPES_CALL PollEntry(RootPinDomainV1 domain)
 {
     if (domain != &s_domain)
     {
@@ -3525,8 +3927,7 @@ RootPinTestPollV1(RootPinDomainV1 domain)
     WaitForCollectionLocked(domain);
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestBeginCallV1(
+void ROOTPIN_LOADED_TYPES_CALL BeginCallEntry(
     RootPinDomainV1 domain,
     RootPinCallTransferV1* transfer)
 {
@@ -3554,9 +3955,20 @@ RootPinTestBeginCallV1(
     }
 
     auto* method = RequireLoadedMethod(domain, transfer->target);
-    const bool resultNeedsSupport = method->resultType != nullptr
-        && ContainsSupport(method->resultType);
+    if (method->resultType == nullptr)
+    {
+        ContractViolation();
+    }
+    const bool resultNeedsSupport = ContainsSupport(method->resultType);
     if (resultNeedsSupport != (transfer->prospectiveResult != nullptr))
+    {
+        ContractViolation();
+    }
+    const auto requiredTransfers = static_cast<uint32_t>(std::count_if(
+        method->inputs.begin(), method->inputs.end(), [](const MethodInputSlot& input) {
+            return input.handoffKind == ROOTPIN_METHOD_HANDOFF_OWNED;
+        }));
+    if (transfer->inputCount != requiredTransfers)
     {
         ContractViolation();
     }
@@ -3591,7 +4003,8 @@ RootPinTestBeginCallV1(
             SupportAction::ValidateRelease, nullptr, false);
         const auto mapIndex = FindMethodInput(method, input.sourceRole, input.formalOrdinal);
         if ((hasPreviousMapIndex && mapIndex <= previousMapIndex)
-            || method->inputs[mapIndex].completeType != input.stagedSource->completeType)
+            || method->inputs[mapIndex].completeType != input.stagedSource->completeType
+            || method->inputs[mapIndex].handoffKind != ROOTPIN_METHOD_HANDOFF_OWNED)
         {
             ContractViolation();
         }
@@ -3612,8 +4025,7 @@ RootPinTestBeginCallV1(
     s_threadState.callTop = transfer;
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestReturnSupportV1(
+void ROOTPIN_LOADED_TYPES_CALL ReturnSupportEntry(
     RootPinDomainV1 domain,
     RootPinSupportSlotV1* savedResult)
 {
@@ -3655,8 +4067,7 @@ RootPinTestReturnSupportV1(
     call->state = 3;
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestFinishCallV1(
+void ROOTPIN_LOADED_TYPES_CALL FinishCallEntry(
     RootPinDomainV1 domain,
     RootPinCallTransferV1* transfer,
     uint32_t completion)
@@ -3757,6 +4168,97 @@ RootPinTestFinishCallV1(
     transfer->previous = nullptr;
     transfer->state = 4;
     s_threadState.callTop = previous;
+}
+
+void ROOTPIN_LOADED_TYPES_CALL RetainSupportEntry(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value)
+{
+    if (domain != &s_domain)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    RetainSupportLocked(domain, completeType, value);
+}
+
+void ROOTPIN_LOADED_TYPES_CALL ReleaseSupportEntry(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value)
+{
+    if (domain != &s_domain)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    ReleaseSupportLocked(domain, completeType, value);
+}
+
+const RootPinRuntimeInfoV1 s_runtimeInfo = {
+    &s_domain,
+    {
+        1,
+        sizeof(RootPinRuntimeFunctionTableV1),
+        RootExactEntry,
+        PinExactEntry,
+        PinObjectEntry,
+        ResolveExactEntry,
+        RetainSupportEntry,
+        ReleaseSupportEntry,
+        EnterFrameEntry,
+        ExitFrameEntry,
+        PollEntry,
+        BeginCallEntry,
+        ReturnSupportEntry,
+        FinishCallEntry,
+    },
+};
+}
+
+#if defined(TERRUM_ROOT_PIN_TESTS)
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestEnterFrameV1(RootPinDomainV1 domain, RootPinSupportFrameV1* frame)
+{
+    EnterFrameEntry(domain, frame);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestExitFrameV1(RootPinDomainV1 domain, RootPinSupportFrameV1* frame)
+{
+    ExitFrameEntry(domain, frame);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPollV1(RootPinDomainV1 domain)
+{
+    PollEntry(domain);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestBeginCallV1(RootPinDomainV1 domain, RootPinCallTransferV1* transfer)
+{
+    BeginCallEntry(domain, transfer);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReturnSupportV1(
+    RootPinDomainV1 domain,
+    RootPinSupportSlotV1* savedResult)
+{
+    ReturnSupportEntry(domain, savedResult);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestFinishCallV1(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer,
+    uint32_t completion)
+{
+    FinishCallEntry(domain, transfer, completion);
 }
 
 extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
@@ -3970,3 +4472,9 @@ RootPinTestRelocateReachableV1(
 }
 
 #endif
+
+extern "C" ROOTPIN_LOADED_TYPES_API const RootPinRuntimeInfoV1*
+ROOTPIN_LOADED_TYPES_CALL TerrumRootPinGetRuntimeV1(void)
+{
+    return &s_runtimeInfo;
+}
