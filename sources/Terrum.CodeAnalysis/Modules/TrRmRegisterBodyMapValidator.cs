@@ -1020,6 +1020,27 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (instruction[0] == 0x16)
+        {
+            var destination = instruction[1] & 0x0F;
+            var constantIndex = instruction[1] >> 4;
+            if (destination >= 14 || constantIndex >= body.ConstantCount)
+            {
+                throw InvalidMap();
+            }
+
+            var constant = body.ConstantMap.Slice(constantIndex * 8, 8);
+            var typeSpecRef = ReadUInt32(constant, 0);
+            if (!IsCopyableRegisterValueType(typeSpecs, typeSpecRef))
+            {
+                throw InvalidMap();
+            }
+
+            registerTypes[destination] =
+                RegisterTypeState.FromTypeSpecRef(typeSpecRef);
+            return;
+        }
+
         Array.Fill(registerTypes, RegisterTypeState.Unknown);
     }
 

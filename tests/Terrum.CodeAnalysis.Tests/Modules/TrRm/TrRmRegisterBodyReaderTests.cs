@@ -1052,6 +1052,17 @@ public sealed class TrRmRegisterBodyReaderTests
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, registerTargetInitialized: true,
                 unsupportedPrefix: true)));
+    }
+
+    [Test]
+    public void ValidatesConstantMapCallSiteRegisterInputTypes()
+    {
+        var matching = CreateStandardConstantCallSiteArtifact(0xF200_0008);
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(matching));
+
+        var wrongFormal = CreateStandardConstantCallSiteArtifact(0xF200_0009);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedArtifactBodyMaps(wrongFormal));
         Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
@@ -1656,6 +1667,88 @@ public sealed class TrRmRegisterBodyReaderTests
         sections.Add(new TrRmSection(0x0020, 0, 1,
             TrRmVariableTableWriter.EncodeBodies([body])));
         return TrRmArtifactWriter.Encode(sections);
+    }
+
+    private static byte[] CreateStandardConstantCallSiteArtifact(
+        uint targetFormalTypeSpecRef)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("Caller", 1), ("Target", 1),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 4);
+        var featureBytes = TrRmFeatureTableWriter.Encode([
+            TrRmFeatureRow.TypedFrozenValues,
+        ]);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, 1),
+        ], strings, 0, 0, 2, 0, 1);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 2, 0, 1);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.Builtin(8),
+        ], 0, 0, 0);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 0, 0, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
+            new TrRmMethodSigRow(0xF200_0000, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 2, typeSpecs, 1, 0);
+        var parameterBytes = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(2, 0, targetFormalTypeSpecRef, 0),
+        ], signatures, typeSpecs);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 0);
+        var methodRows = new[]
+        {
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+            new TrRmMethodDefRow(0, 4, 2, 0, 0, 0, 0),
+        };
+        var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows,
+            strings, modules, typeDefs, signatures, 0, 1);
+        var methodMap = TrRmRegisterBodyMapBuilder.Create(
+            [], [0x1600_0002]).MethodMap;
+        var constantMap = new byte[8];
+        BinaryPrimitives.WriteUInt32LittleEndian(constantMap, 0xF200_0008);
+        BinaryPrimitives.WriteUInt32LittleEndian(constantMap.AsSpan(4), 1);
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            1, 0, 0, 0, [new TrRmRegisterBodyCallInput(1, 1, 0)], []);
+        byte[] code = [0x16, 0, 0xE0, 0, 1, 0, 0x18, 0];
+        var body = TrRmRegisterBodyWriter.Encode(default, default, methodMap,
+            default, constantMap,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            [entryState, callSite], code);
+
+        var blobBytes = TrRmVariableTableWriter.EncodeBlobs([
+            new byte[] { 42, 0, 0, 0 },
+        ]);
+        var constantSourceBytes = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(1, 1),
+        ], 1, 0, 0);
+        var frozenValueNodeBytes = new byte[24];
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            frozenValueNodeBytes, 0xF200_0008);
+        frozenValueNodeBytes[4] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            frozenValueNodeBytes.AsSpan(8), 1);
+
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 4, stringsBytes),
+            new TrRmSection(0x0003, 0, 1, blobBytes),
+            new TrRmSection(0x0004, 0, 1, featureBytes),
+            new TrRmSection(0x0011, 0, 2, typeSpecBytes),
+            new TrRmSection(0x0016, 0, 2, methodBytes),
+            new TrRmSection(0x0017, 0, 2, signatureBytes),
+            new TrRmSection(0x0018, 0, 1, parameterBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+            new TrRmSection(0x0030, 0, 1, constantSourceBytes),
+            new TrRmSection(0x003F, 0, 1, frozenValueNodeBytes),
+        ]);
     }
 
     private static byte[] CreateForeignInvocationCallSiteHomeArtifact(
