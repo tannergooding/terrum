@@ -52,7 +52,7 @@ public sealed class NativeRootPinLoadedTypesTests
         {
             var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
                 ?? throw new InvalidOperationException("ComSpec is unset.")) {
-                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /Bv /nologo /W4 /WX /O2 /MT /EHsc /std:c++20 /D TERRUM_ROOT_PIN_TESTS /D TERRUM_ROOT_PIN_EXPORTS /LD /Fo\"{providerObjectPath}\" /Fe\"{providerPath}\" \"{providerSource}\" /link /incremental:no && cl /Bv /nologo /W4 /WX /O2 /MT /TC /I\"{includePath}\" /Fo\"{probeObjectPath}\" /Fe\"{probePath}\" \"{probeSource}\" /link /incremental:no\"",
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /Bv /nologo /W4 /WX /O2 /MT /EHsc /std:c++20 /D TERRUM_ROOT_PIN_TESTS /D TERRUM_ROOT_PIN_EXPORTS /LD /Fo\"{providerObjectPath}\" /Fe\"{providerPath}\" \"{providerSource}\" /link /incremental:no && cl /Bv /nologo /W4 /WX /O2 /MT /D TERRUM_ROOT_PIN_TESTS /TC /I\"{includePath}\" /Fo\"{probeObjectPath}\" /Fe\"{probePath}\" \"{probeSource}\" /link /incremental:no\"",
                 WorkingDirectory = root,
             };
             var buildOutput = await RunProcessAsync(build, TimeSpan.FromMinutes(2)).ConfigureAwait(true);
@@ -71,6 +71,13 @@ public sealed class NativeRootPinLoadedTypesTests
             TestContext.WriteLine($"probe-source-sha256={GetSha256(probeSource)}");
             TestContext.WriteLine($"provider-dll-sha256={GetSha256(providerPath)}");
             TestContext.WriteLine($"probe-exe-sha256={GetSha256(probePath)}");
+
+            var invalidSupportProbe = new ProcessStartInfo(probePath) { WorkingDirectory = root };
+            invalidSupportProbe.ArgumentList.Add(providerPath);
+            invalidSupportProbe.ArgumentList.Add("invalid-support");
+            await RunProcessAsync(invalidSupportProbe, TimeSpan.FromSeconds(10),
+                unchecked((int)0xC0000409)).ConfigureAwait(true);
+            TestContext.WriteLine("invalid-support-contract-violation=expected-fast-fail");
         }
         finally
         {
@@ -81,7 +88,10 @@ public sealed class NativeRootPinLoadedTypesTests
     private static string GetSha256(string path)
         => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
-    private static async Task<string> RunProcessAsync(ProcessStartInfo start, TimeSpan timeout)
+    private static async Task<string> RunProcessAsync(
+        ProcessStartInfo start,
+        TimeSpan timeout,
+        int expectedExitCode = 0)
     {
         start.UseShellExecute = false;
         start.CreateNoWindow = true;
@@ -107,8 +117,8 @@ public sealed class NativeRootPinLoadedTypesTests
 
         var standardOutput = await output.ConfigureAwait(true);
         var standardError = await error.ConfigureAwait(true);
-        Assert.That(process.ExitCode, Is.Zero,
-            $"RootPin native probe exited with {process.ExitCode}.{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
+        Assert.That(process.ExitCode, Is.EqualTo(expectedExitCode),
+            $"RootPin native probe exited with {process.ExitCode}, expected {expectedExitCode}.{Environment.NewLine}{standardOutput}{Environment.NewLine}{standardError}");
         return standardOutput + standardError;
     }
 }

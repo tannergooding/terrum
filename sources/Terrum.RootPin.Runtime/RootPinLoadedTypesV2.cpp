@@ -27,6 +27,30 @@ static_assert(sizeof(RootPinTypeOriginV1) == 40);
 static_assert(sizeof(RootPinTypeBatchV2) == 72);
 static_assert(sizeof(RootPinPlaceRequestV1) == 40);
 static_assert(sizeof(RootPinStableValue16V1) == 16);
+static_assert(sizeof(RootPinSupportSlotV1) == 24);
+static_assert(sizeof(RootPinSupportFrameV1) == 32);
+static_assert(sizeof(RootPinInputTransferV1) == 16);
+static_assert(sizeof(RootPinCallTransferV1) == 40);
+static_assert(offsetof(RootPinSupportSlotV1, residence) == 0);
+static_assert(offsetof(RootPinSupportSlotV1, completeType) == 8);
+static_assert(offsetof(RootPinSupportSlotV1, live) == 16);
+static_assert(offsetof(RootPinSupportSlotV1, ownsHold) == 20);
+static_assert(offsetof(RootPinSupportFrameV1, previous) == 0);
+static_assert(offsetof(RootPinSupportFrameV1, slotCount) == 8);
+static_assert(offsetof(RootPinSupportFrameV1, flags) == 12);
+static_assert(offsetof(RootPinSupportFrameV1, slots) == 16);
+static_assert(offsetof(RootPinSupportFrameV1, entryMethod) == 24);
+static_assert(offsetof(RootPinInputTransferV1, stagedSource) == 0);
+static_assert(offsetof(RootPinInputTransferV1, formalOrdinal) == 8);
+static_assert(offsetof(RootPinInputTransferV1, sourceRole) == 12);
+static_assert(offsetof(RootPinInputTransferV1, flags) == 13);
+static_assert(offsetof(RootPinInputTransferV1, reserved) == 14);
+static_assert(offsetof(RootPinCallTransferV1, previous) == 0);
+static_assert(offsetof(RootPinCallTransferV1, target) == 8);
+static_assert(offsetof(RootPinCallTransferV1, prospectiveResult) == 16);
+static_assert(offsetof(RootPinCallTransferV1, inputCount) == 24);
+static_assert(offsetof(RootPinCallTransferV1, state) == 28);
+static_assert(offsetof(RootPinCallTransferV1, inputs) == 32);
 static_assert(offsetof(RootPinTypeNodeV2, role) == 8);
 static_assert(offsetof(RootPinTypeNodeV2, shape) == 12);
 static_assert(offsetof(RootPinTypeNodeV2, size) == 16);
@@ -623,7 +647,8 @@ namespace
     bool ValidateGraph(
         const RootPinTypeBatchV2& batch,
         std::vector<std::vector<uint64_t>>& originKeys,
-        std::unordered_map<uint64_t, Origin>& origins)
+        std::unordered_map<uint64_t, Origin>& origins,
+        std::vector<uint8_t>& containsSupport)
     {
         if (!ValidateNodeShapes(batch))
         {
@@ -736,7 +761,7 @@ namespace
             return false;
         }
 
-        std::vector<uint8_t> containsSupport(batch.nodeCount);
+        containsSupport.assign(batch.nodeCount, 0);
         std::vector<std::vector<uint32_t>> parents(batch.nodeCount);
         std::vector<uint32_t> work;
         for (uint32_t index = 0; index < batch.nodeCount; index++)
@@ -815,9 +840,33 @@ struct RootPinLoadedTypeV1
     uint32_t flags;
     uint64_t elementCount;
     uint64_t elementStride;
+    bool containsSupport;
     RootPinLoadedTypeV1* child;
     std::vector<Field> fields;
     std::vector<uint64_t> origins;
+};
+
+struct ValueWalkFrame
+{
+    RootPinLoadedTypeV1* type;
+    const uint8_t* value;
+    uint64_t cursor;
+};
+
+struct MethodInputSlot
+{
+    uint32_t formalOrdinal;
+    uint32_t entrySlot;
+    RootPinLoadedTypeV1* completeType;
+    uint8_t sourceRole;
+};
+
+struct RootPinLoadedMethodImpl
+{
+    RootPinDomainV1 domain;
+    uint64_t identity;
+    RootPinLoadedTypeV1* resultType;
+    std::vector<MethodInputSlot> inputs;
 };
 
 struct RootPinObjectCellImpl
@@ -829,6 +878,8 @@ struct RootPinObjectCellImpl
     uint64_t generation;
     uint64_t rootEdges;
     uint64_t activePins;
+    uint64_t traceEpoch;
+    RootPinObjectCellV1 traceNext;
     bool published;
     bool live;
     RootPinLoadedTypeV1* payloadType;
@@ -846,6 +897,7 @@ struct RootPinRootCellImpl
     uint64_t knownAlignment;
     uint64_t descriptorHolds;
     uint64_t supportHolds;
+    uint64_t traceEpoch;
     size_t arenaChunkIndex;
     uint32_t accessBits;
     bool active;
@@ -862,6 +914,7 @@ struct RootPinPinCellImpl
     uint64_t extent;
     uint64_t alignment;
     uint64_t descriptorHolds;
+    uint64_t traceEpoch;
     size_t arenaChunkIndex;
     bool wholeObject;
     bool active;
@@ -894,10 +947,22 @@ struct RootPinDomainImpl
     std::unordered_set<RootPinRootCellV1> roots;
     std::unordered_set<RootPinPinCellV1> pins;
     std::vector<std::unique_ptr<RootPinObjectCellImpl>> ownedObjects;
+    std::unordered_map<uint64_t, RootPinLoadedMethodV1> methods;
+    std::vector<std::unique_ptr<RootPinLoadedMethodImpl>> ownedMethods;
     std::vector<CellChunk> cellChunks;
+    std::vector<ValueWalkFrame> supportWalkStack;
     uint64_t nextObjectGeneration = 1;
     uint64_t nextCellIdentity = 1;
+    uint64_t traceEpoch = 0;
 };
+
+struct RootPinThreadState
+{
+    RootPinSupportFrameV1* frameTop;
+    RootPinCallTransferV1* callTop;
+};
+
+static thread_local RootPinThreadState s_threadState = { nullptr, nullptr };
 
 namespace
 {
@@ -1069,7 +1134,8 @@ namespace
         RootPinDomainV1 domain,
         const RootPinTypeBatchV2& batch,
         uint32_t index,
-        const std::vector<std::vector<uint64_t>>& originKeys)
+        const std::vector<std::vector<uint64_t>>& originKeys,
+        const std::vector<uint8_t>& containsSupport)
     {
         const auto& node = batch.nodes[index];
         auto loaded = std::make_unique<RootPinLoadedTypeV1>();
@@ -1087,6 +1153,7 @@ namespace
         loaded->flags = node.flags;
         loaded->elementCount = node.elementCount;
         loaded->elementStride = node.elementStride;
+        loaded->containsSupport = containsSupport[index] != 0;
         loaded->child = nullptr;
         loaded->origins = originKeys[index];
         loaded->fields.reserve(node.fieldCount);
@@ -1245,12 +1312,22 @@ namespace
         RootPinLoadedTypeV1* type,
         uint32_t role)
     {
-        if (domain == nullptr || type == nullptr || type->domain != domain || type->key.role != role)
+        if (domain == nullptr || type == nullptr)
         {
             return false;
         }
 
-        const auto found = domain->types.find(type->key);
+        const auto owned = std::find_if(domain->ownedTypes.begin(), domain->ownedTypes.end(),
+            [type](const auto& candidate) {
+                return candidate.get() == type;
+            });
+        if (owned == domain->ownedTypes.end()
+            || (*owned)->domain != domain || (*owned)->key.role != role)
+        {
+            return false;
+        }
+
+        const auto found = domain->types.find((*owned)->key);
         return found != domain->types.end() && found->second == type;
     }
 
@@ -1653,6 +1730,641 @@ namespace
         ReleaseCellLocked(domain, pin, chunkIndex);
     }
 
+    enum class SupportAction
+    {
+        ValidateRetain,
+        Retain,
+        ValidateRelease,
+        Release,
+        Trace,
+    };
+
+    struct ObjectTraceQueue
+    {
+        uint64_t epoch;
+        RootPinObjectCellV1 first;
+        RootPinObjectCellV1 last;
+        uint64_t count;
+    };
+
+    bool ContainsSupport(const RootPinLoadedTypeV1* type)
+    {
+        if (type == nullptr)
+        {
+            ContractViolation();
+        }
+        return type->containsSupport;
+    }
+
+    const uint8_t* ValueAtOffset(const uint8_t* value, uint64_t offset, uint64_t extent)
+    {
+        if (value == nullptr || offset > std::numeric_limits<uintptr_t>::max()
+            || extent > std::numeric_limits<size_t>::max())
+        {
+            ContractViolation();
+        }
+
+        const auto address = reinterpret_cast<uintptr_t>(value);
+        const auto nativeOffset = static_cast<uintptr_t>(offset);
+        if (nativeOffset > std::numeric_limits<uintptr_t>::max() - address
+            || extent > std::numeric_limits<uintptr_t>::max() - address - nativeOffset)
+        {
+            ContractViolation();
+        }
+        return reinterpret_cast<const uint8_t*>(address + nativeOffset);
+    }
+
+    bool IsZeroValue(const uint8_t* value, uint64_t size)
+    {
+        if (size > std::numeric_limits<size_t>::max())
+        {
+            ContractViolation();
+        }
+        for (size_t index = 0; index < static_cast<size_t>(size); index++)
+        {
+            if (value[index] != 0)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    RootPinObjectCellV1 ReadObjectCell(const uint8_t* value)
+    {
+        RootPinObjectCellV1 object;
+        std::memcpy(&object, value, sizeof(object));
+        return object;
+    }
+
+    RootPinRootCellV1 ReadRootCell(const uint8_t* value)
+    {
+        RootPinRootCellV1 root;
+        std::memcpy(&root, value, sizeof(root));
+        return root;
+    }
+
+    RootPinStableValue16V1 ReadStableValue(const uint8_t* value)
+    {
+        RootPinStableValue16V1 stable;
+        std::memcpy(&stable, value, sizeof(stable));
+        return stable;
+    }
+
+    void EnqueueObjectLocked(
+        RootPinDomainV1 domain,
+        RootPinObjectCellV1 object,
+        ObjectTraceQueue& queue)
+    {
+        if (!IsObjectRegistered(domain, object) || object->domain != domain
+            || !object->published || !object->live || object->currentBase == nullptr
+            || object->payloadType == nullptr
+            || !IsLoadedTypeRegistered(domain, object->payloadType, ROOTPIN_TYPE_ROLE_GC_PAYLOAD))
+        {
+            ContractViolation();
+        }
+        if (object->traceEpoch == queue.epoch)
+        {
+            return;
+        }
+
+        object->traceEpoch = queue.epoch;
+        object->traceNext = nullptr;
+        if (queue.last == nullptr)
+        {
+            queue.first = object;
+        }
+        else
+        {
+            queue.last->traceNext = object;
+        }
+        queue.last = object;
+        if (queue.count == std::numeric_limits<uint64_t>::max())
+        {
+            ContractViolation();
+        }
+        queue.count++;
+    }
+
+    void MarkRootLocked(
+        RootPinDomainV1 domain,
+        RootPinRootCellV1 root,
+        RootPinLoadedTypeV1* expectedType,
+        ObjectTraceQueue& queue)
+    {
+        if (!IsRootRegistered(domain, root) || root->domain != domain
+            || !root->active
+            || (root->descriptorHolds == 0 && root->supportHolds == 0)
+            || root->exactType != expectedType
+            || !root->object->live || root->object->generation != root->generation)
+        {
+            ContractViolation();
+        }
+        if (root->traceEpoch == queue.epoch)
+        {
+            return;
+        }
+
+        root->traceEpoch = queue.epoch;
+        EnqueueObjectLocked(domain, root->object, queue);
+    }
+
+    void MarkPinLocked(
+        RootPinDomainV1 domain,
+        RootPinPinCellV1 pin,
+        const RootPinStableValue16V1& stable,
+        RootPinLoadedTypeV1* expectedType,
+        bool wholeObject,
+        ObjectTraceQueue& queue)
+    {
+        if (!IsPinRegistered(domain, pin) || pin->domain != domain
+            || !pin->active || pin->descriptorHolds == 0
+            || pin->stableAddress != stable.address || pin->wholeObject != wholeObject)
+        {
+            ContractViolation();
+        }
+
+        if (wholeObject)
+        {
+            if (pin->root != nullptr || pin->object->payloadType != expectedType
+                || pin->extent != pin->object->payloadSize
+                || stable.address != reinterpret_cast<uintptr_t>(pin->object->currentBase))
+            {
+                ContractViolation();
+            }
+        }
+        else
+        {
+            if (pin->root == nullptr || !IsRootRegistered(domain, pin->root)
+                || !pin->root->active || pin->root->object != pin->object)
+            {
+                ContractViolation();
+            }
+            MarkRootLocked(domain, pin->root, pin->root->exactType, queue);
+        }
+
+        if (pin->traceEpoch == queue.epoch)
+        {
+            return;
+        }
+        pin->traceEpoch = queue.epoch;
+        if (wholeObject)
+        {
+            EnqueueObjectLocked(domain, pin->object, queue);
+        }
+    }
+
+    void WalkSupportValueLocked(
+        RootPinDomainV1 domain,
+        RootPinLoadedTypeV1* type,
+        const uint8_t* value,
+        SupportAction action,
+        ObjectTraceQueue* queue,
+        bool reverse);
+
+    void VisitSupportCellLocked(
+        RootPinDomainV1 domain,
+        RootPinRootCellV1 root,
+        RootPinLoadedTypeV1* exactType,
+        SupportAction action,
+        ObjectTraceQueue* queue)
+    {
+        if (!IsRootRegistered(domain, root) || root->domain != domain
+            || !root->active || root->descriptorHolds == 0
+            || root->exactType != exactType || !root->object->live
+            || root->object->generation != root->generation)
+        {
+            ContractViolation();
+        }
+
+        switch (action)
+        {
+            case SupportAction::ValidateRetain:
+                if (root->descriptorHolds == std::numeric_limits<uint64_t>::max())
+                {
+                    ContractViolation();
+                }
+                break;
+            case SupportAction::Retain:
+                root->descriptorHolds++;
+                break;
+            case SupportAction::ValidateRelease:
+                break;
+            case SupportAction::Release:
+                ReleaseRootDescriptorLocked(root);
+                break;
+            case SupportAction::Trace:
+                if (queue == nullptr)
+                {
+                    ContractViolation();
+                }
+                MarkRootLocked(domain, root, exactType, *queue);
+                break;
+        }
+    }
+
+    void VisitPinCellLocked(
+        RootPinDomainV1 domain,
+        RootPinPinCellV1 pin,
+        const RootPinStableValue16V1& stable,
+        RootPinLoadedTypeV1* referredType,
+        bool wholeObject,
+        SupportAction action,
+        ObjectTraceQueue* queue)
+    {
+        if (!IsPinRegistered(domain, pin) || pin->domain != domain
+            || !pin->active || pin->descriptorHolds == 0
+            || pin->stableAddress != stable.address || pin->wholeObject != wholeObject
+            || !pin->object->live)
+        {
+            ContractViolation();
+        }
+
+        if (wholeObject)
+        {
+            if (pin->root != nullptr || pin->object->payloadType != referredType
+                || pin->extent != pin->object->payloadSize
+                || stable.address != reinterpret_cast<uintptr_t>(pin->object->currentBase))
+            {
+                ContractViolation();
+            }
+        }
+        else
+        {
+            if (pin->root == nullptr || !IsRootRegistered(domain, pin->root)
+                || !pin->root->active || pin->root->object != pin->object
+                || pin->root->supportHolds == 0
+                || stable.address < pin->stableAddress
+                || stable.address - pin->stableAddress > pin->extent
+                || referredType->size > pin->extent - (stable.address - pin->stableAddress))
+            {
+                ContractViolation();
+            }
+        }
+
+        switch (action)
+        {
+            case SupportAction::ValidateRetain:
+                if (pin->descriptorHolds == std::numeric_limits<uint64_t>::max())
+                {
+                    ContractViolation();
+                }
+                break;
+            case SupportAction::Retain:
+                pin->descriptorHolds++;
+                break;
+            case SupportAction::ValidateRelease:
+                break;
+            case SupportAction::Release:
+                ReleasePinDescriptorLocked(pin);
+                break;
+            case SupportAction::Trace:
+                if (queue == nullptr)
+                {
+                    ContractViolation();
+                }
+                MarkPinLocked(domain, pin, stable, referredType, wholeObject, *queue);
+                break;
+        }
+    }
+
+    void WalkSupportValueLocked(
+        RootPinDomainV1 domain,
+        RootPinLoadedTypeV1* type,
+        const uint8_t* value,
+        SupportAction action,
+        ObjectTraceQueue* queue,
+        bool reverse)
+    {
+        if (type == nullptr || type->domain != domain
+            || type->key.role != ROOTPIN_TYPE_ROLE_VALUE || value == nullptr)
+        {
+            ContractViolation();
+        }
+
+        auto& stack = domain->supportWalkStack;
+        if (!stack.empty() || stack.size() == stack.capacity())
+        {
+            ContractViolation();
+        }
+        stack.push_back({ type, value, 0 });
+
+        while (!stack.empty())
+        {
+            auto& current = stack.back();
+            auto* currentType = current.type;
+            switch (currentType->shape)
+            {
+                case ROOTPIN_TYPE_SHAPE_LEAF:
+                    stack.pop_back();
+                    break;
+                case ROOTPIN_TYPE_SHAPE_FIELDS:
+                {
+                    const auto fieldCount = static_cast<uint64_t>(currentType->fields.size());
+                    if (current.cursor >= fieldCount)
+                    {
+                        stack.pop_back();
+                        break;
+                    }
+
+                    const auto fieldOrdinal = reverse
+                        ? currentType->fields.size() - 1 - static_cast<size_t>(current.cursor)
+                        : static_cast<size_t>(current.cursor);
+                    current.cursor++;
+                    const auto& field = currentType->fields[fieldOrdinal];
+                    if (stack.size() == stack.capacity())
+                    {
+                        ContractViolation();
+                    }
+                    stack.push_back({
+                        field.valueType,
+                        ValueAtOffset(current.value, field.offset, field.valueType->size),
+                        0,
+                    });
+                    break;
+                }
+                case ROOTPIN_TYPE_SHAPE_OPTIONAL:
+                {
+                    if (current.cursor != 0)
+                    {
+                        stack.pop_back();
+                        break;
+                    }
+                    current.cursor = 1;
+                    if (!IsZeroValue(current.value, currentType->size))
+                    {
+                        if (stack.size() == stack.capacity())
+                        {
+                            ContractViolation();
+                        }
+                        stack.push_back({ currentType->child, current.value, 0 });
+                    }
+                    break;
+                }
+                case ROOTPIN_TYPE_SHAPE_OBJECT_CELL:
+                {
+                    const auto object = ReadObjectCell(current.value);
+                    if (!IsObjectRegistered(domain, object) || object->domain != domain
+                        || !object->published || !object->live
+                        || object->payloadType != currentType->child)
+                    {
+                        ContractViolation();
+                    }
+                    if (action == SupportAction::Trace)
+                    {
+                        if (queue == nullptr)
+                        {
+                            ContractViolation();
+                        }
+                        EnqueueObjectLocked(domain, object, *queue);
+                    }
+                    stack.pop_back();
+                    break;
+                }
+                case ROOTPIN_TYPE_SHAPE_ROOT_CELL:
+                {
+                    VisitSupportCellLocked(domain, ReadRootCell(current.value),
+                        currentType->child, action, queue);
+                    stack.pop_back();
+                    break;
+                }
+                case ROOTPIN_TYPE_SHAPE_STABLE_REF:
+                {
+                    const auto stable = ReadStableValue(current.value);
+                    if (stable.address == 0)
+                    {
+                        ContractViolation();
+                    }
+                    if (stable.support != nullptr)
+                    {
+                        VisitPinCellLocked(domain, stable.support, stable, currentType->child,
+                            false, action, queue);
+                    }
+                    stack.pop_back();
+                    break;
+                }
+                case ROOTPIN_TYPE_SHAPE_STABLE_CLASS:
+                {
+                    const auto stable = ReadStableValue(current.value);
+                    if (stable.address == 0 || stable.support == nullptr)
+                    {
+                        ContractViolation();
+                    }
+                    VisitPinCellLocked(domain, stable.support, stable, currentType->child,
+                        true, action, queue);
+                    stack.pop_back();
+                    break;
+                }
+                case ROOTPIN_TYPE_SHAPE_FIXED_ARRAY:
+                {
+                    if (!ContainsSupport(currentType->child)
+                        || current.cursor >= currentType->elementCount)
+                    {
+                        stack.pop_back();
+                        break;
+                    }
+
+                    const auto elementIndex = reverse
+                        ? currentType->elementCount - 1 - current.cursor
+                        : current.cursor;
+                    current.cursor++;
+                    if (elementIndex != 0 && currentType->elementStride
+                        > std::numeric_limits<uint64_t>::max() / elementIndex)
+                    {
+                        ContractViolation();
+                    }
+                    if (stack.size() == stack.capacity())
+                    {
+                        ContractViolation();
+                    }
+                    const auto offset = elementIndex * currentType->elementStride;
+                    stack.push_back({
+                        currentType->child,
+                        ValueAtOffset(current.value, offset, currentType->child->size),
+                        0,
+                    });
+                    break;
+                }
+                default:
+                    ContractViolation();
+            }
+        }
+    }
+
+    void RetainSupportLocked(
+        RootPinDomainV1 domain,
+        RootPinLoadedTypeV1* type,
+        const void* value)
+    {
+        if (!IsLoadedTypeRegistered(domain, type, ROOTPIN_TYPE_ROLE_VALUE)
+            || (type->flags & ROOTPIN_TYPE_FLAG_COPY) == 0)
+        {
+            ContractViolation();
+        }
+        WalkSupportValueLocked(domain, type, static_cast<const uint8_t*>(value),
+            SupportAction::ValidateRetain, nullptr, false);
+        WalkSupportValueLocked(domain, type, static_cast<const uint8_t*>(value),
+            SupportAction::Retain, nullptr, false);
+    }
+
+    void ReleaseSupportLocked(
+        RootPinDomainV1 domain,
+        RootPinLoadedTypeV1* type,
+        const void* value)
+    {
+        if (!IsLoadedTypeRegistered(domain, type, ROOTPIN_TYPE_ROLE_VALUE))
+        {
+            ContractViolation();
+        }
+        WalkSupportValueLocked(domain, type, static_cast<const uint8_t*>(value),
+            SupportAction::ValidateRelease, nullptr, true);
+        WalkSupportValueLocked(domain, type, static_cast<const uint8_t*>(value),
+            SupportAction::Release, nullptr, true);
+    }
+
+    void TracePayloadLocked(
+        RootPinDomainV1 domain,
+        RootPinObjectCellV1 object,
+        ObjectTraceQueue& queue)
+    {
+        const auto* payload = object->currentBase;
+        auto* type = object->payloadType;
+        if (type->shape == ROOTPIN_TYPE_SHAPE_FIELDS)
+        {
+            for (const auto& field : type->fields)
+            {
+                WalkSupportValueLocked(domain, field.valueType,
+                    ValueAtOffset(payload, field.offset, field.valueType->size),
+                    SupportAction::Trace, &queue, false);
+            }
+        }
+        else if (type->shape == ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD)
+        {
+            WalkSupportValueLocked(domain, type->child, payload,
+                SupportAction::Trace, &queue, false);
+        }
+        else
+        {
+            ContractViolation();
+        }
+    }
+
+    uint64_t NextTraceEpochLocked(RootPinDomainV1 domain)
+    {
+        if (domain->traceEpoch == std::numeric_limits<uint64_t>::max())
+        {
+            for (const auto& object : domain->ownedObjects)
+            {
+                object->traceEpoch = 0;
+                object->traceNext = nullptr;
+            }
+            for (const auto root : domain->roots)
+            {
+                root->traceEpoch = 0;
+            }
+            for (const auto pin : domain->pins)
+            {
+                pin->traceEpoch = 0;
+            }
+            domain->traceEpoch = 0;
+        }
+        domain->traceEpoch++;
+        if (domain->traceEpoch == 0)
+        {
+            ContractViolation();
+        }
+        return domain->traceEpoch;
+    }
+
+    void TraceCurrentFramesLocked(RootPinDomainV1 domain, ObjectTraceQueue& queue)
+    {
+        for (auto* frame = s_threadState.frameTop; frame != nullptr; frame = frame->previous)
+        {
+            if (frame->flags != 0 || frame->slotCount > std::numeric_limits<size_t>::max()
+                / sizeof(*frame->slots)
+                || (frame->slotCount != 0 && frame->slots == nullptr))
+            {
+                ContractViolation();
+            }
+            for (uint32_t index = 0; index < frame->slotCount; index++)
+            {
+                const auto& slot = frame->slots[index];
+                if (slot.live > 1 || slot.ownsHold > 1
+                    || (slot.live == 0 && slot.ownsHold != 0))
+                {
+                    ContractViolation();
+                }
+                if (slot.live != 0)
+                {
+                    if (!IsLoadedTypeRegistered(domain, slot.completeType,
+                            ROOTPIN_TYPE_ROLE_VALUE))
+                    {
+                        ContractViolation();
+                    }
+                    WalkSupportValueLocked(domain, slot.completeType,
+                        static_cast<const uint8_t*>(slot.residence),
+                        SupportAction::Trace, &queue, false);
+                }
+            }
+        }
+
+        for (auto* object = queue.first; object != nullptr; object = object->traceNext)
+        {
+            TracePayloadLocked(domain, object, queue);
+        }
+    }
+
+    bool SlotBelongsToFrame(
+        const RootPinSupportFrameV1* frame,
+        const RootPinSupportSlotV1* slot)
+    {
+        if (frame == nullptr || slot == nullptr || frame->slots == nullptr
+            || frame->slotCount > std::numeric_limits<size_t>::max() / sizeof(*frame->slots))
+        {
+            return false;
+        }
+        const auto base = reinterpret_cast<uintptr_t>(frame->slots);
+        const auto address = reinterpret_cast<uintptr_t>(slot);
+        const auto byteCount = static_cast<size_t>(frame->slotCount) * sizeof(*frame->slots);
+        return address >= base && address - base < byteCount
+            && (address - base) % sizeof(*frame->slots) == 0;
+    }
+
+    size_t FindMethodInput(
+        const RootPinLoadedMethodImpl* method,
+        uint8_t sourceRole,
+        uint32_t formalOrdinal)
+    {
+        for (size_t index = 0; index < method->inputs.size(); index++)
+        {
+            const auto& input = method->inputs[index];
+            if (input.sourceRole == sourceRole && input.formalOrdinal == formalOrdinal)
+            {
+                return index;
+            }
+        }
+        ContractViolation();
+    }
+
+    RootPinLoadedMethodImpl* RequireLoadedMethod(
+        RootPinDomainV1 domain,
+        RootPinLoadedMethodV1 method)
+    {
+        if (method == nullptr)
+        {
+            ContractViolation();
+        }
+        const auto found = std::find_if(domain->ownedMethods.begin(), domain->ownedMethods.end(),
+            [method](const auto& candidate) {
+                return candidate.get() == method;
+            });
+        if (found == domain->ownedMethods.end() || (*found)->domain != domain)
+        {
+            ContractViolation();
+        }
+        return found->get();
+    }
+
 }
 
 extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
@@ -1726,7 +2438,8 @@ TerrumRootPinAdmitLoadedTypesV2(
         ExclusiveLock lock(&domain->gate);
         std::vector<std::vector<uint64_t>> originKeys;
         std::unordered_map<uint64_t, Origin> batchOrigins;
-        if (!ValidateGraph(*batch, originKeys, batchOrigins))
+        std::vector<uint8_t> supportByInput;
+        if (!ValidateGraph(*batch, originKeys, batchOrigins, supportByInput))
         {
             return ROOTPIN_TYPE_STATUS_INVALID;
         }
@@ -1766,7 +2479,7 @@ TerrumRootPinAdmitLoadedTypesV2(
                 continue;
             }
 
-            auto loaded = CreateLoadedType(domain, *batch, index, originKeys);
+            auto loaded = CreateLoadedType(domain, *batch, index, originKeys, supportByInput);
             auto* pointer = loaded.get();
             newTypes.push_back(std::move(loaded));
             stagedTypes.emplace(key, pointer);
@@ -1831,6 +2544,15 @@ TerrumRootPinAdmitLoadedTypesV2(
         const auto nextTypeCount = domain->types.size() + newTypes.size();
         const auto nextOriginCount = domain->origins.size() + batchOrigins.size();
         const auto nextOwnedTypeCount = domain->ownedTypes.size() + newTypes.size();
+        if (nextTypeCount == maximumSize)
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        if (!domain->supportWalkStack.empty())
+        {
+            ContractViolation();
+        }
+        domain->supportWalkStack.reserve(nextTypeCount + 1);
         nextTypes.reserve(nextTypeCount);
         nextOrigins.reserve(nextOriginCount);
         for (const auto& [key, pointer] : stagedTypes)
@@ -2174,6 +2896,604 @@ RootPinTestGetObjectCountsV2(
     *rootEdges = object->rootEdges;
     *activePins = object->activePins;
     return ROOTPIN_TYPE_STATUS_SUCCESS;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRetainSupportV1(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value)
+{
+    if (domain != &s_domain)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    RetainSupportLocked(domain, completeType, value);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReleaseSupportV1(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value)
+{
+    if (domain != &s_domain)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    ReleaseSupportLocked(domain, completeType, value);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRegisterLoadedMethodV1(
+    RootPinDomainV1 domain,
+    uint64_t methodIdentity,
+    RootPinLoadedTypeV1* resultType,
+    const RootPinTestMethodInputV1* inputs,
+    uint32_t inputCount,
+    RootPinLoadedMethodV1* vacantOut)
+{
+    if (domain != &s_domain || methodIdentity == 0 || vacantOut == nullptr
+        || reinterpret_cast<uintptr_t>(vacantOut) % alignof(RootPinLoadedMethodV1) != 0
+        || *vacantOut != nullptr)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange inputsRange;
+    MemoryRange outputRange;
+    if (!ValidArray(inputs, inputCount, sizeof(*inputs), alignof(RootPinTestMethodInputV1),
+            inputsRange)
+        || !GetMemoryRange(vacantOut, sizeof(*vacantOut), outputRange)
+        || Overlaps(inputsRange, outputRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    try
+    {
+        ExclusiveLock lock(&domain->gate);
+        if ((resultType != nullptr
+                && !IsLoadedTypeRegistered(domain, resultType, ROOTPIN_TYPE_ROLE_VALUE))
+            || domain->methods.contains(methodIdentity)
+            || domain->methods.size() == std::numeric_limits<size_t>::max()
+            || domain->ownedMethods.size() == std::numeric_limits<size_t>::max())
+        {
+            return ROOTPIN_TYPE_STATUS_INVALID;
+        }
+
+        auto candidate = std::make_unique<RootPinLoadedMethodImpl>();
+        candidate->domain = domain;
+        candidate->identity = methodIdentity;
+        candidate->resultType = resultType;
+        candidate->inputs.reserve(inputCount);
+        bool sawFormal = false;
+        bool sawReceiver = false;
+        uint32_t lastFormalOrdinal = 0;
+        for (uint32_t index = 0; index < inputCount; index++)
+        {
+            const auto& input = inputs[index];
+            if (input.sourceRole > 1 || input.flags != 0 || input.reserved != 0
+                || (input.sourceRole == 1
+                    && (input.formalOrdinal != 0 || sawFormal || sawReceiver))
+                || !IsLoadedTypeRegistered(domain, input.completeType, ROOTPIN_TYPE_ROLE_VALUE)
+                || (input.sourceRole == 0 && sawFormal
+                    && input.formalOrdinal <= lastFormalOrdinal))
+            {
+                return ROOTPIN_TYPE_STATUS_INVALID;
+            }
+            if (input.sourceRole == 0)
+            {
+                sawFormal = true;
+                lastFormalOrdinal = input.formalOrdinal;
+            }
+            else
+            {
+                sawReceiver = true;
+            }
+            for (const auto& previous : candidate->inputs)
+            {
+                if (previous.entrySlot == input.entrySlot
+                    || (previous.sourceRole == input.sourceRole
+                        && previous.formalOrdinal == input.formalOrdinal))
+                {
+                    return ROOTPIN_TYPE_STATUS_INVALID;
+                }
+            }
+            candidate->inputs.push_back({
+                input.formalOrdinal,
+                input.entrySlot,
+                input.completeType,
+                input.sourceRole,
+            });
+        }
+
+        auto nextMethods = domain->methods;
+        nextMethods.reserve(nextMethods.size() + 1);
+        auto* published = candidate.get();
+        nextMethods.emplace(methodIdentity, published);
+        domain->ownedMethods.reserve(domain->ownedMethods.size() + 1);
+        domain->ownedMethods.push_back(std::move(candidate));
+        domain->methods.swap(nextMethods);
+        *vacantOut = published;
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestEnterFrameV1(
+    RootPinDomainV1 domain,
+    RootPinSupportFrameV1* frame)
+{
+    if (domain != &s_domain || frame == nullptr
+        || reinterpret_cast<uintptr_t>(frame) % alignof(RootPinSupportFrameV1) != 0)
+    {
+        ContractViolation();
+    }
+
+    MemoryRange frameRange;
+    MemoryRange slotsRange;
+    if (!GetMemoryRange(frame, sizeof(*frame), frameRange))
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (frame->previous != nullptr || frame->flags != 0
+        || !ValidArray(frame->slots, frame->slotCount, sizeof(*frame->slots),
+            alignof(RootPinSupportSlotV1), slotsRange)
+        || Overlaps(frameRange, slotsRange))
+    {
+        ContractViolation();
+    }
+
+    auto* method = frame->entryMethod == nullptr
+        ? nullptr
+        : RequireLoadedMethod(domain, frame->entryMethod);
+    auto* call = s_threadState.callTop;
+    const bool enteringCall = call != nullptr && call->state == 1;
+    if (enteringCall && (method == nullptr || call->target != frame->entryMethod))
+    {
+        ContractViolation();
+    }
+
+    for (uint32_t index = 0; index < frame->slotCount; index++)
+    {
+        auto& slot = frame->slots[index];
+        if (slot.residence == nullptr || slot.live > 1 || slot.ownsHold > 1
+            || (slot.live == 0 && slot.ownsHold != 0)
+            || !IsLoadedTypeRegistered(domain, slot.completeType, ROOTPIN_TYPE_ROLE_VALUE))
+        {
+            ContractViolation();
+        }
+        if (slot.live != 0)
+        {
+            WalkSupportValueLocked(domain, slot.completeType,
+                static_cast<const uint8_t*>(slot.residence),
+                SupportAction::ValidateRelease, nullptr, false);
+        }
+        if (slot.ownsHold != 0)
+        {
+            if (!ContainsSupport(slot.completeType))
+            {
+                ContractViolation();
+            }
+            for (uint32_t previous = 0; previous < index; previous++)
+            {
+                if (frame->slots[previous].ownsHold != 0
+                    && frame->slots[previous].residence == slot.residence)
+                {
+                    ContractViolation();
+                }
+            }
+        }
+    }
+
+    if (enteringCall)
+    {
+        auto* caller = s_threadState.frameTop;
+        if (caller == nullptr
+            || (method->resultType != nullptr
+                && !IsLoadedTypeRegistered(domain, method->resultType,
+                    ROOTPIN_TYPE_ROLE_VALUE)))
+        {
+            ContractViolation();
+        }
+
+        size_t previousMapIndex = 0;
+        bool hasPreviousMapIndex = false;
+        for (uint32_t index = 0; index < call->inputCount; index++)
+        {
+            const auto& input = call->inputs[index];
+            const auto mapIndex = FindMethodInput(method, input.sourceRole, input.formalOrdinal);
+            if ((hasPreviousMapIndex && mapIndex <= previousMapIndex)
+                || !SlotBelongsToFrame(caller, input.stagedSource)
+                || input.stagedSource->live != 1 || input.stagedSource->ownsHold != 1
+                || !ContainsSupport(input.stagedSource->completeType))
+            {
+                ContractViolation();
+            }
+            WalkSupportValueLocked(domain, input.stagedSource->completeType,
+                static_cast<const uint8_t*>(input.stagedSource->residence),
+                SupportAction::ValidateRelease, nullptr, false);
+            previousMapIndex = mapIndex;
+            hasPreviousMapIndex = true;
+
+            const auto& mapped = method->inputs[mapIndex];
+            if (mapped.completeType != input.stagedSource->completeType
+                || mapped.entrySlot >= frame->slotCount)
+            {
+                ContractViolation();
+            }
+            auto& destination = frame->slots[mapped.entrySlot];
+            if (destination.live != 0 || destination.ownsHold != 0
+                || destination.completeType != mapped.completeType
+                || std::memcmp(destination.residence, input.stagedSource->residence,
+                    static_cast<size_t>(mapped.completeType->size)) != 0)
+            {
+                ContractViolation();
+            }
+            for (uint32_t previous = 0; previous < index; previous++)
+            {
+                const auto& previousInput = call->inputs[previous];
+                const auto priorMapIndex = FindMethodInput(
+                    method, previousInput.sourceRole, previousInput.formalOrdinal);
+                if (method->inputs[priorMapIndex].entrySlot == mapped.entrySlot)
+                {
+                    ContractViolation();
+                }
+            }
+        }
+    }
+
+    frame->previous = s_threadState.frameTop;
+    s_threadState.frameTop = frame;
+    if (enteringCall)
+    {
+        for (uint32_t index = 0; index < call->inputCount; index++)
+        {
+            const auto& input = call->inputs[index];
+            const auto mapIndex = FindMethodInput(method, input.sourceRole, input.formalOrdinal);
+            auto& destination = frame->slots[method->inputs[mapIndex].entrySlot];
+            input.stagedSource->live = 0;
+            input.stagedSource->ownsHold = 0;
+            destination.live = 1;
+            destination.ownsHold = 1;
+        }
+        call->state = 2;
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestExitFrameV1(
+    RootPinDomainV1 domain,
+    RootPinSupportFrameV1* frame)
+{
+    if (domain != &s_domain || frame == nullptr
+        || reinterpret_cast<uintptr_t>(frame) % alignof(RootPinSupportFrameV1) != 0)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (s_threadState.frameTop != frame || frame->flags != 0)
+    {
+        ContractViolation();
+    }
+
+    for (uint32_t index = frame->slotCount; index > 0; index--)
+    {
+        auto& slot = frame->slots[index - 1];
+        if (slot.live > 1 || slot.ownsHold > 1
+            || (slot.live == 0 && slot.ownsHold != 0))
+        {
+            ContractViolation();
+        }
+        if (slot.live != 0 && slot.ownsHold != 0)
+        {
+            ReleaseSupportLocked(domain, slot.completeType, slot.residence);
+        }
+        slot.live = 0;
+        slot.ownsHold = 0;
+    }
+
+    s_threadState.frameTop = frame->previous;
+    frame->previous = nullptr;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestBeginCallV1(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer)
+{
+    if (domain != &s_domain || transfer == nullptr
+        || reinterpret_cast<uintptr_t>(transfer) % alignof(RootPinCallTransferV1) != 0)
+    {
+        ContractViolation();
+    }
+
+    MemoryRange transferRange;
+    MemoryRange inputsRange;
+    if (!GetMemoryRange(transfer, sizeof(*transfer), transferRange))
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (transfer->previous != nullptr || transfer->state != 0
+        || !ValidArray(transfer->inputs, transfer->inputCount, sizeof(*transfer->inputs),
+            alignof(RootPinInputTransferV1), inputsRange)
+        || Overlaps(transferRange, inputsRange)
+        || s_threadState.frameTop == nullptr)
+    {
+        ContractViolation();
+    }
+
+    auto* method = RequireLoadedMethod(domain, transfer->target);
+    const bool resultNeedsSupport = method->resultType != nullptr
+        && ContainsSupport(method->resultType);
+    if (resultNeedsSupport != (transfer->prospectiveResult != nullptr))
+    {
+        ContractViolation();
+    }
+    if (transfer->prospectiveResult != nullptr)
+    {
+        auto* result = transfer->prospectiveResult;
+        if (!SlotBelongsToFrame(s_threadState.frameTop, result)
+            || result->live != 0 || result->ownsHold != 0
+            || result->completeType != method->resultType
+            || IsZeroValue(static_cast<const uint8_t*>(result->residence),
+                method->resultType->size) == false)
+        {
+            ContractViolation();
+        }
+    }
+
+    size_t previousMapIndex = 0;
+    bool hasPreviousMapIndex = false;
+    for (uint32_t index = 0; index < transfer->inputCount; index++)
+    {
+        const auto& input = transfer->inputs[index];
+        if (input.flags != 0 || input.reserved != 0
+            || input.sourceRole > 1 || (input.sourceRole == 1 && input.formalOrdinal != 0)
+            || !SlotBelongsToFrame(s_threadState.frameTop, input.stagedSource)
+            || input.stagedSource->live != 1 || input.stagedSource->ownsHold != 1
+            || !ContainsSupport(input.stagedSource->completeType))
+        {
+            ContractViolation();
+        }
+        WalkSupportValueLocked(domain, input.stagedSource->completeType,
+            static_cast<const uint8_t*>(input.stagedSource->residence),
+            SupportAction::ValidateRelease, nullptr, false);
+        const auto mapIndex = FindMethodInput(method, input.sourceRole, input.formalOrdinal);
+        if ((hasPreviousMapIndex && mapIndex <= previousMapIndex)
+            || method->inputs[mapIndex].completeType != input.stagedSource->completeType)
+        {
+            ContractViolation();
+        }
+        previousMapIndex = mapIndex;
+        hasPreviousMapIndex = true;
+
+        for (uint32_t previous = 0; previous < index; previous++)
+        {
+            if (transfer->inputs[previous].stagedSource == input.stagedSource)
+            {
+                ContractViolation();
+            }
+        }
+    }
+
+    transfer->previous = s_threadState.callTop;
+    transfer->state = 1;
+    s_threadState.callTop = transfer;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReturnSupportV1(
+    RootPinDomainV1 domain,
+    RootPinSupportSlotV1* savedResult)
+{
+    if (domain != &s_domain || savedResult == nullptr
+        || reinterpret_cast<uintptr_t>(savedResult) % alignof(RootPinSupportSlotV1) != 0)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    auto* frame = s_threadState.frameTop;
+    auto* call = s_threadState.callTop;
+    if (frame == nullptr || call == nullptr || call->state != 2
+        || frame->entryMethod != call->target || call->prospectiveResult == nullptr
+        || !SlotBelongsToFrame(frame, savedResult)
+        || savedResult->live != 1 || savedResult->ownsHold != 1
+        || savedResult->completeType == nullptr
+        || savedResult->completeType != RequireLoadedMethod(domain, call->target)->resultType)
+    {
+        ContractViolation();
+    }
+
+    auto* result = call->prospectiveResult;
+    if (result->residence == nullptr || result->live != 0 || result->ownsHold != 0
+        || result->completeType != savedResult->completeType
+        || std::memcmp(result->residence, savedResult->residence,
+            static_cast<size_t>(savedResult->completeType->size)) != 0)
+    {
+        ContractViolation();
+    }
+    WalkSupportValueLocked(domain, savedResult->completeType,
+        static_cast<const uint8_t*>(savedResult->residence),
+        SupportAction::ValidateRelease, nullptr, false);
+
+    savedResult->live = 0;
+    savedResult->ownsHold = 0;
+    result->live = 1;
+    result->ownsHold = 1;
+    call->state = 3;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestFinishCallV1(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer,
+    uint32_t completion)
+{
+    if (domain != &s_domain || transfer == nullptr || completion > 1
+        || reinterpret_cast<uintptr_t>(transfer) % alignof(RootPinCallTransferV1) != 0)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (s_threadState.callTop != transfer || transfer->state < 1 || transfer->state > 3)
+    {
+        ContractViolation();
+    }
+
+    auto* method = RequireLoadedMethod(domain, transfer->target);
+    const bool resultNeedsSupport = method->resultType != nullptr
+        && ContainsSupport(method->resultType);
+    if (completion == 1
+        && (transfer->state != (resultNeedsSupport ? 3u : 2u)
+            || (resultNeedsSupport
+                && (transfer->prospectiveResult == nullptr
+                    || transfer->prospectiveResult->live != 1
+                    || transfer->prospectiveResult->ownsHold != 1))))
+    {
+        ContractViolation();
+    }
+
+    if (completion == 1)
+    {
+        for (uint32_t index = 0; index < transfer->inputCount; index++)
+        {
+            const auto* source = transfer->inputs[index].stagedSource;
+            if (source->live != 0 || source->ownsHold != 0)
+            {
+                ContractViolation();
+            }
+        }
+        if (resultNeedsSupport)
+        {
+            const auto* result = transfer->prospectiveResult;
+            WalkSupportValueLocked(domain, result->completeType,
+                static_cast<const uint8_t*>(result->residence),
+                SupportAction::ValidateRelease, nullptr, false);
+        }
+    }
+
+    if (completion == 0)
+    {
+        if (transfer->state == 1)
+        {
+            for (uint32_t index = transfer->inputCount; index > 0; index--)
+            {
+                auto* source = transfer->inputs[index - 1].stagedSource;
+                if (source->live != 1 || source->ownsHold != 1)
+                {
+                    ContractViolation();
+                }
+                ReleaseSupportLocked(domain, source->completeType, source->residence);
+                source->live = 0;
+                source->ownsHold = 0;
+            }
+        }
+        else
+        {
+            for (uint32_t index = 0; index < transfer->inputCount; index++)
+            {
+                auto* source = transfer->inputs[index].stagedSource;
+                if (source->live != 0 || source->ownsHold != 0)
+                {
+                    ContractViolation();
+                }
+            }
+        }
+
+        if (transfer->prospectiveResult != nullptr)
+        {
+            auto* result = transfer->prospectiveResult;
+            if (transfer->state == 3)
+            {
+                if (result->live != 1 || result->ownsHold != 1)
+                {
+                    ContractViolation();
+                }
+                ReleaseSupportLocked(domain, result->completeType, result->residence);
+                result->live = 0;
+                result->ownsHold = 0;
+            }
+            else if (result->live != 0 || result->ownsHold != 0)
+            {
+                ContractViolation();
+            }
+        }
+    }
+
+    auto* previous = transfer->previous;
+    transfer->previous = nullptr;
+    transfer->state = 4;
+    s_threadState.callTop = previous;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestTraceCurrentFramesV1(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1* objects,
+    uint32_t capacity,
+    uint32_t* outCount)
+{
+    if (domain != &s_domain || outCount == nullptr
+        || reinterpret_cast<uintptr_t>(outCount) % alignof(uint32_t) != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange objectsRange;
+    if (!ValidArray(objects, capacity, sizeof(*objects), alignof(RootPinObjectCellV1),
+            objectsRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    try
+    {
+        ExclusiveLock lock(&domain->gate);
+        ObjectTraceQueue queue = { NextTraceEpochLocked(domain), nullptr, nullptr, 0 };
+        TraceCurrentFramesLocked(domain, queue);
+        if (queue.count > std::numeric_limits<uint32_t>::max()
+            || queue.count > capacity)
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+
+        *outCount = static_cast<uint32_t>(queue.count);
+        uint32_t index = 0;
+        for (auto object = queue.first; object != nullptr; object = object->traceNext)
+        {
+            objects[index++] = object;
+        }
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
 }
 
 #endif

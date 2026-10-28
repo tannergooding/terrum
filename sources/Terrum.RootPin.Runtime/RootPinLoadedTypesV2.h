@@ -23,6 +23,7 @@ typedef struct RootPinLoadedTypeV1 RootPinLoadedTypeV1;
 typedef struct RootPinObjectCellImpl* RootPinObjectCellV1;
 typedef struct RootPinRootCellImpl* RootPinRootCellV1;
 typedef struct RootPinPinCellImpl* RootPinPinCellV1;
+typedef struct RootPinLoadedMethodImpl* RootPinLoadedMethodV1;
 
 typedef struct RootPinTypeNodeV2
 {
@@ -99,6 +100,54 @@ typedef struct RootPinStableValue16V1
     uint64_t address;
     RootPinPinCellV1 support;
 } RootPinStableValue16V1;
+
+typedef struct RootPinSupportSlotV1
+{
+    void* residence;
+    RootPinLoadedTypeV1* completeType;
+    uint32_t live;
+    uint32_t ownsHold;
+} RootPinSupportSlotV1;
+
+typedef struct RootPinSupportFrameV1
+{
+    struct RootPinSupportFrameV1* previous;
+    uint32_t slotCount;
+    uint32_t flags;
+    RootPinSupportSlotV1* slots;
+    RootPinLoadedMethodV1 entryMethod;
+} RootPinSupportFrameV1;
+
+typedef struct RootPinInputTransferV1
+{
+    RootPinSupportSlotV1* stagedSource;
+    uint32_t formalOrdinal;
+    uint8_t sourceRole;
+    uint8_t flags;
+    uint16_t reserved;
+} RootPinInputTransferV1;
+
+typedef struct RootPinCallTransferV1
+{
+    struct RootPinCallTransferV1* previous;
+    RootPinLoadedMethodV1 target;
+    RootPinSupportSlotV1* prospectiveResult;
+    uint32_t inputCount;
+    uint32_t state;
+    RootPinInputTransferV1* inputs;
+} RootPinCallTransferV1;
+
+#if defined(TERRUM_ROOT_PIN_TESTS)
+typedef struct RootPinTestMethodInputV1
+{
+    uint32_t formalOrdinal;
+    uint32_t entrySlot;
+    RootPinLoadedTypeV1* completeType;
+    uint8_t sourceRole;
+    uint8_t flags;
+    uint16_t reserved;
+} RootPinTestMethodInputV1;
+#endif
 
 enum
 {
@@ -233,6 +282,60 @@ RootPinTestGetObjectCountsV2(
     RootPinObjectCellV1 object,
     uint64_t* rootEdges,
     uint64_t* activePins);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRetainSupportV1(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReleaseSupportV1(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* completeType,
+    const void* value);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRegisterLoadedMethodV1(
+    RootPinDomainV1 domain,
+    uint64_t methodIdentity,
+    RootPinLoadedTypeV1* resultType,
+    const RootPinTestMethodInputV1* inputs,
+    uint32_t inputCount,
+    RootPinLoadedMethodV1* vacantOut);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestEnterFrameV1(
+    RootPinDomainV1 domain,
+    RootPinSupportFrameV1* frame);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestExitFrameV1(
+    RootPinDomainV1 domain,
+    RootPinSupportFrameV1* frame);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestBeginCallV1(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReturnSupportV1(
+    RootPinDomainV1 domain,
+    RootPinSupportSlotV1* savedResult);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestFinishCallV1(
+    RootPinDomainV1 domain,
+    RootPinCallTransferV1* transfer,
+    uint32_t completion);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestTraceCurrentFramesV1(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1* objects,
+    uint32_t capacity,
+    uint32_t* outCount);
 #endif
 
 #ifdef __cplusplus

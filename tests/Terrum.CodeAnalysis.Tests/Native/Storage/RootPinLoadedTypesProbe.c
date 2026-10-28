@@ -40,6 +40,23 @@ typedef void (ROOTPIN_LOADED_TYPES_CALL *ReleasePinFunction)(
     RootPinDomainV1, RootPinPinCellV1);
 typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *GetObjectCountsFunction)(
     RootPinDomainV1, RootPinObjectCellV1, uint64_t*, uint64_t*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *SupportValueFunction)(
+    RootPinDomainV1, RootPinLoadedTypeV1*, const void*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RegisterLoadedMethodFunction)(
+    RootPinDomainV1, uint64_t, RootPinLoadedTypeV1*,
+    const RootPinTestMethodInputV1*, uint32_t, RootPinLoadedMethodV1*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *EnterFrameFunction)(
+    RootPinDomainV1, RootPinSupportFrameV1*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *ExitFrameFunction)(
+    RootPinDomainV1, RootPinSupportFrameV1*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *BeginCallFunction)(
+    RootPinDomainV1, RootPinCallTransferV1*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *ReturnSupportFunction)(
+    RootPinDomainV1, RootPinSupportSlotV1*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *FinishCallFunction)(
+    RootPinDomainV1, RootPinCallTransferV1*, uint32_t);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *TraceCurrentFramesFunction)(
+    RootPinDomainV1, RootPinObjectCellV1*, uint32_t, uint32_t*);
 
 #define CHECK(expression) \
     do { \
@@ -61,10 +78,13 @@ static void ReleaseOrigin(void* cookie)
     (*count)--;
 }
 
+static uint32_t s_retirementCount;
+
 static void RetirePayload(RootPinDomainV1 domain, void* payload)
 {
     (void)domain;
     (void)payload;
+    s_retirementCount++;
 }
 
 static void SetNode(
@@ -141,6 +161,21 @@ typedef struct RootPinTestPayloadV2
     RootPinObjectCellV1 next;
     RootPinTestPackedV2 packed;
 } RootPinTestPayloadV2;
+
+typedef struct RootPinTestSupportPayloadV1
+{
+    RootPinObjectCellV1 next;
+    RootPinRootCellV1 root;
+} RootPinTestSupportPayloadV1;
+
+typedef struct RootPinTestSupportAggregateV1
+{
+    RootPinRootCellV1 firstRoot;
+    RootPinRootCellV1 secondRoot;
+    RootPinStableValue16V1 optionalStable;
+    RootPinRootCellV1 roots[2];
+    RootPinStableValue16V1 optionalStableClass;
+} RootPinTestSupportAggregateV1;
 
 typedef char RootPinPackedValueSizeCheck[
     sizeof(((RootPinTestPayloadV2*)0)->packed) == 5 ? 1 : -1];
@@ -555,15 +590,490 @@ static int RunCellCases(
     return 0;
 }
 
+static int RunDeepSupportWalk(
+    AdmitFunction admit,
+    RootPinDomainV1 domain,
+    SupportValueFunction retainSupport,
+    SupportValueFunction releaseSupport,
+    uint32_t* originCounts,
+    RootPinRootCellV1 root)
+{
+    enum
+    {
+        DeepLayers = 512,
+        DeepNodeCount = DeepLayers + 4,
+        DeepFieldCount = DeepLayers + 2,
+        DeepOriginUseCount = DeepNodeCount + 2,
+    };
+    RootPinTypeBatchV2 batch = { 0 };
+    RootPinTypeNodeV2 nodes[DeepNodeCount] = { 0 };
+    RootPinTypeFieldV1 fields[DeepFieldCount] = { 0 };
+    RootPinTypeOriginV1 origins[3] = { 0 };
+    uint32_t originUses[DeepOriginUseCount] = { 0 };
+    RootPinLoadedTypeV1* types[DeepNodeCount] = { 0 };
+    uint8_t value[sizeof(RootPinRootCellV1)];
+
+    SetNode(&nodes[0], 15000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_LEAF, 4, 4,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 0, 0, 3, 1);
+    SetNode(&nodes[1], 15001, (uint32_t)ROOTPIN_TYPE_ROLE_GC_PAYLOAD,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 16, 8,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 0, 2, 0, 3);
+    nodes[1].flags = 0;
+    nodes[1].retirementKey = 502;
+    nodes[1].retireGcPayloadThunk = (uint64_t)(uintptr_t)&RetirePayload;
+    nodes[1].retirementOrigin = 1;
+    nodes[1].layoutKind = ROOTPIN_TYPE_LAYOUT_SEQUENTIAL;
+    SetNode(&nodes[2], 15002, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_OBJECT_CELL, 8, 8,
+        1, 0, 0, 4, 1);
+    SetNode(&nodes[3], 15003, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_ROOT_CELL, 8, 8,
+        2, 0, 0, 5, 1);
+
+    fields[0].fieldKey = 15011;
+    fields[0].offset = 0;
+    fields[0].knownAlignment = 8;
+    fields[0].valueNode = 2;
+    fields[1].fieldKey = 15012;
+    fields[1].offset = 8;
+    fields[1].knownAlignment = 8;
+    fields[1].valueNode = 3;
+
+    for (uint32_t layer = 0; layer < DeepLayers; layer++)
+    {
+        const uint32_t nodeIndex = layer + 4;
+        const uint32_t fieldIndex = layer + 2;
+        SetNode(&nodes[nodeIndex], 16000 + layer, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+            (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 8, 8,
+            (uint32_t)ROOTPIN_TYPE_NO_INDEX, fieldIndex, 1, nodeIndex + 2, 1);
+        nodes[nodeIndex].layoutKind = ROOTPIN_TYPE_LAYOUT_SEQUENTIAL;
+        fields[fieldIndex].fieldKey = 16000 + layer;
+        fields[fieldIndex].offset = 0;
+        fields[fieldIndex].knownAlignment = 8;
+        fields[fieldIndex].valueNode = nodeIndex - 1;
+    }
+
+    SetOrigin(&origins[0], 10, (uint64_t)(uintptr_t)&originCounts[0],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT, RetainOrigin, ReleaseOrigin);
+    SetOrigin(&origins[1], 20, (uint64_t)(uintptr_t)&originCounts[1],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_CODE_UNWIND, RetainOrigin, ReleaseOrigin);
+    SetOrigin(&origins[2], 30, (uint64_t)(uintptr_t)&originCounts[2],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_ALLOCATOR_RUNTIME, RetainOrigin, ReleaseOrigin);
+    originUses[0] = 0;
+    originUses[1] = 1;
+    originUses[2] = 2;
+    for (uint32_t index = 3; index < DeepOriginUseCount; index++)
+    {
+        originUses[index] = 0;
+    }
+
+    batch.abiRevision = 2;
+    batch.byteSize = sizeof(batch);
+    batch.targetProfileId = 2;
+    batch.targetProfileRevision = 1;
+    batch.nodeCount = DeepNodeCount;
+    batch.fieldCount = DeepFieldCount;
+    batch.originCount = 3;
+    batch.originUseCount = DeepOriginUseCount;
+    batch.nodes = nodes;
+    batch.fields = fields;
+    batch.origins = origins;
+    batch.originUses = originUses;
+    CHECK(admit(domain, &batch, types, DeepNodeCount) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    memcpy(value, &root, sizeof(root));
+    retainSupport(domain, types[DeepNodeCount - 1], value);
+    releaseSupport(domain, types[DeepNodeCount - 1], value);
+    CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
+    return 0;
+}
+
+static int RunSupportCases(
+    HMODULE library,
+    RootPinDomainV1 domain,
+    AdmitFunction admit,
+    uint32_t* originCounts)
+{
+    RegisterObjectFunction registerObject = NULL;
+    RootExactFunction rootExact = NULL;
+    PinExactFunction pinExact = NULL;
+    PinObjectFunction pinObject = NULL;
+    ReleaseRootFunction releaseRoot = NULL;
+    GetObjectCountsFunction getObjectCounts = NULL;
+    SupportValueFunction retainSupport = NULL;
+    SupportValueFunction releaseSupport = NULL;
+    RegisterLoadedMethodFunction registerMethod = NULL;
+    EnterFrameFunction enterFrame = NULL;
+    ExitFrameFunction exitFrame = NULL;
+    BeginCallFunction beginCall = NULL;
+    ReturnSupportFunction returnSupport = NULL;
+    FinishCallFunction finishCall = NULL;
+    TraceCurrentFramesFunction traceCurrentFrames = NULL;
+    RootPinTypeBatchV2 batch = { 0 };
+    RootPinTypeNodeV2 nodes[10] = { 0 };
+    RootPinTypeFieldV1 fields[7] = { 0 };
+    RootPinTypeOriginV1 origins[3] = { 0 };
+    uint32_t originUses[12] = { 0 };
+    RootPinLoadedTypeV1* types[10] = { 0 };
+    RootPinTestSupportPayloadV1 payloadA = { 0 };
+    RootPinTestSupportPayloadV1 payloadB = { 0 };
+    RootPinTestSupportPayloadV1 unreachablePayload = { 0 };
+    RootPinObjectCellV1 objectA = NULL;
+    RootPinObjectCellV1 objectB = NULL;
+    RootPinObjectCellV1 unreachableObject = NULL;
+    RootPinObjectCellV1 rootedObject = NULL;
+    RootPinObjectCellV1 tracedObjects[8] = { 0 };
+    RootPinRootCellV1 rootA = NULL;
+    RootPinRootCellV1 rootB = NULL;
+    RootPinRootCellV1 slotRoot = NULL;
+    RootPinStableValue16V1 stable = { 0 };
+    RootPinStableValue16V1 stableClass = { 0 };
+    RootPinStableValue16V1 oldStable = { 0 };
+    RootPinStableValue16V1 newStable = { 0 };
+    RootPinStableValue16V1 destination = { 0 };
+    RootPinStableValue16V1 oldDestination = { 0 };
+    RootPinStableValue16V1 absent = { 0 };
+    RootPinTestSupportAggregateV1 aggregate = { 0 };
+    RootPinSupportSlotV1 traceSlot;
+    RootPinSupportFrameV1 traceFrame = { 0 };
+    RootPinTestMethodInputV1 methodInput = { 0 };
+    RootPinLoadedMethodV1 method = NULL;
+    RootPinSupportSlotV1 callerSlots[3];
+    RootPinSupportFrameV1 callerFrame = { 0 };
+    RootPinSupportSlotV1 calleeSlots[2];
+    RootPinSupportFrameV1 calleeFrame = { 0 };
+    RootPinInputTransferV1 callInput;
+    RootPinCallTransferV1 call;
+    RootPinRootCellV1 calleeRoot = NULL;
+    RootPinStableValue16V1 callerResult = { 0 };
+    RootPinStableValue16V1 calleeResult = { 0 };
+    RootPinRootCellV1 failureRoot = NULL;
+    RootPinSupportSlotV1 failureSlots[3];
+    RootPinSupportFrameV1 failureFrame = { 0 };
+    RootPinRootCellV1 exceptionalRoot = NULL;
+    RootPinSupportSlotV1 exceptionalCallerSlots[3];
+    RootPinSupportFrameV1 exceptionalCallerFrame = { 0 };
+    RootPinSupportSlotV1 exceptionalCalleeSlots[1];
+    RootPinSupportFrameV1 exceptionalCalleeFrame = { 0 };
+    RootPinInputTransferV1 exceptionalInput;
+    RootPinCallTransferV1 exceptionalCall;
+    RootPinRootCellV1 exceptionalCalleeRoot = NULL;
+    RootPinPlaceRequestV1 request;
+    uint64_t rootEdges;
+    uint64_t activePins;
+    uint32_t traceCount;
+    uint32_t status;
+
+    LOAD_FUNCTION("RootPinTestRegisterObjectV2", registerObject);
+    LOAD_FUNCTION("RootPinTestRootExactV2", rootExact);
+    LOAD_FUNCTION("RootPinTestPinExactV2", pinExact);
+    LOAD_FUNCTION("RootPinTestPinObjectV2", pinObject);
+    LOAD_FUNCTION("RootPinTestReleaseRootV2", releaseRoot);
+    LOAD_FUNCTION("RootPinTestGetObjectCountsV2", getObjectCounts);
+    LOAD_FUNCTION("RootPinTestRetainSupportV1", retainSupport);
+    LOAD_FUNCTION("RootPinTestReleaseSupportV1", releaseSupport);
+    LOAD_FUNCTION("RootPinTestRegisterLoadedMethodV1", registerMethod);
+    LOAD_FUNCTION("RootPinTestEnterFrameV1", enterFrame);
+    LOAD_FUNCTION("RootPinTestExitFrameV1", exitFrame);
+    LOAD_FUNCTION("RootPinTestBeginCallV1", beginCall);
+    LOAD_FUNCTION("RootPinTestReturnSupportV1", returnSupport);
+    LOAD_FUNCTION("RootPinTestFinishCallV1", finishCall);
+    LOAD_FUNCTION("RootPinTestTraceCurrentFramesV1", traceCurrentFrames);
+
+    SetNode(&nodes[0], 15000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_LEAF, 4, 4,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 0, 0, 3, 1);
+    SetNode(&nodes[1], 15001, (uint32_t)ROOTPIN_TYPE_ROLE_GC_PAYLOAD,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 16, 8,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 0, 2, 0, 3);
+    SetNode(&nodes[2], 15002, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_OBJECT_CELL, 8, 8,
+        1, 0, 0, 4, 1);
+    SetNode(&nodes[3], 15003, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_ROOT_CELL, 8, 8,
+        2, 0, 0, 5, 1);
+    SetNode(&nodes[4], 15004, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_STABLE_REF, 16, 8,
+        2, 0, 0, 6, 1);
+    SetNode(&nodes[5], 15005, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_OPTIONAL, 16, 8,
+        4, 0, 0, 7, 1);
+    SetNode(&nodes[6], 15006, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 16, 8,
+        3, 0, 0, 8, 1);
+    nodes[6].elementCount = 2;
+    nodes[6].elementStride = 8;
+    SetNode(&nodes[7], 15007, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 64, 8,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 2, 5, 9, 1);
+    SetNode(&nodes[8], 15008, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_STABLE_CLASS, 16, 8,
+        1, 0, 0, 10, 1);
+    SetNode(&nodes[9], 15009, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_OPTIONAL, 16, 8,
+        8, 0, 0, 11, 1);
+    nodes[1].flags = 0;
+    nodes[1].retirementKey = 502;
+    nodes[1].retireGcPayloadThunk = (uint64_t)(uintptr_t)&RetirePayload;
+    nodes[1].retirementOrigin = 1;
+    nodes[1].layoutKind = ROOTPIN_TYPE_LAYOUT_SEQUENTIAL;
+    nodes[7].layoutKind = ROOTPIN_TYPE_LAYOUT_SEQUENTIAL;
+
+    fields[0].fieldKey = 15011;
+    fields[0].offset = 0;
+    fields[0].knownAlignment = 8;
+    fields[0].valueNode = 2;
+    fields[1].fieldKey = 15012;
+    fields[1].offset = 8;
+    fields[1].knownAlignment = 8;
+    fields[1].valueNode = 3;
+    fields[2].fieldKey = 15013;
+    fields[2].offset = 0;
+    fields[2].knownAlignment = 8;
+    fields[2].valueNode = 3;
+    fields[3].fieldKey = 15014;
+    fields[3].offset = 8;
+    fields[3].knownAlignment = 8;
+    fields[3].valueNode = 3;
+    fields[4].fieldKey = 15015;
+    fields[4].offset = 16;
+    fields[4].knownAlignment = 8;
+    fields[4].valueNode = 5;
+    fields[5].fieldKey = 15016;
+    fields[5].offset = 32;
+    fields[5].knownAlignment = 8;
+    fields[5].valueNode = 6;
+    fields[6].fieldKey = 15017;
+    fields[6].offset = 48;
+    fields[6].knownAlignment = 8;
+    fields[6].valueNode = 9;
+
+    SetOrigin(&origins[0], 10, (uint64_t)(uintptr_t)&originCounts[0],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT, RetainOrigin, ReleaseOrigin);
+    SetOrigin(&origins[1], 20, (uint64_t)(uintptr_t)&originCounts[1],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_CODE_UNWIND, RetainOrigin, ReleaseOrigin);
+    SetOrigin(&origins[2], 30, (uint64_t)(uintptr_t)&originCounts[2],
+        (uint32_t)ROOTPIN_TYPE_ORIGIN_ALLOCATOR_RUNTIME, RetainOrigin, ReleaseOrigin);
+    originUses[0] = 0;
+    originUses[1] = 1;
+    originUses[2] = 2;
+    for (uint32_t index = 3; index < 12; index++)
+    {
+        originUses[index] = 0;
+    }
+
+    batch.abiRevision = 2;
+    batch.byteSize = sizeof(batch);
+    batch.targetProfileId = 2;
+    batch.targetProfileRevision = 1;
+    batch.nodeCount = 10;
+    batch.fieldCount = 7;
+    batch.originCount = 3;
+    batch.originUseCount = 12;
+    batch.nodes = nodes;
+    batch.fields = fields;
+    batch.origins = origins;
+    batch.originUses = originUses;
+    CHECK(admit(domain, &batch, types, 10) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(sizeof(RootPinTestSupportPayloadV1) == 16
+        && sizeof(RootPinTestSupportAggregateV1) == 64
+        && offsetof(RootPinTestSupportAggregateV1, optionalStable) == 16
+        && offsetof(RootPinTestSupportAggregateV1, roots) == 32
+        && offsetof(RootPinTestSupportAggregateV1, optionalStableClass) == 48);
+
+    CHECK(registerObject(domain, &payloadA, sizeof(payloadA), 8, types[1], &objectA)
+        == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(registerObject(domain, &payloadB, sizeof(payloadB), 8, types[1], &objectB)
+        == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(registerObject(domain, &unreachablePayload, sizeof(unreachablePayload), 8,
+        types[1], &unreachableObject) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    payloadA.next = objectB;
+    payloadB.next = objectA;
+    unreachablePayload.next = unreachableObject;
+
+    SetPlaceRequest(&request, 0, 8, 8, types[2], (uint32_t)ROOTPIN_ACCESS_READ);
+    CHECK(rootExact(domain, objectA, &request, &rootA) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(rootExact(domain, objectB, &request, &rootB) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    payloadA.root = rootA;
+    payloadB.root = rootB;
+    retainSupport(domain, types[3], &payloadA.root);
+    retainSupport(domain, types[3], &payloadB.root);
+    releaseSupport(domain, types[3], &rootA);
+    releaseSupport(domain, types[3], &rootB);
+
+    rootedObject = objectA;
+    traceSlot = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };
+    traceFrame = (RootPinSupportFrameV1){ NULL, 1, 0, &traceSlot, NULL };
+    enterFrame(domain, &traceFrame);
+    status = traceCurrentFrames(domain, tracedObjects, 8, &traceCount);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 2);
+    CHECK((tracedObjects[0] == objectA && tracedObjects[1] == objectB)
+        || (tracedObjects[0] == objectB && tracedObjects[1] == objectA));
+    exitFrame(domain, &traceFrame);
+    CHECK(traceCurrentFrames(domain, tracedObjects, 8, &traceCount)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 0);
+
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+    CHECK(getObjectCounts(domain, objectB, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+
+    rootA = payloadA.root;
+    retainSupport(domain, types[5], &absent);
+    releaseSupport(domain, types[5], &absent);
+    retainSupport(domain, types[9], &absent);
+    releaseSupport(domain, types[9], &absent);
+    CHECK(pinExact(domain, rootA, &stable) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    aggregate.firstRoot = rootA;
+    aggregate.secondRoot = rootA;
+    aggregate.optionalStable = stable;
+    aggregate.roots[0] = rootA;
+    aggregate.roots[1] = rootA;
+    CHECK(pinObject(domain, objectA, &stableClass) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    aggregate.optionalStableClass = stableClass;
+    retainSupport(domain, types[7], &aggregate);
+    releaseSupport(domain, types[4], &stable);
+    releaseSupport(domain, types[8], &stableClass);
+    traceSlot = (RootPinSupportSlotV1){ &aggregate, types[7], 1, 1 };
+    traceFrame = (RootPinSupportFrameV1){ NULL, 1, 0, &traceSlot, NULL };
+    enterFrame(domain, &traceFrame);
+    status = traceCurrentFrames(domain, tracedObjects, 8, &traceCount);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 2);
+    exitFrame(domain, &traceFrame);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+
+    CHECK(RunDeepSupportWalk(admit, domain, retainSupport, releaseSupport,
+        originCounts, rootA) == 0);
+
+    CHECK(pinExact(domain, rootA, &oldStable) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    destination = oldStable;
+    retainSupport(domain, types[4], &destination);
+    CHECK(pinExact(domain, rootB, &newStable) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    oldDestination = destination;
+    retainSupport(domain, types[4], &newStable);
+    destination = newStable;
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 1);
+    CHECK(getObjectCounts(domain, objectB, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 1);
+    releaseSupport(domain, types[4], &oldDestination);
+    releaseSupport(domain, types[4], &newStable);
+    releaseSupport(domain, types[4], &oldStable);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 0);
+    CHECK(getObjectCounts(domain, objectB, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 1);
+    releaseSupport(domain, types[4], &destination);
+    CHECK(getObjectCounts(domain, objectB, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 0);
+
+    methodInput.formalOrdinal = 0;
+    methodInput.entrySlot = 0;
+    methodInput.completeType = types[3];
+    methodInput.sourceRole = 0;
+    CHECK(registerMethod(domain, 1, types[4], &methodInput, 1, &method)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && method != NULL);
+
+    rootedObject = objectA;
+    callerSlots[0] = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };
+    callerSlots[1] = (RootPinSupportSlotV1){ &slotRoot, types[3], 0, 0 };
+    callerSlots[2] = (RootPinSupportSlotV1){ &callerResult, types[4], 0, 0 };
+    callerFrame = (RootPinSupportFrameV1){ NULL, 3, 0, callerSlots, NULL };
+    enterFrame(domain, &callerFrame);
+    CHECK(rootExact(domain, objectA, &request, &slotRoot) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    callerSlots[1].live = 1;
+    callerSlots[1].ownsHold = 1;
+    callInput = (RootPinInputTransferV1){ &callerSlots[1], 0, 0, 0, 0 };
+    call = (RootPinCallTransferV1){ NULL, method, &callerSlots[2], 1, 0, &callInput };
+    beginCall(domain, &call);
+
+    calleeRoot = slotRoot;
+    calleeSlots[0] = (RootPinSupportSlotV1){ &calleeRoot, types[3], 0, 0 };
+    calleeSlots[1] = (RootPinSupportSlotV1){ &calleeResult, types[4], 0, 0 };
+    calleeFrame = (RootPinSupportFrameV1){ NULL, 2, 0, calleeSlots, method };
+    enterFrame(domain, &calleeFrame);
+    CHECK(callerSlots[1].live == 0 && callerSlots[1].ownsHold == 0
+        && calleeSlots[0].live == 1 && calleeSlots[0].ownsHold == 1);
+    CHECK(pinExact(domain, calleeRoot, &calleeResult) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    calleeSlots[1].live = 1;
+    calleeSlots[1].ownsHold = 1;
+    callerResult = calleeResult;
+    returnSupport(domain, &calleeSlots[1]);
+    exitFrame(domain, &calleeFrame);
+    finishCall(domain, &call, 1);
+    CHECK(callerSlots[2].live == 1 && callerSlots[2].ownsHold == 1
+        && callerResult.support != NULL);
+    callerSlots[0].live = 0;
+    CHECK(traceCurrentFrames(domain, tracedObjects, 8, &traceCount)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 2);
+    releaseSupport(domain, types[4], &callerResult);
+    memset(&callerResult, 0, sizeof(callerResult));
+    callerSlots[2].live = 0;
+    callerSlots[2].ownsHold = 0;
+    exitFrame(domain, &callerFrame);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+
+    rootedObject = objectA;
+    failureSlots[0] = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };
+    failureSlots[1] = (RootPinSupportSlotV1){ &failureRoot, types[3], 0, 0 };
+    failureSlots[2] = (RootPinSupportSlotV1){ &callerResult, types[4], 0, 0 };
+    failureFrame = (RootPinSupportFrameV1){ NULL, 3, 0, failureSlots, NULL };
+    enterFrame(domain, &failureFrame);
+    CHECK(rootExact(domain, objectA, &request, &failureRoot) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    failureSlots[1].live = 1;
+    failureSlots[1].ownsHold = 1;
+    callInput = (RootPinInputTransferV1){ &failureSlots[1], 0, 0, 0, 0 };
+    call = (RootPinCallTransferV1){ NULL, method, &failureSlots[2], 1, 0, &callInput };
+    beginCall(domain, &call);
+    finishCall(domain, &call, 0);
+    CHECK(failureSlots[1].live == 0 && failureSlots[1].ownsHold == 0);
+    exitFrame(domain, &failureFrame);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+
+    rootedObject = objectA;
+    exceptionalCallerSlots[0] = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };
+    exceptionalCallerSlots[1] = (RootPinSupportSlotV1){ &exceptionalRoot, types[3], 0, 0 };
+    exceptionalCallerSlots[2] = (RootPinSupportSlotV1){ &callerResult, types[4], 0, 0 };
+    exceptionalCallerFrame = (RootPinSupportFrameV1){
+        NULL, 3, 0, exceptionalCallerSlots, NULL };
+    enterFrame(domain, &exceptionalCallerFrame);
+    CHECK(rootExact(domain, objectA, &request, &exceptionalRoot) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    exceptionalCallerSlots[1].live = 1;
+    exceptionalCallerSlots[1].ownsHold = 1;
+    exceptionalInput = (RootPinInputTransferV1){
+        &exceptionalCallerSlots[1], 0, 0, 0, 0 };
+    exceptionalCall = (RootPinCallTransferV1){
+        NULL, method, &exceptionalCallerSlots[2], 1, 0, &exceptionalInput };
+    beginCall(domain, &exceptionalCall);
+    exceptionalCalleeRoot = exceptionalRoot;
+    exceptionalCalleeSlots[0] = (RootPinSupportSlotV1){
+        &exceptionalCalleeRoot, types[3], 0, 0 };
+    exceptionalCalleeFrame = (RootPinSupportFrameV1){
+        NULL, 1, 0, exceptionalCalleeSlots, method };
+    enterFrame(domain, &exceptionalCalleeFrame);
+    exitFrame(domain, &exceptionalCalleeFrame);
+    finishCall(domain, &exceptionalCall, 0);
+    exitFrame(domain, &exceptionalCallerFrame);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+    CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
+    CHECK(s_retirementCount == 0);
+    return 0;
+}
+
 #undef LOAD_FUNCTION
 
-static int RunProbe(const char* libraryPath)
+static int RunProbe(const char* libraryPath, int invalidSupport)
 {
     HMODULE library = LoadLibraryA(libraryPath);
     FARPROC procedure;
     AdmitFunction admit = NULL;
     GetDomainFunction getDomain = NULL;
     SetFailureFunction setFailure = NULL;
+    SupportValueFunction retainSupport = NULL;
     RootPinDomainV1 domain;
     RootPinTypeBatchV2 batch;
     RootPinTypeNodeV2 nodes[19];
@@ -588,7 +1098,10 @@ static int RunProbe(const char* libraryPath)
     procedure = GetProcAddress(library, "RootPinTestFailAdmissionAtStageV2");
     CHECK(procedure != NULL && sizeof(setFailure) == sizeof(procedure));
     memcpy(&setFailure, &procedure, sizeof(setFailure));
-    CHECK(admit != NULL && getDomain != NULL && setFailure != NULL);
+    procedure = GetProcAddress(library, "RootPinTestRetainSupportV1");
+    CHECK(procedure != NULL && sizeof(retainSupport) == sizeof(procedure));
+    memcpy(&retainSupport, &procedure, sizeof(retainSupport));
+    CHECK(admit != NULL && getDomain != NULL && setFailure != NULL && retainSupport != NULL);
 
     domain = getDomain();
     CHECK(domain != NULL);
@@ -611,6 +1124,10 @@ static int RunProbe(const char* libraryPath)
         && outputs[13] == outputs[18]);
     CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
     if (RunCellCases(library, domain, outputs, setFailure) != 0)
+    {
+        return 1;
+    }
+    if (RunSupportCases(library, domain, admit, originCounts) != 0)
     {
         return 1;
     }
@@ -796,17 +1313,25 @@ static int RunProbe(const char* libraryPath)
         CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && extraOutput[0] != NULL);
         CHECK(originCounts[0] == 2);
     }
+    if (invalidSupport)
+    {
+        RootPinRootCellV1 invalidRoot = (RootPinRootCellV1)(uintptr_t)1;
+        retainSupport(domain, outputs[4], &invalidRoot);
+        return 3;
+    }
+
     puts("rootpin-loaded-types=pass");
     return 0;
 }
 
 int main(int argc, char** argv)
 {
-    if (argc != 2)
+    if ((argc != 2 && argc != 3)
+        || (argc == 3 && strcmp(argv[2], "invalid-support") != 0))
     {
-        fprintf(stderr, "Expected the provider DLL path.\n");
+        fprintf(stderr, "Expected the provider DLL path and optional invalid-support mode.\n");
         return 2;
     }
 
-    return RunProbe(argv[1]);
+    return RunProbe(argv[1], argc == 3);
 }
