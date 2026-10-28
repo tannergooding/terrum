@@ -60,6 +60,9 @@ internal static class TrRmRegisterBodyMapValidator
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
             parameters, contracts, imports);
+        ValidateCallSiteHomeTypes(body, ownerModule, types, typeSpecs,
+            genericParams, methods, signatures, parameters, imports,
+            constantValues, contracts, nativeFunctionPointerAnchors);
         ValidateNativeAddressRecords(body, ownerModule, features, modules,
             types, typeSpecs, genericParams, methods, signatures, parameters,
             contracts, imports, standardNativeImports,
@@ -802,6 +805,109 @@ internal static class TrRmRegisterBodyMapValidator
         {
             throw InvalidMap();
         }
+    }
+
+    private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,
+        int ownerModule, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmImportTableReader imports,
+        ConstantSourceValueContext constantValues, TrRmContractTableReader contracts,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            var position = 0;
+            while (position < code.Length)
+            {
+                var instruction = code.Slice(position,
+                    TrRmRegisterBodyReader.InstructionLength(code[position]));
+                var recordIndex = instruction[0] switch
+                {
+                    0x90 => instruction[1],
+                    0xE0 => ReadUInt16(instruction, 2),
+                    _ => -1,
+                };
+                if (recordIndex >= 0)
+                {
+                    var payload = body.GetRecord(recordIndex)[4..];
+                    if (payload[0] == 1)
+                    {
+                        var targetMethod = GetMethodMapTarget(
+                            body, ReadUInt16(payload, 4), methods, imports);
+                        var signature = methods.GetSignature(targetMethod);
+                        var (firstParameter, parameterCount) =
+                            signatures.GetParamRange(signature);
+                        var nativeParameters = contracts.GetNativeParameters(targetMethod);
+                        var inputOffset = 16;
+                        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+                        {
+                            if (payload[inputOffset] == 2)
+                            {
+                                var homeIndex = ReadUInt16(payload, inputOffset + 2);
+                                var typeMapIndex = ReadUInt16(
+                                    body.HomeMap, (homeIndex * 8) + 2);
+                                var formalType = parameters.GetTypeSpec(
+                                    firstParameter + ordinal);
+                                var nativeParameterAccess = (byte)0;
+                                foreach (var nativeParameter in nativeParameters)
+                                {
+                                    if (nativeParameter.ParameterOrdinal == ordinal)
+                                    {
+                                        nativeParameterAccess = nativeParameter.Access;
+                                        break;
+                                    }
+                                }
+
+                                if (nativeParameterAccess != 0
+                                    ? !TrRmNativeImportTypeContract
+                                        .MatchesNativeParameterArgumentType(typeSpecs,
+                                            GetTypeMapTypeSpecRef(body, typeMapIndex),
+                                            formalType, nativeParameterAccess)
+                                    : !MatchesTypeMapEntry(body, typeMapIndex,
+                                        formalType, ownerModule, types, typeSpecs,
+                                        genericParams, imports, constantValues,
+                                        nativeFunctionPointerAnchors))
+                                {
+                                    throw InvalidMap();
+                                }
+                            }
+
+                            inputOffset += 4;
+                        }
+
+                        if (payload[1] == 2)
+                        {
+                            var resultHome = ReadUInt16(payload, 6);
+                            var typeMapIndex = ReadUInt16(body.HomeMap,
+                                (resultHome * 8) + 2);
+                            if (!MatchesTypeMapEntry(body, typeMapIndex,
+                                signatures.GetResultTypeSpec(signature),
+                                ownerModule, types, typeSpecs, genericParams,
+                                imports, constantValues, nativeFunctionPointerAnchors))
+                            {
+                                throw InvalidMap();
+                            }
+                        }
+                    }
+                }
+
+                position += instruction.Length;
+            }
+        }
+    }
+
+    private static uint GetTypeMapTypeSpecRef(
+        TrRmRegisterBodyReader body, int typeMapIndex)
+    {
+        var token = ReadUInt32(body.TypeMap, typeMapIndex * sizeof(uint));
+        return (byte)(token >> 24) switch
+        {
+            0x11 => token & 0x00FF_FFFF,
+            0xF2 or 0xF3 => token,
+            _ => throw InvalidMap(),
+        };
     }
 
     private static void RejectNonReturningMethodMapTarget(
