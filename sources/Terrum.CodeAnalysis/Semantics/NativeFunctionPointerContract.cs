@@ -112,8 +112,13 @@ internal static class NativeFunctionPointerContract
 
             foreach (var parameter in signature.NativeParameters)
             {
-                if (!DirectNativeImportContract.IsInputPointee(
-                    parameter.PointeeType, structures)
+                if (parameter is null
+                    || (uint)parameter.ParameterIndex >= (uint)signature.ParameterTypes.Length
+                    || !DirectNativeImportContract.MatchesNativeParameterFormalType(
+                        signature.ParameterTypes[parameter.ParameterIndex],
+                        parameter.PointeeType, parameter.Access, pointerTypes)
+                    || !DirectNativeImportContract.IsInputPointee(
+                        parameter.PointeeType, structures)
                     || (NativePointerTypes.IsType(parameter.PointeeType)
                         && !NativePointerTypeContract.IsValidType(
                             parameter.PointeeType, pointerTypes))
@@ -359,14 +364,17 @@ internal static class NativeFunctionPointerContract
                 || parameter.ParameterIndex < 0
                 || parameter.ParameterIndex >= signature.ParameterTypes.Length
                 || claimedParameters.Contains(parameter.ParameterIndex)
-                || signature.ParameterTypes[parameter.ParameterIndex]
-                    != PrimitiveType.NativeRawPointer
                 || parameter.Access is not (NativeParameterAccess.Read
                     or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
                 || parameter.Retention != NativeParameterRetention.NoEscape
                 || (parameter.PointeeType == PrimitiveType.Void
                     && (parameter.Access != NativeParameterAccess.Read
-                        || parameter.Extent != 0)))
+                        || parameter.Extent != 0
+                        || signature.ParameterTypes[parameter.ParameterIndex]
+                            != PrimitiveType.NativeRawPointer))
+                || (parameter.PointeeType != PrimitiveType.Void
+                    && !NativePointerTypes.IsType(
+                        signature.ParameterTypes[parameter.ParameterIndex])))
             {
                 return false;
             }
@@ -629,6 +637,12 @@ internal static class NativeFunctionPointerContract
     internal static bool CanPersistRevision92(
         NativeFunctionPointerSignatureDefinition signature)
         => signature.EffectsMask == 0 && signature.Selectors.IsEmpty
+            && signature.OutputStates.IsEmpty && signature.Dependencies.IsEmpty
+            && signature.NativeParameters.IsDefaultOrEmpty;
+
+    internal static bool CanPersistDevelopmentFunctionPointerEffectsDraft(
+        NativeFunctionPointerSignatureDefinition signature)
+        => (signature.EffectsMask & ~6u) == 0 && signature.Selectors.IsEmpty
             && signature.OutputStates.IsEmpty && signature.Dependencies.IsEmpty
             && signature.NativeParameters.IsDefaultOrEmpty;
 

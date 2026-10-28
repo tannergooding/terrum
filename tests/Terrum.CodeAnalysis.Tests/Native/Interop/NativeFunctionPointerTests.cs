@@ -647,7 +647,7 @@ public sealed class NativeFunctionPointerTests
         var compilation = Compilation.Create(SyntaxTree.Parse("""
             [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
-            extern unsafe int32 QueryPerformanceCounter(ptr<int64> counter);
+            extern unsafe int32 QueryPerformanceCounter(write ptr<int64> counter);
 
             int32 Main() {
                 mut int32 counter = 0;
@@ -751,16 +751,19 @@ public sealed class NativeFunctionPointerTests
         Assert.That(NativeFunctionPointerContract.MatchesAddressableFunction(
             imported, functionPointer.Type, program.NativeFunctionPointerSignatures), Is.True);
         Assert.That(NativeFunctionPointerContract.CanPersistRevision92(signature), Is.False);
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitDevelopmentFunctionPointerEffectsDraft(
+                program, "unsupported-native-output-signature"));
     }
 
     [Test]
-    public void NativeImportPointerTypeComparisonPreservesRawContracts()
+    public void NativeImportPointerTypeComparisonPreservesTypedContracts()
     {
         var readParameter = new DirectNativeParameter(1, PrimitiveType.UInt32,
             NativeParameterAccess.Read, NativeParameterRetention.NoEscape, 4);
         var signature = new NativeFunctionPointerSignatureDefinition(
             NativeCallingConvention.Unmanaged, PrimitiveType.Int32,
-            [NativePointerTypes.Type(0), PrimitiveType.NativeRawPointer]) {
+            [NativePointerTypes.Type(0), NativePointerTypes.Type(1)]) {
             Selectors =
             [
                 new NativeFunctionPointerSelector(3, 0,
@@ -1939,6 +1942,10 @@ public sealed class NativeFunctionPointerTests
 
             [Terrum.Interop.NativeCallable]
             unsafe int32 ExplicitlyUnsafe(int32 value) { return value; }
+
+            [DoesNotReturn]
+            [Terrum.Interop.NativeCallable]
+            unsafe int32 StopsAndRequiresUnsafe(int32 value) { while (true) { } }
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
@@ -1948,6 +1955,8 @@ public sealed class NativeFunctionPointerTests
         var stops = program.Functions.Single(static function => function.Name == "Stops");
         var explicitlyUnsafe = program.Functions.Single(
             static function => function.Name == "ExplicitlyUnsafe");
+        var stopsAndRequiresUnsafe = program.Functions.Single(
+            static function => function.Name == "StopsAndRequiresUnsafe");
         Assert.That(returns.RequiresUnsafeCaller, Is.True);
         Assert.That(returns.DeclaredRequiresUnsafeCaller, Is.False);
         Assert.That(stops.DoesNotReturn, Is.True);
@@ -1955,6 +1964,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(explicitlyUnsafe.RequiresUnsafeCaller, Is.True);
         Assert.That(explicitlyUnsafe.DeclaredRequiresUnsafeCaller, Is.True);
         Assert.That(explicitlyUnsafe.NativeFunctionPointerType, Is.Not.Null);
+        Assert.That(stopsAndRequiresUnsafe.NativeFunctionPointerType, Is.Not.Null);
         Assert.That(stops.NativeFunctionPointerType,
             Is.Not.EqualTo(returns.NativeFunctionPointerType));
         Assert.That(explicitlyUnsafe.NativeFunctionPointerType,
@@ -1967,16 +1977,186 @@ public sealed class NativeFunctionPointerTests
             stops.NativeFunctionPointerType!.Value)].EffectsMask, Is.EqualTo(2));
         Assert.That(signatures[NativeFunctionPointerTypes.Index(
             explicitlyUnsafe.NativeFunctionPointerType!.Value)].EffectsMask, Is.EqualTo(4));
+        Assert.That(signatures[NativeFunctionPointerTypes.Index(
+            stopsAndRequiresUnsafe.NativeFunctionPointerType!.Value)].EffectsMask, Is.EqualTo(6));
+        Assert.That(new[]
+        {
+            returns.NativeFunctionPointerType.Value,
+            stops.NativeFunctionPointerType.Value,
+            explicitlyUnsafe.NativeFunctionPointerType.Value,
+            stopsAndRequiresUnsafe.NativeFunctionPointerType.Value,
+        }.Distinct().Count(), Is.EqualTo(4));
+        Assert.That(signatures.Length, Is.EqualTo(4));
         Assert.That(NativeFunctionPointerContract.MatchesFunction(returns,
             returns.NativeFunctionPointerType.Value, signatures), Is.True);
         Assert.That(NativeFunctionPointerContract.MatchesFunction(stops,
             stops.NativeFunctionPointerType.Value, signatures), Is.True);
         Assert.That(NativeFunctionPointerContract.MatchesFunction(explicitlyUnsafe,
             explicitlyUnsafe.NativeFunctionPointerType.Value, signatures), Is.True);
+        Assert.That(NativeFunctionPointerContract.MatchesFunction(stopsAndRequiresUnsafe,
+            stopsAndRequiresUnsafe.NativeFunctionPointerType.Value, signatures), Is.True);
         Assert.Throws<ModuleContractException>(() =>
             ModuleCompiler.CreateProducer(program, ["Stops"]));
         Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "native-callable-effects"));
+
+        var candidateArtifact = TrRmExecutableCompiler
+            .EmitDevelopmentFunctionPointerEffectsDraft(program, "native-callable-effects");
+        var loaded = TrRmExecutableCompiler
+            .LoadDevelopmentFunctionPointerEffectsDraft(candidateArtifact);
+        foreach (var (name, expectedEffects, expectedDoesNotReturn,
+            expectedDeclaredUnsafe) in new[]
+        {
+            ("Returns", 0u, false, false),
+            ("Stops", 2u, true, false),
+            ("ExplicitlyUnsafe", 4u, false, true),
+            ("StopsAndRequiresUnsafe", 6u, true, true),
+        })
+        {
+            var function = loaded.Functions.Single(candidate => candidate.Name == name);
+            Assert.That(function.NativeFunctionPointerType, Is.Not.Null);
+            Assert.That(function.DoesNotReturn, Is.EqualTo(expectedDoesNotReturn));
+            Assert.That(function.RequiresUnsafeCaller, Is.True);
+            Assert.That(function.DeclaredRequiresUnsafeCaller,
+                Is.EqualTo(expectedDeclaredUnsafe));
+            var signature = loaded.NativeFunctionPointerSignatures[
+                NativeFunctionPointerTypes.Index(function.NativeFunctionPointerType!.Value)];
+            Assert.That(signature.EffectsMask, Is.EqualTo(expectedEffects));
+        }
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(candidateArtifact));
+
+        var index = TrRmArtifactIndex
+            .ForDevelopmentFunctionPointerEffectsDraft(candidateArtifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index);
+        var stopsMethod = 0;
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            if (tables.Methods.GetName(method) == "Stops")
+            {
+                stopsMethod = method;
+                break;
+            }
+        }
+        Assert.That(stopsMethod, Is.GreaterThan(0));
+        var (firstContract, contractCount) = tables.Methods.GetContractRange(stopsMethod);
+        var effectsRow = 0;
+        for (var indexInRange = 0; indexInRange < contractCount; indexInRange++)
+        {
+            var row = firstContract + indexInRange;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                tables.Contracts.GetRow(row).Slice(4, sizeof(ushort))) == 1)
+            {
+                effectsRow = row;
+                break;
+            }
+        }
+        Assert.That(effectsRow, Is.GreaterThan(0));
+        Assert.That(index.TryGetSection(0x001B, out _, out var contractRowCount), Is.True);
+        var contractSectionOffset = FindSectionOffset(candidateArtifact, 0x001B);
+        var contractIndexByteCount = checked((contractRowCount + 1) * sizeof(uint));
+        var effectsRowOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            candidateArtifact.AsSpan(
+                contractSectionOffset + ((effectsRow - 1) * sizeof(uint)))));
+        var malformed = (byte[])candidateArtifact.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(
+            contractSectionOffset + contractIndexByteCount + effectsRowOffset + 8), 8);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentFunctionPointerEffectsDraft(malformed));
+    }
+
+    [Test]
+    public void DevelopmentEffectsProfileSeparatesNativeImportRoleUnsafety()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("example.dll", "ObserveDefault")]
+            public extern void ObserveDefault();
+
+            [Terrum.Interop.NativeImport("example.dll", "ObserveExplicit")]
+            public unsafe extern void ObserveExplicit();
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentFunctionPointerEffectsDraft(
+            compilation.Program!, "native-import-effects");
+        var index = TrRmArtifactIndex.ForDevelopmentFunctionPointerEffectsDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index);
+        var loaded = TrRmExecutableCompiler
+            .LoadDevelopmentFunctionPointerEffectsDraft(artifact);
+        foreach (var (name, declaredUnsafe) in new[]
+        {
+            ("ObserveDefault", false),
+            ("ObserveExplicit", true),
+        })
+        {
+            var function = loaded.Functions.Single(candidate => candidate.Name == name);
+            Assert.That(function.RequiresUnsafeCaller, Is.True);
+            Assert.That(function.DeclaredRequiresUnsafeCaller, Is.EqualTo(declaredUnsafe));
+            Assert.That(function.DirectNativeImport, Is.Not.Null);
+        }
+        var defaultMethod = 0;
+        var explicitMethod = 0;
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            var name = tables.Methods.GetName(method);
+            defaultMethod = name == "ObserveDefault" ? method : defaultMethod;
+            explicitMethod = name == "ObserveExplicit" ? method : explicitMethod;
+        }
+        Assert.That(defaultMethod, Is.GreaterThan(0));
+        Assert.That(explicitMethod, Is.GreaterThan(0));
+        Assert.That(tables.Methods.GetContractRange(defaultMethod).Count, Is.EqualTo(1));
+        Assert.That(tables.Methods.GetContractRange(explicitMethod).Count, Is.EqualTo(2));
+        Assert.That(tables.Contracts.GetEffectsMask(defaultMethod), Is.Zero);
+        Assert.That(tables.Contracts.GetEffectsMask(explicitMethod), Is.EqualTo(4u));
+
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+    }
+
+    [Test]
+    public void DevelopmentEffectsProfileRetainsBodylessNativeCallableExpectations()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeCallable]
+            public int32 ReadValue(int32 value) { return value; }
+
+            [Terrum.Interop.NativeCallable]
+            public unsafe int32 ReadUnsafe(int32 value) { return value; }
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var providerArtifact = TrRmExecutableCompiler
+            .EmitDevelopmentFunctionPointerEffectsDraft(provider.Program!, "callable-effects");
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentFunctionPointerEffectsDraftReference(providerArtifact);
+        var consumer = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 0; }"), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(consumer.Program!.Functions.Count(static function =>
+            function.ModuleImport is not null), Is.EqualTo(2));
+
+        var consumerArtifact = TrRmExecutableCompiler
+            .EmitDevelopmentFunctionPointerEffectsDraft(consumer.Program!, "callable-consumer");
+        var loadedConsumer = TrRmExecutableCompiler
+            .LoadDevelopmentFunctionPointerEffectsDraft(consumerArtifact);
+        foreach (var (name, declaredUnsafe) in new[]
+        {
+            ("ReadValue", false),
+            ("ReadUnsafe", true),
+        })
+        {
+            var imported = loadedConsumer.Functions.Single(function =>
+                function.Name == name);
+            Assert.That(imported.ModuleImport, Is.Not.Null);
+            Assert.That(imported.RequiresUnsafeCaller, Is.True);
+            Assert.That(imported.DeclaredRequiresUnsafeCaller,
+                Is.EqualTo(declaredUnsafe));
+        }
     }
 
     [Test]

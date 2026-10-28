@@ -9,14 +9,14 @@ namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
-    private static bool HasOutputFeature(BoundFunction function)
+    private static bool HasOutputFeature(BoundFunction function, BoundProgram program)
     {
         if (HasOutputParameters(function))
         {
             return true;
         }
 
-        return ContainsOutputFeature(function.Body);
+        return ContainsOutputFeature(function.Body, program);
     }
 
     private static bool HasRootlessNativeValues(BoundFunction function)
@@ -38,53 +38,96 @@ public static partial class TrRmExecutableCompiler
         => function.Variables.Take(function.ParameterCount)
             .Any(static variable => variable.IsOut || variable.IsInit);
 
-    private static bool ContainsOutputFeature(BoundStatement statement)
+    private static bool ContainsOutputFeature(BoundStatement statement, BoundProgram program)
     {
         return statement switch
         {
-            BoundBlock block => block.Statements.Any(ContainsOutputFeature),
+            BoundBlock block => block.Statements.Any(child =>
+                ContainsOutputFeature(child, program)),
             BoundVacantLocal => true,
-            BoundLocal local => ContainsOutputFeature(local.Initializer),
-            BoundAssignment assignment => ContainsOutputFeature(assignment.Value),
-            BoundExpressionStatement expression => ContainsOutputFeature(expression.Expression),
-            BoundReturn { Value: not null } result => ContainsOutputFeature(result.Value),
-            BoundIf conditional => ContainsOutputFeature(conditional.Condition)
-                || ContainsOutputFeature(conditional.Then)
-                || conditional.Else is not null && ContainsOutputFeature(conditional.Else),
-            BoundWhile loop => ContainsOutputFeature(loop.Condition)
-                || ContainsOutputFeature(loop.Body)
-                || loop.Iterator is not null && ContainsOutputFeature(loop.Iterator),
-            BoundUnsafe unsafeBlock => ContainsOutputFeature(unsafeBlock.Body),
-            BoundRequire require => ContainsOutputFeature(require.Condition),
+            BoundLocal local => ContainsOutputFeature(local.Initializer, program),
+            BoundAssignment assignment => ContainsOutputFeature(assignment.Value, program),
+            BoundExpressionStatement expression => ContainsOutputFeature(expression.Expression, program),
+            BoundReturn { Value: not null } result => ContainsOutputFeature(result.Value, program),
+            BoundIf conditional => ContainsOutputFeature(conditional.Condition, program)
+                || ContainsOutputFeature(conditional.Then, program)
+                || (conditional.Else is not null
+                    && ContainsOutputFeature(conditional.Else, program)),
+            BoundWhile loop => ContainsOutputFeature(loop.Condition, program)
+                || ContainsOutputFeature(loop.Body, program)
+                || (loop.Iterator is not null
+                    && ContainsOutputFeature(loop.Iterator, program)),
+            BoundUnsafe unsafeBlock => ContainsOutputFeature(unsafeBlock.Body, program),
+            BoundRequire require => ContainsOutputFeature(require.Condition, program),
             _ => false,
         };
     }
 
-    private static bool ContainsOutputFeature(BoundExpression expression)
+    private static bool ContainsOutputFeature(BoundExpression expression, BoundProgram program)
     {
         return expression switch
         {
             BoundOutArgument or BoundNativeStorageAddress => true,
-            BoundBinary binary => ContainsOutputFeature(binary.Left)
-                || ContainsOutputFeature(binary.Right),
-            BoundUnary unary => ContainsOutputFeature(unary.Operand),
-            BoundCast cast => ContainsOutputFeature(cast.Operand),
-            BoundConditional conditional => ContainsOutputFeature(conditional.Condition)
-                || ContainsOutputFeature(conditional.WhenTrue)
-                || ContainsOutputFeature(conditional.WhenFalse),
-            BoundCall call => call.Arguments.Any(ContainsOutputFeature),
+            BoundBinary binary => ContainsOutputFeature(binary.Left, program)
+                || ContainsOutputFeature(binary.Right, program),
+            BoundUnary unary => ContainsOutputFeature(unary.Operand, program),
+            BoundCast cast => ContainsOutputFeature(cast.Operand, program),
+            BoundConditional conditional => ContainsOutputFeature(conditional.Condition, program)
+                || ContainsOutputFeature(conditional.WhenTrue, program)
+                || ContainsOutputFeature(conditional.WhenFalse, program),
+            BoundCall call => HasNativeParameterArguments(call, program)
+                || call.Arguments.Any(argument => ContainsOutputFeature(argument, program)),
+            BoundIndirectCall call => HasNativeParameterArguments(call, program)
+                || ContainsOutputFeature(call.Target, program)
+                || call.Arguments.Any(argument => ContainsOutputFeature(argument, program)),
             _ => false,
         };
+    }
+
+    private static bool HasNativeParameterArguments(BoundCall call, BoundProgram program)
+    {
+        if ((uint)call.Function >= (uint)program.Functions.Length)
+        {
+            return false;
+        }
+
+        var target = program.Functions[call.Function];
+        for (var index = 0; index < call.Arguments.Length; index++)
+        {
+            var parameterIndex = call.ParameterIndex(index);
+            if (DirectNativeImportContract.ParameterForParameter(target, parameterIndex) is not null
+                || NativeVTableCallContract.ParameterForParameter(target, parameterIndex) is not null)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool HasNativeParameterArguments(BoundIndirectCall call, BoundProgram program)
+    {
+        if (!NativeFunctionPointerTypes.IsType(call.Target.Type))
+        {
+            return false;
+        }
+
+        var signatureIndex = NativeFunctionPointerTypes.Index(call.Target.Type);
+        return (uint)signatureIndex < (uint)program.NativeFunctionPointerSignatures.Length
+            && !program.NativeFunctionPointerSignatures[signatureIndex].NativeParameters.IsEmpty;
     }
 
     private static byte[] EncodeOutputBody(BoundFunction function, BoundProgram program,
         List<ReadOnlyMemory<byte>> typeRows,
         Dictionary<PrimitiveType, int> nativeParameterTypeRows,
         Dictionary<PrimitiveType, int> nativeOutputTypeRows,
+        Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
         Dictionary<PrimitiveType, int> nativePointerTypeRows,
+        Dictionary<int, int> structureTypeDefRows,
+        Dictionary<int, int> typeDefTypeSpecRows,
         int nativeRawPointerTypeRow)
         => new OutputBodyWriter(function, program, typeRows,
-            nativeParameterTypeRows, nativeOutputTypeRows, nativePointerTypeRows,
+            nativeParameterTypeRows, nativeOutputTypeRows, nativeFunctionPointerTypeRows,
+            nativePointerTypeRows, structureTypeDefRows, typeDefTypeSpecRows,
             nativeRawPointerTypeRow).Encode();
 
     private static void WriteCallInstruction(List<byte> bytes, int referenceWidth, int countWidth)
@@ -105,7 +148,9 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundVariable>.Builder variables,
         ImmutableArray<BoundFunction>.Builder functions,
         int[] functionIndexByMethodRow,
-        ImmutableArray<BoundStruct> structures, uint ruleRevision)
+        ImmutableArray<BoundStruct> structures,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] structureTypeByTypeDef, uint ruleRevision)
     {
         var statements = ImmutableArray.CreateBuilder<BoundStatement>(
             body.Operations.Length + body.Places.Length + 1);
@@ -113,7 +158,8 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < body.Places.Length; index++)
         {
             var place = body.Places[index];
-            var placeType = OutputType(body, types, place.TypeId);
+            var placeType = OutputType(body, types, place.TypeId,
+                nativePointerTypeDefinitions, structureTypeByTypeDef);
             if (!IsOutputScalarType(placeType)
                 || ruleRevision == TrRmProvisionalFeatureRevisions.ScalarInitOutputInitialRuleRevision
                     && placeType != PrimitiveType.Int32)
@@ -159,7 +205,8 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < body.Values.Length; index++)
         {
             var value = body.Values[index];
-            var type = OutputType(body, types, value.TypeId);
+            var type = OutputType(body, types, value.TypeId,
+                nativePointerTypeDefinitions, structureTypeByTypeDef);
             if (!IsOutputBodyValueType(type))
             {
                 throw Invalid("The executable place profile requires scalar values.");
@@ -195,7 +242,8 @@ public static partial class TrRmExecutableCompiler
         var bodyTypes = new PrimitiveType[body.Types.Length];
         for (var index = 0; index < bodyTypes.Length; index++)
         {
-            bodyTypes[index] = OutputType(body, types, index + 1);
+            bodyTypes[index] = OutputType(body, types, index + 1,
+                nativePointerTypeDefinitions, structureTypeByTypeDef);
         }
 
         BoundExpression ReadValue(int valueId)
@@ -311,12 +359,16 @@ public static partial class TrRmExecutableCompiler
                     case 2:
                     {
                         var type = bodyTypes[operation.TypeId - 1];
-                        if (!IsOutputScalarType(type) || operation.Opcode == 2 && !IsInteger(type))
+                        var isNullPointer = operation.Data == 0
+                            && (type == PrimitiveType.NativeRawPointer
+                                || NativePointerTypes.IsType(type));
+                        if ((!IsOutputScalarType(type) && !isNullPointer)
+                            || (operation.Opcode == 2 && !IsInteger(type)))
                         {
                             throw Invalid("Constant type is outside the executable place profile.");
                         }
 
-                        var constantValue = type switch
+                        var constantValue = isNullPointer ? 0 : type switch
                         {
                             PrimitiveType.Int32 or PrimitiveType.UInt32
                                 => unchecked((int)operation.Data),
@@ -465,15 +517,36 @@ public static partial class TrRmExecutableCompiler
                                 if (value is BoundNativeStorageAddress)
                                 {
                                     if (nativeParameter is not DirectNativeParameter parameterContract
-                                        || parameterContract.Access != NativeParameterAccess.Read
                                         || parameterContract.Retention != NativeParameterRetention.NoEscape
-                                        || parameterContract.Extent > 1
-                                        || formal.Type != PrimitiveType.NativeRawPointer)
+                                        || value is not BoundNativeStorageAddress address
+                                        || parameterContract.Extent > address.ElementCount
+                                        || !IsOutputScalarType(parameterContract.PointeeType)
+                                        || !DirectNativeImportContract.TryGetNativeParameterArgumentType(
+                                            formal.Type, parameterContract,
+                                            [.. nativePointerTypeDefinitions],
+                                            out var pointerArgumentType)
+                                        || address.CarrierType != parameterContract.PointeeType
+                                        || address.IsReadonly
+                                            != (parameterContract.Access == NativeParameterAccess.Read)
+                                        || body.Values[argument - 1].TypeId <= 0
+                                        || body.Values[argument - 1].TypeId > bodyTypes.Length
+                                        || bodyTypes[body.Values[argument - 1].TypeId - 1]
+                                            != pointerArgumentType)
                                     {
-                                        throw Invalid("Address argument has no matching read-only native parameter contract.");
+                                        throw Invalid("Address argument has no matching NativeParameter contract.");
                                     }
                                 }
-                                else if (formal.Type != value.Type)
+                                else if (nativeParameter is DirectNativeParameter valueContract
+                                    ? !DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                                        value.Type, formal.Type, valueContract,
+                                        [.. nativePointerTypeDefinitions],
+                                        value is BoundConstant {
+                                            Type: PrimitiveType.NativeRawPointer,
+                                            Value: 0,
+                                        })
+                                        && !DirectNativeImportContract.IsReadonlyStringParameter(
+                                            value.Type, valueContract)
+                                    : formal.Type != value.Type)
                                 {
                                     throw Invalid("Call argument type does not match its formal.");
                                 }
@@ -745,7 +818,9 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static PrimitiveType OutputType(TrRmScalarInitOutputBodyReader.Body body,
-        TrRmTypeSpecTableReader types, int typeId)
+        TrRmTypeSpecTableReader types, int typeId,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] structureTypeByTypeDef)
     {
         if (typeId <= 0 || typeId > body.Types.Length)
         {
@@ -753,14 +828,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var typeSpecRow = body.Types[typeId - 1].TypeSpecRow;
-        if (TrRmNativeImportTypeContract.TryGetWritableOutputPointee(
-            types, checked((uint)typeSpecRow), out var pointeeType)
-            && IsOutputScalarType(pointeeType))
-        {
-            return PrimitiveType.NativeRawPointer;
-        }
-
-        return BodyTypeFromRow(types, typeSpecRow);
+        return BodyTypeFromRow(types, typeSpecRow, nativePointerTypeDefinitions,
+            structureTypeByTypeDef);
     }
 
     private static bool IsOutputScalarType(PrimitiveType type)
@@ -806,7 +875,10 @@ public static partial class TrRmExecutableCompiler
         private readonly List<ReadOnlyMemory<byte>> _typeRows;
         private readonly Dictionary<PrimitiveType, int> _nativeParameterTypeRows;
         private readonly Dictionary<PrimitiveType, int> _nativeOutputTypeRows;
+        private readonly Dictionary<PrimitiveType, int> _nativeFunctionPointerTypeRows;
         private readonly Dictionary<PrimitiveType, int> _nativePointerTypeRows;
+        private readonly Dictionary<int, int> _structureTypeDefRows;
+        private readonly Dictionary<int, int> _typeDefTypeSpecRows;
         private readonly int _nativeRawPointerTypeRow;
         private readonly int[] _placeByVariable;
         private readonly int[] _currentValues;
@@ -836,7 +908,10 @@ public static partial class TrRmExecutableCompiler
             List<ReadOnlyMemory<byte>> typeRows,
             Dictionary<PrimitiveType, int> nativeParameterTypeRows,
             Dictionary<PrimitiveType, int> nativeOutputTypeRows,
+            Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
             Dictionary<PrimitiveType, int> nativePointerTypeRows,
+            Dictionary<int, int> structureTypeDefRows,
+            Dictionary<int, int> typeDefTypeSpecRows,
             int nativeRawPointerTypeRow)
         {
             _function = function;
@@ -844,7 +919,10 @@ public static partial class TrRmExecutableCompiler
             _typeRows = typeRows;
             _nativeParameterTypeRows = nativeParameterTypeRows;
             _nativeOutputTypeRows = nativeOutputTypeRows;
+            _nativeFunctionPointerTypeRows = nativeFunctionPointerTypeRows;
             _nativePointerTypeRows = nativePointerTypeRows;
+            _structureTypeDefRows = structureTypeDefRows;
+            _typeDefTypeSpecRows = typeDefTypeSpecRows;
             _nativeRawPointerTypeRow = nativeRawPointerTypeRow;
             _placeByVariable = new int[function.Variables.Length];
             _currentValues = new int[function.Variables.Length];
@@ -1007,7 +1085,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (!IsOutputBodyValueType(type) || kind > 2
                 || (kind == 1 && !IsOutputScalarType(type))
-                || (kind == 2 && type != PrimitiveType.NativeRawPointer)
+                || (kind == 2 && type != PrimitiveType.NativeRawPointer
+                    && !NativePointerTypes.IsType(type))
                 || _valueTypes.Count >= SemanticVerifier.MaximumVariables)
             {
                 throw Unsupported("The output Body profile supports scalar and typed pointer values within the verifier limit.");
@@ -1257,7 +1336,21 @@ public static partial class TrRmExecutableCompiler
         {
             switch (expression)
             {
-                case BoundRead read:
+            case BoundConstant { Value: 0 } constant
+                when constant.Type == PrimitiveType.NativeRawPointer
+                    || NativePointerTypes.IsType(constant.Type):
+                var pointerResult = _valueTypes.Count + 1;
+                var pointerTypeId = BodyTypeId(BodyTypeRow(constant.Type));
+                var pointerReferenceWidth = Width((ulong)Math.Max(pointerResult, pointerTypeId));
+                var pointerOffset = _operations.Count;
+                WriteInstruction(_operations, 0x01, pointerReferenceWidth, 1);
+                Write(_operations, (ulong)pointerResult, pointerReferenceWidth);
+                Write(_operations, (ulong)pointerTypeId, pointerReferenceWidth);
+                Write(_operations, 0, 1);
+                _ = AddValue(constant.Type, 0, (uint)pointerOffset);
+                _operationCount++;
+                return pointerResult;
+            case BoundRead read:
                     if ((uint)read.Variable >= (uint)_currentValues.Length)
                     {
                         throw Unsupported("Read is outside the variable inventory.");
@@ -1681,21 +1774,21 @@ public static partial class TrRmExecutableCompiler
                     if (value is BoundNativeStorageAddress address)
                     {
                         if (!_unsafeScope || nativeParameter is not DirectNativeParameter parameterContract
-                            || parameterContract.Access != NativeParameterAccess.Read
                             || parameterContract.Retention != NativeParameterRetention.NoEscape
-                            || parameterContract.Extent > 1
+                            || parameterContract.Extent > address.ElementCount
                             || !IsOutputScalarType(parameterContract.PointeeType)
-                            || parameter.Type != PrimitiveType.NativeRawPointer
+                            || !DirectNativeImportContract.TryGetNativeParameterArgumentType(
+                                parameter.Type, parameterContract, _program.NativePointerTypes,
+                                out var pointerValueType)
                             || !DirectNativeImportContract.MatchesAddress(
                                 address, parameterContract, _function, _program))
                         {
-                            throw Unsupported("Address arguments require an exact read-only scalar NativeParameter contract.");
+                            throw Unsupported("Address arguments require an exact scalar NativeParameter contract.");
                         }
 
-                        var pointerTypeRow = NativeParameterTypeRow(_typeRows,
-                            _nativeParameterTypeRows, parameterContract.PointeeType);
+                        var pointerTypeRow = BodyTypeRow(pointerValueType);
                         arguments[argument] = EmitNativeStorageAddress(address, pointerTypeRow,
-                            PrimitiveType.NativeRawPointer);
+                            pointerValueType);
                     }
                     else
                     {
@@ -1704,7 +1797,19 @@ public static partial class TrRmExecutableCompiler
                             throw Unsupported("By-value output-profile arguments must be scalar or raw-pointer values.");
                         }
                         arguments[argument] = EmitValue(value);
-                        if (_valueTypes[arguments[argument] - 1] != BodyTypeRow(parameter.Type))
+                        var matchesParameter = nativeParameter is DirectNativeParameter parameterContract
+                            ? DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                                value.Type, parameter.Type, parameterContract,
+                                _program.NativePointerTypes,
+                                value is BoundConstant {
+                                    Type: PrimitiveType.NativeRawPointer,
+                                    Value: 0,
+                                })
+                                || DirectNativeImportContract.IsReadonlyStringParameter(
+                                    value.Type, parameterContract)
+                            : value.Type == parameter.Type;
+                        if (_valueTypes[arguments[argument] - 1] != BodyTypeRow(value.Type)
+                            || !matchesParameter)
                         {
                             throw Unsupported("Call argument type does not match its parameter.");
                         }
@@ -2078,8 +2183,10 @@ public static partial class TrRmExecutableCompiler
 
             if (NativePointerTypes.IsType(type))
             {
-                return _nativePointerTypeRows.TryGetValue(type, out var row)
-                    ? row : throw Unsupported("A typed native pointer Body value has no TypeSpec row.");
+                return NativePointerTypeRow(type, _nativeRawPointerTypeRow,
+                    _nativeFunctionPointerTypeRows, _typeRows, _nativePointerTypeRows,
+                    _program.NativePointerTypes, _structureTypeDefRows,
+                    _typeDefTypeSpecRows);
             }
 
             return TypeRow(type);

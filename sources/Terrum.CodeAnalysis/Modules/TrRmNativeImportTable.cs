@@ -161,6 +161,82 @@ internal static class TrRmNativeImportTypeContract
         return false;
     }
 
+    internal static bool MatchesNativeParameterArgumentType(
+        TrRmTypeSpecTableReader types, uint argumentTypeSpecRef,
+        uint formalTypeSpecRef, byte access)
+    {
+        if (access is < 1 or > 3
+            || !TryGetNativePointerPointeeShape(types, argumentTypeSpecRef,
+                out var argumentQualifier, out var argumentInlinePointee,
+                out var argumentPointeeRef)
+            || !TryGetNativePointerPointeeShape(types, formalTypeSpecRef,
+                out var formalQualifier, out var formalInlinePointee,
+                out var formalPointeeRef)
+            || (access is 2 or 3 && (argumentQualifier != 1 || formalQualifier != 1)))
+        {
+            return false;
+        }
+
+        var argumentIsVoid = IsVoidPointee(types, argumentInlinePointee, argumentPointeeRef);
+        var formalIsVoid = IsVoidPointee(types, formalInlinePointee, formalPointeeRef);
+        if (argumentIsVoid || formalIsVoid)
+        {
+            return argumentIsVoid && formalIsVoid && access == 1
+                && argumentQualifier == 0 && formalQualifier == 0;
+        }
+
+        if (argumentPointeeRef == 0 && formalPointeeRef == 0)
+        {
+            return argumentInlinePointee == formalInlinePointee;
+        }
+        if (argumentPointeeRef == 0
+            && TryGetScalarType(types, formalPointeeRef, out var formalScalar))
+        {
+            return FromAtomicCode(argumentInlinePointee) == formalScalar;
+        }
+        if (formalPointeeRef == 0
+            && TryGetScalarType(types, argumentPointeeRef, out var argumentScalar))
+        {
+            return FromAtomicCode(formalInlinePointee) == argumentScalar;
+        }
+
+        return types.GetTypeSpecBytes(argumentPointeeRef)
+            .SequenceEqual(types.GetTypeSpecBytes(formalPointeeRef));
+    }
+
+    private static bool TryGetNativePointerPointeeShape(TrRmTypeSpecTableReader types,
+        uint typeSpecRef, out byte qualifier, out byte inlinePointeeCode,
+        out uint pointeeTypeSpecRef)
+    {
+        var type = types.GetTypeSpecBytes(typeSpecRef);
+        if (type.Length == 4 && type[0] == 0x01 && type[2] == 0x8C)
+        {
+            qualifier = type[1];
+            inlinePointeeCode = type[3];
+            pointeeTypeSpecRef = 0;
+            return qualifier is 0 or 1;
+        }
+
+        if (type.Length == 7 && type[0] == 0x0C && type[2] == 0x8C)
+        {
+            qualifier = type[1];
+            inlinePointeeCode = 0;
+            pointeeTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
+            return qualifier is 0 or 1 && pointeeTypeSpecRef != 0;
+        }
+
+        qualifier = 0;
+        inlinePointeeCode = 0;
+        pointeeTypeSpecRef = 0;
+        return false;
+    }
+
+    private static bool IsVoidPointee(TrRmTypeSpecTableReader types,
+        byte inlinePointeeCode, uint pointeeTypeSpecRef)
+        => pointeeTypeSpecRef == 0
+            ? inlinePointeeCode == 0
+            : types.GetTypeSpecBytes(pointeeTypeSpecRef) is [0x01, 0x00, 0x00];
+
     internal static bool IsNativeAbiValueType(TrRmTypeSpecTableReader types, uint typeSpecRef)
         => (TryGetScalarType(types, typeSpecRef, out var scalarType)
                 && DirectNativeImportContract.IsScalar(scalarType))
@@ -341,6 +417,8 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
             var library = Read(data, 4);
             var export = Read(data, 8);
             var policy = Read(data, 12);
+            var effectsMask = method > 0 && method <= methods.Count
+                ? contracts.GetEffectsMask((int)method) : 0;
             if (method is 0 or > 0xFF_FFFF || method > methods.Count
                 || library is 0 or > 0xFF_FFFF || export is 0 or > 0xFF_FFFF
                 || policy != WindowsSystem32ResolutionPolicy
@@ -349,7 +427,8 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
                 || methods.GetBodyRow((int)method) != 0
                 || signatures.GetReceiverTypeSpec(methods.GetSignature((int)method)) != 0
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
-                || (contracts.GetEffectsMask((int)method) & 4) == 0
+                || (!contracts.Schema.UsesDevelopmentFunctionPointerEffects()
+                    && (effectsMask & 4) == 0)
                 || !contracts.HasNativeAbi((int)method)
                 || contracts.GetNativeAbi((int)method)
                     != new TrRmNativeAbiContract(1, 1, 0))
@@ -368,7 +447,7 @@ public readonly ref struct TrRmDevelopmentNativeImportTableReader
             _rowByMethod[method] = row;
             TrRmNativeImportSignatureValidator.Validate(method, methods, signatures, parameters, types,
                 contracts.GetNativeOutputs((int)method), contracts.GetNativeParameters((int)method),
-                layouts);
+                layouts, validateNativeParameterAccess: true);
         }
 
         for (var method = 1; method <= methods.Count; method++)

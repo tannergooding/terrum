@@ -39,6 +39,15 @@ public static partial class TrRmExecutableCompiler
     ];
 
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
+        => EmitDevelopment(program, moduleIdentity, TrRmArtifactSchema.Development);
+
+    internal static byte[] EmitDevelopmentFunctionPointerEffectsDraft(
+        BoundProgram program, string moduleIdentity)
+        => EmitDevelopment(program, moduleIdentity,
+            TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
+
+    private static byte[] EmitDevelopment(BoundProgram program, string moduleIdentity,
+        TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.Functions.Any(static function =>
@@ -75,8 +84,11 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("The native pointer or function-pointer type table is invalid.");
         }
-        if (program.NativeFunctionPointerSignatures.Any(static signature =>
-            !NativeFunctionPointerContract.CanPersistRevision92(signature)))
+        if (program.NativeFunctionPointerSignatures.Any(signature =>
+            !(schema.UsesDevelopmentFunctionPointerEffects()
+                ? NativeFunctionPointerContract.CanPersistDevelopmentFunctionPointerEffectsDraft(
+                    signature)
+                : NativeFunctionPointerContract.CanPersistRevision92(signature))))
         {
             throw Unsupported(
                 "The Development function-pointer signature table does not persist complete invocation contracts.");
@@ -209,7 +221,8 @@ public static partial class TrRmExecutableCompiler
             }
             var features = function.IsExternal || hasNativeVTable ? default : AnalyzeFunction(function);
             functionFeatures[index] = features;
-            outputFeatures[index] = !function.IsExternal && !hasNativeVTable && HasOutputFeature(function);
+            outputFeatures[index] = !function.IsExternal && !hasNativeVTable
+                && HasOutputFeature(function, program);
             hasFloatingTypes |= features.HasFloatingTypes;
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
@@ -485,12 +498,16 @@ public static partial class TrRmExecutableCompiler
                         program.NativeFunctionPointerSignatures);
                 var isNativeFunctionPointerValue = NativeFunctionPointerTypes.IsType(variable.Type);
                 var isNativePointerValue = NativePointerTypes.IsType(variable.Type);
+                var invalidNativeParameter = nativeParameter is not null
+                    && !DirectNativeImportContract.MatchesNativeParameterFormalType(
+                        variable.Type, nativeParameter.PointeeType,
+                        nativeParameter.Access, program.NativePointerTypes);
                 var parameterType = isNativeOutput
                     ? NativeOutputTypeRow(typeRowsList, nativeOutputTypeRows, nativeOutput!.PointeeType)
                     : nativeParameter is not null
-                        ? NativeParameterTypeRow(typeRowsList, nativeParameterTypeRows,
-                            nativeParameter.PointeeType, structureTypeDefRows,
-                            typeDefTypeSpecRows, blittableParameterTypeRows)
+                        ? NativeValueTypeRow(variable.Type, nativeRawPointerTypeRow,
+                            nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
+                            program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows)
                         : NativeValueTypeRow(variable.Type, nativeRawPointerTypeRow,
                             nativeFunctionPointerTypeRows, typeRowsList, nativePointerTypeRows,
                             program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows);
@@ -512,16 +529,16 @@ public static partial class TrRmExecutableCompiler
                                     && !NativeFunctionPointerTypes.IsType(variable.Type))))
                     || (function.DirectNativeImport is not null
                         && (isNativeOutput
-                            ? (variable.Type != PrimitiveType.NativeStorageAddress
-                                || !variable.IsOut || variable.IsInit)
+                            ? variable.Type != PrimitiveType.NativeStorageAddress
+                                || !variable.IsOut || variable.IsInit
                             : nativeParameter is not null
-                                ? (variable.Type != PrimitiveType.NativeRawPointer
-                                    || variable.IsOut || variable.IsInit)
-                                : ((!Scalar(variable.Type)
+                                ? variable.IsOut || variable.IsInit
+                                : (!Scalar(variable.Type)
                                         && variable.Type != PrimitiveType.NativeRawPointer
                                         && !isNativePointerValue
                                         && !isNativeFunctionPointerValue)
-                                    || variable.IsOut || variable.IsInit))))
+                                    || variable.IsOut || variable.IsInit))
+                    || invalidNativeParameter)
                 {
                     throw Unsupported($"Function '{function.Name}' has a non-value scalar parameter.");
                 }
@@ -544,8 +561,9 @@ public static partial class TrRmExecutableCompiler
                 bodyRow = bodies.Count + 1;
                 bodies.Add(outputFeatures[index]
                     ? EncodeOutputBody(function, program, typeRowsList,
-                        nativeParameterTypeRows, nativeOutputTypeRows, nativePointerTypeRows,
-                        nativeRawPointerTypeRow)
+                        nativeParameterTypeRows, nativeOutputTypeRows,
+                        nativeFunctionPointerTypeRows, nativePointerTypeRows,
+                        structureTypeDefRows, typeDefTypeSpecRows, nativeRawPointerTypeRow)
                     : functionFeatures[index].HasIndexedFlow
                         ? new IndexedBuilder(function, program,
                             functionFeatures[index].HasFloatingTypes, nativeRawPointerTypeRow,
@@ -555,8 +573,13 @@ public static partial class TrRmExecutableCompiler
                             nativePointerTypeRows));
             }
 
-            var effectMask = (function.DoesNotReturn ? 2u : 0u)
-                | (function.RequiresUnsafeCaller ? 4u : 0u);
+            var effectMask = schema.UsesDevelopmentFunctionPointerEffects()
+                && (function.DirectNativeImport is not null
+                    || function.NativeFunctionPointerType is not null)
+                ? NativeFunctionPointerContract.GetDeclaredEffectsMask(
+                    function.DoesNotReturn, function.DeclaredRequiresUnsafeCaller)
+                : (function.DoesNotReturn ? 2u : 0u)
+                    | (function.RequiresUnsafeCaller ? 4u : 0u);
             var contractFirst = effectMask != 0 || function.DirectNativeImport is not null
                 || function.NativeFunctionPointerType is not null || hasNativeVTable
                     ? contracts.Count + 1 : 0;
@@ -639,14 +662,19 @@ public static partial class TrRmExecutableCompiler
                     program.NativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows)),
                 0, first, signature.ParameterTypes.Length, 0, 0));
             var contractFirst = contracts.Count + 1;
-            contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
-                s_effectPayloads[4]));
+            var anchorEffectsMask = schema.UsesDevelopmentFunctionPointerEffects()
+                ? signature.EffectsMask : 4u;
+            if (anchorEffectsMask != 0)
+            {
+                contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 1,
+                    s_effectPayloads[anchorEffectsMask]));
+            }
             contracts.Add(new TrRmContractRow(0x1600_0000u | (uint)methodRow, 0x10,
                 NativeAbiPayload(3)));
             var nameRow = names.Count + 1;
             names.Add(($"__trrm_fnptr_signature_{index}", 1));
             methods.Add(new TrRmMethodDefRow(0, nameRow, signatures.Count, 0,
-                contractFirst, 2, 0));
+                contractFirst, contracts.Count - contractFirst + 1, 0));
             nativeFunctionPointerSignatureRows.Add(
                 new TrRmNativeFunctionPointerSignatureRow(methodRow));
         }
@@ -728,16 +756,15 @@ public static partial class TrRmExecutableCompiler
             : new TrRmModuleRefTableReader(moduleRefBytes, moduleRefRows.Count, strings, modules);
         var typeRows = typeRowsList.ToArray();
         var typeBytes = TrRmTypeSpecTableWriter.Encode(typeRows, typeDefCount, 0, 0,
-            nativeFunctionPointerSignatureRows.Count,
-            TrRmArtifactSchema.Development);
+            nativeFunctionPointerSignatureRows.Count, schema);
         var types = new TrRmTypeSpecTableReader(typeBytes, typeRows.Length,
             typeDefCount, 0, 0, nativeFunctionPointerSignatureRows.Count,
-            TrRmArtifactSchema.Development);
+            schema);
         var sigBytes = TrRmMethodSigTableWriter.Encode(signatures, types, parameters.Count, 0);
         var sigs = new TrRmMethodSigTableReader(sigBytes, signatures.Count, types, parameters.Count, 0);
         var paramBytes = parameters.Count == 0 ? []
             : TrRmParamTableWriter.Encode(parameters, sigs, types,
-                TrRmArtifactSchema.Development);
+                schema);
         var typeDefRows = new TrRmTypeDefRow[typeDefCount];
         for (var type = 0; type < blittableStructureIndexes.Length; type++)
         {
@@ -776,12 +803,15 @@ public static partial class TrRmExecutableCompiler
             typeDefs, sigs, contracts.Count, bodies.Count);
         var paramReader = parameters.Count == 0 ? default
             : new TrRmParamTableReader(paramBytes, parameters.Count, sigs, types,
-                TrRmArtifactSchema.Development);
+                schema);
         var contractBytes = contracts.Count == 0 ? []
-            : TrRmContractTableWriter.Encode(contracts, typeDefs, defs, sigs,
-                paramReader, types, developmentProfile: true);
+            : schema.UsesDevelopmentFunctionPointerEffects()
+                ? TrRmContractTableWriter.EncodeDevelopmentFunctionPointerEffectsDraft(
+                    contracts, typeDefs, defs, sigs, paramReader, types)
+                : TrRmContractTableWriter.Encode(contracts, typeDefs, defs, sigs,
+                    paramReader, types, developmentProfile: true);
         var contractReader = new TrRmContractTableReader(contractBytes, contracts.Count,
-            typeDefs, defs, sigs, paramReader, types, developmentProfile: true);
+            typeDefs, defs, sigs, paramReader, types, schema);
         var moduleImportRows = new List<TrRmImportRow>(moduleImportIdentities.Length);
         for (var index = 0; index < program.Functions.Length; index++)
         {
@@ -850,7 +880,7 @@ public static partial class TrRmExecutableCompiler
         }
         var nativeVTableBytes = nativeVTableRows.Count == 0 ? []
             : TrRmNativeVTableTableWriter.Encode(nativeVTableRows, defs, sigs, paramReader,
-                types, contractReader);
+                types, contractReader, layouts);
         var sectionCount = 5 + (featureCount != 0 ? 1 : 0)
             + (moduleRefRows.Count != 0 ? 1 : 0)
             + (typeDefRows.Length != 0 ? 1 : 0)
@@ -936,8 +966,15 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new(0x48, 0, (uint)targetProfiles.Count, targetProfileBytes));
         }
-        var artifact = TrRmArtifactWriter.EncodeDevelopment(sections);
-        _ = Load(artifact);
+        var artifact = TrRmArtifactWriter.Encode(sections, schema);
+        if (schema.UsesDevelopmentFunctionPointerEffects())
+        {
+            _ = LoadDevelopmentFunctionPointerEffectsDraft(artifact);
+        }
+        else
+        {
+            _ = Load(artifact);
+        }
         return artifact;
     }
 
@@ -952,10 +989,22 @@ public static partial class TrRmExecutableCompiler
     }
 
     public static BoundProgram Load(ReadOnlySpan<byte> artifact)
+        => LoadDevelopment(artifact, TrRmArtifactSchema.Development);
+
+    internal static BoundProgram LoadDevelopmentFunctionPointerEffectsDraft(
+        ReadOnlySpan<byte> artifact)
+        => LoadDevelopment(artifact,
+            TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
+
+    private static BoundProgram LoadDevelopment(ReadOnlySpan<byte> artifact,
+        TrRmArtifactSchema schema)
     {
-        var index = new TrRmArtifactIndex(artifact, TrRmArtifactSchema.Development);
-        var validatedTables = TrRmStructuralMetadataValidator
-            .ValidateDevelopmentAndGetExecutionTables(index);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
+            ? TrRmStructuralMetadataValidator
+                .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index)
+            : TrRmStructuralMetadataValidator
+                .ValidateDevelopmentAndGetExecutionTables(index);
         var modules = validatedTables.Modules;
         var typeDefs = validatedTables.TypeDefs;
         var strings = validatedTables.Strings;
@@ -1079,7 +1128,12 @@ public static partial class TrRmExecutableCompiler
 
             nativeFunctionPointerSignatureDefinitions.Add(
                 new NativeFunctionPointerSignatureDefinition(
-                    NativeCallingConvention.Native, resultType, parameterTypes.MoveToImmutable()));
+                    NativeCallingConvention.Native, resultType, parameterTypes.MoveToImmutable())
+                {
+                    EffectsMask = schema.UsesDevelopmentFunctionPointerEffects()
+                        ? nativeFunctionPointerSignatureTable
+                            .GetDeclaredEffectsMask(signatureRow) : 0,
+                });
         }
         var nativeFunctionPointerSignatureArray = nativeFunctionPointerSignatureDefinitions.ToImmutable();
         if (!NativePointerTypeContract.IsValidTable(
@@ -1164,10 +1218,8 @@ public static partial class TrRmExecutableCompiler
                 var typeSpecRow = parameters.GetTypeSpec(first + param);
                 var type = nativeOutput is not null
                     ? PrimitiveType.NativeStorageAddress
-                    : nativeParameter is not null
-                        ? PrimitiveType.NativeRawPointer
-                        : FromNativeValueRow(types, typeSpecRow,
-                            nativePointerTypeDefinitions, structureTypeByTypeDef);
+                    : FromNativeValueRow(types, typeSpecRow,
+                        nativePointerTypeDefinitions, structureTypeByTypeDef);
                 var mode = parameters.GetMode(first + param);
                 if (type == PrimitiveType.Void
                     || (mode != 0 && mode != 2)
@@ -1176,8 +1228,7 @@ public static partial class TrRmExecutableCompiler
                             && !NativeVTableCallContract.IsNativeValueType(type,
                                 nativeFunctionPointerSignatureArray,
                                 [.. nativePointerTypeDefinitions]))
-                        || (nativeOutput is not null && type != PrimitiveType.NativeStorageAddress)
-                        || (nativeParameter is not null && type != PrimitiveType.NativeRawPointer)))
+                        || (nativeOutput is not null && type != PrimitiveType.NativeStorageAddress)))
                     || (isNativeVTable && (mode != 0
                         || (nativeOutput is not null
                             ? type != PrimitiveType.NativeStorageAddress
@@ -1185,8 +1236,7 @@ public static partial class TrRmExecutableCompiler
                             : nativeParameter is null
                             && !NativeVTableCallContract.IsNativeValueType(type,
                                 nativeFunctionPointerSignatureArray,
-                                [.. nativePointerTypeDefinitions]))
-                        || (nativeParameter is not null && type != PrimitiveType.NativeRawPointer)))
+                                [.. nativePointerTypeDefinitions]))))
                     || (!isNativeImport && mode == 2 && (scalarInitOutputRuleRevision == 0
                         || (scalarInitOutputRuleRevision
                             == TrRmDevelopmentFeatureTableReader.ScalarInitOutputInitialRuleRevision
@@ -1206,6 +1256,7 @@ public static partial class TrRmExecutableCompiler
             var (contractFirst, contracts) = defs.GetContractRange(row);
             var doesNotReturn = false;
             var requiresUnsafeCaller = false;
+            var declaredRequiresUnsafeCaller = false;
             if (contracts != 0)
             {
                 for (var contractIndex = 0; contractIndex < contracts; contractIndex++)
@@ -1227,7 +1278,18 @@ public static partial class TrRmExecutableCompiler
                     }
                     doesNotReturn = (effectMask & 2) != 0;
                     requiresUnsafeCaller = (effectMask & 4) != 0;
+                    if (schema.UsesDevelopmentFunctionPointerEffects())
+                    {
+                        declaredRequiresUnsafeCaller = (effectMask & 4) != 0;
+                    }
                 }
+            }
+            if (schema.UsesDevelopmentFunctionPointerEffects())
+            {
+                var nativeAbiRole = contractTable.HasNativeAbi(row)
+                    ? contractTable.GetNativeAbi(row).Role : (byte)0;
+                requiresUnsafeCaller = declaredRequiresUnsafeCaller
+                    || nativeAbiRole is 1 or 2 or 3 or 4;
             }
 
             DirectNativeImport? directNativeImport = null;
@@ -1250,7 +1312,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         var typeSpecRow = parameters.GetTypeSpec(first + parameter.ParameterOrdinal);
                         var pointeeType = NativeParameterPointee(types, typeSpecRow,
-                            layouts, structureTypeByTypeDef);
+                            parameter.Access, nativePointerTypeDefinitions, layouts,
+                            structureTypeByTypeDef);
                         if (parameter.Access is < 1 or > 3
                             || parameter.Retention != 1 || parameter.ExtentKind is not (0 or 1)
                             || parameter.PointerDepth != 1 || parameter.RequiredAlignment != 0)
@@ -1286,7 +1349,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         var typeSpecRow = parameters.GetTypeSpec(first + parameter.ParameterOrdinal);
                         var pointeeType = NativeParameterPointee(types, typeSpecRow,
-                            layouts, structureTypeByTypeDef);
+                            parameter.Access, nativePointerTypeDefinitions, layouts,
+                            structureTypeByTypeDef);
                         directParameters.Add(new DirectNativeParameter(parameter.ParameterOrdinal,
                             pointeeType, (NativeParameterAccess)(parameter.Access - 1),
                             NativeParameterRetention.NoEscape, parameter.Extent));
@@ -1327,6 +1391,7 @@ public static partial class TrRmExecutableCompiler
             {
                 DoesNotReturn = doesNotReturn,
                 RequiresUnsafeCaller = requiresUnsafeCaller,
+                DeclaredRequiresUnsafeCaller = declaredRequiresUnsafeCaller,
                 IsExternal = isNativeImport || isImportedNativeCallable,
                 Intrinsic = isNativeVTable ? BoundIntrinsic.NativeVTableCall : BoundIntrinsic.None,
                 DirectNativeImport = directNativeImport,
@@ -1433,15 +1498,11 @@ public static partial class TrRmExecutableCompiler
                     defs, sigs, parameters, types, contractBytes,
                     contractTable, nativeImports, nativeVTables, scalarInitOutputRuleRevision,
                     rootlessNativeValuesRuleRevision);
-                if (outputBody.Places.IsEmpty)
-                {
-                    throw Invalid("The executable general Body profile requires places.");
-                }
-
                 variables = declaration.Variables.ToBuilder();
                 statements = DecodeOutputBody(outputBody, types, variables, functions,
                     functionIndexByMethodRow,
-                    structures, scalarInitOutputRuleRevision);
+                    structures, nativePointerTypeDefinitions, structureTypeByTypeDef,
+                    scalarInitOutputRuleRevision);
             }
             else
             {
@@ -1493,11 +1554,25 @@ public static partial class TrRmExecutableCompiler
 
     /// <summary>Reads a validated TRRM library and exposes its public native declarations to source binding.</summary>
     public static CompilationReference CreateReference(byte[] providerArtifact)
+        => CreateReference(providerArtifact, TrRmArtifactSchema.Development);
+
+    internal static CompilationReference
+        CreateDevelopmentFunctionPointerEffectsDraftReference(byte[] providerArtifact)
+        => CreateReference(providerArtifact,
+            TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
+
+    private static CompilationReference CreateReference(byte[] providerArtifact,
+        TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(providerArtifact);
-        var program = Load(providerArtifact);
-        var validatedTables = TrRmStructuralMetadataValidator.ValidateDevelopmentAndGetExecutionTables(
-            new TrRmArtifactIndex(providerArtifact, TrRmArtifactSchema.Development));
+        var program = LoadDevelopment(providerArtifact, schema);
+        var artifactIndex = new TrRmArtifactIndex(providerArtifact, schema);
+        var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
+            ? TrRmStructuralMetadataValidator
+                .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(
+                    artifactIndex)
+            : TrRmStructuralMetadataValidator
+                .ValidateDevelopmentAndGetExecutionTables(artifactIndex);
         var providerIdentity = validatedTables.Modules.GetIdentity(1);
         var (targetRequirement, runtimePolicy) = validatedTables.Modules.GetRequirements(1);
         if (program.EntryPoint != -1
@@ -2533,23 +2608,36 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static PrimitiveType NativeParameterPointee(TrRmTypeSpecTableReader typeSpecs,
-        uint typeSpecRef, TrRmLayoutTableReader layouts, int[] structureTypeByTypeDef)
+        uint typeSpecRef, byte access,
+        List<NativePointerTypeDefinition> nativePointerTypes,
+        TrRmLayoutTableReader layouts,
+        int[] structureTypeByTypeDef)
     {
-        if (TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-            typeSpecs, typeSpecRef, out var pointeeType))
+        if (!TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+                typeSpecs, typeSpecRef, access, layouts, out _))
         {
-            return pointeeType;
+            throw Invalid("Invalid native parameter pointee TypeSpec.");
         }
 
-        if (TrRmNativeImportTypeContract.TryGetBlittableAggregateParameterTypeDef(
-            typeSpecs, typeSpecRef, layouts, out var typeDefRow)
-            && typeDefRow < structureTypeByTypeDef.Length
-            && structureTypeByTypeDef[typeDefRow] >= 0)
+        var formalType = FromNativeValueRow(typeSpecs, typeSpecRef,
+            nativePointerTypes, structureTypeByTypeDef);
+        if (formalType == PrimitiveType.NativeRawPointer)
         {
-            return (PrimitiveType)(100 + structureTypeByTypeDef[typeDefRow]);
+            return PrimitiveType.Void;
         }
 
-        throw Invalid("Invalid native parameter pointee TypeSpec.");
+        if (!NativePointerTypes.IsType(formalType))
+        {
+            throw Invalid("NativeParameter formal is not a native pointer TypeSpec.");
+        }
+
+        var pointerIndex = NativePointerTypes.Index(formalType);
+        if ((uint)pointerIndex >= (uint)nativePointerTypes.Count)
+        {
+            throw Invalid("NativeParameter formal has no native pointer definition.");
+        }
+
+        return nativePointerTypes[pointerIndex].PointeeType;
     }
 
     private static PrimitiveType BodyTypeFromRow(TrRmTypeSpecTableReader types, int row)

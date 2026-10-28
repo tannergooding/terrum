@@ -15,6 +15,16 @@ internal static class DirectNativeImportContract
     internal const uint UInt32NonZeroResultCondition = 2;
     internal const uint Int32NonNegativeResultCondition = 3;
 
+    internal static bool IsValidResolution(
+        NativeImportResolutionMode mode, NativeImportResolutionPolicy policy) =>
+        (mode, policy) switch
+        {
+            (NativeImportResolutionMode.Link, NativeImportResolutionPolicy.NotApplicable) => true,
+            (NativeImportResolutionMode.Dynamic, NativeImportResolutionPolicy.Default
+                or NativeImportResolutionPolicy.CompatibilitySearch) => true,
+            _ => false,
+        };
+
     internal static uint ResolveResultCondition(PrimitiveType returnType, uint requestedCondition) =>
         requestedCondition == Int32NonZeroResultCondition && returnType == PrimitiveType.UInt32
             ? UInt32NonZeroResultCondition
@@ -26,19 +36,47 @@ internal static class DirectNativeImportContract
         || (returnType == PrimitiveType.UInt32
             && resultCondition == UInt32NonZeroResultCondition);
 
-    internal static bool IsValidLibraryName(string name) =>
+    internal static bool IsValidSourceLibraryName(string name)
+    {
+        if (string.IsNullOrEmpty(name) || name is "." or "..")
+        {
+            return false;
+        }
+
+        foreach (var character in name)
+        {
+            if (character is < ' ' or > '~' or '/' or '\\' or ':')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    internal static bool IsValidPrivateWindowsLibraryName(string name) =>
         name is { Length: >= 5 and <= 256 }
         && name.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
         && name.All(static character => character is (>= '0' and <= '9') or (>= 'A' and <= 'Z')
             or (>= 'a' and <= 'z') or '_' or '-' or '.');
+
+    internal static bool IsValidPrivateWindows(BoundFunction function,
+        IReadOnlyList<BoundStruct> structures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes = default) =>
+        IsValid(function, structures, functionPointerSignatures, pointerTypes)
+        && function.DirectNativeImport is DirectNativeImport import
+        && IsValidPrivateWindowsLibraryName(import.LibraryName);
 
     internal static bool IsValidExportName(string name) =>
         name is { Length: >= 1 and <= 256 }
         && name.All(static character => character is >= '!' and <= '~');
 
     internal static bool IsScalar(PrimitiveType type) =>
-        type is PrimitiveType.Bool or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
-            or PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
+        type is PrimitiveType.Bool or PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32
+            or PrimitiveType.Rune or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+            or PrimitiveType.Int64 or PrimitiveType.UInt8 or PrimitiveType.UInt16 or PrimitiveType.UInt32
+            or PrimitiveType.UInt64 or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     internal static bool IsValueParameter(PrimitiveType type,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
@@ -85,6 +123,30 @@ internal static class DirectNativeImportContract
             or PrimitiveType.NativeUtf8ZPointer || NativePointerTypes.IsType(type)
             || NativeFunctionPointerTypes.IsType(type);
 
+    internal static bool IsOutputPointee(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures) =>
+        IsOutputPointee(type) || IsBlittableAggregate(type, structures);
+
+    internal static bool IsAggregateOutputPointee(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures) =>
+        IsBlittableAggregate(type, structures) && !IsUniqueValue(type, structures)
+        && ValueLayout.Size(type, structures) > 0;
+
+    internal static bool IsNativeOutputCellType(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures) =>
+        IsOutputPointee(type) || IsAggregateOutputPointee(type, structures);
+
+    internal static bool IsNativeOutputCellType(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes) =>
+        IsNativeOutputCellType(type, structures)
+        && ValueLayout.Size(type, structures) > 0
+        && (!NativePointerTypes.IsType(type)
+            || NativePointerTypeContract.IsValidType(type, pointerTypes))
+        && (!NativeFunctionPointerTypes.IsType(type)
+            || NativeFunctionPointerContract.IsValidType(type, functionPointerSignatures));
+
     internal static bool IsInputPointee(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
     {
         if (type is PrimitiveType.Void or PrimitiveType.NativeRawPointer
@@ -94,6 +156,89 @@ internal static class DirectNativeImportContract
             return true;
         }
         return IsBlittableAggregate(type, structures);
+    }
+
+    internal static bool MatchesNativeParameterFormalType(PrimitiveType formalType,
+        PrimitiveType pointeeType, NativeParameterAccess access,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes)
+    {
+        if (access is not (NativeParameterAccess.Read
+            or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite))
+        {
+            return false;
+        }
+        if (pointeeType == PrimitiveType.Void)
+        {
+            return formalType == PrimitiveType.NativeRawPointer
+                && access == NativeParameterAccess.Read;
+        }
+        if (!NativePointerTypeContract.IsValidType(formalType, pointerTypes))
+        {
+            return false;
+        }
+
+        var pointerType = pointerTypes[NativePointerTypes.Index(formalType)];
+        return pointerType.PointeeType == pointeeType
+            && (access == NativeParameterAccess.Read || pointerType.IsWritable);
+    }
+
+    internal static bool MatchesNativeParameterArgumentType(PrimitiveType argumentType,
+        PrimitiveType formalType, DirectNativeParameter parameter,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        bool isNullPointer = false)
+    {
+        if (!MatchesNativeParameterFormalType(formalType, parameter.PointeeType,
+                parameter.Access, pointerTypes))
+        {
+            return false;
+        }
+        if (isNullPointer)
+        {
+            return argumentType == PrimitiveType.NativeRawPointer;
+        }
+        if (formalType == PrimitiveType.NativeRawPointer)
+        {
+            return argumentType == PrimitiveType.NativeRawPointer;
+        }
+        if (!NativePointerTypeContract.IsValidType(argumentType, pointerTypes))
+        {
+            return false;
+        }
+
+        var argumentPointer = pointerTypes[NativePointerTypes.Index(argumentType)];
+        return argumentPointer.PointeeType == parameter.PointeeType
+            && (parameter.Access == NativeParameterAccess.Read || argumentPointer.IsWritable);
+    }
+
+    internal static bool TryGetNativeParameterArgumentType(PrimitiveType formalType,
+        DirectNativeParameter parameter,
+        ImmutableArray<NativePointerTypeDefinition> pointerTypes,
+        out PrimitiveType argumentType)
+    {
+        argumentType = formalType;
+        if (!MatchesNativeParameterFormalType(formalType, parameter.PointeeType,
+            parameter.Access, pointerTypes))
+        {
+            return false;
+        }
+        if (parameter.Access != NativeParameterAccess.Read
+            || formalType == PrimitiveType.NativeRawPointer
+            || !pointerTypes[NativePointerTypes.Index(formalType)].IsWritable)
+        {
+            return true;
+        }
+
+        for (var index = 0; index < pointerTypes.Length; index++)
+        {
+            var pointer = pointerTypes[index];
+            if (pointer.PointeeType == parameter.PointeeType && !pointer.IsWritable)
+            {
+                argumentType = NativePointerTypes.Type(index);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     internal static bool IsCopyablePointee(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
@@ -119,10 +264,14 @@ internal static class DirectNativeImportContract
         if (function.DirectNativeImport is not DirectNativeImport import
             || !function.IsExternal
             || !function.RequiresUnsafeCaller
-            || !IsValidLibraryName(import.LibraryName) || !IsValidExportName(import.ExportName)
+            || !IsValidSourceLibraryName(import.LibraryName) || !IsValidExportName(import.ExportName)
+            || !NativeFunctionPointerContract.IsKnownConvention(import.CallingConvention)
+            || !IsValidResolution(import.ResolutionMode, import.ResolutionPolicy)
             || import.Outputs.IsDefault || import.Parameters.IsDefault
             || function.Variables.IsDefault || function.ParameterCount < 0
             || function.ParameterCount > function.Variables.Length
+            || !NativeOutputContractValidator.IsValid(function, structures, pointerTypes,
+                functionPointerSignatures)
             || (function.ReturnType != PrimitiveType.Void
                 && !IsValueParameter(function.ReturnType, functionPointerSignatures, pointerTypes))
             || import.Outputs.Length > function.ParameterCount)
@@ -135,14 +284,19 @@ internal static class DirectNativeImportContract
         foreach (var output in import.Outputs)
         {
             if (output is null || output.ParameterIndex < 0 || output.ParameterIndex >= function.ParameterCount
-                || outputs[output.ParameterIndex] || !IsOutputPointee(output.PointeeType)
+                || outputs[output.ParameterIndex]
+                || !IsNativeOutputCellType(output.PointeeType, structures,
+                    functionPointerSignatures, pointerTypes)
                 || (NativePointerTypes.IsType(output.PointeeType)
                     && !NativePointerTypeContract.IsValidType(output.PointeeType, pointerTypes))
                 || !IsValidResultCondition(function.ReturnType, output.ResultCondition)
                 || output.FailureDisposition != 1
                 || function.Variables[output.ParameterIndex] is not BoundVariable outputParameter
-                || outputParameter.Type != PrimitiveType.NativeStorageAddress
-                || !outputParameter.IsOut || outputParameter.IsInit
+                || !NativePointerTypeContract.IsValidType(outputParameter.Type, pointerTypes)
+                || pointerTypes[NativePointerTypes.Index(outputParameter.Type)].PointeeType
+                    != output.PointeeType
+                || !pointerTypes[NativePointerTypes.Index(outputParameter.Type)].IsWritable
+                || outputParameter.IsOut || outputParameter.IsInit
                 || function.ReturnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32))
             {
                 return false;
@@ -163,7 +317,8 @@ internal static class DirectNativeImportContract
                 || parameter.Retention != NativeParameterRetention.NoEscape
                 || (parameter.PointeeType == PrimitiveType.Void && (parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0))
                 || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
-                || pointerParameter.Type != PrimitiveType.NativeRawPointer
+                || !MatchesNativeParameterFormalType(pointerParameter.Type,
+                    parameter.PointeeType, parameter.Access, pointerTypes)
                 || pointerParameter.IsOut || pointerParameter.IsInit)
             {
                 return false;
@@ -180,14 +335,21 @@ internal static class DirectNativeImportContract
             var parameterType = parameter.Type;
             if (parameterType == PrimitiveType.NativeStorageAddress)
             {
-                if (!outputs[index] || !parameter.IsOut || parameter.IsInit)
+                return false;
+            }
+            if (parameterType == PrimitiveType.NativeRawPointer)
+            {
+                if (parameter.IsOut || parameter.IsInit)
                 {
                     return false;
                 }
             }
-            else if (parameterType == PrimitiveType.NativeRawPointer)
+            else if (NativePointerTypes.IsType(parameterType))
             {
-                if (outputs[index] || parameter.IsOut || parameter.IsInit)
+                if (!NativePointerTypeContract.IsValidType(parameterType, pointerTypes)
+                    || (outputs[index]
+                        && !pointerTypes[NativePointerTypes.Index(parameterType)].IsWritable)
+                    || parameter.IsOut || parameter.IsInit)
                 {
                     return false;
                 }
@@ -239,6 +401,17 @@ internal static class DirectNativeImportContract
             && caller.Variables[address.Variable].IsMutable
             && !caller.Variables[address.Variable].IsInitializationLocal;
     }
+
+    internal static bool MatchesReservation(BoundNativeOutputReservation reservation,
+        DirectNativeOutput output, BoundFunction caller, BoundProgram program) =>
+        reservation.Type == PrimitiveType.Void
+        && reservation.PointeeType == output.PointeeType
+        && IsNativeOutputCellType(output.PointeeType, program.Structures,
+            program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+        && (uint)reservation.Variable < (uint)caller.Variables.Length
+        && caller.Variables[reservation.Variable].Type == output.PointeeType
+        && caller.Variables[reservation.Variable].IsInitializationLocal
+        && ValueLayout.Size(output.PointeeType, program.Structures) > 0;
 
     internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeParameter parameter,
         BoundFunction caller, BoundProgram program)

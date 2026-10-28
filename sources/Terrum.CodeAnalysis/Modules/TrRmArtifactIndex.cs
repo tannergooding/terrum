@@ -10,8 +10,20 @@ internal enum TrRmArtifactSchema
 {
     Standard,
     Development,
+    DevelopmentFunctionPointerEffectsDraft,
     CopyOriginDraft,
     ForeignInvocationDraft,
+}
+
+internal static class TrRmArtifactSchemaFacts
+{
+    internal static bool IsDevelopmentProfile(this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.Development
+            or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft;
+
+    internal static bool UsesDevelopmentFunctionPointerEffects(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft;
 }
 
 /// <summary>Validates TRRM (1, 0) framing and indexes present sections without binding them.</summary>
@@ -34,6 +46,7 @@ public readonly ref struct TrRmArtifactIndex
     internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact, TrRmArtifactSchema schema)
     {
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
+            or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.CopyOriginDraft
             or TrRmArtifactSchema.ForeignInvocationDraft)
             || artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
@@ -212,6 +225,10 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForDevelopment(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.Development);
 
+    internal static TrRmArtifactIndex ForDevelopmentFunctionPointerEffectsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
+
     internal static TrRmArtifactIndex ForCopyOriginDraft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.CopyOriginDraft);
 
@@ -300,12 +317,12 @@ public readonly ref struct TrRmArtifactIndex
                     || FixedStride(targetKind, schema) == -1
                     || sectionCounts[targetKind] == 0
                     || row > sectionCounts[targetKind]))
-                || (selector == 1 && (schema != TrRmArtifactSchema.Development
+                || (selector == 1 && (!schema.IsDevelopmentProfile()
                     ? targetKind != 0 || sectionCounts[0x0020] == 0
                         || row > sectionCounts[0x0020]
                     : targetKind != 0x0020 || sectionCounts[0x0020] == 0
                         || row > sectionCounts[0x0020] || block == 0))
-                || (kind == 0x7F00 && (schema != TrRmArtifactSchema.Development
+                || (kind == 0x7F00 && (!schema.IsDevelopmentProfile()
                     ? !((selector == 0 && targetKind == 0x001F)
                         || (selector == 1 && targetKind == 0))
                     : !((selector == 0 && targetKind == 0x001F)
@@ -317,13 +334,13 @@ public readonly ref struct TrRmArtifactIndex
     }
 
     private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
-        => schema != TrRmArtifactSchema.Development
+        => !schema.IsDevelopmentProfile()
             ? kind is >= 0x0001 and <= 0x004B
             : kind is >= 0x0001 and <= 0x0020 && kind != 0x0004;
 
     private static int FixedStride(int kind, TrRmArtifactSchema schema)
     {
-        if (schema == TrRmArtifactSchema.Development)
+        if (schema.IsDevelopmentProfile())
         {
             return kind switch
             {

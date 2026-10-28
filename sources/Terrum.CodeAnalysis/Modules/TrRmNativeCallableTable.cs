@@ -73,6 +73,10 @@ internal readonly ref struct TrRmNativeCallableTableReader
             var data = GetRow(row);
             var method = Read(data, 0);
             var entryName = Read(data, 4);
+            var effectsMask = method > 0 && method <= methods.Count
+                ? contracts.GetEffectsMask((int)method) : 0;
+            var declaredEffectsProfile =
+                contracts.Schema.UsesDevelopmentFunctionPointerEffects();
             if (method is 0 or > 0xFF_FFFF || method > methods.Count
                 || entryName > 0xFF_FFFF || entryName > strings.Count
                 || _rowByMethod[method] != 0
@@ -83,8 +87,9 @@ internal readonly ref struct TrRmNativeCallableTableReader
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
                 || !contracts.HasNativeAbi((int)method)
                 || contracts.GetNativeAbi((int)method) != new TrRmNativeAbiContract(1, 2, 0)
-                || (contracts.GetEffectsMask((int)method) & 4) != 4
-                || (contracts.GetEffectsMask((int)method) & 2) != 0)
+                || (declaredEffectsProfile
+                    ? (effectsMask & ~6u) != 0
+                    : (effectsMask & 4) != 4 || (effectsMask & 2) != 0))
             {
                 throw InvalidNativeCallable();
             }

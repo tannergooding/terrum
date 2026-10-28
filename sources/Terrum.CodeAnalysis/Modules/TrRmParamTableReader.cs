@@ -33,6 +33,7 @@ public readonly ref struct TrRmParamTableReader
             || (long)recordCount * RowSize != section.Length
             || schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft))
         {
@@ -105,7 +106,7 @@ public readonly ref struct TrRmParamTableReader
             return false;
         }
 
-        if (schema == TrRmArtifactSchema.Development)
+        if (schema.IsDevelopmentProfile())
         {
             return data[12] <= 4 && data[13] == 0;
         }

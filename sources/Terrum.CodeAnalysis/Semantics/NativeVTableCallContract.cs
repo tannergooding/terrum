@@ -36,6 +36,7 @@ internal static class NativeVTableCallContract
             || method.VTableByteOffset > int.MaxValue - NativeTargetProfile.PointerSize
             || method.Parameters.IsDefault
             || method.Outputs.IsDefault
+            || !method.Outputs.IsEmpty
             || !IsNativeValueType(function.ReturnType, program))
         {
             return false;
@@ -58,7 +59,8 @@ internal static class NativeVTableCallContract
             if (output is null || output.ParameterIndex <= 0
                 || output.ParameterIndex >= function.ParameterCount
                 || annotatedOutputs[output.ParameterIndex]
-                || !DirectNativeImportContract.IsOutputPointee(output.PointeeType)
+                || !DirectNativeImportContract.IsAggregateOutputPointee(
+                    output.PointeeType, program.Structures)
                 || (NativePointerTypes.IsType(output.PointeeType)
                     && !NativePointerTypeContract.IsValidType(
                         output.PointeeType, program.NativePointerTypes))
@@ -70,11 +72,15 @@ internal static class NativeVTableCallContract
                 || output.FailureDisposition != 1
                 || function.ReturnType is not (PrimitiveType.Int32 or PrimitiveType.UInt32)
                 || function.Variables[output.ParameterIndex] is not {
-                    Type: PrimitiveType.NativeStorageAddress,
-                    IsOut: true,
+                    IsOut: false,
                     IsInit: false,
                     IsImplicitRef: false,
-                })
+                } outputParameter
+                || !NativePointerTypeContract.IsValidType(
+                    outputParameter.Type, program.NativePointerTypes)
+                || program.NativePointerTypes[NativePointerTypes.Index(outputParameter.Type)].PointeeType
+                    != output.PointeeType
+                || !program.NativePointerTypes[NativePointerTypes.Index(outputParameter.Type)].IsWritable)
             {
                 return false;
             }
@@ -92,12 +98,12 @@ internal static class NativeVTableCallContract
                 || parameter.Retention is not (NativeParameterRetention.NoEscape
                     or NativeParameterRetention.MayEscape)
                 || !DirectNativeImportContract.IsInputPointee(parameter.PointeeType, program.Structures)
-                || function.Variables[parameter.ParameterIndex] is not {
-                    Type: PrimitiveType.NativeRawPointer,
-                    IsOut: false,
-                    IsInit: false,
-                    IsImplicitRef: false,
-                })
+                || function.Variables[parameter.ParameterIndex] is not BoundVariable pointerParameter
+                || !DirectNativeImportContract.MatchesNativeParameterFormalType(
+                    pointerParameter.Type, parameter.PointeeType, parameter.Access,
+                    program.NativePointerTypes)
+                || pointerParameter.IsOut || pointerParameter.IsInit
+                || pointerParameter.IsImplicitRef)
             {
                 return false;
             }
@@ -114,7 +120,11 @@ internal static class NativeVTableCallContract
             }
             if (annotatedOutputs[index])
             {
-                if (parameter.Type != PrimitiveType.NativeStorageAddress || !parameter.IsOut)
+                if (!NativePointerTypeContract.IsValidType(parameter.Type, program.NativePointerTypes)
+                    || program.NativePointerTypes[NativePointerTypes.Index(parameter.Type)].PointeeType
+                        != method.Outputs.Single(output => output.ParameterIndex == index).PointeeType
+                    || !program.NativePointerTypes[NativePointerTypes.Index(parameter.Type)].IsWritable
+                    || parameter.IsOut || parameter.IsInit)
                 {
                     return false;
                 }

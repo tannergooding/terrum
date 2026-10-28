@@ -131,7 +131,9 @@ public readonly ref struct TrRmFeatureTableReader
         if (recordCount < 0 || recordCount > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || schema is not (TrRmArtifactSchema.Standard
-                or TrRmArtifactSchema.Development or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+                or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft))
         {
             throw InvalidFeature();

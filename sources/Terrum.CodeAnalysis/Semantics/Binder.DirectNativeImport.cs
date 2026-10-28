@@ -64,14 +64,27 @@ internal sealed partial class Binder
     }
 
     private BoundExpression BindDirectNativeParameterAddress(SyntaxNode expression,
-        DirectNativeParameter parameter, TextSpan span) =>
-        IsAddressOfExpression(expression)
+        DirectNativeParameter parameter, PrimitiveType formalType, TextSpan span) =>
+        BindDirectNativeParameterArgument(expression, parameter, formalType, span);
+
+    private BoundExpression BindDirectNativeParameterArgument(SyntaxNode expression,
+        DirectNativeParameter parameter, PrimitiveType formalType, TextSpan span)
+    {
+        if (parameter.Access == NativeParameterAccess.Read
+            && NativePointerTypes.IsType(formalType)
+            && _nativePointerTypes[NativePointerTypes.Index(formalType)].IsWritable)
+        {
+            _ = GetNativePointerType(parameter.PointeeType, isWritable: false, span);
+        }
+
+        return IsAddressOfExpression(expression)
             ? BindNativeParameterAddress(expression, parameter.Access, parameter.Extent,
                 parameter.PointeeType, span)
-            : BindDirectNativePointerValue(expression, parameter);
+            : BindDirectNativePointerValue(expression, parameter, formalType);
+    }
 
     private BoundExpression BindDirectNativePointerValue(SyntaxNode expression,
-        DirectNativeParameter parameter)
+        DirectNativeParameter parameter, PrimitiveType formalType)
     {
         while (expression.Kind == SyntaxKind.ParenthesizedExpression)
         {
@@ -80,7 +93,15 @@ internal sealed partial class Binder
         if (expression.Kind == SyntaxKind.LiteralExpression
             && expression.Children is [SyntaxTokenElement { Token.Text: "null" }])
         {
-            return new BoundConstant(0, PrimitiveType.NativeRawPointer, expression.Span);
+            if (!DirectNativeImportContract.TryGetNativeParameterArgumentType(
+                formalType, parameter, [.. _nativePointerTypes], out var pointerType))
+            {
+                Report("TRM3030",
+                    "A null NativeParameter value has no matching pointer contract.",
+                    expression.Span);
+                return ErrorExpression(expression.Span);
+            }
+            return new BoundConstant(0, pointerType, expression.Span);
         }
 
         var literalType = NativeStringZConstructorType(expression);
@@ -93,7 +114,23 @@ internal sealed partial class Binder
                 ? BindNativeUtf16ZLiteral(expression, literalType)
                 : BindNativeUtf8ZLiteral(expression, literalType);
         }
-        return BindExpression(expression, PrimitiveType.NativeRawPointer);
+        var value = BindExpression(expression, null);
+        var matches = value.Type == PrimitiveType.NativeRawPointer
+            ? parameter.PointeeType == PrimitiveType.Void
+                && parameter.Access == NativeParameterAccess.Read
+            : NativePointerTypeContract.IsValidType(value.Type, [.. _nativePointerTypes])
+                && _nativePointerTypes[NativePointerTypes.Index(value.Type)].PointeeType
+                    == parameter.PointeeType
+                && (parameter.Access == NativeParameterAccess.Read
+                    || _nativePointerTypes[NativePointerTypes.Index(value.Type)].IsWritable);
+        if (!matches)
+        {
+            Report("TRM3007",
+                "A NativeParameter pointer value must match the pointee and access contract.",
+                expression.Span);
+            return ErrorExpression(expression.Span);
+        }
+        return value;
     }
 
     private static PrimitiveType? NativeStringZConstructorType(SyntaxNode expression)

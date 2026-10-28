@@ -16,7 +16,7 @@ internal static class TrRmNativeVTableTableWriter
     internal static byte[] Encode(IReadOnlyList<TrRmNativeVTableRow> rows,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader types,
-        TrRmContractTableReader contracts)
+        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -36,7 +36,7 @@ internal static class TrRmNativeVTableTableWriter
         }
 
         _ = new TrRmNativeVTableTableReader(result, rows.Count, methods, signatures,
-            parameters, types, contracts);
+            parameters, types, contracts, layouts);
         return result;
     }
 }
@@ -51,7 +51,7 @@ internal readonly ref struct TrRmNativeVTableTableReader
     internal TrRmNativeVTableTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader types,
-        TrRmContractTableReader contracts)
+        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * 16 != section.Length
@@ -86,7 +86,8 @@ internal readonly ref struct TrRmNativeVTableTableReader
                 throw InvalidNativeVTable();
             }
 
-            ValidateSignature((int)method, methods, signatures, parameters, types, contracts);
+            ValidateSignature((int)method, methods, signatures, parameters, types, contracts,
+                layouts);
             var parameterCount = signatures.GetParamRange(
                 methods.GetSignature((int)method)).Count;
             var nativeParameters = new bool[parameterCount];
@@ -147,7 +148,8 @@ internal readonly ref struct TrRmNativeVTableTableReader
 
     private static void ValidateSignature(int method, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts)
+        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts)
     {
         var signature = methods.GetSignature(method);
         if (!IsNativeValueType(types, signatures.GetResultTypeSpec(signature), allowVoid: true))
@@ -213,7 +215,8 @@ internal readonly ref struct TrRmNativeVTableTableReader
             }
             else if (nativeParameter is TrRmNativeParameterContract annotated)
             {
-                if (ordinal == 0 || !IsSupportedNativeParameter(types, typeSpec, annotated))
+                if (ordinal == 0
+                    || !IsSupportedNativeParameter(types, typeSpec, annotated, layouts))
                 {
                     throw InvalidNativeVTable();
                 }
@@ -280,15 +283,14 @@ internal readonly ref struct TrRmNativeVTableTableReader
     }
 
     private static bool IsSupportedNativeParameter(TrRmTypeSpecTableReader types,
-        uint typeSpec, TrRmNativeParameterContract parameter)
+        uint typeSpec, TrRmNativeParameterContract parameter, TrRmLayoutTableReader layouts)
         => parameter.Access is >= 1 and <= 3
             && parameter.Retention == 1
             && parameter.ExtentKind is 0 or 1
             && parameter.PointerDepth == 1
             && parameter.RequiredAlignment == 0
-            && parameter.Extent <= int.MaxValue
             && TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
-                types, typeSpec, out _);
+                types, typeSpec, parameter.Access, layouts, out _);
 
     private static bool IsNativeValueType(TrRmTypeSpecTableReader types,
         uint typeSpec, bool allowVoid)

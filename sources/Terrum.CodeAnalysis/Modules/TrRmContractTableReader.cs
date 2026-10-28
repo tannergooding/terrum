@@ -67,6 +67,16 @@ public readonly ref struct TrRmContractTableReader
     internal TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader typeSpecs, TrRmArtifactSchema schema)
+        : this(section, recordCount, types, methods, signatures, parameters,
+            typeSpecs, fieldPathCount: 0, default, default, schema,
+            profileAware: false, predicateGraphCount: 0)
+    {
+    }
+
+    internal TrRmContractTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader typeSpecs, int fieldPathCount,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmArtifactSchema schema, int predicateGraphCount = 0)
@@ -89,13 +99,14 @@ public readonly ref struct TrRmContractTableReader
             || fieldPathCount is < 0 or > 0xFF_FFFF
             || predicateGraphCount is < 0 or > 0xFF_FFFF
             || schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.CopyOriginDraft
                 or TrRmArtifactSchema.ForeignInvocationDraft)
             || (schema == TrRmArtifactSchema.CopyOriginDraft && !profileAware))
         {
             throw InvalidContract();
         }
-        var developmentProfile = schema == TrRmArtifactSchema.Development;
+        var developmentProfile = schema.IsDevelopmentProfile();
 
         _rows = recordCount == 0 ? default : new TrRmVariableTableIndex(section, recordCount, 8, 1);
         _methods = methods;
@@ -536,7 +547,14 @@ public readonly ref struct TrRmContractTableReader
 
         for (var method = 1; method <= methods.Count; method++)
         {
-            if (_hasNativeAbis[method] && (GetEffectsMask(method) & 4) == 0)
+            if (!_hasNativeAbis[method])
+            {
+                continue;
+            }
+
+            var role = GetNativeAbi(method).Role;
+            if ((!schema.UsesDevelopmentFunctionPointerEffects() || role == 4)
+                && (GetEffectsMask(method) & 4) == 0)
             {
                 throw InvalidContract();
             }

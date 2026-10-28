@@ -54,8 +54,11 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
         if (!ValidCount(methodDefCount)
             || schema is not (TrRmArtifactSchema.Standard
-                or TrRmArtifactSchema.Development or TrRmArtifactSchema.CopyOriginDraft)
-            || (schema != TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+                or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.ForeignInvocationDraft)
+            || (!schema.IsDevelopmentProfile()
                 && nativeFunctionPointerSignatureCount != 0))
         {
             throw InvalidType();
@@ -69,7 +72,7 @@ public readonly ref struct TrRmTypeSpecTableReader
         _nativeFunctionPointerSignatureCount = nativeFunctionPointerSignatureCount;
         _methodDefCount = methodDefCount;
         _schema = schema;
-        _nativeFunctionPointerTypeKeyCount = schema == TrRmArtifactSchema.Development
+        _nativeFunctionPointerTypeKeyCount = schema.IsDevelopmentProfile()
             ? nativeFunctionPointerSignatureCount
             : CountNativeFunctionPointerRows();
         for (var row = 1; row <= recordCount; row++)
@@ -325,7 +328,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     {
         callingConvention = 0;
         methodDefRow = 0;
-        if (_schema == TrRmArtifactSchema.Development
+        if (_schema.IsDevelopmentProfile()
             || typeSpecRow <= 0 || typeSpecRow > _recordCount)
         {
             return false;
@@ -438,7 +441,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     internal bool TryGetNativeFunctionPointerSignatureRow(ushort typeKey, out int signatureRow)
     {
         var index = (int)typeKey - NativeFunctionPointerTypeKeyStart;
-        if (_schema == TrRmArtifactSchema.Development
+        if (_schema.IsDevelopmentProfile()
             && index >= 0 && index < _nativeFunctionPointerSignatureCount
             && index < ushort.MaxValue - NativeFunctionPointerTypeKeyStart + 1)
         {
@@ -453,7 +456,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     internal bool TryGetNativeFunctionPointerTypeSpecRow(ushort typeKey,
         out int typeSpecRow)
     {
-        if (_schema != TrRmArtifactSchema.Development)
+        if (!_schema.IsDevelopmentProfile())
         {
             var index = (int)typeKey - NativeFunctionPointerTypeKeyStart;
             if (index >= 0 && index < _nativeFunctionPointerTypeKeyCount
@@ -563,7 +566,7 @@ public readonly ref struct TrRmTypeSpecTableReader
                 identities[row] = TypeIdentityBase + ((long)bytes[0] << 32)
                     + Read(bytes, 2);
             }
-            else if (_schema == TrRmArtifactSchema.Development
+            else if (_schema.IsDevelopmentProfile()
                 && bytes[0] == 0x0D && bytes.Length == 6 && bytes[1] == 0)
             {
                 var signature = Read(bytes, 2);
@@ -574,7 +577,7 @@ public readonly ref struct TrRmTypeSpecTableReader
                     keys[row] = (ushort)typeKey;
                 }
             }
-            else if (_schema != TrRmArtifactSchema.Development
+            else if (!_schema.IsDevelopmentProfile()
                 && bytes[0] == 0x0D && bytes.Length == 7 && bytes[1] == 0)
             {
                 identities[row] = TypeIdentityBase + 0x20000 + Read(bytes, 3);
@@ -803,7 +806,7 @@ public readonly ref struct TrRmTypeSpecTableReader
                 {
                     throw InvalidType();
                 }
-                if (_schema == TrRmArtifactSchema.Development)
+                if (_schema.IsDevelopmentProfile())
                 {
                     RequireLength(bytes, 6);
                     var signature = Read(bytes, 2);

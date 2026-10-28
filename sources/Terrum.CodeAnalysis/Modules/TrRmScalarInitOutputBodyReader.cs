@@ -46,7 +46,7 @@ internal static class TrRmScalarInitOutputBodyReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, ReadOnlySpan<byte> contractSection,
         TrRmContractTableReader contractTable,
-        TrRmNativeImportTableReader nativeImports,
+        TrRmDevelopmentNativeImportTableReader nativeImports,
         TrRmNativeVTableTableReader nativeVTables, uint ruleRevision,
         uint rootlessNativeValuesRuleRevision)
     {
@@ -76,7 +76,7 @@ internal static class TrRmScalarInitOutputBodyReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmVariableTableIndex contracts,
         TrRmContractTableReader contractTable,
-        TrRmNativeImportTableReader nativeImports,
+        TrRmDevelopmentNativeImportTableReader nativeImports,
         TrRmNativeVTableTableReader nativeVTables,
         uint ruleRevision, out uint effects)
     {
@@ -95,14 +95,17 @@ internal static class TrRmScalarInitOutputBodyReader
             var clause = contracts.GetRow(row);
             if (BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]) == 1)
             {
+                var effectMask = clause.Length == 12
+                    ? BinaryPrimitives.ReadUInt32LittleEndian(clause[8..]) : 0;
                 if (effects != 0 || clause.Length != 12
                     || BinaryPrimitives.ReadUInt32LittleEndian(clause)
                         != (0x1600_0000u | (uint)method)
                     || BinaryPrimitives.ReadUInt16LittleEndian(clause[6..]) != 0
-                    || (effects = BinaryPrimitives.ReadUInt32LittleEndian(clause[8..])) is < 1 or > 7)
+                    || (effectMask & ~6u) != 0)
                 {
                     throw InvalidBody();
                 }
+                effects = effectMask;
             }
         }
 
@@ -182,7 +185,7 @@ internal static class TrRmScalarInitOutputBodyReader
         private readonly TrRmParamTableReader _parameters;
         private readonly TrRmVariableTableIndex _contracts;
         private readonly TrRmContractTableReader _contractTable;
-        private readonly TrRmNativeImportTableReader _nativeImports;
+        private readonly TrRmDevelopmentNativeImportTableReader _nativeImports;
         private readonly TrRmNativeVTableTableReader _nativeVTables;
         private readonly uint _ruleRevision;
         private readonly uint _rootlessNativeValuesRuleRevision;
@@ -223,7 +226,7 @@ internal static class TrRmScalarInitOutputBodyReader
             TrRmBodyTableReader bodies, TrRmMethodDefTableReader methods,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmVariableTableIndex contracts, TrRmContractTableReader contractTable,
-            TrRmNativeImportTableReader nativeImports,
+            TrRmDevelopmentNativeImportTableReader nativeImports,
             TrRmNativeVTableTableReader nativeVTables, uint ruleRevision,
             uint rootlessNativeValuesRuleRevision)
         {
@@ -1321,12 +1324,20 @@ internal static class TrRmScalarInitOutputBodyReader
                                     && NativeTypeKey(outputPointee) != ushort.MaxValue
                                     && Scalar(NativeTypeKey(outputPointee));
                                 var matchesInput = nativeParameter is TrRmNativeParameterContract addressParameter
-                                    && addressParameter.Access == 1
                                     && addressParameter.Retention == 1
                                     && addressParameter.Extent <= 1;
-                                if ((!matchesOutput && !matchesInput)
-                                    || !TypeSpecsEqual(checked((uint)TypeSpecRow(_valueTypes[valueId - 1])),
-                                        _parameters.GetTypeSpec(first + argument)))
+                                var argumentTypeSpec = checked((uint)TypeSpecRow(
+                                    _valueTypes[valueId - 1]));
+                                var formalTypeSpec = _parameters.GetTypeSpec(first + argument);
+                                var matchingAddressType = matchesOutput
+                                    ? TypeSpecsEqual(argumentTypeSpec, formalTypeSpec)
+                                    : matchesInput && nativeParameter is
+                                        TrRmNativeParameterContract inputParameter
+                                        && TrRmNativeImportTypeContract
+                                            .MatchesNativeParameterArgumentType(_types,
+                                                argumentTypeSpec, formalTypeSpec,
+                                                inputParameter.Access);
+                                if ((!matchesOutput && !matchesInput) || !matchingAddressType)
                                 {
                                     throw InvalidBody();
                                 }
@@ -1334,8 +1345,15 @@ internal static class TrRmScalarInitOutputBodyReader
                             }
                             else if (UseValue(valueId) != type
                                 || (_types.IsNativePointerTypeKey(type)
-                                    && !TypeSpecsEqual(checked((uint)TypeSpecRow(_valueTypes[valueId - 1])),
-                                        _parameters.GetTypeSpec(first + argument))))
+                                    && !(nativeParameter is TrRmNativeParameterContract valueParameter
+                                        ? TrRmNativeImportTypeContract
+                                            .MatchesNativeParameterArgumentType(_types,
+                                                checked((uint)TypeSpecRow(_valueTypes[valueId - 1])),
+                                                _parameters.GetTypeSpec(first + argument),
+                                                valueParameter.Access)
+                                        : TypeSpecsEqual(
+                                            checked((uint)TypeSpecRow(_valueTypes[valueId - 1])),
+                                            _parameters.GetTypeSpec(first + argument)))))
                             {
                                 throw InvalidBody();
                             }

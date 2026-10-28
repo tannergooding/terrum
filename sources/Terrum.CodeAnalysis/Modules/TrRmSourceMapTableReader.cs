@@ -53,7 +53,7 @@ public readonly ref struct TrRmSourceMapTableReader
             if (IsBodyInstructionSlot(kind, selector, schema))
             {
                 if (target == 0
-                    || (schema == TrRmArtifactSchema.Development && block == 0))
+                    || (schema.IsDevelopmentProfile() && block == 0))
                 {
                     throw InvalidMap();
                 }
@@ -132,7 +132,7 @@ public readonly ref struct TrRmSourceMapTableReader
     internal void ValidateCompactLinearLocations(TrRmMethodDefTableReader methods,
         ReadOnlySpan<int> operationCounts)
     {
-        if (_schema != TrRmArtifactSchema.Development)
+        if (!_schema.IsDevelopmentProfile())
         {
             throw InvalidMap();
         }
@@ -159,7 +159,7 @@ public readonly ref struct TrRmSourceMapTableReader
             var slot = _slots.Slice(offset, 16);
             var kind = ReadU16(slot, 0);
             if ((_schema == TrRmArtifactSchema.Standard && kind == 0)
-                || (_schema == TrRmArtifactSchema.Development && kind == 0x0020))
+                || (_schema.IsDevelopmentProfile() && kind == 0x0020))
             {
                 var method = methods.GetBodyOwnerMethod((int)Read(slot, 4));
                 var block = ReadU16(slot, 8);
@@ -167,7 +167,7 @@ public readonly ref struct TrRmSourceMapTableReader
                 var countIndex = _schema == TrRmArtifactSchema.Standard
                     ? block + 1 : block;
                 if (ReadU16(slot, 2) != 1 || ReadU16(slot, 10) != 0
-                    || (_schema == TrRmArtifactSchema.Development && block == 0)
+                    || (_schema.IsDevelopmentProfile() && block == 0)
                     || countIndex >= counts.Length
                     || Read(slot, 12) > (uint)counts[countIndex])
                 {

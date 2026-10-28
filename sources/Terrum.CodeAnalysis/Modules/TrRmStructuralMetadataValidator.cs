@@ -411,6 +411,12 @@ public static class TrRmStructuralMetadataValidator
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: true);
 
+    internal static ValidatedExecutionTables
+        ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: true,
+            developmentFunctionPointerEffectsDraft: true);
+
     internal static ValidatedExecutionTables ValidateCopyOriginDraftAndGetExecutionTables(
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
@@ -653,9 +659,12 @@ public static class TrRmStructuralMetadataValidator
 
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
         BodyInspection inspection, bool developmentProfile,
-        bool copyOriginDraft = false, bool foreignInvocationDraft = false)
+        bool copyOriginDraft = false, bool foreignInvocationDraft = false,
+        bool developmentFunctionPointerEffectsDraft = false)
     {
-        var selectedSchema = developmentProfile
+        var selectedSchema = developmentFunctionPointerEffectsDraft
+            ? TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+            : developmentProfile
             ? TrRmArtifactSchema.Development
             : copyOriginDraft
                 ? TrRmArtifactSchema.CopyOriginDraft
@@ -666,6 +675,7 @@ public static class TrRmStructuralMetadataValidator
         {
             throw InvalidMetadata();
         }
+        developmentProfile |= developmentFunctionPointerEffectsDraft;
 
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
             || !index.TryGetSection(0x0002, out var stringBytes, out var stringCount))
@@ -951,7 +961,7 @@ public static class TrRmStructuralMetadataValidator
         var contracts = developmentProfile
             ? new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs,
-                developmentProfile: true)
+                index.Schema)
             : new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs, fieldPathCount,
                 features, modules, index.Schema, predicateGraphs.Count);
@@ -1046,7 +1056,7 @@ public static class TrRmStructuralMetadataValidator
             : default;
         var nativeVTables = developmentProfile
             ? new TrRmNativeVTableTableReader(nativeVTableBytes,
-                nativeVTableCount, methods, signatures, parameters, typeSpecs, contracts)
+                nativeVTableCount, methods, signatures, parameters, typeSpecs, contracts, layouts)
             : default;
         if (foreignInvocationDraft)
         {
@@ -1089,7 +1099,7 @@ public static class TrRmStructuralMetadataValidator
         var sourceMaps = sourceMapCount == 0 ? default
             : new TrRmSourceMapTableReader(sourceMapBytes, sourceMapCount,
                 methods, sourceFiles, developmentProfile
-                    ? TrRmArtifactSchema.Development : TrRmArtifactSchema.Standard);
+                    ? index.Schema : TrRmArtifactSchema.Standard);
 
         if (inspection != BodyInspection.None)
         {

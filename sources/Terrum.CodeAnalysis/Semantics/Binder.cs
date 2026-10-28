@@ -2808,23 +2808,8 @@ internal sealed partial class Binder
             if (hasDirectNativePointerType)
             {
                 nativePointeeType = pointeeType;
-                if (nativeOutputCondition.HasValue && isWritableNativePointer)
-                {
-                    type = BindType(typeNode, allowVoid: false);
-                }
-                else if (nativeParameters.ContainsKey(parameterIndex + 1) && !isWritableNativePointer)
-                {
-                    type = PrimitiveType.NativeRawPointer;
-                }
-                else
-                {
-                    type = BindType(typeNode, allowVoid: false);
-                }
             }
-            else
-            {
-                type = BindType(typeNode, allowVoid: false);
-            }
+            type = BindType(typeNode, allowVoid: false);
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
             {
                 Report("TRM3023", "A native buffer view cannot be a parameter.", parameter.Span);
@@ -3018,12 +3003,16 @@ internal sealed partial class Binder
             {
                 var parameterIndex = ordinal - 1;
                 if (parameterIndex < 0 || parameterIndex >= declared.Count
-                    || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
                     || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
-                    || nativeOutputConditionsByIndex.ContainsKey(parameterIndex))
+                    || !DirectNativeImportContract.MatchesNativeParameterFormalType(
+                        declared[parameterIndex].Type, pointeeType, nativeParameter.Access,
+                        [.. _nativePointerTypes])
+                    || nativeOutputConditionsByIndex.ContainsKey(parameterIndex)
+                    || nativeParameter.Retention != NativeParameterRetention.NoEscape
+                    || (pointeeType == PrimitiveType.Void && nativeParameter.Extent != 0))
                 {
                     Report("TRM3030",
-                        "NativeParameter must identify a non-output raw pointer parameter.",
+                        "NativeParameter must identify a non-output pointer parameter with a matching pointee type and access qualifier.",
                         nativeImportAttribute?.Span ?? declaration.Span);
                     continue;
                 }
@@ -3103,14 +3092,16 @@ internal sealed partial class Binder
             {
                 var parameterIndex = ordinal - 1;
                 if (parameterIndex <= 0 || parameterIndex >= declared.Count
-                    || declared[parameterIndex].Type != PrimitiveType.NativeRawPointer
                     || declared[parameterIndex].IsOut
                     || nativeOutputConditionsByIndex.ContainsKey(parameterIndex)
                     || declared[parameterIndex].NativePointeeType is not PrimitiveType pointeeType
-                    || !DirectNativeImportContract.IsInputPointee(pointeeType, _structs))
+                    || !DirectNativeImportContract.IsInputPointee(pointeeType, _structs)
+                    || !DirectNativeImportContract.MatchesNativeParameterFormalType(
+                        declared[parameterIndex].Type, pointeeType, nativeParameter.Access,
+                        [.. _nativePointerTypes]))
                 {
                     Report("TRM3030",
-                        "NativeParameter must identify a non-receiver raw pointer parameter with a supported pointee type.",
+                        "NativeParameter must identify a non-receiver pointer parameter with a matching pointee type and access qualifier.",
                         nativeVTableMethodAttribute?.Span ?? declaration.Span);
                     continue;
                 }
@@ -3129,7 +3120,8 @@ internal sealed partial class Binder
             for (var index = 0; index < declared.Count; index++)
             {
                 var parameter = declared[index];
-                if (parameter.IsWritableNativePointer)
+                if (parameter.IsWritableNativePointer
+                    && !nativeParameters.ContainsKey(index + 1))
                 {
                     Report("TRM3030",
                         "NativeOutput is not supported on NativeVTableMethod without an admitted interface method contract.",
@@ -7688,7 +7680,7 @@ internal sealed partial class Binder
                 parameter.ParameterIndex == index) is DirectNativeParameter nativeParameter)
             {
                 boundArguments.Add(BindDirectNativeParameterAddress(
-                    value, nativeParameter, argument.Span));
+                    value, nativeParameter, signature.ParameterTypes[index], argument.Span));
             }
             else
             {
@@ -8192,19 +8184,27 @@ internal sealed partial class Binder
                 }
                 else if (signature?.External is BoundFunction directParameterFunction
                     && directParameterFunction.DirectNativeImport is not null
-                    && expectedParameter?.Type == PrimitiveType.NativeRawPointer && position >= 0
+                    && expectedParameter is not null && position >= 0
                     && DirectNativeImportContract.ParameterForParameter(
-                        directParameterFunction, position) is DirectNativeParameter directInputParameter)
+                        directParameterFunction, position) is DirectNativeParameter directInputParameter
+                    && DirectNativeImportContract.MatchesNativeParameterFormalType(
+                        expectedParameter.Type, directInputParameter.PointeeType,
+                        directInputParameter.Access, [.. _nativePointerTypes]))
                 {
-                    bound.Add(BindDirectNativeParameterAddress(value, directInputParameter, argument.Span));
+                    bound.Add(BindDirectNativeParameterAddress(value, directInputParameter,
+                        expectedParameter.Type, argument.Span));
                 }
                 else if (signature?.External is BoundFunction nativeVTableFunction
                     && nativeVTableFunction.NativeVTableMethod is not null
-                    && expectedParameter?.Type == PrimitiveType.NativeRawPointer && position >= 0
+                    && expectedParameter is not null && position >= 0
                     && NativeVTableCallContract.ParameterForParameter(
-                        nativeVTableFunction, position) is DirectNativeParameter vtableInputParameter)
+                        nativeVTableFunction, position) is DirectNativeParameter vtableInputParameter
+                    && DirectNativeImportContract.MatchesNativeParameterFormalType(
+                        expectedParameter.Type, vtableInputParameter.PointeeType,
+                        vtableInputParameter.Access, [.. _nativePointerTypes]))
                 {
-                    bound.Add(BindDirectNativeParameterAddress(value, vtableInputParameter, argument.Span));
+                    bound.Add(BindDirectNativeParameterAddress(value, vtableInputParameter,
+                        expectedParameter.Type, argument.Span));
                 }
                 else
                 {

@@ -5860,11 +5860,29 @@ public static partial class SemanticVerifier
                             && directNativeParameter is not null
                             && DirectNativeImportContract.MatchesAddress(
                                 directParameterAddress, directNativeParameter, function, program);
+                        var isDirectNativeParameterValue = directNativeParameter is not null
+                            && argument is not BoundNativeStorageAddress
+                            && DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                                argument.Type, target.Variables[parameterSlot].Type,
+                                directNativeParameter, program.NativePointerTypes,
+                                argument is BoundConstant {
+                                    Type: PrimitiveType.NativeRawPointer,
+                                    Value: 0,
+                                });
                         var isNativeVTableParameterAddress = argument is BoundNativeStorageAddress
                             nativeVTableParameterAddress
                             && nativeVTableParameter is not null
                             && DirectNativeImportContract.MatchesAddress(
                                 nativeVTableParameterAddress, nativeVTableParameter, function, program);
+                        var isNativeVTableParameterValue = nativeVTableParameter is not null
+                            && argument is not BoundNativeStorageAddress
+                            && DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                                argument.Type, target.Variables[parameterSlot].Type,
+                                nativeVTableParameter, program.NativePointerTypes,
+                                argument is BoundConstant {
+                                    Type: PrimitiveType.NativeRawPointer,
+                                    Value: 0,
+                                });
                         var implicitReferenceTemporary = call.ImplicitReferenceTemporary(i);
                         if (implicitReferenceTemporary < -1)
                         {
@@ -6020,7 +6038,14 @@ public static partial class SemanticVerifier
                                         initialized, fieldMasks, declarations, function, program,
                                         ref remaining, depth + 1, failures);
                                 }
-                                else if (argument.Type != PrimitiveType.NativeRawPointer
+                                else if (!DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                                        argument.Type, target.Variables[parameterSlot].Type,
+                                        directNativeParameter,
+                                        program.NativePointerTypes,
+                                        argument is BoundConstant {
+                                            Type: PrimitiveType.NativeRawPointer,
+                                            Value: 0,
+                                        })
                                     && !isDirectNativeStringPointerArgument)
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
@@ -6039,7 +6064,14 @@ public static partial class SemanticVerifier
                                         initialized, fieldMasks, declarations, function, program,
                                         ref remaining, depth + 1, failures);
                                 }
-                                else if (argument.Type != PrimitiveType.NativeRawPointer
+                                else if (!DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                                        argument.Type, target.Variables[parameterSlot].Type,
+                                        nativeVTableParameter,
+                                        program.NativePointerTypes,
+                                        argument is BoundConstant {
+                                            Type: PrimitiveType.NativeRawPointer,
+                                            Value: 0,
+                                        })
                                     && !isNativeVTableStringPointerArgument)
                                 {
                                     throw InvalidEffect(argument.Span, "NativeImport");
@@ -6178,8 +6210,10 @@ public static partial class SemanticVerifier
                             && !(argument is BoundNativeOutputReservation && directNativeOutput is not null)
                             && !(argument is BoundNativeOutputReservation && nativeVTableOutput is not null)
                             && !isDirectNativeParameterAddress
+                            && !isDirectNativeParameterValue
                             && !isDirectNativeStringPointerArgument
                             && !isNativeVTableParameterAddress
+                            && !isNativeVTableParameterValue
                             && !isNativeVTableStringPointerArgument)
                         {
                             throw Invalid();
@@ -6483,7 +6517,13 @@ public static partial class SemanticVerifier
                 && (argument is BoundNativeStorageAddress address
                     ? DirectNativeImportContract.MatchesAddress(
                         address, nativeParameter, caller, program)
-                    : argument.Type == PrimitiveType.NativeRawPointer
+                    : DirectNativeImportContract.MatchesNativeParameterArgumentType(
+                        argument.Type, signature.ParameterTypes[index], nativeParameter,
+                        program.NativePointerTypes,
+                        argument is BoundConstant {
+                            Type: PrimitiveType.NativeRawPointer,
+                            Value: 0,
+                        })
                         || DirectNativeImportContract.IsStringPointerArgument(
                             argument, nativeParameter, program));
             if ((nativeParameter is null

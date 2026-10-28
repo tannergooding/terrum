@@ -19,9 +19,6 @@ public sealed class NativeVTableCallTests
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int NativeVTableDispatch(IntPtr receiver);
 
-    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
-    private delegate int NativeVTableOutputDispatch(IntPtr receiver, IntPtr output);
-
     [Test]
     public void NativeVTableDeclarationRoundTripsThroughStandardTrRm()
     {
@@ -136,7 +133,7 @@ public sealed class NativeVTableCallTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
 
         var privateArtifact = ModuleCompiler.CreateProducer(offsetLoaded, ["Invoke"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(92));
         var privateReference = ModuleCompiler.CreateReference(privateArtifact);
         var privateConsumer = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
@@ -223,7 +220,7 @@ public sealed class NativeVTableCallTests
     public void NativeVTableVoidDeclarationRoundTripsThroughStandardTrRm()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeVTableMethod(3)]
             public extern unsafe void Release(ptr<void> receiver);
             """));
@@ -278,8 +275,10 @@ public sealed class NativeVTableCallTests
         Assert.That(importedDispatch.IsExternal, Is.False);
         Assert.That(importedDispatch.ModuleImport, Is.EqualTo(
             new BoundModuleImport("VTableProvider", "Invoke", 1, 0)));
-        Assert.That(loaded.Functions.Single(static function => function.Name == "Dispatch")
-            .IndexedBody, Is.Not.Null);
+        var dispatchFunction = loaded.Functions.Single(static function =>
+            function.Name == "Dispatch");
+        Assert.That(dispatchFunction.IndexedBody, Is.Null);
+        Assert.That(dispatchFunction.Body.Statements, Is.Not.Empty);
         Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
 
         var nativeProvider = NativeModuleCompiler.CreateProducer(provider.Program!,
@@ -363,26 +362,73 @@ public sealed class NativeVTableCallTests
     }
 
     [Test]
+    public void DevelopmentEffectsProfileKeepsNativeVTableRoleEffectsRequired()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeVTableMethod(0)]
+            public extern unsafe int32 Invoke(ptr<void> receiver);
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentFunctionPointerEffectsDraft(
+            compilation.Program!, "vtable-effects");
+        var index = TrRmArtifactIndex.ForDevelopmentFunctionPointerEffectsDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index);
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        Assert.That(tables.Contracts.GetEffectsMask(1), Is.EqualTo(4u));
+
+        var (firstContract, contractCount) = tables.Methods.GetContractRange(1);
+        var effectsRow = 0;
+        for (var indexInRange = 0; indexInRange < contractCount; indexInRange++)
+        {
+            var row = firstContract + indexInRange;
+            if (BinaryPrimitives.ReadUInt16LittleEndian(
+                tables.Contracts.GetRow(row).Slice(4, sizeof(ushort))) == 1)
+            {
+                effectsRow = row;
+                break;
+            }
+        }
+        Assert.That(effectsRow, Is.GreaterThan(0));
+
+        Assert.That(index.TryGetSection(0x001B, out _, out var contractRowCount), Is.True);
+        var sectionOffset = FindSectionOffset(artifact, 0x001B);
+        var indexByteCount = checked((contractRowCount + 1) * sizeof(uint));
+        var rowOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            artifact.AsSpan(sectionOffset + ((effectsRow - 1) * sizeof(uint)))));
+        var effectsMaskOffset = sectionOffset + indexByteCount + rowOffset + 8;
+        var malformed = (byte[])artifact.Clone();
+        BinaryPrimitives.WriteUInt32LittleEndian(malformed.AsSpan(effectsMaskOffset), 0);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadDevelopmentFunctionPointerEffectsDraft(malformed));
+    }
+
+    [Test]
     public async Task NativeVTableTrRmImportDispatchesNonNullReceiverAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeVTableMethod(0)]
             public extern unsafe int32 Invoke(ptr<void> receiver);
             """));
         Assert.That(provider.HasErrors, Is.False,
             string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var artifact = TrRmExecutableCompiler.Emit(provider.Program!, "VTableProvider");
-        var reference = TrRmExecutableCompiler.CreateReference(artifact);
+        var artifact = TrRmExecutableCompiler.EmitDevelopmentFunctionPointerEffectsDraft(
+            provider.Program!, "VTableProvider");
+        var reference = TrRmExecutableCompiler
+            .CreateDevelopmentFunctionPointerEffectsDraftReference(artifact);
         var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             public int32 GetValue(ptr<void> receiver) { return 42; }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             public unsafe int32 Dispatch(ptr<void> receiver) {
                 unsafe { return Invoke(receiver); }
@@ -397,8 +443,11 @@ public sealed class NativeVTableCallTests
         var receiver = IntPtr.Zero;
         try
         {
-            var consumerArtifact = TrRmExecutableCompiler.Emit(consumer.Program!, "VTableConsumer");
-            var loadedConsumer = TrRmExecutableCompiler.Load(consumerArtifact);
+            var consumerArtifact = TrRmExecutableCompiler
+                .EmitDevelopmentFunctionPointerEffectsDraft(
+                    consumer.Program!, "VTableConsumer");
+            var loadedConsumer = TrRmExecutableCompiler
+                .LoadDevelopmentFunctionPointerEffectsDraft(consumerArtifact);
             await File.WriteAllBytesAsync(libraryPath, NativeEmitter.EmitLibrary(
                 loadedConsumer, ["GetValue", "Dispatch"], NativeRuntimePolicy.FailFast))
                 .ConfigureAwait(true);
@@ -431,121 +480,21 @@ public sealed class NativeVTableCallTests
     }
 
     [Test]
-    public async Task NativeVTableTrRmOutputWritesThroughNonNullReceiverAsync()
+    public void NativeVTableSlotAloneDoesNotAdmitAggregateOutput()
     {
-        Assume.That(OperatingSystem.IsWindows()
-            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Packet { public uint32 Value; }
+
             [Terrum.Interop.NativeVTableMethod(0)]
-            [Terrum.Interop.NativeOutput(1, NonNegative)]
-            public extern unsafe int32 Invoke(ptr<void> receiver, write ptr<uint32> output);
+            extern unsafe int32 Invoke(ptr<void> receiver,
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Packet> output);
             """));
-        Assert.That(provider.HasErrors, Is.False,
-            string.Join(Environment.NewLine, provider.Diagnostics));
 
-        var providerArtifact = TrRmExecutableCompiler.Emit(provider.Program!, "VTableOutputProvider");
-        var loadedProvider = TrRmExecutableCompiler.Load(providerArtifact);
-        var loadedMethod = loadedProvider.Functions.Single(static function => function.Name == "Invoke");
-        Assert.That(loadedMethod.NativeVTableMethod!.Outputs.Single(),
-            Is.EqualTo(new DirectNativeOutput(1, PrimitiveType.UInt32, 3, 1)));
-
-        var contractIndex = TrRmArtifactIndex.ForDevelopment(providerArtifact);
-        Assert.That(contractIndex.TryGetSection(0x001B, out _, out var contractCount), Is.True);
-        var contractSectionOffset = FindSectionOffset(providerArtifact, 0x001B);
-        var contractDataOffset = contractSectionOffset + ((contractCount + 1) * sizeof(uint));
-        var malformedProvider = (byte[])providerArtifact.Clone();
-        var mutatedOutput = false;
-        for (var row = 1; row <= contractCount; row++)
-        {
-            var rowStart = contractDataOffset + checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-                malformedProvider.AsSpan(contractSectionOffset + ((row - 1) * sizeof(uint)))));
-            if (BinaryPrimitives.ReadUInt16LittleEndian(malformedProvider.AsSpan(rowStart + 4)) == 0x12)
-            {
-                BinaryPrimitives.WriteUInt32LittleEndian(malformedProvider.AsSpan(rowStart + 8), 0);
-                mutatedOutput = true;
-            }
-        }
-        Assert.That(mutatedOutput, Is.True);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(malformedProvider));
-
-        var semanticProvider = ModuleCompiler.CreateProducer(loadedProvider, ["Invoke"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(semanticProvider.AsSpan(4)), Is.EqualTo(89));
-        var reference = TrRmExecutableCompiler.CreateReference(providerArtifact);
-        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            bool Failed(int32 status) { return status < 0; }
-            public unsafe int32 Dispatch(ptr<void> receiver) {
-                mut uint32 output = 0;
-                unsafe {
-                    int32 status = Invoke(receiver, &output);
-                    if (Failed(status)) { return -1; }
-                    else { return int32(output); }
-                }
-            }
-            """), reference);
-        Assert.That(consumer.HasErrors, Is.False,
-            string.Join(Environment.NewLine, consumer.Diagnostics));
-
-        var consumerArtifact = TrRmExecutableCompiler.Emit(consumer.Program!, "VTableOutputConsumer");
-        AssertNativeVTableFeatures(TrRmArtifactIndex.ForDevelopment(consumerArtifact),
-            hasScalarInitOutput: true);
-        var loadedConsumer = TrRmExecutableCompiler.Load(consumerArtifact);
-        var privateReference = ModuleCompiler.CreateReference(semanticProvider);
-        var privateConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            bool Failed(int32 status) { return status < 0; }
-            public unsafe int32 Dispatch(ptr<void> receiver) {
-                mut uint32 output = 0;
-                unsafe {
-                    int32 status = Invoke(receiver, &output);
-                    if (Failed(status)) { return -1; }
-                    else { return int32(output); }
-                }
-            }
-            """), privateReference);
-        Assert.That(privateConsumer.HasErrors, Is.False,
-            string.Join(Environment.NewLine, privateConsumer.Diagnostics));
-
-        var libraryPath = Path.Combine(TestArtifactPaths.DirectoryPath, $"terrum-trrm-vtable-output-{Guid.NewGuid():N}.dll");
-        var handle = IntPtr.Zero;
-        var vtable = IntPtr.Zero;
-        var receiver = IntPtr.Zero;
-        NativeVTableOutputDispatch outputCallback = static (_, output) =>
-        {
-            Marshal.WriteInt32(output, 42);
-            return 0;
-        };
-        try
-        {
-            await File.WriteAllBytesAsync(libraryPath, NativeEmitter.EmitLibrary(
-                loadedConsumer, ["Dispatch"], NativeRuntimePolicy.FailFast))
-                .ConfigureAwait(true);
-            handle = NativeLibrary.Load(libraryPath);
-            vtable = Marshal.AllocHGlobal(IntPtr.Size);
-            receiver = Marshal.AllocHGlobal(IntPtr.Size);
-            Marshal.WriteIntPtr(vtable, Marshal.GetFunctionPointerForDelegate(outputCallback));
-            Marshal.WriteIntPtr(receiver, vtable);
-
-            var dispatch = Marshal.GetDelegateForFunctionPointer<NativeVTableDispatch>(
-                NativeLibrary.GetExport(handle, "Dispatch"));
-            Assert.That(dispatch(receiver), Is.EqualTo(42));
-            GC.KeepAlive(outputCallback);
-        }
-        finally
-        {
-            if (handle != IntPtr.Zero)
-            {
-                NativeLibrary.Free(handle);
-            }
-            if (receiver != IntPtr.Zero)
-            {
-                Marshal.FreeHGlobal(receiver);
-            }
-            if (vtable != IntPtr.Zero)
-            {
-                Marshal.FreeHGlobal(vtable);
-            }
-            await TestFileCleanup.DeleteWithRetryAsync(libraryPath).ConfigureAwait(true);
-        }
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3030"), Is.True);
     }
 
     private static string CompilerApphost()
@@ -619,7 +568,7 @@ public sealed class NativeVTableCallTests
                 }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             uint32 GetValue(ptr<TestObject> receiver, uint32 first, float64 second,
                 uint32 third, float64 fourth, float64 fifth, uint32 sixth) {
@@ -694,7 +643,7 @@ public sealed class NativeVTableCallTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             float64 GetValue(ptr<TestObject> receiver, write ptr<uint32> output) {
                 unsafe {
@@ -724,77 +673,6 @@ public sealed class NativeVTableCallTests
     }
 
     [Test]
-    public void NativeVTableMixedNativeAndTerrumOutputsPreserveScalarAndPointerValues()
-    {
-        Assume.That(OperatingSystem.IsWindows()
-            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [Terrum.Interop.NativeImport("kernel32.dll", "GetCurrentProcess")]
-            [NoThrow]
-            extern unsafe ptr<void> GetCurrentProcess();
-
-            [Blittable] [Layout(LayoutKind.Sequential)]
-            struct TestVTable {
-                public fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>, write ptr<ptr<void>>,
-                    write ptr<uint32>, ptr<void>, int32> Method;
-                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, write ptr<uint32>,
-                    write ptr<ptr<void>>, write ptr<uint32>, ptr<void>, int32> method) {
-                    Method = method;
-                }
-            }
-
-            [Blittable] [Layout(LayoutKind.Sequential)]
-            struct TestObject {
-                public ptr<TestVTable> VTable;
-                public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
-            }
-
-            [NoThrow]
-            [Terrum.Interop.NativeCallable]
-            int32 GetValues(ptr<TestObject> receiver, write ptr<uint32> scalarOutput,
-                write ptr<ptr<void>> pointerOutput, write ptr<uint32> ordinaryOutput,
-                ptr<void> pointerValue) {
-                unsafe {
-                    *scalarOutput = 42;
-                    *pointerOutput = pointerValue;
-                    *ordinaryOutput = 99;
-                    return 0;
-                }
-            }
-
-            [Terrum.Interop.NativeOutput(1, NonNegative)]
-            [Terrum.Interop.NativeOutput(2, NonNegative)]
-            [Terrum.Interop.NativeVTableMethod(0)]
-            extern unsafe int32 Invoke(ptr<TestObject> receiver,
-                write ptr<uint32> scalarOutput, write ptr<ptr<void>> pointerOutput,
-                out uint32 ordinaryOutput, ptr<void> pointerValue);
-
-            int32 Main() {
-                unsafe {
-                    ptr<void> pointerValue = GetCurrentProcess();
-                    TestVTable vtable = new TestVTable(&GetValues);
-                    TestObject instance = new TestObject(&vtable);
-                    ptr<TestObject> receiver = &instance;
-                    mut uint32 scalarOutput = 0;
-                    mut ptr<void> pointerOutput = null;
-                    mut uint32 ordinaryOutput = 0;
-                    int32 result = Invoke(receiver, &scalarOutput, &pointerOutput,
-                        out ordinaryOutput, pointerValue);
-                    if (result < 0) { return -1; }
-                    if (ordinaryOutput != 99) { return -2; }
-                    if (scalarOutput != 42) { return -3; }
-                    if (pointerOutput != pointerValue) { return -4; }
-                    return 0;
-                }
-            }
-            """));
-
-        Assert.That(compilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
-    }
-
-    [Test]
     public async Task NativeVTableBoolResultWithOutputPreservesTheReturnValueAsync()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -814,7 +692,7 @@ public sealed class NativeVTableCallTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             bool GetValue(ptr<TestObject> receiver, write ptr<uint32> output) {
                 unsafe {
@@ -871,7 +749,7 @@ public sealed class NativeVTableCallTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 ReadFirst(ptr<TestObject> receiver, ptr<char16> value) {
                 unsafe { return *value == 'a' ? 42 : 0; }
@@ -915,7 +793,7 @@ public sealed class NativeVTableCallTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             ptr<void> GetValue(ptr<TestObject> receiver) { return null; }
 
@@ -973,7 +851,7 @@ public sealed class NativeVTableCallTests
                 }
             }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             uint32 GetValue(ptr<TestObject> receiver, ptr<uint32> value) { return 74; }
 
@@ -1034,11 +912,11 @@ public sealed class NativeVTableCallTests
             public extern unsafe int32 Invoke(ptr<TestObject> receiver, ptr<TestPayload> value);
             """;
         const string consumerSource = """
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 GetFirst(ptr<TestObject> receiver, ptr<TestPayload> value) { return 42; }
 
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             int32 GetSecond(ptr<TestObject> receiver, ptr<TestPayload> value) { return 43; }
 

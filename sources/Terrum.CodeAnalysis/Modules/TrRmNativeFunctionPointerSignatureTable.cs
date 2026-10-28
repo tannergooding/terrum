@@ -43,6 +43,8 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
     private readonly TrRmMethodSigTableReader _signatures;
     private readonly TrRmParamTableReader _parameters;
     private readonly TrRmTypeSpecTableReader _types;
+    private readonly TrRmContractTableReader _contracts;
+    private readonly TrRmArtifactSchema _schema;
     private readonly int[] _rowByMethod;
     private readonly int[] _methodBySignature;
     private readonly int[] _canonicalSignatureIdByRow;
@@ -68,6 +70,8 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         _signatures = signatures;
         _parameters = parameters;
         _types = types;
+        _contracts = contracts;
+        _schema = contracts.Schema;
         _recordCount = recordCount;
         _rowByMethod = new int[methods.Count + 1];
         _methodBySignature = new int[recordCount + 1];
@@ -87,8 +91,7 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
                 || signatures.GetGenericCount(methods.GetSignature((int)method)) != 0
                 || !contracts.HasNativeAbi((int)method)
                 || contracts.GetNativeAbi((int)method) != new TrRmNativeAbiContract(1, 3, 0)
-                || contracts.GetEffectsMask((int)method) != 5
-                || methods.GetContractRange((int)method).Count != 2)
+                || !ValidAnchorContractRange((int)method, methods, contracts))
             {
                 throw InvalidNativeFunctionPointerSignature();
             }
@@ -145,8 +148,12 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         var match = 0;
         for (var signatureRow = 1; signatureRow <= _recordCount; signatureRow++)
         {
-            var anchorSignature = _methods.GetSignature(GetMethodDefRow(signatureRow));
-            if (!SignatureEquals(methodSignature, anchorSignature))
+            var anchorMethod = GetMethodDefRow(signatureRow);
+            var anchorSignature = _methods.GetSignature(anchorMethod);
+            if ((_schema.UsesDevelopmentFunctionPointerEffects()
+                    && _contracts.GetEffectsMask(methodDefRow)
+                        != _contracts.GetEffectsMask(anchorMethod))
+                || !SignatureEquals(methodSignature, anchorSignature))
             {
                 continue;
             }
@@ -158,6 +165,67 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
             match = signatureRow;
         }
         return match;
+    }
+
+    internal uint GetDeclaredEffectsMask(int signatureRow)
+    {
+        if (signatureRow <= 0 || signatureRow > _recordCount)
+        {
+            throw InvalidNativeFunctionPointerSignature();
+        }
+
+        return _contracts.GetEffectsMask(_methodBySignature[signatureRow]);
+    }
+
+    private bool ValidAnchorContractRange(int method,
+        TrRmMethodDefTableReader methods, TrRmContractTableReader contracts)
+    {
+        var (first, count) = methods.GetContractRange(method);
+        if (!_schema.UsesDevelopmentFunctionPointerEffects())
+        {
+            return count == 2 && contracts.GetEffectsMask(method) == 4;
+        }
+
+        var hasEffects = false;
+        var hasNativeAbi = false;
+        for (var index = 0; index < count; index++)
+        {
+            var clause = contracts.GetRow(first + index);
+            var owner = BinaryPrimitives.ReadUInt32LittleEndian(clause);
+            var kind = BinaryPrimitives.ReadUInt16LittleEndian(clause[4..]);
+            if (owner != (0x1600_0000u | (uint)method))
+            {
+                return false;
+            }
+
+            if (kind == 1)
+            {
+                if (hasEffects)
+                {
+                    return false;
+                }
+                hasEffects = true;
+            }
+            else if (kind == 0x10)
+            {
+                if (hasNativeAbi)
+                {
+                    return false;
+                }
+                hasNativeAbi = true;
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        var effectsMask = contracts.GetEffectsMask(method);
+        return hasNativeAbi && (count == 1 || count == 2)
+            && hasEffects == (count == 2)
+            && (effectsMask & ~6u) == 0
+            && contracts.GetNativeParameters(method).IsEmpty
+            && contracts.GetNativeOutputs(method).IsEmpty;
     }
 
     private bool SignatureEquals(int leftSignature, int rightSignature)
@@ -285,6 +353,10 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
         var method = _methodBySignature[signatureRow];
         var signature = _methods.GetSignature(method);
         var typeIdentities = new List<string>();
+        if (_schema.UsesDevelopmentFunctionPointerEffects())
+        {
+            typeIdentities.Add($"effects:{_contracts.GetEffectsMask(method)}");
+        }
         typeIdentities.Add(CanonicalTypeIdentity(
             _signatures.GetResultTypeSpec(signature), allowVoid: true, depth + 1));
         var (first, count) = _signatures.GetParamRange(signature);
