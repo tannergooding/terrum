@@ -759,7 +759,8 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                 }
 
-                UpdateRegisterTypeMapIndexes(instruction, registerTypeMapIndexes);
+                UpdateRegisterTypeMapIndexes(body, instruction,
+                    registerTypeMapIndexes, typeSpecs);
                 position += instructionLength;
             }
         }
@@ -895,7 +896,8 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void UpdateRegisterTypeMapIndexes(
-        ReadOnlySpan<byte> instruction, int[] registerTypeMapIndexes)
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
+        int[] registerTypeMapIndexes, TrRmTypeSpecTableReader typeSpecs)
     {
         if (instruction[0] == 0x10)
         {
@@ -908,6 +910,38 @@ internal static class TrRmRegisterBodyMapValidator
 
             registerTypeMapIndexes[destination] = source < 14
                 ? registerTypeMapIndexes[source] : -1;
+            return;
+        }
+
+        if (instruction[0] == 0x13)
+        {
+            var destination = instruction[1] & 0x0F;
+            var homeIndex = instruction[1] >> 4;
+            if (destination >= 14 || homeIndex >= body.HomeCount)
+            {
+                throw InvalidMap();
+            }
+
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            if (home[0] != 2 || home[1] != 0)
+            {
+                throw InvalidMap();
+            }
+
+            var typeMapIndex = ReadUInt16(home, 2);
+            var typeSpecRef = GetTypeMapTypeSpecRef(body, typeMapIndex);
+            var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+            var isAtomicValueType = type.TypeCode is > 0 and < 0x80;
+            var isPointerFamily = type.TypeCode == 0x8C;
+            var isCopyableValue = type.Form == 0x0D
+                || (type.Form == 0x01 && (isAtomicValueType || isPointerFamily))
+                || (type.Form == 0x0C && isPointerFamily);
+            if (!isCopyableValue)
+            {
+                throw InvalidMap();
+            }
+
+            registerTypeMapIndexes[destination] = typeMapIndex;
             return;
         }
 
@@ -1020,7 +1054,8 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                 }
 
-                UpdateRegisterTypeMapIndexes(instruction, registerTypeMapIndexes);
+                UpdateRegisterTypeMapIndexes(body, instruction,
+                    registerTypeMapIndexes, typeSpecs);
                 position += instruction.Length;
             }
         }
