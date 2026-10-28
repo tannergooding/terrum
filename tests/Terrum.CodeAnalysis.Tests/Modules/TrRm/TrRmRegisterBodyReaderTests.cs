@@ -865,6 +865,39 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesMethodMapCallSiteUnitFormalEncoding()
+    {
+        TrRmRegisterBodyCallInput[] unitInput = [new(0, 0, 0)];
+        var callCode = new byte[] { 0x90, 1, 0x18, 0 };
+        ValidateSelectedImportedMethodBodyMaps(
+            CreateCallSiteBody(0, 0x1C00_0001, callCode, unitInput),
+            targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000);
+        ValidateSelectedImportedMethodBodyMaps(
+            CreateCallSiteBody(0, 0x1600_0002, callCode, unitInput),
+            targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000);
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedImportedMethodBodyMaps(
+                CreateCallSiteBody(0, 0x1C00_0001, callCode, unitInput),
+                targetReturnsUnit: true,
+                targetParameterTypeSpecRef: 0xF200_0008));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedImportedMethodBodyMaps(
+                CreateCallSiteBody(0, 0x1C00_0001, callCode,
+                    [new TrRmRegisterBodyCallInput(1, 1, 0)]),
+                targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedImportedMethodBodyMaps(
+                CreateCallSiteBody(0, 0x1C00_0001, callCode, []),
+                targetReturnsUnit: true, targetParameterTypeSpecRef: 0xF200_0000));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedImportedMethodBodyMaps(
+                CreateCallSiteBody(0, 0x1C00_0001, callCode,
+                    [new TrRmRegisterBodyCallInput(1, 1, 0)]),
+                targetReturnsUnit: true));
+    }
+
+    [Test]
     public void RestrictsBoundMethodCallDiscardToUnitResults()
     {
         ValidateSelectedImportedMethodBodyMaps(
@@ -986,6 +1019,34 @@ public sealed class TrRmRegisterBodyReaderTests
         Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(
                 mismatchedArgument, methodParameterTypeSpecRef: 7));
+    }
+
+    [Test]
+    public void MatchesConstructedConstantArgumentsByTypedValue()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts, [0x18, 0]);
+        var mapStart = 5 + (3 * sizeof(uint)) + (3 * sizeof(uint));
+        body[mapStart] = 2;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(mapStart + 8), 0x1100_0006);
+
+        ValidateSelectedConstructedTypeMap(body,
+            methodParameterTypeSpecRef: 5,
+            constantFormal: true,
+            includeFeature11: true,
+            duplicateConstantSource: true);
+
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedConstructedTypeMap(body,
+                methodParameterTypeSpecRef: 5,
+                constantFormal: true,
+                includeFeature11: true,
+                duplicateConstantSource: true,
+                secondConstantValue: 43));
     }
 
     [Test]
@@ -1149,11 +1210,15 @@ public sealed class TrRmRegisterBodyReaderTests
 
     private static byte[] CreateCallSiteBody(byte resultKind,
         uint methodMapToken, byte[] code)
+        => CreateCallSiteBody(resultKind, methodMapToken, code, []);
+
+    private static byte[] CreateCallSiteBody(byte resultKind,
+        uint methodMapToken, byte[] code,
+        IReadOnlyList<TrRmRegisterBodyCallInput> inputs)
     {
         var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
-        var callSite = new byte[] {
-            2, 0, 0, 0, 1, resultKind, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        };
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            1, resultKind, 0, 0, inputs, []);
         var counts = new uint[5];
         counts[2] = 1;
         var body = CreateBodyWithRecords(
@@ -1172,10 +1237,12 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     private static void ValidateSelectedImportedMethodBodyMaps(byte[] body,
-        bool targetDoesNotReturn = false, bool targetReturnsUnit = false)
+        bool targetDoesNotReturn = false, bool targetReturnsUnit = false,
+        uint targetParameterTypeSpecRef = 0)
     {
         var artifact = CreateStandardArtifactWithImportedMethod(
-            body, targetDoesNotReturn, targetReturnsUnit);
+            body, targetDoesNotReturn, targetReturnsUnit,
+            targetParameterTypeSpecRef);
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
@@ -1194,11 +1261,14 @@ public sealed class TrRmRegisterBodyReaderTests
         uint methodParameterTypeSpecRef = 0,
         bool constantFormal = false,
         bool includeFeature11 = false,
-        uint constantTypeSpecRef = 0xF200_0008)
+        uint constantTypeSpecRef = 0xF200_0008,
+        bool duplicateConstantSource = false,
+        int secondConstantValue = 42)
     {
         var artifact = CreateStandardArtifactWithConstructedTypeMap(
             body, importedTypeOwnerIsDifferentModule, methodParameterTypeSpecRef,
-            constantFormal, includeFeature11, constantTypeSpecRef);
+            constantFormal, includeFeature11, constantTypeSpecRef,
+            duplicateConstantSource, secondConstantValue);
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
@@ -1316,7 +1386,9 @@ public sealed class TrRmRegisterBodyReaderTests
         uint methodParameterTypeSpecRef = 0,
         bool constantFormal = false,
         bool includeFeature11 = false,
-        uint constantTypeSpecRef = 0xF200_0008)
+        uint constantTypeSpecRef = 0xF200_0008,
+        bool duplicateConstantSource = false,
+        int secondConstantValue = 42)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("main", 0), ("Example", 0),
@@ -1364,6 +1436,11 @@ public sealed class TrRmRegisterBodyReaderTests
                 TrRmTypeSpecTableWriter.Constructed(3, [0xF200_0000]),
                 TrRmTypeSpecTableWriter.Constructed(3, [2]),
             ];
+        if (constantFormal && duplicateConstantSource)
+        {
+            typeSpecRows = [.. typeSpecRows,
+                TrRmTypeSpecTableWriter.Constructed(3, [2])];
+        }
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows, 2, 1, 1);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeSpecRows.Length, 2, 1, 1);
@@ -1400,10 +1477,15 @@ public sealed class TrRmRegisterBodyReaderTests
                 2, 0, 0, constantTypeSpecRef, 0)
             : new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
                 1, 1, 1, 0, 0);
+        var constantSourceCount = constantFormal ? 1 : 0;
+        if (constantFormal && duplicateConstantSource)
+        {
+            constantSourceCount++;
+        }
         var genericParamBytes = TrRmGenericParamTableWriter.Encode([
             genericParam,
         ], strings, typeDefs, methods, signatures, typeSpecs, 0,
-            constantFormal ? 1 : 0);
+            constantSourceCount);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
             strings, modules);
         var importBytes = TrRmImportTableWriter.Encode([
@@ -1438,19 +1520,28 @@ public sealed class TrRmRegisterBodyReaderTests
         ]);
         if (constantFormal)
         {
-            var blobBytes = TrRmVariableTableWriter.EncodeBlobs([
-                new byte[] { 42, 0, 0, 0 },
-            ]);
-            var node = new byte[24];
-            BinaryPrimitives.WriteUInt32LittleEndian(node, 0xF200_0008);
-            node[4] = 1;
-            BinaryPrimitives.WriteUInt32LittleEndian(node.AsSpan(8), 1);
-            sections.Add(new TrRmSection(0x0003, 0, 1, blobBytes));
-            sections.Add(new TrRmSection(0x0030, 0, 1,
-                TrRmConstantSourceTableWriter.Encode([
-                    new TrRmConstantSourceRow(1, 1),
-                ], 1, 0, 0)));
-            sections.Add(new TrRmSection(0x003F, 0, 1, node));
+            var sourceCount = constantSourceCount;
+            var firstBlob = new byte[] { 42, 0, 0, 0 };
+            var secondBlob = new byte[sizeof(int)];
+            BinaryPrimitives.WriteInt32LittleEndian(secondBlob, secondConstantValue);
+            var blobBytes = duplicateConstantSource
+                ? TrRmVariableTableWriter.EncodeBlobs([firstBlob, secondBlob])
+                : TrRmVariableTableWriter.EncodeBlobs([firstBlob]);
+            var nodes = new byte[sourceCount * 24];
+            for (var row = 0; row < sourceCount; row++)
+            {
+                var node = nodes.AsSpan(row * 24, 24);
+                BinaryPrimitives.WriteUInt32LittleEndian(node, 0xF200_0008);
+                node[4] = 1;
+                BinaryPrimitives.WriteUInt32LittleEndian(node[8..], (uint)(row + 1));
+            }
+            TrRmConstantSourceRow[] sourceRows = duplicateConstantSource
+                ? [new TrRmConstantSourceRow(1, 1), new TrRmConstantSourceRow(1, 2)]
+                : [new TrRmConstantSourceRow(1, 1)];
+            sections.Add(new TrRmSection(0x0003, 0, (uint)sourceCount, blobBytes));
+            sections.Add(new TrRmSection(0x0030, 0, (uint)sourceCount,
+                TrRmConstantSourceTableWriter.Encode(sourceRows, sourceCount, 0, 0)));
+            sections.Add(new TrRmSection(0x003F, 0, (uint)sourceCount, nodes));
         }
         sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections);
@@ -1588,7 +1679,8 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     private static byte[] CreateStandardArtifactWithImportedMethod(byte[] body,
-        bool targetDoesNotReturn = false, bool targetReturnsUnit = false)
+        bool targetDoesNotReturn = false, bool targetReturnsUnit = false,
+        uint targetParameterTypeSpecRef = 0)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("main", 0), ("required", 0),
@@ -1610,13 +1702,20 @@ public sealed class TrRmRegisterBodyReaderTests
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 0, 1, 0);
         var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
             0, 0, 0, targetDoesNotReturn ? 2 : 0);
+        var targetParameterCount = targetParameterTypeSpecRef == 0 ? 0 : 1;
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
             new TrRmMethodSigRow(
-                targetReturnsUnit ? 0xF200_0000u : 0xF200_0008u, 0, 0, 0, 0, 0),
-        ], typeSpecs, 0, 0);
+                targetReturnsUnit ? 0xF200_0000u : 0xF200_0008u, 0,
+                targetParameterCount == 0 ? 0 : 1, targetParameterCount, 0, 0),
+        ], typeSpecs, targetParameterCount, 0);
         var signatures = new TrRmMethodSigTableReader(
-            signatureBytes, 2, typeSpecs, 0, 0);
+            signatureBytes, 2, typeSpecs, targetParameterCount, 0);
+        var parameterBytes = targetParameterCount == 0
+            ? []
+            : TrRmParamTableWriter.Encode([
+                new TrRmParamRow(2, 0, targetParameterTypeSpecRef, 0),
+            ], signatures, typeSpecs);
         var contractCount = targetDoesNotReturn ? 2 : 0;
         var methodBytes = TrRmMethodDefTableWriter.Encode([
             new TrRmMethodDefRow(0, 3, 1, 0,
@@ -1646,6 +1745,11 @@ public sealed class TrRmRegisterBodyReaderTests
             new TrRmSection(0x0016, 0, 2, methodBytes),
             new TrRmSection(0x0017, 0, 2, signatureBytes),
         };
+        if (targetParameterCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                (uint)targetParameterCount, parameterBytes));
+        }
         if (targetDoesNotReturn)
         {
             sections.Add(new TrRmSection(0x001B, 0, 2, contractBytes));

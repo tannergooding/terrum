@@ -59,7 +59,7 @@ internal static class TrRmRegisterBodyMapValidator
         ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
-            contracts, imports);
+            parameters, contracts, imports);
         ValidateNativeAddressRecords(body, ownerModule, features, modules,
             types, typeSpecs, genericParams, methods, signatures, parameters,
             contracts, imports, standardNativeImports,
@@ -704,8 +704,8 @@ internal static class TrRmRegisterBodyMapValidator
 
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
-        TrRmMethodSigTableReader signatures, TrRmContractTableReader contracts,
-        TrRmImportTableReader imports)
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmContractTableReader contracts, TrRmImportTableReader imports)
     {
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
@@ -725,12 +725,12 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                     case 0x90:
                         ValidateCallSiteEffects(body, instruction[1], blockIndex,
-                            typeSpecs, methods, signatures, contracts, imports);
+                            typeSpecs, methods, signatures, parameters, contracts, imports);
                         break;
                     case 0xE0:
                         ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
                             blockIndex, typeSpecs, methods, signatures,
-                            contracts, imports);
+                            parameters, contracts, imports);
                         break;
                     case 0xE1:
                         var methodMapIndex = ReadUInt16(instruction, 2);
@@ -757,7 +757,8 @@ internal static class TrRmRegisterBodyMapValidator
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
         int recordIndex, int blockIndex, TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
-        TrRmContractTableReader contracts, TrRmImportTableReader imports)
+        TrRmParamTableReader parameters, TrRmContractTableReader contracts,
+        TrRmImportTableReader imports)
     {
         var payload = body.GetRecord(recordIndex)[4..];
         if (payload[0] != 1)
@@ -768,6 +769,29 @@ internal static class TrRmRegisterBodyMapValidator
         var targetMethod = GetMethodMapTarget(
             body, ReadUInt16(payload, 4), methods, imports);
         var signature = methods.GetSignature(targetMethod);
+        var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
+        var inputCount = ReadUInt32(payload, 8);
+        if (inputCount != (uint)parameterCount)
+        {
+            throw InvalidMap();
+        }
+
+        var inputOffset = 16;
+        for (var ordinal = 0; ordinal < parameterCount; ordinal++)
+        {
+            var selectorKind = payload[inputOffset];
+            var isUnitInput = selectorKind == 0;
+            var formalType = parameters.GetTypeSpec(firstParameter + ordinal);
+            var isUnitFormal = typeSpecs.AreEquivalentTypeSpecRefs(
+                formalType, UnitTypeSpecRef);
+            if (isUnitInput != isUnitFormal)
+            {
+                throw InvalidMap();
+            }
+
+            inputOffset += 4;
+        }
+
         var resultType = signatures.GetResultTypeSpec(signature);
         var unitResult = typeSpecs.AreEquivalentTypeSpecRefs(
             resultType, UnitTypeSpecRef);
