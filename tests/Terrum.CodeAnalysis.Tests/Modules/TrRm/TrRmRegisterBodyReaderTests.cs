@@ -1002,6 +1002,11 @@ public sealed class TrRmRegisterBodyReaderTests
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadTargetFromHome: true,
                 loadInputFromHome: true)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalsToRegisters: true)));
         Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
@@ -1042,6 +1047,24 @@ public sealed class TrRmRegisterBodyReaderTests
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, registerTargetInitialized: true,
                 unsupportedPrefix: true)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalsToRegisters: true,
+                targetFormalOrdinal: 2)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalsToRegisters: true,
+                targetFormalOrdinal: 1)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalsToRegisters: true,
+                inputFormalOrdinal: 0)));
     }
 
     [Test]
@@ -1443,7 +1466,9 @@ public sealed class TrRmRegisterBodyReaderTests
         uint entryTargetTypeToken = 0, uint entryArgumentTypeToken = 0xF200_0008,
         bool moveRegisterTarget = false, bool moveRegisterInput = false,
         bool unsupportedPrefix = false, bool loadTargetFromHome = false,
-        bool loadInputFromHome = false, bool callableHomeIsLocal = false)
+        bool loadInputFromHome = false, bool callableHomeIsLocal = false,
+        bool loadFormalsToRegisters = false,
+        byte targetFormalOrdinal = 0, byte inputFormalOrdinal = 1)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("Caller", 1), ("Anchor", 1),
@@ -1564,6 +1589,13 @@ public sealed class TrRmRegisterBodyReaderTests
         if (loadInputFromHome)
         {
             codeBytes.AddRange([0x13, 0x13]);
+        }
+        if (loadFormalsToRegisters)
+        {
+            codeBytes.AddRange([
+                0x11, (byte)(targetFormalOrdinal << 4),
+                0x11, (byte)((inputFormalOrdinal << 4) | 1),
+            ]);
         }
         if (unsupportedPrefix)
         {

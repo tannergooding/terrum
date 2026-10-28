@@ -26,6 +26,19 @@ internal static class TrRmRegisterBodyMapValidator
         internal TrRmBlobTableReader Blobs { get; } = blobs;
     }
 
+    private readonly record struct RegisterTypeState(int TypeMapIndex, uint TypeSpecRef)
+    {
+        internal static RegisterTypeState Unknown => new(-1, 0);
+
+        internal static RegisterTypeState FromTypeMap(int typeMapIndex)
+            => new(typeMapIndex, 0);
+
+        internal static RegisterTypeState FromTypeSpecRef(uint typeSpecRef)
+            => new(-1, typeSpecRef);
+
+        internal bool IsKnown => TypeMapIndex >= 0 || TypeSpecRef != 0;
+    }
+
     internal static void Validate(TrRmRegisterBodyReader body, int methodDefRow,
         int ownerModule, TrRmFeatureTableReader features,
         TrRmModuleTableReader modules,
@@ -58,9 +71,9 @@ internal static class TrRmRegisterBodyMapValidator
             visitedTypeSpecRows);
         ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
-        ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
+        ValidateCallSiteEffects(body, methodDefRow, typeSpecs, methods, signatures,
             parameters, contracts, imports, nativeFunctionPointerAnchors);
-        ValidateCallSiteHomeTypes(body, ownerModule, types, typeSpecs,
+        ValidateCallSiteHomeTypes(body, methodDefRow, ownerModule, types, typeSpecs,
             genericParams, methods, signatures, parameters, imports,
             constantValues, contracts, nativeFunctionPointerAnchors);
         ValidateNativeAddressRecords(body, ownerModule, features, modules,
@@ -706,6 +719,7 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
+        int methodDefRow,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
@@ -714,8 +728,7 @@ internal static class TrRmRegisterBodyMapValidator
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             var code = body.GetBlockCode(blockIndex);
-            var registerTypeMapIndexes =
-                CreateBlockEntryRegisterTypeMapIndexes(body, blockIndex);
+            var registerTypes = CreateBlockEntryRegisterTypes(body, blockIndex);
             var position = 0;
             while (position < code.Length)
             {
@@ -731,13 +744,13 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                     case 0x90:
                         ValidateCallSiteEffects(body, instruction[1], blockIndex,
-                            registerTypeMapIndexes,
+                            registerTypes,
                             typeSpecs, methods, signatures, parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
                         break;
                     case 0xE0:
                         ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
-                            blockIndex, registerTypeMapIndexes,
+                            blockIndex, registerTypes,
                             typeSpecs, methods, signatures,
                             parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
@@ -759,15 +772,15 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                 }
 
-                UpdateRegisterTypeMapIndexes(body, instruction,
-                    registerTypeMapIndexes, typeSpecs);
+                UpdateRegisterTypeStates(body, instruction, registerTypes,
+                    methodDefRow, methods, signatures, parameters, typeSpecs);
                 position += instructionLength;
             }
         }
     }
 
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
-        int recordIndex, int blockIndex, int[] registerTypeMapIndexes,
+        int recordIndex, int blockIndex, RegisterTypeState[] registerTypes,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmContractTableReader contracts,
@@ -776,7 +789,7 @@ internal static class TrRmRegisterBodyMapValidator
     {
         var payload = body.GetRecord(recordIndex)[4..];
         var targetMethod = GetCallSiteTargetMethod(body, payload,
-            registerTypeMapIndexes, typeSpecs, methods, imports,
+            registerTypes, typeSpecs, methods, imports,
             nativeFunctionPointerAnchors);
         var signature = methods.GetSignature(targetMethod);
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
@@ -820,7 +833,7 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static int GetCallSiteTargetMethod(TrRmRegisterBodyReader body,
-        ReadOnlySpan<byte> payload, int[] registerTypeMapIndexes,
+        ReadOnlySpan<byte> payload, RegisterTypeState[] registerTypes,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
@@ -830,7 +843,7 @@ internal static class TrRmRegisterBodyMapValidator
         {
             1 => GetMethodMapTarget(body, targetIndex, methods, imports),
             2 => GetRegisterFunctionPointerAnchorMethod(
-                body, registerTypeMapIndexes, targetIndex, typeSpecs,
+                body, registerTypes, targetIndex, typeSpecs,
                 nativeFunctionPointerAnchors),
             3 => GetHomeFunctionPointerAnchorMethod(body, targetIndex,
                 typeSpecs, nativeFunctionPointerAnchors),
@@ -856,13 +869,13 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static int GetRegisterFunctionPointerAnchorMethod(
-        TrRmRegisterBodyReader body, int[] registerTypeMapIndexes, int register,
+        TrRmRegisterBodyReader body, RegisterTypeState[] registerTypes, int register,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
-        var typeMapIndex = GetRegisterTypeMapIndex(registerTypeMapIndexes, register);
+        var typeState = GetRegisterTypeState(registerTypes, register);
         var typeSpec = typeSpecs.GetTypeSpecRef(
-            GetTypeMapTypeSpecRef(body, typeMapIndex));
+            GetRegisterTypeSpecRef(body, typeState));
         if (!typeSpec.IsRow || typeSpec.Form != 0x0D || typeSpec.Qualifiers != 0
             || !nativeFunctionPointerAnchors.HasAnchorForTypeSpec(typeSpec.Row))
         {
@@ -872,11 +885,11 @@ internal static class TrRmRegisterBodyMapValidator
         return nativeFunctionPointerAnchors.GetAnchorMethodDefRow(typeSpec.Row);
     }
 
-    private static int[] CreateBlockEntryRegisterTypeMapIndexes(
+    private static RegisterTypeState[] CreateBlockEntryRegisterTypes(
         TrRmRegisterBodyReader body, int blockIndex)
     {
-        var registerTypeMapIndexes = new int[16];
-        Array.Fill(registerTypeMapIndexes, -1);
+        var registerTypes = new RegisterTypeState[16];
+        Array.Fill(registerTypes, RegisterTypeState.Unknown);
         var block = body.GetBlock(blockIndex);
         var entryState = body.GetRecord(ReadUInt16(block, 8));
         var registerCount = checked((int)ReadUInt32(entryState, 4));
@@ -889,15 +902,18 @@ internal static class TrRmRegisterBodyMapValidator
                 continue;
             }
 
-            registerTypeMapIndexes[register] = ReadUInt16(entryState, offset + 2);
+            registerTypes[register] = RegisterTypeState.FromTypeMap(
+                ReadUInt16(entryState, offset + 2));
         }
 
-        return registerTypeMapIndexes;
+        return registerTypes;
     }
 
-    private static void UpdateRegisterTypeMapIndexes(
+    private static void UpdateRegisterTypeStates(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
-        int[] registerTypeMapIndexes, TrRmTypeSpecTableReader typeSpecs)
+        RegisterTypeState[] registerTypes, int methodDefRow,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs)
     {
         if (instruction[0] == 0x10)
         {
@@ -908,8 +924,8 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
 
-            registerTypeMapIndexes[destination] = source < 14
-                ? registerTypeMapIndexes[source] : -1;
+            registerTypes[destination] = source < 14
+                ? registerTypes[source] : RegisterTypeState.Unknown;
             return;
         }
 
@@ -929,39 +945,105 @@ internal static class TrRmRegisterBodyMapValidator
             }
 
             var typeMapIndex = ReadUInt16(home, 2);
-            var typeSpecRef = GetTypeMapTypeSpecRef(body, typeMapIndex);
-            var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
-            var isAtomicValueType = type.TypeCode is > 0 and < 0x80;
-            var isPointerFamily = type.TypeCode == 0x8C;
-            var isCopyableValue = type.Form == 0x0D
-                || (type.Form == 0x01 && (isAtomicValueType || isPointerFamily))
-                || (type.Form == 0x0C && isPointerFamily);
-            if (!isCopyableValue)
+            if (!IsCopyableRegisterValueType(typeSpecs,
+                GetTypeMapTypeSpecRef(body, typeMapIndex)))
             {
                 throw InvalidMap();
             }
 
-            registerTypeMapIndexes[destination] = typeMapIndex;
+            registerTypes[destination] = RegisterTypeState.FromTypeMap(typeMapIndex);
             return;
         }
 
-        Array.Fill(registerTypeMapIndexes, -1);
+        if (instruction[0] == 0x11)
+        {
+            var destination = instruction[1] & 0x0F;
+            var formalOrdinal = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var signature = methods.GetSignature(methodDefRow);
+            var (firstParameter, parameterCount) =
+                signatures.GetParamRange(signature);
+            if (formalOrdinal >= parameterCount)
+            {
+                throw InvalidMap();
+            }
+
+            var parameterRow = firstParameter + formalOrdinal;
+            var typeSpecRef = parameters.GetTypeSpec(parameterRow);
+            if (parameters.GetMode(parameterRow) != 0
+                || parameters.GetFlags(parameterRow) != 0
+                || !IsCopyableRegisterValueType(typeSpecs, typeSpecRef))
+            {
+                throw InvalidMap();
+            }
+
+            registerTypes[destination] =
+                RegisterTypeState.FromTypeSpecRef(typeSpecRef);
+            return;
+        }
+
+        Array.Fill(registerTypes, RegisterTypeState.Unknown);
     }
 
-    private static int GetRegisterTypeMapIndex(
-        int[] registerTypeMapIndexes, int register)
+    private static RegisterTypeState GetRegisterTypeState(
+        RegisterTypeState[] registerTypes, int register)
     {
-        if ((uint)register >= (uint)registerTypeMapIndexes.Length
-            || registerTypeMapIndexes[register] < 0)
+        if ((uint)register >= (uint)registerTypes.Length
+            || !registerTypes[register].IsKnown)
         {
             throw InvalidMap();
         }
 
-        return registerTypeMapIndexes[register];
+        return registerTypes[register];
+    }
+
+    private static uint GetRegisterTypeSpecRef(TrRmRegisterBodyReader body,
+        RegisterTypeState type)
+        => type.TypeSpecRef != 0
+            ? type.TypeSpecRef
+            : type.TypeMapIndex >= 0
+                ? GetTypeMapTypeSpecRef(body, type.TypeMapIndex)
+                : throw InvalidMap();
+
+    private static bool MatchesRegisterType(TrRmRegisterBodyReader body,
+        RegisterTypeState actual, uint expectedTypeSpecRef, int ownerModule,
+        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports,
+        ConstantSourceValueContext constantValues,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        if (actual.TypeSpecRef != 0)
+        {
+            return AreEquivalentSelectedTypeSpecRefs(actual.TypeSpecRef,
+                expectedTypeSpecRef, ownerModule, types, typeSpecs,
+                genericParams, imports, constantValues,
+                nativeFunctionPointerAnchors);
+        }
+
+        return actual.TypeMapIndex >= 0
+            && MatchesTypeMapEntry(body, actual.TypeMapIndex,
+                expectedTypeSpecRef, ownerModule, types, typeSpecs,
+                genericParams, imports, constantValues,
+                nativeFunctionPointerAnchors);
+    }
+
+    private static bool IsCopyableRegisterValueType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        var isAtomicValueType = type.TypeCode is > 0 and < 0x80;
+        var isPointerFamily = type.TypeCode == 0x8C;
+        return type.Form == 0x0D
+            || (type.Form == 0x01 && (isAtomicValueType || isPointerFamily))
+            || (type.Form == 0x0C && isPointerFamily);
     }
 
     private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,
-        int ownerModule, TrRmTypeDefTableReader types,
+        int methodDefRow, int ownerModule, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmImportTableReader imports,
@@ -971,8 +1053,7 @@ internal static class TrRmRegisterBodyMapValidator
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             var code = body.GetBlockCode(blockIndex);
-            var registerTypeMapIndexes =
-                CreateBlockEntryRegisterTypeMapIndexes(body, blockIndex);
+            var registerTypes = CreateBlockEntryRegisterTypes(body, blockIndex);
             var position = 0;
             while (position < code.Length)
             {
@@ -990,7 +1071,7 @@ internal static class TrRmRegisterBodyMapValidator
                     if (payload[0] is 1 or 2 or 3)
                     {
                         var targetMethod = GetCallSiteTargetMethod(body, payload,
-                            registerTypeMapIndexes, typeSpecs, methods, imports,
+                            registerTypes, typeSpecs, methods, imports,
                             nativeFunctionPointerAnchors);
                         var signature = methods.GetSignature(targetMethod);
                         var (firstParameter, parameterCount) =
@@ -1004,11 +1085,11 @@ internal static class TrRmRegisterBodyMapValidator
                             {
                                 var selectorIndex = ReadUInt16(payload,
                                     inputOffset + 2);
-                                var typeMapIndex = selectorKind == 1
-                                    ? GetRegisterTypeMapIndex(
-                                        registerTypeMapIndexes, selectorIndex)
-                                    : ReadUInt16(body.HomeMap,
-                                        (selectorIndex * 8) + 2);
+                                var typeState = selectorKind == 1
+                                    ? GetRegisterTypeState(registerTypes, selectorIndex)
+                                    : RegisterTypeState.FromTypeMap(
+                                        ReadUInt16(body.HomeMap,
+                                            (selectorIndex * 8) + 2));
                                 var formalType = parameters.GetTypeSpec(
                                     firstParameter + ordinal);
                                 var nativeParameterAccess = (byte)0;
@@ -1024,9 +1105,9 @@ internal static class TrRmRegisterBodyMapValidator
                                 if (nativeParameterAccess != 0
                                     ? !TrRmNativeImportTypeContract
                                         .MatchesNativeParameterArgumentType(typeSpecs,
-                                            GetTypeMapTypeSpecRef(body, typeMapIndex),
+                                            GetRegisterTypeSpecRef(body, typeState),
                                             formalType, nativeParameterAccess)
-                                    : !MatchesTypeMapEntry(body, typeMapIndex,
+                                    : !MatchesRegisterType(body, typeState,
                                         formalType, ownerModule, types, typeSpecs,
                                         genericParams, imports, constantValues,
                                         nativeFunctionPointerAnchors))
@@ -1054,8 +1135,8 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                 }
 
-                UpdateRegisterTypeMapIndexes(body, instruction,
-                    registerTypeMapIndexes, typeSpecs);
+                UpdateRegisterTypeStates(body, instruction, registerTypes,
+                    methodDefRow, methods, signatures, parameters, typeSpecs);
                 position += instruction.Length;
             }
         }
