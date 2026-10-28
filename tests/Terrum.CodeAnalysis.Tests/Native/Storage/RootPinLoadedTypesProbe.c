@@ -4,11 +4,11 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "RootPinLoadedTypesV1.h"
+#include "RootPinLoadedTypesV2.h"
 
 typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *AdmitFunction)(
     RootPinDomainV1,
-    const RootPinTypeBatchV1*,
+    const RootPinTypeBatchV2*,
     RootPinLoadedTypeV1**,
     uint32_t);
 typedef RootPinDomainV1 (ROOTPIN_LOADED_TYPES_CALL *GetDomainFunction)(void);
@@ -43,7 +43,7 @@ static void RetirePayload(RootPinDomainV1 domain, void* payload)
 }
 
 static void SetNode(
-    RootPinTypeNodeV1* node,
+    RootPinTypeNodeV2* node,
     uint64_t typeKey,
     uint32_t role,
     uint32_t shape,
@@ -67,6 +67,8 @@ static void SetNode(
     node->originCount = originCount;
     node->retirementOrigin = (uint32_t)ROOTPIN_TYPE_NO_INDEX;
     node->flags = (uint32_t)ROOTPIN_TYPE_FLAG_COPY;
+    node->elementCount = 0;
+    node->elementStride = 0;
 }
 
 static void SetOrigin(
@@ -85,14 +87,14 @@ static void SetOrigin(
 }
 
 static void BuildValidBatch(
-    RootPinTypeBatchV1* batch,
-    RootPinTypeNodeV1* nodes,
+    RootPinTypeBatchV2* batch,
+    RootPinTypeNodeV2* nodes,
     RootPinTypeFieldV1* fields,
     RootPinTypeOriginV1* origins,
     uint32_t* originUses,
     uint32_t* originCounts)
 {
-    memset(nodes, 0, sizeof(RootPinTypeNodeV1) * 13);
+    memset(nodes, 0, sizeof(RootPinTypeNodeV2) * 19);
     memset(fields, 0, sizeof(RootPinTypeFieldV1) * 6);
     memset(origins, 0, sizeof(RootPinTypeOriginV1) * 3);
 
@@ -135,6 +137,34 @@ static void BuildValidBatch(
     SetNode(&nodes[12], 12001, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 5, 1,
         (uint32_t)ROOTPIN_TYPE_NO_INDEX, 5, 1, 16, 1);
+    SetNode(&nodes[13], 14000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 24, 4,
+        1, 0, 0, 17, 1);
+    nodes[13].elementCount = 3;
+    nodes[13].elementStride = 8;
+    SetNode(&nodes[14], 14001, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 48, 4,
+        13, 0, 0, 18, 1);
+    nodes[14].elementCount = 2;
+    nodes[14].elementStride = 24;
+    SetNode(&nodes[15], 14002, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 0, 4,
+        0, 0, 0, 19, 1);
+    nodes[15].elementCount = 0;
+    nodes[15].elementStride = 4;
+    SetNode(&nodes[16], 14003, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_LEAF, 0, 0,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 0, 0, 20, 1);
+    SetNode(&nodes[17], 14004, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 0, 1,
+        16, 0, 0, 21, 1);
+    nodes[17].elementCount = UINT64_MAX;
+    nodes[17].elementStride = 0;
+    SetNode(&nodes[18], 14000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 24, 4,
+        1, 0, 0, 22, 1);
+    nodes[18].elementCount = 3;
+    nodes[18].elementStride = 8;
 
     nodes[1].layoutKind = ROOTPIN_TYPE_LAYOUT_SEQUENTIAL;
     nodes[3].layoutKind = ROOTPIN_TYPE_LAYOUT_SEQUENTIAL;
@@ -198,15 +228,21 @@ static void BuildValidBatch(
     originUses[14] = 0;
     originUses[15] = 0;
     originUses[16] = 0;
+    originUses[17] = 0;
+    originUses[18] = 0;
+    originUses[19] = 0;
+    originUses[20] = 0;
+    originUses[21] = 0;
+    originUses[22] = 0;
 
-    batch->abiRevision = 1;
+    batch->abiRevision = 2;
     batch->byteSize = sizeof(*batch);
     batch->targetProfileId = 2;
     batch->targetProfileRevision = 1;
-    batch->nodeCount = 13;
+    batch->nodeCount = 19;
     batch->fieldCount = 6;
     batch->originCount = 3;
-    batch->originUseCount = 17;
+    batch->originUseCount = 23;
     batch->nodes = nodes;
     batch->fields = fields;
     batch->origins = origins;
@@ -236,26 +272,27 @@ static int RunProbe(const char* libraryPath)
     GetDomainFunction getDomain = NULL;
     SetFailureFunction setFailure = NULL;
     RootPinDomainV1 domain;
-    RootPinTypeBatchV1 batch;
-    RootPinTypeNodeV1 nodes[13];
+    RootPinTypeBatchV2 batch;
+    RootPinTypeNodeV2 nodes[19];
     RootPinTypeFieldV1 fields[6];
     RootPinTypeOriginV1 origins[3];
-    uint32_t originUses[17];
+    uint32_t originUses[23];
     uint32_t originCounts[3] = { 0, 0, 0 };
-    RootPinLoadedTypeV1* outputs[13];
-    RootPinLoadedTypeV1* repeated[13];
+    RootPinLoadedTypeV1* outputs[19];
+    RootPinLoadedTypeV1* repeated[19];
     uint32_t status;
     uint32_t index;
 
     CHECK(library != NULL);
 
-    procedure = GetProcAddress(library, "TerrumRootPinAdmitLoadedTypesV1");
+    procedure = GetProcAddress(library, "TerrumRootPinAdmitLoadedTypesV2");
     CHECK(procedure != NULL && sizeof(admit) == sizeof(procedure));
     memcpy(&admit, &procedure, sizeof(admit));
+    CHECK(GetProcAddress(library, "TerrumRootPinAdmitLoadedTypesV1") == NULL);
     procedure = GetProcAddress(library, "RootPinTestGetDomainV1");
     CHECK(procedure != NULL && sizeof(getDomain) == sizeof(procedure));
     memcpy(&getDomain, &procedure, sizeof(getDomain));
-    procedure = GetProcAddress(library, "RootPinTestFailAdmissionAtStageV1");
+    procedure = GetProcAddress(library, "RootPinTestFailAdmissionAtStageV2");
     CHECK(procedure != NULL && sizeof(setFailure) == sizeof(procedure));
     memcpy(&setFailure, &procedure, sizeof(setFailure));
     CHECK(admit != NULL && getDomain != NULL && setFailure != NULL);
@@ -264,23 +301,26 @@ static int RunProbe(const char* libraryPath)
     CHECK(domain != NULL);
     BuildValidBatch(&batch, nodes, fields, origins, originUses, originCounts);
     memset(outputs, 0xA5, sizeof(outputs));
-    status = admit(domain, &batch, outputs, 13);
+    status = admit(domain, &batch, outputs, 19);
     CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS);
     CHECK(outputs[0] != NULL && outputs[1] != NULL && outputs[2] != NULL
         && outputs[3] != NULL && outputs[4] != NULL && outputs[5] != NULL
         && outputs[6] != NULL && outputs[7] != NULL && outputs[8] != NULL
         && outputs[9] != NULL && outputs[10] != NULL && outputs[11] != NULL
-        && outputs[12] != NULL);
+        && outputs[12] != NULL && outputs[13] != NULL && outputs[14] != NULL
+        && outputs[15] != NULL && outputs[16] != NULL && outputs[17] != NULL
+        && outputs[18] != NULL);
     CHECK(outputs[0] == outputs[7]);
     CHECK(outputs[0] != outputs[1] && outputs[5] != outputs[6]);
     CHECK(outputs[8] != outputs[3] && outputs[9] != outputs[0]
         && outputs[10] != outputs[9] && outputs[11] != outputs[1]
-        && outputs[12] != outputs[1]);
+        && outputs[12] != outputs[1] && outputs[13] != outputs[14]
+        && outputs[13] == outputs[18]);
     CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
 
-    status = admit(domain, &batch, repeated, 13);
+    status = admit(domain, &batch, repeated, 19);
     CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS);
-    for (index = 0; index < 13; index++)
+    for (index = 0; index < 19; index++)
     {
         CHECK(repeated[index] == outputs[index]);
     }
@@ -289,29 +329,55 @@ static int RunProbe(const char* libraryPath)
     nodes[7].size = 8;
     nodes[7].alignment = 8;
     memset(repeated, 0xA5, sizeof(repeated));
-    status = admit(domain, &batch, repeated, 13);
-    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 13));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 19));
     CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
     nodes[7].size = 4;
     nodes[7].alignment = 4;
 
     nodes[5].child = 99;
     memset(repeated, 0xA5, sizeof(repeated));
-    status = admit(domain, &batch, repeated, 13);
-    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 13));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 19));
     nodes[5].child = 0;
 
     batch.targetProfileRevision = 2;
     memset(repeated, 0xA5, sizeof(repeated));
-    status = admit(domain, &batch, repeated, 13);
-    CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED && OutputsAreZero(repeated, 13));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED && OutputsAreZero(repeated, 19));
     batch.targetProfileRevision = 1;
 
+    batch.abiRevision = 1;
+    memset(repeated, 0xA5, sizeof(repeated));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED && OutputsAreZero(repeated, 19));
+    batch.abiRevision = 2;
+
+    nodes[0].elementCount = 1;
+    memset(repeated, 0xA5, sizeof(repeated));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 19));
+    nodes[0].elementCount = 0;
+
+    nodes[18].elementCount = 4;
+    nodes[18].size = 32;
+    memset(repeated, 0xA5, sizeof(repeated));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 19));
+    nodes[18].elementCount = 3;
+    nodes[18].size = 24;
+
+    nodes[13].elementCount = UINT64_MAX;
+    memset(repeated, 0xA5, sizeof(repeated));
+    status = admit(domain, &batch, repeated, 19);
+    CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && OutputsAreZero(repeated, 19));
+    nodes[13].elementCount = 3;
+
     {
-        RootPinTypeNodeV1 cycleNode = { 0 };
+        RootPinTypeNodeV2 cycleNode = { 0 };
         RootPinTypeFieldV1 cycleField = { 0 };
         uint32_t cycleOriginUse = 0;
-        RootPinTypeBatchV1 cycleBatch = { 0 };
+        RootPinTypeBatchV2 cycleBatch = { 0 };
         RootPinLoadedTypeV1* cycleOutput[1];
 
         SetNode(&cycleNode, 12000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
@@ -322,7 +388,7 @@ static int RunProbe(const char* libraryPath)
         cycleField.offset = 0;
         cycleField.knownAlignment = 4;
         cycleField.valueNode = 0;
-        cycleBatch.abiRevision = 1;
+        cycleBatch.abiRevision = 2;
         cycleBatch.byteSize = sizeof(cycleBatch);
         cycleBatch.targetProfileId = 2;
         cycleBatch.targetProfileRevision = 1;
@@ -341,10 +407,37 @@ static int RunProbe(const char* libraryPath)
     }
 
     {
-        RootPinTypeNodeV1 payloadNodes[2] = { 0 };
+        RootPinTypeNodeV2 arrayCycleNode = { 0 };
+        uint32_t arrayCycleOriginUse = 0;
+        RootPinTypeBatchV2 arrayCycleBatch = { 0 };
+        RootPinLoadedTypeV1* arrayCycleOutput[1];
+
+        SetNode(&arrayCycleNode, 12500, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
+            (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 0, 4,
+            0, 0, 0, 0, 1);
+        arrayCycleNode.elementCount = 0;
+        arrayCycleNode.elementStride = 0;
+        arrayCycleBatch.abiRevision = 2;
+        arrayCycleBatch.byteSize = sizeof(arrayCycleBatch);
+        arrayCycleBatch.targetProfileId = 2;
+        arrayCycleBatch.targetProfileRevision = 1;
+        arrayCycleBatch.nodeCount = 1;
+        arrayCycleBatch.originCount = 1;
+        arrayCycleBatch.originUseCount = 1;
+        arrayCycleBatch.nodes = &arrayCycleNode;
+        arrayCycleBatch.origins = &origins[0];
+        arrayCycleBatch.originUses = &arrayCycleOriginUse;
+        arrayCycleOutput[0] = (RootPinLoadedTypeV1*)(uintptr_t)1;
+        status = admit(domain, &arrayCycleBatch, arrayCycleOutput, 1);
+        CHECK(status == ROOTPIN_TYPE_STATUS_INVALID && arrayCycleOutput[0] == NULL);
+        CHECK(originCounts[0] == 1);
+    }
+
+    {
+        RootPinTypeNodeV2 payloadNodes[2] = { 0 };
         RootPinTypeOriginV1 payloadOrigins[2] = { origins[0], origins[1] };
         uint32_t payloadUses[3] = { 0, 0, 1 };
-        RootPinTypeBatchV1 payloadBatch = { 0 };
+        RootPinTypeBatchV2 payloadBatch = { 0 };
         RootPinLoadedTypeV1* payloadOutputs[2];
 
         SetNode(&payloadNodes[0], 13000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
@@ -357,7 +450,7 @@ static int RunProbe(const char* libraryPath)
         payloadNodes[1].retirementKey = 601;
         payloadNodes[1].retireGcPayloadThunk = (uint64_t)(uintptr_t)&RetirePayload;
         payloadNodes[1].retirementOrigin = 1;
-        payloadBatch.abiRevision = 1;
+        payloadBatch.abiRevision = 2;
         payloadBatch.byteSize = sizeof(payloadBatch);
         payloadBatch.targetProfileId = 2;
         payloadBatch.targetProfileRevision = 1;
@@ -375,10 +468,10 @@ static int RunProbe(const char* libraryPath)
     }
 
     {
-        RootPinTypeNodeV1 extraNode = { 0 };
+        RootPinTypeNodeV2 extraNode = { 0 };
         RootPinTypeOriginV1 extraOrigin = { 0 };
         uint32_t extraUse = 0;
-        RootPinTypeBatchV1 extraBatch = { 0 };
+        RootPinTypeBatchV2 extraBatch = { 0 };
         RootPinLoadedTypeV1* extraOutput[1];
 
         SetNode(&extraNode, 9000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
@@ -386,7 +479,7 @@ static int RunProbe(const char* libraryPath)
             4, 4, (uint32_t)ROOTPIN_TYPE_NO_INDEX, 0, 0, 0, 1);
         SetOrigin(&extraOrigin, 90, (uint64_t)(uintptr_t)&originCounts[0],
             (uint32_t)ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT, RetainOrigin, ReleaseOrigin);
-        extraBatch.abiRevision = 1;
+        extraBatch.abiRevision = 2;
         extraBatch.byteSize = sizeof(extraBatch);
         extraBatch.targetProfileId = 2;
         extraBatch.targetProfileRevision = 1;

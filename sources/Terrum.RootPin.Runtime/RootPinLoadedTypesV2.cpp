@@ -2,7 +2,7 @@
 #define NOMINMAX
 #include <windows.h>
 
-#include "RootPinLoadedTypesV1.h"
+#include "RootPinLoadedTypesV2.h"
 
 #include <algorithm>
 #include <atomic>
@@ -18,24 +18,26 @@
 #include <vector>
 
 static_assert(sizeof(void*) == 8);
-static_assert(sizeof(RootPinTypeNodeV1) == 80);
+static_assert(sizeof(RootPinTypeNodeV2) == 96);
 static_assert(sizeof(RootPinTypeFieldV1) == 32);
 static_assert(sizeof(RootPinTypeOriginV1) == 40);
-static_assert(sizeof(RootPinTypeBatchV1) == 72);
-static_assert(offsetof(RootPinTypeNodeV1, role) == 8);
-static_assert(offsetof(RootPinTypeNodeV1, shape) == 12);
-static_assert(offsetof(RootPinTypeNodeV1, size) == 16);
-static_assert(offsetof(RootPinTypeNodeV1, alignment) == 24);
-static_assert(offsetof(RootPinTypeNodeV1, retirementKey) == 32);
-static_assert(offsetof(RootPinTypeNodeV1, child) == 40);
-static_assert(offsetof(RootPinTypeNodeV1, fieldFirst) == 44);
-static_assert(offsetof(RootPinTypeNodeV1, fieldCount) == 48);
-static_assert(offsetof(RootPinTypeNodeV1, originFirst) == 52);
-static_assert(offsetof(RootPinTypeNodeV1, originCount) == 56);
-static_assert(offsetof(RootPinTypeNodeV1, retirementOrigin) == 60);
-static_assert(offsetof(RootPinTypeNodeV1, retireGcPayloadThunk) == 64);
-static_assert(offsetof(RootPinTypeNodeV1, layoutKind) == 72);
-static_assert(offsetof(RootPinTypeNodeV1, flags) == 76);
+static_assert(sizeof(RootPinTypeBatchV2) == 72);
+static_assert(offsetof(RootPinTypeNodeV2, role) == 8);
+static_assert(offsetof(RootPinTypeNodeV2, shape) == 12);
+static_assert(offsetof(RootPinTypeNodeV2, size) == 16);
+static_assert(offsetof(RootPinTypeNodeV2, alignment) == 24);
+static_assert(offsetof(RootPinTypeNodeV2, retirementKey) == 32);
+static_assert(offsetof(RootPinTypeNodeV2, child) == 40);
+static_assert(offsetof(RootPinTypeNodeV2, fieldFirst) == 44);
+static_assert(offsetof(RootPinTypeNodeV2, fieldCount) == 48);
+static_assert(offsetof(RootPinTypeNodeV2, originFirst) == 52);
+static_assert(offsetof(RootPinTypeNodeV2, originCount) == 56);
+static_assert(offsetof(RootPinTypeNodeV2, retirementOrigin) == 60);
+static_assert(offsetof(RootPinTypeNodeV2, retireGcPayloadThunk) == 64);
+static_assert(offsetof(RootPinTypeNodeV2, layoutKind) == 72);
+static_assert(offsetof(RootPinTypeNodeV2, flags) == 76);
+static_assert(offsetof(RootPinTypeNodeV2, elementCount) == 80);
+static_assert(offsetof(RootPinTypeNodeV2, elementStride) == 88);
 static_assert(offsetof(RootPinTypeFieldV1, fieldKey) == 0);
 static_assert(offsetof(RootPinTypeFieldV1, offset) == 8);
 static_assert(offsetof(RootPinTypeFieldV1, knownAlignment) == 16);
@@ -45,14 +47,14 @@ static_assert(offsetof(RootPinTypeOriginV1, cookie) == 8);
 static_assert(offsetof(RootPinTypeOriginV1, retainOrigin) == 16);
 static_assert(offsetof(RootPinTypeOriginV1, releaseOrigin) == 24);
 static_assert(offsetof(RootPinTypeOriginV1, kind) == 32);
-static_assert(offsetof(RootPinTypeBatchV1, abiRevision) == 0);
-static_assert(offsetof(RootPinTypeBatchV1, targetProfileId) == 8);
-static_assert(offsetof(RootPinTypeBatchV1, nodeCount) == 16);
-static_assert(offsetof(RootPinTypeBatchV1, nodes) == 32);
-static_assert(offsetof(RootPinTypeBatchV1, fields) == 40);
-static_assert(offsetof(RootPinTypeBatchV1, origins) == 48);
-static_assert(offsetof(RootPinTypeBatchV1, originUses) == 56);
-static_assert(offsetof(RootPinTypeBatchV1, flags) == 64);
+static_assert(offsetof(RootPinTypeBatchV2, abiRevision) == 0);
+static_assert(offsetof(RootPinTypeBatchV2, targetProfileId) == 8);
+static_assert(offsetof(RootPinTypeBatchV2, nodeCount) == 16);
+static_assert(offsetof(RootPinTypeBatchV2, nodes) == 32);
+static_assert(offsetof(RootPinTypeBatchV2, fields) == 40);
+static_assert(offsetof(RootPinTypeBatchV2, origins) == 48);
+static_assert(offsetof(RootPinTypeBatchV2, originUses) == 56);
+static_assert(offsetof(RootPinTypeBatchV2, flags) == 64);
 
 namespace
 {
@@ -177,12 +179,12 @@ namespace
         return left == right;
     }
 
-    uint64_t ChildKey(const RootPinTypeBatchV1& batch, uint32_t index)
+    uint64_t ChildKey(const RootPinTypeBatchV2& batch, uint32_t index)
     {
         return index == ROOTPIN_TYPE_NO_INDEX ? 0 : batch.nodes[index].typeKey;
     }
 
-    uint32_t ChildRole(const RootPinTypeBatchV1& batch, uint32_t index)
+    uint32_t ChildRole(const RootPinTypeBatchV2& batch, uint32_t index)
     {
         return index == ROOTPIN_TYPE_NO_INDEX ? 0 : batch.nodes[index].role;
     }
@@ -197,7 +199,7 @@ namespace
     }
 
     bool SameNodeInput(
-        const RootPinTypeBatchV1& batch,
+        const RootPinTypeBatchV2& batch,
         uint32_t leftIndex,
         uint32_t rightIndex,
         const std::vector<std::vector<uint64_t>>& originKeys)
@@ -209,6 +211,8 @@ namespace
             || left.alignment != right.alignment
             || left.retirementKey != right.retirementKey
             || left.layoutKind != right.layoutKind || left.flags != right.flags
+            || left.elementCount != right.elementCount
+            || left.elementStride != right.elementStride
             || ChildKey(batch, left.child) != ChildKey(batch, right.child)
             || ChildRole(batch, left.child) != ChildRole(batch, right.child)
             || left.fieldCount != right.fieldCount
@@ -246,12 +250,12 @@ namespace
     }
 
     bool SameNodeLoaded(
-        const RootPinTypeBatchV1& batch,
+        const RootPinTypeBatchV2& batch,
         uint32_t inputIndex,
         const std::vector<std::vector<uint64_t>>& originKeys,
         const RootPinLoadedTypeV1& loaded);
 
-    bool ValidateNodeShapes(const RootPinTypeBatchV1& batch)
+    bool ValidateNodeShapes(const RootPinTypeBatchV2& batch)
     {
         for (uint32_t index = 0; index < batch.nodeCount; index++)
         {
@@ -260,8 +264,14 @@ namespace
                 || (node.role != ROOTPIN_TYPE_ROLE_VALUE
                     && node.role != ROOTPIN_TYPE_ROLE_GC_PAYLOAD)
                 || node.shape < ROOTPIN_TYPE_SHAPE_LEAF
-                || node.shape > ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD
+                || node.shape > ROOTPIN_TYPE_SHAPE_FIXED_ARRAY
                 || !HasValidAlignment(node.size, node.alignment))
+            {
+                return false;
+            }
+
+            if (node.shape != ROOTPIN_TYPE_SHAPE_FIXED_ARRAY
+                && (node.elementCount != 0 || node.elementStride != 0))
             {
                 return false;
             }
@@ -317,7 +327,7 @@ namespace
                 return false;
             }
 
-            const RootPinTypeNodeV1* child = node.child == ROOTPIN_TYPE_NO_INDEX
+            const RootPinTypeNodeV2* child = node.child == ROOTPIN_TYPE_NO_INDEX
                 ? nullptr
                 : &batch.nodes[node.child];
             switch (node.shape)
@@ -387,6 +397,32 @@ namespace
                         return false;
                     }
                     break;
+                case ROOTPIN_TYPE_SHAPE_FIXED_ARRAY:
+                {
+                    if (node.role != ROOTPIN_TYPE_ROLE_VALUE
+                        || child->role != ROOTPIN_TYPE_ROLE_VALUE)
+                    {
+                        return false;
+                    }
+
+                    const auto arrayAlignment = child->alignment == 0 ? 1 : child->alignment;
+                    const auto maximum = std::numeric_limits<uint64_t>::max();
+                    const auto remainder = child->size % arrayAlignment;
+                    const auto padding = remainder == 0 ? 0 : arrayAlignment - remainder;
+                    if (child->size > maximum - padding)
+                    {
+                        return false;
+                    }
+                    const auto stride = child->size + padding;
+                    if (node.elementStride != stride
+                        || node.alignment != arrayAlignment
+                        || (stride != 0 && node.elementCount > maximum / stride)
+                        || node.size != node.elementCount * stride)
+                    {
+                        return false;
+                    }
+                    break;
+                }
                 default:
                     return false;
             }
@@ -395,7 +431,7 @@ namespace
         return true;
     }
 
-    bool ValidateStorageAcyclic(const RootPinTypeBatchV1& batch)
+    bool ValidateStorageAcyclic(const RootPinTypeBatchV2& batch)
     {
         std::vector<size_t> indegree(batch.nodeCount);
 
@@ -415,7 +451,8 @@ namespace
                 }
             }
             else if (node.shape == ROOTPIN_TYPE_SHAPE_OPTIONAL
-                || node.shape == ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD)
+                || node.shape == ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD
+                || node.shape == ROOTPIN_TYPE_SHAPE_FIXED_ARRAY)
             {
                 indegree[node.child]++;
             }
@@ -449,7 +486,8 @@ namespace
                 }
             }
             else if ((node.shape == ROOTPIN_TYPE_SHAPE_OPTIONAL
-                || node.shape == ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD)
+                || node.shape == ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD
+                || node.shape == ROOTPIN_TYPE_SHAPE_FIXED_ARRAY)
                 && --indegree[node.child] == 0)
             {
                 ready.push_back(node.child);
@@ -460,7 +498,7 @@ namespace
     }
 
     bool ValidateFields(
-        const RootPinTypeBatchV1& batch,
+        const RootPinTypeBatchV2& batch,
         std::vector<uint8_t>& fieldOwnership,
         const std::vector<uint8_t>& containsSupport)
     {
@@ -575,7 +613,7 @@ namespace
     }
 
     bool ValidateGraph(
-        const RootPinTypeBatchV1& batch,
+        const RootPinTypeBatchV2& batch,
         std::vector<std::vector<uint64_t>>& originKeys,
         std::unordered_map<uint64_t, Origin>& origins)
     {
@@ -766,6 +804,8 @@ struct RootPinLoadedTypeV1
     uint64_t retirementOriginKey;
     uint32_t layoutKind;
     uint32_t flags;
+    uint64_t elementCount;
+    uint64_t elementStride;
     RootPinLoadedTypeV1* child;
     std::vector<Field> fields;
     std::vector<uint64_t> origins;
@@ -821,7 +861,7 @@ namespace
 #endif
 
     bool SameNodeLoaded(
-        const RootPinTypeBatchV1& batch,
+        const RootPinTypeBatchV2& batch,
         uint32_t inputIndex,
         const std::vector<std::vector<uint64_t>>& originKeys,
         const RootPinLoadedTypeV1& loaded)
@@ -832,6 +872,8 @@ namespace
             || input.alignment != loaded.alignment
             || input.retirementKey != loaded.retirementKey
             || input.layoutKind != loaded.layoutKind || input.flags != loaded.flags
+            || input.elementCount != loaded.elementCount
+            || input.elementStride != loaded.elementStride
             || ChildKey(batch, input.child) != (loaded.child == nullptr ? 0 : loaded.child->key.value)
             || ChildRole(batch, input.child) != (loaded.child == nullptr ? 0 : loaded.child->key.role)
             || input.fieldCount != loaded.fields.size()
@@ -865,7 +907,7 @@ namespace
     }
 
     std::unique_ptr<RootPinLoadedTypeV1> CreateLoadedType(
-        const RootPinTypeBatchV1& batch,
+        const RootPinTypeBatchV2& batch,
         uint32_t index,
         const std::vector<std::vector<uint64_t>>& originKeys)
     {
@@ -882,6 +924,8 @@ namespace
             : 0;
         loaded->layoutKind = node.layoutKind;
         loaded->flags = node.flags;
+        loaded->elementCount = node.elementCount;
+        loaded->elementStride = node.elementStride;
         loaded->child = nullptr;
         loaded->origins = originKeys[index];
         loaded->fields.reserve(node.fieldCount);
@@ -890,9 +934,9 @@ namespace
 }
 
 extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
-TerrumRootPinAdmitLoadedTypesV1(
+TerrumRootPinAdmitLoadedTypesV2(
     RootPinDomainV1 domain,
-    const RootPinTypeBatchV1* batch,
+    const RootPinTypeBatchV2* batch,
     RootPinLoadedTypeV1** vacantOutTypes,
     uint32_t outCount)
 {
@@ -918,11 +962,11 @@ TerrumRootPinAdmitLoadedTypesV1(
         std::fill_n(vacantOutTypes, outCount, nullptr);
         return ROOTPIN_TYPE_STATUS_INVALID;
     }
-    if (reinterpret_cast<uintptr_t>(batch) % alignof(RootPinTypeBatchV1) != 0
+    if (reinterpret_cast<uintptr_t>(batch) % alignof(RootPinTypeBatchV2) != 0
         || !GetMemoryRange(batch, sizeof(*batch), batchRange)
         || Overlaps(outputRange, batchRange)
         || !ValidArray(batch->nodes, batch->nodeCount, sizeof(*batch->nodes),
-            alignof(RootPinTypeNodeV1), nodesRange)
+            alignof(RootPinTypeNodeV2), nodesRange)
         || !ValidArray(batch->fields, batch->fieldCount, sizeof(*batch->fields),
             alignof(RootPinTypeFieldV1), fieldsRange)
         || !ValidArray(batch->origins, batch->originCount, sizeof(*batch->origins),
@@ -944,13 +988,13 @@ TerrumRootPinAdmitLoadedTypesV1(
         {
             return ROOTPIN_TYPE_STATUS_UNSUPPORTED;
         }
-        if (batch->abiRevision != 1
+        if (batch->abiRevision != 2
             || batch->targetProfileId != 2
             || batch->targetProfileRevision != 1)
         {
             return ROOTPIN_TYPE_STATUS_UNSUPPORTED;
         }
-        if (batch->byteSize != sizeof(RootPinTypeBatchV1)
+        if (batch->byteSize != sizeof(RootPinTypeBatchV2)
             || batch->flags != 0 || batch->reserved != 0
             || batch->nodeCount == 0 || batch->nodeCount != outCount)
         {
@@ -1132,7 +1176,7 @@ RootPinTestGetDomainV1(void)
 }
 
 extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestFailAdmissionAtStageV1(uint32_t stage)
+RootPinTestFailAdmissionAtStageV2(uint32_t stage)
 {
     s_failureStage.store(stage);
 }

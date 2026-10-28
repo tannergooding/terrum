@@ -1368,7 +1368,12 @@ supplementary native admission export now validates and interns typed
 descriptor graphs transactionally under a test-only domain path. It is not
 wired to a complete runtime table, object registration, RootPin operations,
 relocation or JIT/AOT loading. This is not normative adoption or runtime
-execution support. Canonical source contracts are in
+execution support. A second unapproved amendment adds fixed arrays to that
+descriptor handoff and selects its V2/96-byte-node form. The standalone native
+admission implementation and supervised test now use that V2 shape, including
+checked count/stride, nested arrays, packed placement and zero/unit cases.
+This remains test-only descriptor admission, not rooted element operations or
+runtime execution. Canonical source contracts are in
 [language](../specs/language.md),
 [complete types](../specs/language/types-and-normalization.md),
 [references](../specs/language/references.md), [lifetimes](../specs/lifetimes.md),

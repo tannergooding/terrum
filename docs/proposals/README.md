@@ -110,3 +110,4 @@ replace the accepted [source](../specs/language.md),
 [representation](../specs/representation/README.md),
 [runtime](../specs/runtime/README.md) and
 [target](../specs/targets/README.md) owners.
+| [RootPin fixed-array layout descriptors](reference-root-pin-array-layout-descriptors.md) | Unapproved, provisional amendment limited to the loaded-type candidate: one repeated fixed-inline-array shape, checked layout and exact element lookup through relocation; revises only the supplementary descriptor ABI and preserves the 104/112-byte helper ABI, B + RootPin selection and separate source/codec/construction gates. |

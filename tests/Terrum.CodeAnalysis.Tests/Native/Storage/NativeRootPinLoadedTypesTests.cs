@@ -41,8 +41,8 @@ public sealed class NativeRootPinLoadedTypesTests
         var providerObjectPath = Path.Combine(directory, "root-pin-loaded-types.obj");
         var probePath = Path.Combine(directory, "root-pin-loaded-types-probe.exe");
         var probeObjectPath = Path.Combine(directory, "root-pin-loaded-types-probe.obj");
-        var providerSource = Path.Combine(root, "sources", "Terrum.RootPin.Runtime", "RootPinLoadedTypesV1.cpp");
-        var providerHeader = Path.Combine(root, "sources", "Terrum.RootPin.Runtime", "RootPinLoadedTypesV1.h");
+        var providerSource = Path.Combine(root, "sources", "Terrum.RootPin.Runtime", "RootPinLoadedTypesV2.cpp");
+        var providerHeader = Path.Combine(root, "sources", "Terrum.RootPin.Runtime", "RootPinLoadedTypesV2.h");
         var probeSource = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
             "Native", "Storage", "RootPinLoadedTypesProbe.c");
         var testSource = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",

@@ -1,5 +1,5 @@
-#ifndef TERRUM_ROOT_PIN_LOADED_TYPES_V1_H
-#define TERRUM_ROOT_PIN_LOADED_TYPES_V1_H
+#ifndef TERRUM_ROOT_PIN_LOADED_TYPES_V2_H
+#define TERRUM_ROOT_PIN_LOADED_TYPES_V2_H
 
 #include <stdint.h>
 
@@ -21,7 +21,7 @@ extern "C" {
 typedef struct RootPinDomainImpl* RootPinDomainV1;
 typedef struct RootPinLoadedTypeV1 RootPinLoadedTypeV1;
 
-typedef struct RootPinTypeNodeV1
+typedef struct RootPinTypeNodeV2
 {
     uint64_t typeKey;
     uint32_t role;
@@ -38,7 +38,9 @@ typedef struct RootPinTypeNodeV1
     uint64_t retireGcPayloadThunk;
     uint32_t layoutKind;
     uint32_t flags;
-} RootPinTypeNodeV1;
+    uint64_t elementCount;
+    uint64_t elementStride;
+} RootPinTypeNodeV2;
 
 typedef struct RootPinTypeFieldV1
 {
@@ -61,7 +63,7 @@ typedef struct RootPinTypeOriginV1
     uint32_t reserved;
 } RootPinTypeOriginV1;
 
-typedef struct RootPinTypeBatchV1
+typedef struct RootPinTypeBatchV2
 {
     uint32_t abiRevision;
     uint32_t byteSize;
@@ -71,13 +73,13 @@ typedef struct RootPinTypeBatchV1
     uint32_t fieldCount;
     uint32_t originCount;
     uint32_t originUseCount;
-    const RootPinTypeNodeV1* nodes;
+    const RootPinTypeNodeV2* nodes;
     const RootPinTypeFieldV1* fields;
     const RootPinTypeOriginV1* origins;
     const uint32_t* originUses;
     uint32_t flags;
     uint32_t reserved;
-} RootPinTypeBatchV1;
+} RootPinTypeBatchV2;
 
 enum
 {
@@ -95,6 +97,7 @@ enum
     ROOTPIN_TYPE_SHAPE_STABLE_REF = 6,
     ROOTPIN_TYPE_SHAPE_STABLE_CLASS = 7,
     ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD = 8,
+    ROOTPIN_TYPE_SHAPE_FIXED_ARRAY = 9,
     ROOTPIN_TYPE_LAYOUT_AUTO = 0,
     ROOTPIN_TYPE_LAYOUT_SEQUENTIAL = 1,
     ROOTPIN_TYPE_LAYOUT_UNION = 2,
@@ -107,9 +110,9 @@ enum
 };
 
 ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
-TerrumRootPinAdmitLoadedTypesV1(
+TerrumRootPinAdmitLoadedTypesV2(
     RootPinDomainV1 domain,
-    const RootPinTypeBatchV1* batch,
+    const RootPinTypeBatchV2* batch,
     RootPinLoadedTypeV1** vacantOutTypes,
     uint32_t outCount);
 
@@ -118,7 +121,7 @@ ROOTPIN_LOADED_TYPES_API RootPinDomainV1 ROOTPIN_LOADED_TYPES_CALL
 RootPinTestGetDomainV1(void);
 
 ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
-RootPinTestFailAdmissionAtStageV1(uint32_t stage);
+RootPinTestFailAdmissionAtStageV2(uint32_t stage);
 #endif
 
 #ifdef __cplusplus
