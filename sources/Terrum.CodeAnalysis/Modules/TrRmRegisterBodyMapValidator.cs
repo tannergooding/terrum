@@ -747,12 +747,19 @@ internal static class TrRmRegisterBodyMapValidator
                             registerTypes,
                             typeSpecs, methods, signatures, parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
+                        UpdateCallSiteRegisterTypes(body, instruction[1], registerTypes,
+                            typeSpecs, methods, signatures, imports,
+                            nativeFunctionPointerAnchors);
                         break;
                     case 0xE0:
                         ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
                             blockIndex, registerTypes,
                             typeSpecs, methods, signatures,
                             parameters, contracts, imports,
+                            nativeFunctionPointerAnchors);
+                        UpdateCallSiteRegisterTypes(body,
+                            ReadUInt16(instruction, 2), registerTypes,
+                            typeSpecs, methods, signatures, imports,
                             nativeFunctionPointerAnchors);
                         break;
                     case 0xE1:
@@ -772,10 +779,52 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                 }
 
-                UpdateRegisterTypeStates(body, instruction, registerTypes,
-                    methodDefRow, methods, signatures, parameters, typeSpecs);
+                if (opcode is not (0x90 or 0xE0))
+                {
+                    UpdateRegisterTypeStates(body, instruction, registerTypes,
+                        methodDefRow, methods, signatures, parameters, typeSpecs);
+                }
                 position += instructionLength;
             }
+        }
+    }
+
+    private static void UpdateCallSiteRegisterTypes(
+        TrRmRegisterBodyReader body, int recordIndex,
+        RegisterTypeState[] registerTypes,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmImportTableReader imports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        var payload = body.GetRecord(recordIndex)[4..];
+        var targetMethod = GetCallSiteTargetMethod(body, payload,
+            registerTypes, typeSpecs, methods, imports,
+            nativeFunctionPointerAnchors);
+        var signature = methods.GetSignature(targetMethod);
+        var inputCount = checked((int)ReadUInt32(payload, 8));
+        var inputOffset = 16;
+        for (var input = 0; input < inputCount; input++)
+        {
+            if (payload[inputOffset] == 1
+                && payload[inputOffset + 1] == 2)
+            {
+                var register = ReadUInt16(payload, inputOffset + 2);
+                if (register < 14)
+                {
+                    registerTypes[register] = RegisterTypeState.Unknown;
+                }
+            }
+
+            inputOffset += 4;
+        }
+
+        if (payload[1] == 1)
+        {
+            var resultRegister = ReadUInt16(payload, 6);
+            registerTypes[resultRegister] =
+                RegisterTypeState.FromTypeSpecRef(
+                    signatures.GetResultTypeSpec(signature));
         }
     }
 
@@ -819,11 +868,6 @@ internal static class TrRmRegisterBodyMapValidator
         var unitResult = typeSpecs.AreEquivalentTypeSpecRefs(
             resultType, UnitTypeSpecRef);
         var doesNotReturn = (contracts.GetEffectsMask(targetMethod) & 2) != 0;
-        if (payload[0] == 2 && !doesNotReturn && !unitResult)
-        {
-            throw InvalidMap();
-        }
-
         if (doesNotReturn
             ? payload[1] != 0 || !body.IsCallSiteAtBlockEnd(blockIndex, recordIndex)
             : unitResult ? payload[1] != 0 : payload[1] == 0)
@@ -1190,8 +1234,17 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                 }
 
-                UpdateRegisterTypeStates(body, instruction, registerTypes,
-                    methodDefRow, methods, signatures, parameters, typeSpecs);
+                if (recordIndex >= 0)
+                {
+                    UpdateCallSiteRegisterTypes(body, recordIndex,
+                        registerTypes, typeSpecs, methods, signatures,
+                        imports, nativeFunctionPointerAnchors);
+                }
+                else
+                {
+                    UpdateRegisterTypeStates(body, instruction, registerTypes,
+                        methodDefRow, methods, signatures, parameters, typeSpecs);
+                }
                 position += instruction.Length;
             }
         }
