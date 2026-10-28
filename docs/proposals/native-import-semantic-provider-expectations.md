@@ -1,13 +1,9 @@
 # Direct-native-import expectations in private semantic modules
 
-**Status: unapproved; provisionally actionable only under the user's
-authorized missing-contract workflow.** The applicable instruction is:
-
-> At a genuine missing contract, prepare the smallest concrete decision needed as a new proposal doc using gpt-6.1-sol at max reasoning, then continue with it being treated as a provisional approval/direction.
-
-This recommendation selects private expectation transport and comparison,
-not normative adoption, implementation support or released stability. It
-does not approve adjacent syntax, schemas, APIs or runtime policy.
+**Status: unapproved; provisionally actionable under the current implementation
+authorization.** This recommendation selects private expectation transport
+and comparison, not normative adoption, implementation support or released
+stability. It does not approve adjacent syntax, schemas, APIs or runtime policy.
 
 ## Decision and boundary
 
@@ -57,7 +53,7 @@ These are inspected source boundaries, not newly executed validation:
 | Same file, `PutFunction`, `GetFunction`, `SameDirectNativeParameters` | Owned direct payloads already carry library/export and 14-byte input records. The helper compares corresponding formal, normalized pointee identity, access, retention and full `uint` extent, but ordinary ModuleCompiler binding does not call it. |
 | [`ModuleSets`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs), [`Graph`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs) | Consumer creation, graph import validation and restoration are separate paths. `RecordedImportPromises` overlays selected flags on a replacement, not an original complete direct descriptor. |
 | [`NativeModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/NativeModuleCompiler.cs), direct-expectation provider validation | Outer native containers already retain and compare direct descriptors. Their Windows library comparison is ordinal-ignore-case; foreign exports and provider identities are ordinal. This is not a carrier for bare semantic imports. |
-| [`NativeParameterExtentPersistenceTests.cs`](../../tests/Terrum.CodeAnalysis.Tests/Modules/NativeParameterExtentPersistenceTests.cs) and the [test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj) | The active direct replacement regression requires the original `uint.MaxValue` provider to link and a `ushort.MaxValue` replacement to reject. The assigning investigation reports the latter currently accepted; the analogous vtable test rejects it. Keep the failing direct assertion unweakened. |
+| [`NativeParameterExtentPersistenceTests.cs`](../../tests/Terrum.CodeAnalysis.Tests/Modules/NativeParameterExtentPersistenceTests.cs) and the [test project](../../tests/Terrum.CodeAnalysis.Tests/Terrum.CodeAnalysis.Tests.csproj) | The direct replacement regression demonstrates that a consumer expecting extent `uint.MaxValue` currently links against a replacement at `ushort.MaxValue`; the analogous vtable replacement rejects the change. |
 
 The [implementation reference](../implementation/modules.md) distinguishes
 the current private revision-92 codec from the unapproved compositions.
