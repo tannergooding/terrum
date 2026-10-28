@@ -1358,8 +1358,18 @@ unpublished profile to make a subset appear conforming.
 ## CG-027: Normal/GC backing, roots, pin reborrows and Cleanup
 
 **Accepted source direction; implementation and independent exchange remain
-blocked on complete type, runtime and carrier selections.** Canonical source
-contracts are in [language](../specs/language.md),
+incomplete.** The unapproved RootPin proposals provisionally select a Windows
+x64 stable-cell runtime, Feature 14/1, TargetProfile 2/1, F0 and Body record
+0D; a separate exact `RootPinRuntimeDraft` profile now dispatches its
+`ReferenceSupport` record without composing the foreign-invocation schemas.
+The separate unapproved loaded-type proposal specifies same-provider
+descriptor admission and retained layout/code/Cleanup origins. Its
+supplementary native admission export now validates and interns typed
+descriptor graphs transactionally under a test-only domain path. It is not
+wired to a complete runtime table, object registration, RootPin operations,
+relocation or JIT/AOT loading. This is not normative adoption or runtime
+execution support. Canonical source contracts are in
+[language](../specs/language.md),
 [complete types](../specs/language/types-and-normalization.md),
 [references](../specs/language/references.md), [lifetimes](../specs/lifetimes.md),
 [conversions](../specs/conversions.md) and
@@ -1376,9 +1386,12 @@ stable `ref *root` pin reborrows, or a public managed-handle ABI. The profiles
 explicitly exclude interior pointers and pinning; source-defined classes use
 compiler-owned `TryCreate` factories, while `new C(...)` remains unsupported.
 The existing Cleanup prototype is for unique values and does not implement
-GC-triggered object Cleanup. These are scoped implementation facts, not a
-reason to weaken the accepted contracts or infer conformance from the private
-collector.
+GC-triggered object Cleanup. The internal RootPin draft selection now checks
+Feature 14/1, TargetProfile 2/1 and the F0/record-0D schema boundary, including
+the distinct foreign-invocation NativeAddress record. It does not bind source
+operations, implement the provider, relocate objects or lower a root/pin.
+These are scoped implementation facts, not a reason to weaken the accepted
+contracts or infer conformance from the private collector.
 
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
 from GC-backed `gc C`, `gc box<T>` and `gc ref<T>`. Carry exact backing
@@ -1394,10 +1407,10 @@ non-resurrecting, before reclamation and on an unspecified cleanup thread,
 with thread-neutral/transferable transitive obligations.
 
 The former `pin` TypeSpec qualifier bit is retired/reserved and must not be
-reused for GC. No GC TypeSpec form/code, root/retain/pin/retirement record,
-Feature ID, collector/provider profile or ABI/carrier layout is assigned by
-this integration. Select those physical/runtime contracts explicitly before
-producer/consumer support; never infer them from private formats or equal
+reused for GC. The unapproved proposal supplies provisional type/runtime
+carriers and the RootPin draft profile supplies exact schema dispatch; source
+binding, producer/consumer execution, collector/provider implementation and
+qualification remain open. Never infer support from private formats or equal
 version bytes. Use unrelated synthetic classes/boxes and root/pin operations,
 including bounded references that outlive a handle local but not a slot or
 owner/guard endpoint, optional-root presence checks, failed acquisition with

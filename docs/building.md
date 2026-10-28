@@ -116,9 +116,10 @@ can run together through the existing runner:
 dotnet test tests\Terrum.CodeAnalysis.Tests\Terrum.CodeAnalysis.Tests.csproj -c Debug --no-build --no-restore --filter "FullyQualifiedName~NativeLoaderInteropTests|FullyQualifiedName~NativeOwnedCallAbiTests"
 ```
 
-Only five narrow C inputs remain under the test project's probe areas. Their retained
-assertions require the particular unmanaged exception or stack environment,
-not merely an independent caller or heap instrumentation:
+Six narrow C inputs remain under the test project's probe areas. The first
+five require their particular unmanaged exception/stack environment, not
+merely an independent caller or heap instrumentation; the RootPin fixture
+checks the selected native admission boundary:
 
 | Input | Distinct observation / consumer |
 |---|---|
@@ -127,6 +128,7 @@ not merely an independent caller or heap instrumentation:
 | `tests\Terrum.CodeAnalysis.Tests\Native\Unwind\Probes\seh-probe.c` | MSVC `__try`/`__finally`/filter semantics compared with a hand-built dynamic SEH table; SEH script |
 | `tests\Terrum.CodeAnalysis.Tests\Native\Ownership\Probes\owned-buffer-abi-probe.c` | Allocation/release failure and dirty BOOL injection combined with escaping native exception filters and cleanup callbacks during native unwind |
 | `tests\Terrum.CodeAnalysis.Tests\Native\Ownership\Probes\managed-node-abi-probe.c` | Root/allocation accounting and native failure injection combined with native exception-filter and unwind observations |
+| `tests\Terrum.CodeAnalysis.Tests\Native\Storage\RootPinLoadedTypesProbe.c` | Candidate same-provider RootPin loaded-type admission, typed recursive graphs, identity interning and atomic rejection; the companion NUnit test compiles the provider fixture and does not qualify RootPin operations, relocation or execution |
 
 The frame, owned-buffer and managed-node scripts consume the
 prebuilt Debug compiler at
@@ -152,4 +154,5 @@ dynamic SEH behavior without consuming Terrum compiler output. All four
 scripts require Visual Studio x64 C++ build tools. Keep their MSVC setup and
 compilation in the same process; managed catches are not a substitute for the
 native SEH assertions. Pure ABI/layout and loader checks instead belong in the
-maintained NUnit suite.
+maintained NUnit suite. The RootPin loaded-type test also needs Visual Studio
+x64 C++ build tools when selected; it is descriptor-admission evidence only.
