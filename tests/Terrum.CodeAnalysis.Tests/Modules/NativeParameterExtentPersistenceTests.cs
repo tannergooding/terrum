@@ -4,6 +4,7 @@ using System;
 using System.Linq;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
 
@@ -47,6 +48,39 @@ public sealed class NativeParameterExtentPersistenceTests
         var method = reference.Functions.Single(static function =>
             function.Name == "Invoke").NativeVTableMethod!;
         Assert.That(method.Parameters.Single().Extent, Is.EqualTo(uint.MaxValue));
+    }
+
+    [Test]
+    public void FullUnsignedExtentSurvivesNativeProviderExpectationRoundTrip()
+    {
+        var provider = CreateNativeProvider(uint.MaxValue);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return 0; }"),
+            NativeModuleCompiler.CreateReference(provider));
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, provider, NativeRuntimePolicy.FailFast);
+
+        Assert.DoesNotThrow(() => NativeModuleCompiler.Validate(consumer, provider));
+        var lowWordProvider = CreateNativeProvider(ushort.MaxValue);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.Validate(consumer, lowWordProvider));
+    }
+
+    private static byte[] CreateNativeProvider(uint extent)
+    {
+        var source = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("extent.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            public extern int32 ObserveValues(ptr<uint32> values);
+            """));
+        Assert.That(source.HasErrors, Is.False,
+            string.Join(Environment.NewLine, source.Diagnostics));
+
+        return NativeModuleCompiler.CreateProducer(
+            WithExtent(source.Program!, extent), ["ObserveValues"],
+            "ExtentProvider", NativeRuntimePolicy.FailFast);
     }
 
     private static BoundProgram WithExtent(BoundProgram program, uint extent)

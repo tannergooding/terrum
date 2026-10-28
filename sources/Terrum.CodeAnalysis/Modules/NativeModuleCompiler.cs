@@ -29,13 +29,17 @@ public sealed record NativeModuleInfo(string Identity, bool IsConsumer, string I
 /// <summary>Creates and checks single-provider Windows x64 native packages; this is not an authenticated code loader.</summary>
 public static partial class NativeModuleCompiler
 {
-    private const int Version = 2;
+    private const int Version = 3;
     private const int MaximumBytes = 16 * 1024 * 1024;
     private const int MaximumContractBytes = 4 * 1024 * 1024;
     private const int HeaderSize = 18;
     private const int HashSize = 32;
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<string>> EmptyProviderImports =
         new Dictionary<string, IReadOnlyList<string>>(StringComparer.Ordinal);
+
+    private sealed record DirectImportExpectation(string LocalFunctionName, string ProviderIdentity,
+        string ProviderExportKey, string ForeignLibraryName, string ForeignExportName,
+        ImmutableArray<DirectNativeParameter> Parameters);
 
     /// <summary>Stores a verified semantic producer contract and its independently emitted DLL.</summary>
     public static byte[] CreateProducer(BoundProgram program, IReadOnlyList<string> exports, string identity,
@@ -45,6 +49,12 @@ public static partial class NativeModuleCompiler
         ArgumentNullException.ThrowIfNull(exports);
         CheckIdentity(identity);
         CheckPolicy(runtimePolicy);
+        if (program.Functions.Any(static function => function.IsExternal
+                && function.IsModuleReference && function.DirectNativeImport is not null))
+        {
+            throw new ModuleContractException(
+                "Direct native module imports require explicit native module dependencies.");
+        }
         var names = exports.ToArray();
         var contract = ModuleCompiler.CreateProducer(program, names);
         var image = program.Functions.Any(static function => function.DirectNativeImport is not null)
@@ -75,12 +85,15 @@ public static partial class NativeModuleCompiler
             [(package.Identity, package.Policy, providerReference)]);
         var contract = ModuleCompiler.CreateConsumer(program, package.Contract);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(contract);
+        var directImportExpectations = CreateDirectImportExpectations(
+            program, contractSnapshot.ParsedModule.Structures);
         var dll = DllName(package.Identity);
         var providerBindings = new List<NativeImportBinding>();
         var providerBindingNames = new HashSet<string>(StringComparer.Ordinal);
         foreach (var function in program.Functions)
         {
-            if (!function.IsExternal || function.DirectNativeImport is not null)
+            if (function.ModuleImport is null
+                && (!function.IsExternal || function.DirectNativeImport is not null))
             {
                 continue;
             }
@@ -113,7 +126,7 @@ public static partial class NativeModuleCompiler
         }
         var machineImports = machineImportsBuilder.ToArray();
         var consumer = Write(isConsumer: true, package.Identity, runtimePolicy, contract, image,
-            machineImports, contractSnapshot);
+            machineImports, contractSnapshot, directImportExpectations);
         ValidatePair(Read(consumer), provider);
         return consumer;
     }
@@ -281,11 +294,15 @@ public static partial class NativeModuleCompiler
             ?? throw new InvalidOperationException("Native consumer contract snapshot is missing.");
         var providerSnapshot = producer.ProviderSnapshot
             ?? throw new InvalidOperationException("Native provider contract snapshot is missing.");
-        if (ModuleCompiler.Link(consumerSnapshot, providerSnapshot).RuntimePolicy != (BoundRuntimePolicy)consumer.Policy)
+        var providerReference = providerSnapshot.GetReference();
+        if (ModuleCompiler.Link(consumerSnapshot, providerSnapshot).RuntimePolicy
+            != (BoundRuntimePolicy)consumer.Policy)
         {
             throw new ModuleFormatException("Native package and linked semantic policies differ.");
         }
-        return providerSnapshot.GetReference();
+        ValidateDirectImportExpectationsAgainstProvider(consumer.DirectImportExpectations,
+            consumerSnapshot, producer.Identity, providerReference);
+        return providerReference;
     }
 
     private static void ValidateProducerImage(Package producer, IReadOnlyList<string> exports)
@@ -294,7 +311,9 @@ public static partial class NativeModuleCompiler
             ModuleCompiler.GetProducerNativeImports(producer.Contract));
         NativeModuleImageValidator.Validate(producer.Image, isConsumer: false, nativeImports, exports,
             producer.Policy, allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(producer.Profile),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(producer.Profile));
+            allowManagedRuntimeData: AllowsManagedRuntimeData(producer.Profile),
+            directImportExports: System32DirectImportExports(
+                ModuleCompiler.GetProducerDirectNativeImportExports(producer.Contract)));
     }
 
     private static Dictionary<string, IReadOnlyList<string>> System32DirectImports(
@@ -307,6 +326,20 @@ public static partial class NativeModuleCompiler
             imports.Add(NativeEmitter.System32ImportPath(dllName), symbols);
         }
         return imports;
+    }
+
+    private static Dictionary<string, NativeImportBinding> System32DirectImportExports(
+        IReadOnlyList<NativeImportBinding> directImports)
+    {
+        var exports = new Dictionary<string, NativeImportBinding>(directImports.Count,
+            StringComparer.Ordinal);
+        foreach (var import in directImports)
+        {
+            exports.Add(import.FunctionName, import with {
+                DllName = NativeEmitter.System32ImportPath(import.DllName),
+            });
+        }
+        return exports;
     }
 
     private static void ValidateConsumerImage(Package consumer)
@@ -414,6 +447,8 @@ public static partial class NativeModuleCompiler
             var isNativeCallable = function.IsExternal && function.NativeFunctionPointerType is not null;
             var isNativeVTable = function.NativeVTableMethod is not null
                 && NativeVTableCallContract.IsValid(function, program);
+            var isDirectNativeModuleImport = function.IsExternal && function.IsModuleReference
+                && function.DirectNativeImport is not null;
             if (import is null && function.IsExternal && isNativeVTable)
             {
                 var selectedProviderIndex = -1;
@@ -440,16 +475,42 @@ public static partial class NativeModuleCompiler
                 import = new BoundModuleImport(providerIdentity, function.Name, 1,
                     (uint)providerPolicy);
             }
+            else if (import is null && isDirectNativeModuleImport)
+            {
+                var selectedProviderIndex = -1;
+                for (var providerIndex = 0; providerIndex < providers.Count; providerIndex++)
+                {
+                    if (!providers[providerIndex].Reference.Functions.Any(declaration =>
+                        declaration.Name == function.Name && declaration.DirectNativeImport is not null))
+                    {
+                        continue;
+                    }
+                    if (selectedProviderIndex >= 0)
+                    {
+                        throw new ModuleContractException(
+                            $"Direct native declaration '{function.Name}' has ambiguous providers.");
+                    }
+                    selectedProviderIndex = providerIndex;
+                }
+                if (selectedProviderIndex < 0)
+                {
+                    throw new ModuleContractException(
+                        $"Direct native declaration '{function.Name}' has no selected provider.");
+                }
+                var (providerIdentity, providerPolicy, _) = providers[selectedProviderIndex];
+                import = new BoundModuleImport(providerIdentity, function.Name, 1,
+                    (uint)providerPolicy);
+            }
 
             if (import is null)
             {
                 continue;
             }
-            if ((!isNativeCallable && !isNativeVTable)
+            if ((!isNativeCallable && !isNativeVTable && !isDirectNativeModuleImport)
                 || import.TargetRequirement != 1 || import.ExportKey != function.Name)
             {
                 throw new ModuleContractException(
-                    "A retained TRRM import is not a supported native callable or vtable dependency.");
+                    "A retained import is not a supported native callable, vtable, or direct native dependency.");
             }
 
             var matchedProvider = false;
@@ -469,12 +530,27 @@ public static partial class NativeModuleCompiler
                     || (isNativeVTable
                         && (declaration.NativeVTableMethod is not NativeVTableMethodDefinition providerVTable
                             || !ModuleCompiler.SameNativeVTableMethod(
-                                function.NativeVTableMethod!, providerVTable))))
+                                function.NativeVTableMethod!, providerVTable)))
+                    || (isDirectNativeModuleImport
+                        && (declaration.DirectNativeImport is null
+                            || !DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
+                                program.NativeFunctionPointerSignatures, program.NativePointerTypes)
+                            || !DirectNativeImportContract.IsValidPrivateWindows(declaration, providerReference.Structures,
+                                providerReference.NativeFunctionPointerSignatures,
+                                providerReference.NativePointerTypes)
+                            || !ModuleCompiler.SameNativeOutputContracts(
+                                function.NativeOutputRole, function.NativeOutputContracts,
+                                declaration.NativeOutputRole, declaration.NativeOutputContracts,
+                                program.Structures, providerReference.Structures,
+                                program.NativeFunctionPointerSignatures, program.NativePointerTypes,
+                                providerReference.NativeFunctionPointerSignatures,
+                                providerReference.NativePointerTypes))))
                 {
                     throw new ModuleContractException(
                         "The selected native provider does not satisfy a retained TRRM import identity.");
                 }
-                if (isNativeVTable)
+                if ((function.ModuleImport is null || !function.IsExternal)
+                    && (isNativeVTable || isDirectNativeModuleImport))
                 {
                     reboundFunctions ??= program.Functions.ToBuilder();
                     reboundFunctions[functionIndex] = function with {
@@ -501,9 +577,242 @@ public static partial class NativeModuleCompiler
             : program with { Functions = reboundFunctions.ToImmutable() };
     }
 
+    private static ImmutableArray<DirectImportExpectation> CreateDirectImportExpectations(
+        BoundProgram program, ImmutableArray<BoundStruct> destinationStructures)
+    {
+        var expectations = ImmutableArray.CreateBuilder<DirectImportExpectation>();
+        foreach (var function in program.Functions)
+        {
+            if (!function.IsExternal || !function.IsModuleReference
+                || function.DirectNativeImport is not DirectNativeImport directImport)
+            {
+                continue;
+            }
+            if (function.ModuleImport is not BoundModuleImport moduleImport
+                || moduleImport.TargetRequirement != 1
+                || moduleImport.ExportKey != function.Name
+                || moduleImport.RuntimePolicy != (uint)program.RuntimePolicy
+                || !DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
+                    program.NativeFunctionPointerSignatures, program.NativePointerTypes))
+            {
+                throw new ModuleContractException(
+                    $"Direct native module import '{function.Name}' lacks a checked provider binding.");
+            }
+            var parameters = ModuleCompiler.RemapDirectNativeParameters(directImport.Parameters,
+                program.Structures, destinationStructures);
+            var orderedParameters = parameters.OrderBy(static parameter => parameter.ParameterIndex)
+                .ToImmutableArray();
+            expectations.Add(new DirectImportExpectation(function.Name,
+                moduleImport.ProducerIdentity, moduleImport.ExportKey, directImport.LibraryName,
+                directImport.ExportName, orderedParameters));
+        }
+        var ordered = expectations.OrderBy(static expectation => expectation.LocalFunctionName,
+            StringComparer.Ordinal).ToImmutableArray();
+        ValidateDirectImportExpectationShape(ordered);
+        return ordered;
+    }
+
+    private static void ValidateDirectImportExpectationShape(
+        ImmutableArray<DirectImportExpectation> expectations)
+    {
+        if (expectations.IsDefault || expectations.Length > 1024)
+        {
+            throw new ModuleFormatException("Invalid direct-import expectation count.");
+        }
+        string? previousName = null;
+        foreach (var expectation in expectations)
+        {
+            if (expectation is null
+                || !ValidGraphSymbol(expectation.LocalFunctionName)
+                || !ValidIdentity(expectation.ProviderIdentity)
+                || expectation.ProviderExportKey != expectation.LocalFunctionName
+                || !ValidGraphSymbol(expectation.ProviderExportKey)
+                || !DirectNativeImportContract.IsValidPrivateWindowsLibraryName(
+                    expectation.ForeignLibraryName)
+                || !DirectNativeImportContract.IsValidExportName(expectation.ForeignExportName)
+                || expectation.Parameters.IsDefault || expectation.Parameters.Length > 256
+                || (previousName is not null
+                    && StringComparer.Ordinal.Compare(previousName, expectation.LocalFunctionName) >= 0))
+            {
+                throw new ModuleFormatException(
+                    "Invalid, duplicate or unordered direct-import expectation.");
+            }
+            var previousFormal = -1;
+            foreach (var parameter in expectation.Parameters)
+            {
+                if (parameter is null
+                    || parameter.ParameterIndex <= previousFormal
+                    || parameter.ParameterIndex >= 256
+                    || parameter.Access is not (NativeParameterAccess.Read
+                        or NativeParameterAccess.Write or NativeParameterAccess.ReadWrite)
+                    || parameter.Retention != NativeParameterRetention.NoEscape
+                    || (parameter.PointeeType == PrimitiveType.Void
+                        && (parameter.Access != NativeParameterAccess.Read || parameter.Extent != 0)))
+                {
+                    throw new ModuleFormatException("Invalid direct-import native parameter expectation.");
+                }
+                previousFormal = parameter.ParameterIndex;
+            }
+            previousName = expectation.LocalFunctionName;
+        }
+    }
+
+    private static byte[] SerializeDirectImportExpectations(
+        ImmutableArray<DirectImportExpectation> expectations)
+    {
+        ValidateDirectImportExpectationShape(expectations);
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        writer.Write(checked((ushort)expectations.Length));
+        foreach (var expectation in expectations)
+        {
+            PutGraphString(writer, expectation.LocalFunctionName);
+            PutGraphString(writer, expectation.ProviderIdentity);
+            PutGraphString(writer, expectation.ProviderExportKey);
+            PutGraphString(writer, expectation.ForeignLibraryName);
+            PutGraphString(writer, expectation.ForeignExportName);
+            writer.Write(checked((ushort)expectation.Parameters.Length));
+            foreach (var parameter in expectation.Parameters)
+            {
+                writer.Write(checked((uint)parameter.ParameterIndex));
+                writer.Write((int)parameter.PointeeType);
+                writer.Write((byte)parameter.Access);
+                writer.Write((byte)parameter.Retention);
+                writer.Write(parameter.Extent);
+            }
+        }
+        return stream.ToArray();
+    }
+
+    private static ImmutableArray<DirectImportExpectation> ReadDirectImportExpectations(
+        byte[] bytes, ref int at)
+    {
+        var count = ReadGraphCount(bytes, ref at, 1024);
+        var expectations = ImmutableArray.CreateBuilder<DirectImportExpectation>(count);
+        for (var index = 0; index < count; index++)
+        {
+            var localName = ReadGraphString(bytes, ref at, 256);
+            var providerIdentity = ReadGraphString(bytes, ref at, 64);
+            var providerExportKey = ReadGraphString(bytes, ref at, 256);
+            var foreignLibraryName = ReadGraphString(bytes, ref at, 256);
+            var foreignExportName = ReadGraphString(bytes, ref at, 256);
+            var parameterCount = ReadGraphCount(bytes, ref at, 256);
+            if ((long)at + (parameterCount * 14L) > bytes.Length - HashSize)
+            {
+                throw new ModuleFormatException("Truncated direct-import native parameter table.");
+            }
+            var parameters = ImmutableArray.CreateBuilder<DirectNativeParameter>(parameterCount);
+            for (var parameterIndex = 0; parameterIndex < parameterCount; parameterIndex++)
+            {
+                var formalOrdinal = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at, sizeof(uint)));
+                at += sizeof(uint);
+                var pointeeType = (PrimitiveType)BinaryPrimitives.ReadInt32LittleEndian(
+                    bytes.AsSpan(at, sizeof(int)));
+                at += sizeof(int);
+                var access = (NativeParameterAccess)bytes[at++];
+                var retention = (NativeParameterRetention)bytes[at++];
+                var extent = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(at, sizeof(uint)));
+                at += sizeof(uint);
+                if (formalOrdinal >= 256)
+                {
+                    throw new ModuleFormatException("Direct-import formal ordinal exceeds its limit.");
+                }
+                parameters.Add(new DirectNativeParameter((int)formalOrdinal, pointeeType,
+                    access, retention, extent));
+            }
+            expectations.Add(new DirectImportExpectation(localName, providerIdentity,
+                providerExportKey, foreignLibraryName, foreignExportName, parameters.MoveToImmutable()));
+        }
+        var result = expectations.MoveToImmutable();
+        ValidateDirectImportExpectationShape(result);
+        return result;
+    }
+
+    private static void ValidateDirectImportExpectationsAgainstConsumer(
+        ImmutableArray<DirectImportExpectation> expectations,
+        ModuleCompiler.ConsumerContractSnapshot consumer) =>
+        ValidateDirectImportExpectationsAgainstModule(expectations, consumer.ParsedModule);
+
+    private static void ValidateDirectImportExpectationsAgainstModule(
+        ImmutableArray<DirectImportExpectation> expectations, ModuleCompiler.Module module)
+    {
+        foreach (var expectation in expectations)
+        {
+            var declaration = module.Functions.SingleOrDefault(function =>
+                function.Name == expectation.LocalFunctionName);
+            if (declaration is null || !declaration.Import || declaration.Function is not null
+                || declaration.NativeOutputContracts.IsDefault
+                || (!declaration.NativeOutputContracts.IsEmpty
+                    && declaration.NativeOutputRole != NativeOutputDeclarationRole.DirectImport))
+            {
+                throw new ModuleFormatException(
+                    "Direct-import expectation does not select an imported declaration.");
+            }
+            var parameterCount = ModuleCompiler.ContractParameterCount(declaration.Contract);
+            foreach (var parameter in expectation.Parameters)
+            {
+                if (parameter.ParameterIndex >= parameterCount
+                    || !DirectNativeImportContract.IsInputPointee(parameter.PointeeType,
+                        module.Structures)
+                    || (NativePointerTypes.IsType(parameter.PointeeType)
+                        && !NativePointerTypeContract.IsValidType(parameter.PointeeType,
+                            module.NativePointerTypes))
+                    || (NativeFunctionPointerTypes.IsType(parameter.PointeeType)
+                        && !NativeFunctionPointerContract.IsValidType(parameter.PointeeType,
+                            module.NativeFunctionPointerSignatures))
+                    || declaration.NativeOutputContracts.Any(output =>
+                        output.FormalOrdinal == parameter.ParameterIndex))
+                {
+                    throw new ModuleFormatException(
+                        "Direct-import parameter expectation contradicts its retained declaration.");
+                }
+            }
+        }
+    }
+
+    private static void ValidateDirectImportExpectationsAgainstProvider(
+        ImmutableArray<DirectImportExpectation> expectations,
+        ModuleCompiler.ConsumerContractSnapshot consumer, string providerIdentity,
+        CompilationReference providerReference) =>
+        ValidateDirectImportExpectationsAgainstProvider(expectations,
+            consumer.ParsedModule, providerIdentity, providerReference);
+
+    private static void ValidateDirectImportExpectationsAgainstProvider(
+        ImmutableArray<DirectImportExpectation> expectations, ModuleCompiler.Module consumerModule,
+        string providerIdentity, CompilationReference providerReference)
+    {
+        ValidateDirectImportExpectationsAgainstModule(expectations, consumerModule);
+        foreach (var expectation in expectations)
+        {
+            if (!StringComparer.Ordinal.Equals(expectation.ProviderIdentity, providerIdentity))
+            {
+                throw new ModuleContractException(
+                    "Direct-import expectation selects a different native provider identity.");
+            }
+            var declaration = providerReference.Functions.SingleOrDefault(function =>
+                function.Name == expectation.ProviderExportKey);
+            if (declaration?.DirectNativeImport is not DirectNativeImport directImport
+                || !StringComparer.OrdinalIgnoreCase.Equals(expectation.ForeignLibraryName,
+                    directImport.LibraryName)
+                || expectation.ForeignExportName != directImport.ExportName
+                || !ModuleCompiler.SameDirectNativeParameters(expectation.Parameters,
+                    consumerModule.Structures,
+                    consumerModule.NativeFunctionPointerSignatures,
+                    consumerModule.NativePointerTypes,
+                    directImport.Parameters, providerReference.Structures,
+                    providerReference.NativeFunctionPointerSignatures,
+                    providerReference.NativePointerTypes))
+            {
+                throw new ModuleContractException(
+                    "Selected provider changes a retained direct-import native contract.");
+            }
+        }
+    }
+
     private static byte[] Write(bool isConsumer, string identity, NativeRuntimePolicy policy, byte[] contract,
         byte[] image, string[]? machineImports = null,
-        ModuleCompiler.ConsumerContractSnapshot? contractSnapshot = null)
+        ModuleCompiler.ConsumerContractSnapshot? contractSnapshot = null,
+        ImmutableArray<DirectImportExpectation> directImportExpectations = default)
     {
         CheckIdentity(identity);
         CheckPolicy(policy);
@@ -515,6 +824,20 @@ public static partial class NativeModuleCompiler
         var consumerSnapshot = isConsumer
             ? contractSnapshot ?? ModuleCompiler.ReadConsumerContractSnapshot(contract)
             : null;
+        var expectations = directImportExpectations;
+        if (expectations.IsDefault)
+        {
+            expectations = [];
+        }
+        if (!isConsumer && !expectations.IsEmpty)
+        {
+            throw new ModuleFormatException("Native producer packages cannot retain consumer import expectations.");
+        }
+        ValidateDirectImportExpectationShape(expectations);
+        if (consumerSnapshot is not null)
+        {
+            ValidateDirectImportExpectationsAgainstConsumer(expectations, consumerSnapshot);
+        }
         var profile = Encoding.ASCII.GetBytes(consumerSnapshot is not null ? consumerSnapshot.Profile
             : ModuleCompiler.GetNativeProfileVersion(contract, false));
         var imports = machineImports ?? [];
@@ -545,8 +868,9 @@ public static partial class NativeModuleCompiler
             }
         }
         var importTable = importStream.ToArray();
+        var directImportExpectationTable = SerializeDirectImportExpectations(expectations);
         var length = checked(HeaderSize + nameLength + profile.Length + importTable.Length
-            + contract.Length + image.Length + HashSize);
+            + directImportExpectationTable.Length + contract.Length + image.Length + HashSize);
         if (contract.Length is < 1 or > MaximumContractBytes || image.Length == 0 || length > MaximumBytes)
         {
             throw new NotSupportedException("Native module package exceeds its bounded artifact limits.");
@@ -563,8 +887,12 @@ public static partial class NativeModuleCompiler
         _ = Encoding.ASCII.GetBytes(identity.AsSpan(), result.AsSpan(HeaderSize, nameLength));
         profile.CopyTo(result, HeaderSize + nameLength);
         importTable.CopyTo(result, HeaderSize + nameLength + profile.Length);
-        contract.CopyTo(result, HeaderSize + nameLength + profile.Length + importTable.Length);
-        image.CopyTo(result, HeaderSize + nameLength + profile.Length + importTable.Length + contract.Length);
+        directImportExpectationTable.CopyTo(result,
+            HeaderSize + nameLength + profile.Length + importTable.Length);
+        contract.CopyTo(result, HeaderSize + nameLength + profile.Length + importTable.Length
+            + directImportExpectationTable.Length);
+        image.CopyTo(result, HeaderSize + nameLength + profile.Length + importTable.Length
+            + directImportExpectationTable.Length + contract.Length);
         SHA256.HashData(result.AsSpan(0, length - HashSize)).CopyTo(result, length - HashSize);
         return result;
     }
@@ -623,6 +951,11 @@ public static partial class NativeModuleCompiler
             }
             machineImports[index] = imported;
         }
+        var directImportExpectations = ReadDirectImportExpectations(bytes, ref at);
+        if (bytes[5] == 1 && !directImportExpectations.IsEmpty)
+        {
+            throw new ModuleFormatException("Native producers cannot contain consumer import expectations.");
+        }
         if ((bytes[5] == 1 && machineImports.Length != 0)
             || (long)at + contractLength + imageLength + HashSize != bytes.Length)
         {
@@ -663,6 +996,7 @@ public static partial class NativeModuleCompiler
             {
                 throw new ModuleFormatException("Native machine imports differ from retained semantic declarations or calls.");
             }
+            ValidateDirectImportExpectationsAgainstConsumer(directImportExpectations, contractSnapshot);
             var machineImportSet = machineImports.ToHashSet(StringComparer.Ordinal);
             if (!machineImportSet.IsSubsetOf(contractSnapshot.Declarations))
             {
@@ -679,6 +1013,7 @@ public static partial class NativeModuleCompiler
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         return new Package(bytes[5] == 2, name, (NativeRuntimePolicy)bytes[6], contract, image, profile) {
             MachineImports = machineImports,
+            DirectImportExpectations = directImportExpectations,
             ContractSnapshot = contractSnapshot,
             ProviderSnapshot = providerSnapshot,
         };
@@ -711,6 +1046,7 @@ public static partial class NativeModuleCompiler
     private sealed record Package(bool IsConsumer, string Identity, NativeRuntimePolicy Policy, byte[] Contract, byte[] Image, string Profile)
     {
         public string[] MachineImports { get; init; } = [];
+        public ImmutableArray<DirectImportExpectation> DirectImportExpectations { get; init; } = [];
         public ModuleCompiler.ConsumerContractSnapshot? ContractSnapshot { get; init; }
         public ModuleCompiler.ProviderContractSnapshot? ProviderSnapshot { get; init; }
     }
