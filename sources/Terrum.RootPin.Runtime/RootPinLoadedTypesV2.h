@@ -20,6 +20,9 @@ extern "C" {
 
 typedef struct RootPinDomainImpl* RootPinDomainV1;
 typedef struct RootPinLoadedTypeV1 RootPinLoadedTypeV1;
+typedef struct RootPinObjectCellImpl* RootPinObjectCellV1;
+typedef struct RootPinRootCellImpl* RootPinRootCellV1;
+typedef struct RootPinPinCellImpl* RootPinPinCellV1;
 
 typedef struct RootPinTypeNodeV2
 {
@@ -81,6 +84,45 @@ typedef struct RootPinTypeBatchV2
     uint32_t reserved;
 } RootPinTypeBatchV2;
 
+typedef struct RootPinPlaceRequestV1
+{
+    uint64_t offset;
+    uint64_t extent;
+    uint64_t knownAlignment;
+    RootPinLoadedTypeV1* exactT;
+    uint32_t accessBits;
+    uint32_t reserved;
+} RootPinPlaceRequestV1;
+
+typedef struct RootPinStableValue16V1
+{
+    uint64_t address;
+    RootPinPinCellV1 support;
+} RootPinStableValue16V1;
+
+enum
+{
+    ROOTPIN_ACCESS_READ = 1,
+    ROOTPIN_ACCESS_READ_WRITE = 3
+};
+
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootPinRootExactEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    const RootPinPlaceRequestV1* request,
+    RootPinRootCellV1* vacantOut);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootPinPinExactEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root,
+    RootPinStableValue16V1* vacantOut);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootPinPinObjectEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    RootPinStableValue16V1* vacantOut);
+typedef uint64_t (ROOTPIN_LOADED_TYPES_CALL *RootPinResolveExactEntryV1)(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root);
+
 enum
 {
     ROOTPIN_TYPE_STATUS_SUCCESS = 0,
@@ -122,6 +164,75 @@ RootPinTestGetDomainV1(void);
 
 ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
 RootPinTestFailAdmissionAtStageV2(uint32_t stage);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRegisterObjectV2(
+    RootPinDomainV1 domain,
+    void* payload,
+    uint64_t payloadSize,
+    uint64_t payloadAlignment,
+    RootPinLoadedTypeV1* payloadType,
+    RootPinObjectCellV1* vacantOut);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestCanRootV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    const RootPinPlaceRequestV1* request,
+    uint32_t* outCanRoot);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestCanPinObjectV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    uint32_t* outCanPin);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRootExactV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    const RootPinPlaceRequestV1* request,
+    RootPinRootCellV1* vacantOut);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPinExactV2(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root,
+    RootPinStableValue16V1* vacantOut);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPinObjectV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    RootPinStableValue16V1* vacantOut);
+
+ROOTPIN_LOADED_TYPES_API uint64_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestResolveExactV2(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReplaceObjectPayloadV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    void* payload);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReleaseRootV2(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReleasePinV2(
+    RootPinDomainV1 domain,
+    RootPinPinCellV1 pin);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestGetObjectCountsV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    uint64_t* rootEdges,
+    uint64_t* activePins);
 #endif
 
 #ifdef __cplusplus

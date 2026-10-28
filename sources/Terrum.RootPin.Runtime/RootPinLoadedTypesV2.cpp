@@ -9,11 +9,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <new>
+#include <numeric>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -22,6 +25,8 @@ static_assert(sizeof(RootPinTypeNodeV2) == 96);
 static_assert(sizeof(RootPinTypeFieldV1) == 32);
 static_assert(sizeof(RootPinTypeOriginV1) == 40);
 static_assert(sizeof(RootPinTypeBatchV2) == 72);
+static_assert(sizeof(RootPinPlaceRequestV1) == 40);
+static_assert(sizeof(RootPinStableValue16V1) == 16);
 static_assert(offsetof(RootPinTypeNodeV2, role) == 8);
 static_assert(offsetof(RootPinTypeNodeV2, shape) == 12);
 static_assert(offsetof(RootPinTypeNodeV2, size) == 16);
@@ -55,6 +60,9 @@ static_assert(offsetof(RootPinTypeBatchV2, fields) == 40);
 static_assert(offsetof(RootPinTypeBatchV2, origins) == 48);
 static_assert(offsetof(RootPinTypeBatchV2, originUses) == 56);
 static_assert(offsetof(RootPinTypeBatchV2, flags) == 64);
+static_assert(offsetof(RootPinPlaceRequestV1, exactT) == 24);
+static_assert(offsetof(RootPinPlaceRequestV1, accessBits) == 32);
+static_assert(offsetof(RootPinStableValue16V1, support) == 8);
 
 namespace
 {
@@ -795,6 +803,7 @@ namespace
 
 struct RootPinLoadedTypeV1
 {
+    RootPinDomainV1 domain;
     TypeKey key;
     uint32_t shape;
     uint64_t size;
@@ -811,12 +820,83 @@ struct RootPinLoadedTypeV1
     std::vector<uint64_t> origins;
 };
 
+struct RootPinObjectCellImpl
+{
+    RootPinDomainV1 domain;
+    uint8_t* currentBase;
+    uint64_t payloadSize;
+    uint64_t alignment;
+    uint64_t generation;
+    uint64_t rootEdges;
+    uint64_t activePins;
+    bool published;
+    bool live;
+    RootPinLoadedTypeV1* payloadType;
+};
+
+struct RootPinRootCellImpl
+{
+    RootPinDomainV1 domain;
+    RootPinObjectCellV1 object;
+    RootPinLoadedTypeV1* exactType;
+    uint64_t identity;
+    uint64_t generation;
+    uint64_t offset;
+    uint64_t extent;
+    uint64_t knownAlignment;
+    uint64_t descriptorHolds;
+    uint64_t supportHolds;
+    size_t arenaChunkIndex;
+    uint32_t accessBits;
+    bool active;
+};
+
+struct RootPinPinCellImpl
+{
+    RootPinDomainV1 domain;
+    RootPinObjectCellV1 object;
+    RootPinRootCellV1 root;
+    RootPinLoadedTypeV1* exactType;
+    uint64_t identity;
+    uint64_t stableAddress;
+    uint64_t extent;
+    uint64_t alignment;
+    uint64_t descriptorHolds;
+    size_t arenaChunkIndex;
+    bool wholeObject;
+    bool active;
+};
+
+struct CellChunk
+{
+    uint8_t* base;
+    size_t nextSlot;
+    size_t activeCells;
+    bool committed;
+};
+
+inline constexpr size_t RootPinCellChunkSize = 1024 * 1024;
+inline constexpr size_t RootPinCellSlotSize = 128;
+inline constexpr size_t RootPinCellsPerChunk = RootPinCellChunkSize / RootPinCellSlotSize;
+
+static_assert(sizeof(RootPinRootCellImpl) <= RootPinCellSlotSize);
+static_assert(sizeof(RootPinPinCellImpl) <= RootPinCellSlotSize);
+static_assert(alignof(RootPinRootCellImpl) <= 16);
+static_assert(alignof(RootPinPinCellImpl) <= 16);
+
 struct RootPinDomainImpl
 {
     SRWLOCK gate = SRWLOCK_INIT;
     std::unordered_map<TypeKey, RootPinLoadedTypeV1*, TypeKeyHash> types;
     std::unordered_map<uint64_t, Origin> origins;
     std::vector<std::unique_ptr<RootPinLoadedTypeV1>> ownedTypes;
+    std::unordered_set<RootPinObjectCellV1> objects;
+    std::unordered_set<RootPinRootCellV1> roots;
+    std::unordered_set<RootPinPinCellV1> pins;
+    std::vector<std::unique_ptr<RootPinObjectCellImpl>> ownedObjects;
+    std::vector<CellChunk> cellChunks;
+    uint64_t nextObjectGeneration = 1;
+    uint64_t nextCellIdentity = 1;
 };
 
 namespace
@@ -841,6 +921,85 @@ namespace
     private:
         SRWLOCK* _gate;
     };
+
+    [[noreturn]] void ContractViolation() noexcept;
+
+    template<typename T>
+    T* AllocateCellLocked(RootPinDomainV1 domain, size_t& chunkIndex)
+    {
+        static_assert(sizeof(T) <= RootPinCellSlotSize);
+        static_assert(alignof(T) <= 16);
+
+        if (domain->cellChunks.empty()
+            || domain->cellChunks.back().nextSlot == RootPinCellsPerChunk)
+        {
+            if (domain->cellChunks.size() == std::numeric_limits<size_t>::max())
+            {
+                return nullptr;
+            }
+            domain->cellChunks.reserve(domain->cellChunks.size() + 1);
+            auto* base = static_cast<uint8_t*>(VirtualAlloc(nullptr, RootPinCellChunkSize,
+                MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
+            if (base == nullptr)
+            {
+                return nullptr;
+            }
+            domain->cellChunks.push_back({ base, 0, 0, true });
+        }
+
+        chunkIndex = domain->cellChunks.size() - 1;
+        auto& chunk = domain->cellChunks[chunkIndex];
+        if (!chunk.committed)
+        {
+            if (VirtualAlloc(chunk.base, RootPinCellChunkSize, MEM_COMMIT, PAGE_READWRITE)
+                != chunk.base)
+            {
+                return nullptr;
+            }
+            chunk.committed = true;
+        }
+
+        if (chunk.nextSlot >= RootPinCellsPerChunk)
+        {
+            ContractViolation();
+        }
+
+        const auto slotOffset = chunk.nextSlot * RootPinCellSlotSize;
+        auto* slot = chunk.base + slotOffset;
+        chunk.nextSlot++;
+        chunk.activeCells++;
+        return ::new (slot) T{};
+    }
+
+    template<typename T>
+    void ReleaseCellLocked(RootPinDomainV1 domain, T* cell, size_t chunkIndex)
+    {
+        if (cell == nullptr || chunkIndex >= domain->cellChunks.size())
+        {
+            ContractViolation();
+        }
+
+        auto& chunk = domain->cellChunks[chunkIndex];
+        const auto first = reinterpret_cast<uintptr_t>(chunk.base);
+        const auto address = reinterpret_cast<uintptr_t>(cell);
+        if (!chunk.committed || chunk.activeCells == 0
+            || address < first || address - first >= RootPinCellChunkSize
+            || (address - first) % RootPinCellSlotSize != 0)
+        {
+            ContractViolation();
+        }
+
+        cell->~T();
+        chunk.activeCells--;
+        if (chunk.activeCells == 0)
+        {
+            if (!VirtualFree(chunk.base, RootPinCellChunkSize, MEM_DECOMMIT))
+            {
+                ContractViolation();
+            }
+            chunk.committed = false;
+        }
+    }
 
     RootPinDomainImpl s_domain;
 #if defined(TERRUM_ROOT_PIN_TESTS)
@@ -907,12 +1066,14 @@ namespace
     }
 
     std::unique_ptr<RootPinLoadedTypeV1> CreateLoadedType(
+        RootPinDomainV1 domain,
         const RootPinTypeBatchV2& batch,
         uint32_t index,
         const std::vector<std::vector<uint64_t>>& originKeys)
     {
         const auto& node = batch.nodes[index];
         auto loaded = std::make_unique<RootPinLoadedTypeV1>();
+        loaded->domain = domain;
         loaded->key = { node.typeKey, node.role };
         loaded->shape = node.shape;
         loaded->size = node.size;
@@ -931,6 +1092,567 @@ namespace
         loaded->fields.reserve(node.fieldCount);
         return loaded;
     }
+
+    [[noreturn]] void ContractViolation() noexcept
+    {
+        TerminateProcess(GetCurrentProcess(), 0xC0000409);
+        std::abort();
+    }
+
+    bool CheckedPointerAddress(uint8_t* base, uint64_t offset, uint64_t& address)
+    {
+        const auto first = reinterpret_cast<uintptr_t>(base);
+        if (offset > std::numeric_limits<uintptr_t>::max() - first)
+        {
+            return false;
+        }
+
+        address = static_cast<uint64_t>(first + static_cast<uintptr_t>(offset));
+        return true;
+    }
+
+    uint64_t AlignmentAfterOffset(uint64_t alignment, uint64_t offset)
+    {
+        return alignment == 0 ? 0 : std::gcd(alignment, offset);
+    }
+
+    struct PlaceCandidate
+    {
+        RootPinLoadedTypeV1* type;
+        uint64_t offset;
+        uint64_t alignment;
+    };
+
+    bool FindExactPlace(
+        RootPinLoadedTypeV1* payloadType,
+        uint64_t payloadSize,
+        uint64_t payloadAlignment,
+        uint64_t targetOffset,
+        uint64_t extent,
+        uint64_t requestedAlignment,
+        RootPinLoadedTypeV1* exactType,
+        uint64_t& actualAlignment)
+    {
+        if (payloadType == nullptr || payloadType->size != payloadSize
+            || targetOffset > payloadSize || extent > payloadSize - targetOffset
+            || !IsPowerOfTwo(requestedAlignment))
+        {
+            return false;
+        }
+
+        std::vector<PlaceCandidate> candidates;
+        candidates.push_back({ payloadType, 0, payloadAlignment });
+
+        for (size_t cursor = 0; cursor < candidates.size(); cursor++)
+        {
+            const auto candidate = candidates[cursor];
+            const auto* type = candidate.type;
+            if (type == exactType && candidate.offset == targetOffset
+                && type->size == extent && candidate.alignment >= requestedAlignment
+                && candidate.alignment % requestedAlignment == 0)
+            {
+                actualAlignment = candidate.alignment;
+                return true;
+            }
+
+            if (type->shape == ROOTPIN_TYPE_SHAPE_FIELDS)
+            {
+                for (const auto& field : type->fields)
+                {
+                    if (field.valueType->size == 0
+                        || field.offset > std::numeric_limits<uint64_t>::max() - candidate.offset)
+                    {
+                        continue;
+                    }
+                    const auto fieldOffset = candidate.offset + field.offset;
+                    if (targetOffset < fieldOffset
+                        || targetOffset - fieldOffset >= field.valueType->size)
+                    {
+                        continue;
+                    }
+
+                    const auto placementAlignment =
+                        AlignmentAfterOffset(candidate.alignment, field.offset);
+                    const auto fieldAlignment =
+                        std::min(placementAlignment, field.knownAlignment);
+                    candidates.push_back({ field.valueType, fieldOffset, fieldAlignment });
+                }
+            }
+            else if (type->shape == ROOTPIN_TYPE_SHAPE_FIXED_ARRAY)
+            {
+                if (type->elementCount == 0 || type->elementStride == 0
+                    || targetOffset < candidate.offset
+                    || targetOffset - candidate.offset >= type->size)
+                {
+                    continue;
+                }
+
+                const auto relativeOffset = targetOffset - candidate.offset;
+                const auto elementIndex = relativeOffset / type->elementStride;
+                const auto elementOffset = relativeOffset % type->elementStride;
+                if (elementIndex >= type->elementCount
+                    || elementOffset >= type->child->size
+                    || elementIndex > std::numeric_limits<uint64_t>::max() / type->elementStride)
+                {
+                    continue;
+                }
+
+                const auto displacement = elementIndex * type->elementStride;
+                if (displacement > std::numeric_limits<uint64_t>::max() - candidate.offset)
+                {
+                    continue;
+                }
+                const auto elementBase = candidate.offset + displacement;
+                candidates.push_back({
+                    type->child,
+                    elementBase,
+                    AlignmentAfterOffset(candidate.alignment, displacement),
+                });
+            }
+            else if (type->shape == ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD
+                && type->child->size != 0
+                && targetOffset >= candidate.offset
+                && targetOffset - candidate.offset < type->child->size)
+            {
+                candidates.push_back({
+                    type->child,
+                    candidate.offset,
+                    std::min(candidate.alignment, type->child->alignment),
+                });
+            }
+        }
+
+        return false;
+    }
+
+    bool IsObjectRegistered(RootPinDomainV1 domain, RootPinObjectCellV1 object)
+    {
+        return domain != nullptr && object != nullptr && domain->objects.contains(object);
+    }
+
+    bool IsRootRegistered(RootPinDomainV1 domain, RootPinRootCellV1 root)
+    {
+        return domain != nullptr && root != nullptr && domain->roots.contains(root);
+    }
+
+    bool IsPinRegistered(RootPinDomainV1 domain, RootPinPinCellV1 pin)
+    {
+        return domain != nullptr && pin != nullptr && domain->pins.contains(pin);
+    }
+
+    bool IsLoadedTypeRegistered(
+        RootPinDomainV1 domain,
+        RootPinLoadedTypeV1* type,
+        uint32_t role)
+    {
+        if (domain == nullptr || type == nullptr || type->domain != domain || type->key.role != role)
+        {
+            return false;
+        }
+
+        const auto found = domain->types.find(type->key);
+        return found != domain->types.end() && found->second == type;
+    }
+
+    bool ValidateRootRequest(
+        RootPinDomainV1 domain,
+        RootPinObjectCellV1 object,
+        const RootPinPlaceRequestV1& request,
+        uint64_t& actualAlignment)
+    {
+        if (!IsObjectRegistered(domain, object)
+            || object->domain != domain || !object->published || !object->live
+            || object->payloadType == nullptr
+            || object->payloadType->domain != domain
+            || object->payloadType->key.role != ROOTPIN_TYPE_ROLE_GC_PAYLOAD
+            || (object->payloadType->shape != ROOTPIN_TYPE_SHAPE_FIELDS
+                && object->payloadType->shape != ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD)
+            || object->payloadSize != object->payloadType->size
+            || object->alignment != object->payloadType->alignment
+            || object->currentBase == nullptr
+            || request.reserved != 0
+            || (request.accessBits != ROOTPIN_ACCESS_READ
+                && request.accessBits != ROOTPIN_ACCESS_READ_WRITE)
+            || request.extent == 0
+            || request.offset > object->payloadSize
+            || request.extent > object->payloadSize - request.offset
+            || !IsPowerOfTwo(request.knownAlignment)
+            || request.exactT == nullptr
+            || !IsLoadedTypeRegistered(domain, request.exactT, ROOTPIN_TYPE_ROLE_VALUE)
+            || request.extent != request.exactT->size)
+        {
+            return false;
+        }
+
+        uint64_t address;
+        if (!CheckedPointerAddress(object->currentBase, request.offset, address))
+        {
+            return false;
+        }
+
+        return FindExactPlace(object->payloadType, object->payloadSize, object->alignment,
+            request.offset, request.extent, request.knownAlignment, request.exactT,
+            actualAlignment);
+    }
+
+    bool CanPinObject(RootPinDomainV1 domain, RootPinObjectCellV1 object)
+    {
+        return IsObjectRegistered(domain, object)
+            && object->domain == domain && object->published && object->live
+            && object->currentBase != nullptr
+            && object->payloadType != nullptr
+            && object->payloadType->domain == domain
+            && object->payloadType->key.role == ROOTPIN_TYPE_ROLE_GC_PAYLOAD
+            && object->payloadType->shape == ROOTPIN_TYPE_SHAPE_FIELDS;
+    }
+
+    void RetireRootIfUnheld(RootPinRootCellV1 root)
+    {
+        if (root->descriptorHolds == 0 && root->supportHolds == 0)
+        {
+            auto* domain = root->domain;
+            if (!root->active || root->object->rootEdges == 0
+                || domain->roots.erase(root) != 1)
+            {
+                ContractViolation();
+            }
+            root->active = false;
+            root->object->rootEdges--;
+            ReleaseCellLocked(domain, root, root->arenaChunkIndex);
+        }
+    }
+
+    uint32_t RootExactEntry(
+        RootPinDomainV1 domain,
+        RootPinObjectCellV1 object,
+        const RootPinPlaceRequestV1* request,
+        RootPinRootCellV1* vacantOut)
+    {
+        if (domain != &s_domain || object == nullptr || request == nullptr || vacantOut == nullptr
+            || reinterpret_cast<uintptr_t>(request) % alignof(RootPinPlaceRequestV1) != 0
+            || reinterpret_cast<uintptr_t>(vacantOut) % alignof(RootPinRootCellV1) != 0
+            || *vacantOut != nullptr)
+        {
+            ContractViolation();
+        }
+
+        RootPinRootCellV1 candidate = nullptr;
+        size_t chunkIndex = 0;
+        bool published = false;
+        try
+        {
+            ExclusiveLock lock(&domain->gate);
+            uint64_t actualAlignment;
+            if (!ValidateRootRequest(domain, object, *request, actualAlignment)
+                || object->rootEdges == std::numeric_limits<uint64_t>::max())
+            {
+                ContractViolation();
+            }
+            if (domain->nextCellIdentity == std::numeric_limits<uint64_t>::max())
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+
+            if (domain->roots.size() == std::numeric_limits<size_t>::max()
+                || domain->nextCellIdentity == std::numeric_limits<uint64_t>::max())
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+            domain->roots.reserve(domain->roots.size() + 1);
+            candidate = AllocateCellLocked<RootPinRootCellImpl>(domain, chunkIndex);
+            if (candidate == nullptr)
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+
+            candidate->arenaChunkIndex = chunkIndex;
+            MaybeFailAtStage(4);
+            candidate->domain = domain;
+            candidate->object = object;
+            candidate->exactType = request->exactT;
+            candidate->identity = domain->nextCellIdentity;
+            candidate->generation = object->generation;
+            candidate->offset = request->offset;
+            candidate->extent = request->extent;
+            candidate->knownAlignment = actualAlignment;
+            candidate->descriptorHolds = 1;
+            candidate->supportHolds = 0;
+            candidate->accessBits = request->accessBits;
+            candidate->active = true;
+            if (!domain->roots.insert(candidate).second)
+            {
+                ContractViolation();
+            }
+            published = true;
+            domain->nextCellIdentity++;
+            object->rootEdges++;
+            *vacantOut = candidate;
+            return ROOTPIN_TYPE_STATUS_SUCCESS;
+        }
+        catch (const std::bad_alloc&)
+        {
+            if (candidate != nullptr && !published)
+            {
+                ExclusiveLock lock(&domain->gate);
+                ReleaseCellLocked(domain, candidate, chunkIndex);
+            }
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        catch (const std::length_error&)
+        {
+            if (candidate != nullptr && !published)
+            {
+                ExclusiveLock lock(&domain->gate);
+                ReleaseCellLocked(domain, candidate, chunkIndex);
+            }
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+    }
+
+    uint32_t PinExactEntry(
+        RootPinDomainV1 domain,
+        RootPinRootCellV1 root,
+        RootPinStableValue16V1* vacantOut)
+    {
+        if (domain != &s_domain || root == nullptr || vacantOut == nullptr
+            || reinterpret_cast<uintptr_t>(vacantOut) % alignof(RootPinStableValue16V1) != 0
+            || vacantOut->address != 0 || vacantOut->support != nullptr)
+        {
+            ContractViolation();
+        }
+
+        RootPinPinCellV1 candidate = nullptr;
+        size_t chunkIndex = 0;
+        bool published = false;
+        try
+        {
+            ExclusiveLock lock(&domain->gate);
+            if (!IsRootRegistered(domain, root) || root->domain != domain
+                || !root->active || root->descriptorHolds == 0
+                || !root->object->live || root->object->generation != root->generation
+                || root->supportHolds == std::numeric_limits<uint64_t>::max()
+                || root->object->activePins == std::numeric_limits<uint64_t>::max())
+            {
+                ContractViolation();
+            }
+            if (domain->nextCellIdentity == std::numeric_limits<uint64_t>::max())
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+            uint64_t stableAddress;
+            if (!CheckedPointerAddress(root->object->currentBase, root->offset, stableAddress))
+            {
+                ContractViolation();
+            }
+
+            if (domain->pins.size() == std::numeric_limits<size_t>::max())
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+            domain->pins.reserve(domain->pins.size() + 1);
+            candidate = AllocateCellLocked<RootPinPinCellImpl>(domain, chunkIndex);
+            if (candidate == nullptr)
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+
+            candidate->arenaChunkIndex = chunkIndex;
+            MaybeFailAtStage(5);
+            candidate->domain = domain;
+            candidate->object = root->object;
+            candidate->root = root;
+            candidate->exactType = root->exactType;
+            candidate->identity = domain->nextCellIdentity;
+            candidate->stableAddress = stableAddress;
+            candidate->extent = root->extent;
+            candidate->alignment = root->knownAlignment;
+            candidate->descriptorHolds = 1;
+            candidate->wholeObject = false;
+            candidate->active = true;
+            if (!domain->pins.insert(candidate).second)
+            {
+                ContractViolation();
+            }
+            published = true;
+            domain->nextCellIdentity++;
+            root->supportHolds++;
+            root->object->activePins++;
+            vacantOut->address = stableAddress;
+            vacantOut->support = candidate;
+            return ROOTPIN_TYPE_STATUS_SUCCESS;
+        }
+        catch (const std::bad_alloc&)
+        {
+            if (candidate != nullptr && !published)
+            {
+                ExclusiveLock lock(&domain->gate);
+                ReleaseCellLocked(domain, candidate, chunkIndex);
+            }
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        catch (const std::length_error&)
+        {
+            if (candidate != nullptr && !published)
+            {
+                ExclusiveLock lock(&domain->gate);
+                ReleaseCellLocked(domain, candidate, chunkIndex);
+            }
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+    }
+
+    uint32_t PinObjectEntry(
+        RootPinDomainV1 domain,
+        RootPinObjectCellV1 object,
+        RootPinStableValue16V1* vacantOut)
+    {
+        if (domain != &s_domain || object == nullptr || vacantOut == nullptr
+            || reinterpret_cast<uintptr_t>(vacantOut) % alignof(RootPinStableValue16V1) != 0
+            || vacantOut->address != 0 || vacantOut->support != nullptr)
+        {
+            ContractViolation();
+        }
+
+        RootPinPinCellV1 candidate = nullptr;
+        size_t chunkIndex = 0;
+        bool published = false;
+        try
+        {
+            ExclusiveLock lock(&domain->gate);
+            if (!CanPinObject(domain, object)
+                || object->activePins == std::numeric_limits<uint64_t>::max())
+            {
+                ContractViolation();
+            }
+            if (domain->nextCellIdentity == std::numeric_limits<uint64_t>::max())
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+
+            if (domain->pins.size() == std::numeric_limits<size_t>::max())
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+            domain->pins.reserve(domain->pins.size() + 1);
+            candidate = AllocateCellLocked<RootPinPinCellImpl>(domain, chunkIndex);
+            if (candidate == nullptr)
+            {
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+
+            candidate->arenaChunkIndex = chunkIndex;
+            MaybeFailAtStage(6);
+            candidate->domain = domain;
+            candidate->object = object;
+            candidate->root = nullptr;
+            candidate->exactType = nullptr;
+            candidate->identity = domain->nextCellIdentity;
+            candidate->stableAddress = reinterpret_cast<uintptr_t>(object->currentBase);
+            candidate->extent = object->payloadSize;
+            candidate->alignment = object->alignment;
+            candidate->descriptorHolds = 1;
+            candidate->wholeObject = true;
+            candidate->active = true;
+            if (!domain->pins.insert(candidate).second)
+            {
+                ContractViolation();
+            }
+            published = true;
+            domain->nextCellIdentity++;
+            object->activePins++;
+            vacantOut->address = reinterpret_cast<uintptr_t>(object->currentBase);
+            vacantOut->support = candidate;
+            return ROOTPIN_TYPE_STATUS_SUCCESS;
+        }
+        catch (const std::bad_alloc&)
+        {
+            if (candidate != nullptr && !published)
+            {
+                ExclusiveLock lock(&domain->gate);
+                ReleaseCellLocked(domain, candidate, chunkIndex);
+            }
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        catch (const std::length_error&)
+        {
+            if (candidate != nullptr && !published)
+            {
+                ExclusiveLock lock(&domain->gate);
+                ReleaseCellLocked(domain, candidate, chunkIndex);
+            }
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+    }
+
+    uint64_t ResolveExactEntry(RootPinDomainV1 domain, RootPinRootCellV1 root)
+    {
+        if (domain != &s_domain || root == nullptr)
+        {
+            ContractViolation();
+        }
+
+        ExclusiveLock lock(&domain->gate);
+        if (!IsRootRegistered(domain, root) || root->domain != domain
+            || !root->active || root->descriptorHolds == 0
+            || !root->object->live || root->object->generation != root->generation)
+        {
+            ContractViolation();
+        }
+
+        uint64_t address;
+        if (!CheckedPointerAddress(root->object->currentBase, root->offset, address))
+        {
+            ContractViolation();
+        }
+        return address;
+    }
+
+    void ReleaseRootDescriptorLocked(RootPinRootCellV1 root)
+    {
+        if (!root->active || root->descriptorHolds == 0)
+        {
+            ContractViolation();
+        }
+        root->descriptorHolds--;
+        RetireRootIfUnheld(root);
+    }
+
+    void ReleasePinDescriptorLocked(RootPinPinCellV1 pin)
+    {
+        if (!pin->active || pin->descriptorHolds == 0
+            || pin->object->activePins == 0)
+        {
+            ContractViolation();
+        }
+        pin->descriptorHolds--;
+        if (pin->descriptorHolds != 0)
+        {
+            return;
+        }
+
+        auto* domain = pin->domain;
+        auto* object = pin->object;
+        auto* root = pin->root;
+        const auto chunkIndex = pin->arenaChunkIndex;
+        if (domain->pins.erase(pin) != 1)
+        {
+            ContractViolation();
+        }
+        object->activePins--;
+        pin->stableAddress = 0;
+        pin->active = false;
+        if (root != nullptr)
+        {
+            if (root->supportHolds == 0)
+            {
+                ContractViolation();
+            }
+            root->supportHolds--;
+            RetireRootIfUnheld(root);
+        }
+        ReleaseCellLocked(domain, pin, chunkIndex);
+    }
+
 }
 
 extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
@@ -1044,7 +1766,7 @@ TerrumRootPinAdmitLoadedTypesV2(
                 continue;
             }
 
-            auto loaded = CreateLoadedType(*batch, index, originKeys);
+            auto loaded = CreateLoadedType(domain, *batch, index, originKeys);
             auto* pointer = loaded.get();
             newTypes.push_back(std::move(loaded));
             stagedTypes.emplace(key, pointer);
@@ -1180,4 +1902,278 @@ RootPinTestFailAdmissionAtStageV2(uint32_t stage)
 {
     s_failureStage.store(stage);
 }
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRegisterObjectV2(
+    RootPinDomainV1 domain,
+    void* payload,
+    uint64_t payloadSize,
+    uint64_t payloadAlignment,
+    RootPinLoadedTypeV1* payloadType,
+    RootPinObjectCellV1* vacantOut)
+{
+    if (domain != &s_domain || vacantOut == nullptr
+        || reinterpret_cast<uintptr_t>(vacantOut) % alignof(RootPinObjectCellV1) != 0
+        || *vacantOut != nullptr
+        || payloadType == nullptr
+        || !HasValidAlignment(payloadSize, payloadAlignment)
+        || (payloadSize != 0 && payload == nullptr)
+        || (payload != nullptr && payloadAlignment != 0
+            && reinterpret_cast<uintptr_t>(payload) % payloadAlignment != 0))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange payloadRange;
+    if (!GetMemoryRange(payload, static_cast<size_t>(payloadSize), payloadRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    auto candidate = std::unique_ptr<RootPinObjectCellImpl>(
+        new (std::nothrow) RootPinObjectCellImpl{});
+    if (candidate == nullptr)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+
+    try
+    {
+        ExclusiveLock lock(&domain->gate);
+        if (!IsLoadedTypeRegistered(domain, payloadType, ROOTPIN_TYPE_ROLE_GC_PAYLOAD)
+            || (payloadType->shape != ROOTPIN_TYPE_SHAPE_FIELDS
+                && payloadType->shape != ROOTPIN_TYPE_SHAPE_BOX_PAYLOAD)
+            || payloadType->size != payloadSize
+            || payloadType->alignment != payloadAlignment)
+        {
+            return ROOTPIN_TYPE_STATUS_INVALID;
+        }
+        if (domain->nextObjectGeneration == std::numeric_limits<uint64_t>::max())
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        if (domain->objects.size() == std::numeric_limits<size_t>::max()
+            || domain->ownedObjects.size() == std::numeric_limits<size_t>::max())
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        domain->objects.reserve(domain->objects.size() + 1);
+        domain->ownedObjects.reserve(domain->ownedObjects.size() + 1);
+
+        candidate->domain = domain;
+        candidate->currentBase = static_cast<uint8_t*>(payload);
+        candidate->payloadSize = payloadSize;
+        candidate->alignment = payloadAlignment;
+        candidate->generation = domain->nextObjectGeneration;
+        candidate->rootEdges = 0;
+        candidate->activePins = 0;
+        candidate->published = true;
+        candidate->live = true;
+        candidate->payloadType = payloadType;
+        auto* published = candidate.get();
+        if (!domain->objects.insert(published).second)
+        {
+            ContractViolation();
+        }
+        domain->ownedObjects.push_back(std::move(candidate));
+        domain->nextObjectGeneration++;
+        *vacantOut = published;
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestCanRootV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    const RootPinPlaceRequestV1* request,
+    uint32_t* outCanRoot)
+{
+    if (outCanRoot == nullptr
+        || reinterpret_cast<uintptr_t>(outCanRoot) % alignof(uint32_t) != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+    *outCanRoot = 0;
+    if (domain != &s_domain || request == nullptr
+        || reinterpret_cast<uintptr_t>(request) % alignof(RootPinPlaceRequestV1) != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    try
+    {
+        ExclusiveLock lock(&domain->gate);
+        uint64_t actualAlignment;
+        *outCanRoot = ValidateRootRequest(domain, object, *request, actualAlignment) ? 1u : 0u;
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestCanPinObjectV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    uint32_t* outCanPin)
+{
+    if (outCanPin == nullptr
+        || reinterpret_cast<uintptr_t>(outCanPin) % alignof(uint32_t) != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+    *outCanPin = 0;
+    if (domain != &s_domain)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    *outCanPin = CanPinObject(domain, object) ? 1u : 0u;
+    return ROOTPIN_TYPE_STATUS_SUCCESS;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRootExactV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    const RootPinPlaceRequestV1* request,
+    RootPinRootCellV1* vacantOut)
+{
+    return RootExactEntry(domain, object, request, vacantOut);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPinExactV2(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root,
+    RootPinStableValue16V1* vacantOut)
+{
+    return PinExactEntry(domain, root, vacantOut);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPinObjectV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    RootPinStableValue16V1* vacantOut)
+{
+    return PinObjectEntry(domain, object, vacantOut);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint64_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestResolveExactV2(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root)
+{
+    return ResolveExactEntry(domain, root);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReplaceObjectPayloadV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    void* payload)
+{
+    if (domain != &s_domain || object == nullptr)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (!IsObjectRegistered(domain, object) || object->domain != domain
+        || !object->published || !object->live
+        || (object->payloadSize != 0 && payload == nullptr)
+        || (payload != nullptr && object->alignment != 0
+            && reinterpret_cast<uintptr_t>(payload) % object->alignment != 0))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange payloadRange;
+    if (!GetMemoryRange(payload, static_cast<size_t>(object->payloadSize), payloadRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+    if (object->activePins != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_UNSUPPORTED;
+    }
+    object->currentBase = static_cast<uint8_t*>(payload);
+    return ROOTPIN_TYPE_STATUS_SUCCESS;
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReleaseRootV2(
+    RootPinDomainV1 domain,
+    RootPinRootCellV1 root)
+{
+    if (domain != &s_domain || root == nullptr)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (!IsRootRegistered(domain, root) || root->domain != domain)
+    {
+        ContractViolation();
+    }
+    ReleaseRootDescriptorLocked(root);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestReleasePinV2(
+    RootPinDomainV1 domain,
+    RootPinPinCellV1 pin)
+{
+    if (domain != &s_domain || pin == nullptr)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (!IsPinRegistered(domain, pin) || pin->domain != domain)
+    {
+        ContractViolation();
+    }
+    ReleasePinDescriptorLocked(pin);
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestGetObjectCountsV2(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1 object,
+    uint64_t* rootEdges,
+    uint64_t* activePins)
+{
+    if (domain != &s_domain || object == nullptr || rootEdges == nullptr || activePins == nullptr)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    ExclusiveLock lock(&domain->gate);
+    if (!IsObjectRegistered(domain, object) || object->domain != domain)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+    *rootEdges = object->rootEdges;
+    *activePins = object->activePins;
+    return ROOTPIN_TYPE_STATUS_SUCCESS;
+}
+
 #endif

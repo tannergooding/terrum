@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stdint.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -15,6 +16,30 @@ typedef RootPinDomainV1 (ROOTPIN_LOADED_TYPES_CALL *GetDomainFunction)(void);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *SetFailureFunction)(uint32_t);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *RetireFunction)(RootPinDomainV1, void*);
 typedef void (ROOTPIN_LOADED_TYPES_CALL *OriginCallback)(void*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RegisterObjectFunction)(
+    RootPinDomainV1, void*, uint64_t, uint64_t, RootPinLoadedTypeV1*,
+    RootPinObjectCellV1*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *CanRootFunction)(
+    RootPinDomainV1, RootPinObjectCellV1, const RootPinPlaceRequestV1*, uint32_t*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *CanPinObjectFunction)(
+    RootPinDomainV1, RootPinObjectCellV1, uint32_t*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootExactFunction)(
+    RootPinDomainV1, RootPinObjectCellV1, const RootPinPlaceRequestV1*,
+    RootPinRootCellV1*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *PinExactFunction)(
+    RootPinDomainV1, RootPinRootCellV1, RootPinStableValue16V1*);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *PinObjectFunction)(
+    RootPinDomainV1, RootPinObjectCellV1, RootPinStableValue16V1*);
+typedef uint64_t (ROOTPIN_LOADED_TYPES_CALL *ResolveExactFunction)(
+    RootPinDomainV1, RootPinRootCellV1);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *ReplacePayloadFunction)(
+    RootPinDomainV1, RootPinObjectCellV1, void*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *ReleaseRootFunction)(
+    RootPinDomainV1, RootPinRootCellV1);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *ReleasePinFunction)(
+    RootPinDomainV1, RootPinPinCellV1);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *GetObjectCountsFunction)(
+    RootPinDomainV1, RootPinObjectCellV1, uint64_t*, uint64_t*);
 
 #define CHECK(expression) \
     do { \
@@ -86,6 +111,42 @@ static void SetOrigin(
     origin->kind = kind;
 }
 
+static void SetPlaceRequest(
+    RootPinPlaceRequestV1* request,
+    uint64_t offset,
+    uint64_t extent,
+    uint64_t knownAlignment,
+    RootPinLoadedTypeV1* exactType,
+    uint32_t accessBits)
+{
+    request->offset = offset;
+    request->extent = extent;
+    request->knownAlignment = knownAlignment;
+    request->exactT = exactType;
+    request->accessBits = accessBits;
+    request->reserved = 0;
+}
+
+#pragma pack(push, 1)
+typedef struct RootPinTestPackedV2
+{
+    uint8_t tag;
+    int32_t value;
+} RootPinTestPackedV2;
+#pragma pack(pop)
+
+typedef struct RootPinTestPayloadV2
+{
+    uint32_t values[6];
+    RootPinObjectCellV1 next;
+    RootPinTestPackedV2 packed;
+} RootPinTestPayloadV2;
+
+typedef char RootPinPackedValueSizeCheck[
+    sizeof(((RootPinTestPayloadV2*)0)->packed) == 5 ? 1 : -1];
+typedef char RootPinPayloadPackedOffsetCheck[
+    offsetof(RootPinTestPayloadV2, packed) == 32 ? 1 : -1];
+
 static void BuildValidBatch(
     RootPinTypeBatchV2* batch,
     RootPinTypeNodeV2* nodes,
@@ -95,7 +156,7 @@ static void BuildValidBatch(
     uint32_t* originCounts)
 {
     memset(nodes, 0, sizeof(RootPinTypeNodeV2) * 19);
-    memset(fields, 0, sizeof(RootPinTypeFieldV1) * 6);
+    memset(fields, 0, sizeof(RootPinTypeFieldV1) * 8);
     memset(origins, 0, sizeof(RootPinTypeOriginV1) * 3);
 
     SetNode(&nodes[0], 1000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
@@ -108,8 +169,8 @@ static void BuildValidBatch(
         (uint32_t)ROOTPIN_TYPE_SHAPE_OBJECT_CELL, 8, 8,
         3, 0, 0, 2, 1);
     SetNode(&nodes[3], 4000, (uint32_t)ROOTPIN_TYPE_ROLE_GC_PAYLOAD,
-        (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 8, 8,
-        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 2, 1, 3, 3);
+        (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 40, 8,
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 2, 3, 3, 3);
     SetNode(&nodes[4], 5000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_ROOT_CELL, 8, 8,
         0, 0, 0, 6, 1);
@@ -133,10 +194,10 @@ static void BuildValidBatch(
         9, 0, 0, 14, 1);
     SetNode(&nodes[11], 11000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 4, 4,
-        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 3, 2, 15, 1);
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 5, 2, 15, 1);
     SetNode(&nodes[12], 12001, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_FIELDS, 5, 1,
-        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 5, 1, 16, 1);
+        (uint32_t)ROOTPIN_TYPE_NO_INDEX, 7, 1, 16, 1);
     SetNode(&nodes[13], 14000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_FIXED_ARRAY, 24, 4,
         1, 0, 0, 17, 1);
@@ -189,20 +250,28 @@ static void BuildValidBatch(
     fields[1].valueNode = 0;
     fields[2].fieldKey = 201;
     fields[2].offset = 0;
-    fields[2].knownAlignment = 8;
-    fields[2].valueNode = 2;
-    fields[3].fieldKey = 301;
-    fields[3].offset = 0;
-    fields[3].knownAlignment = 4;
-    fields[3].valueNode = 0;
-    fields[4].fieldKey = 302;
-    fields[4].offset = 0;
-    fields[4].knownAlignment = 4;
-    fields[4].valueNode = 0;
-    fields[5].fieldKey = 401;
-    fields[5].offset = 1;
-    fields[5].knownAlignment = 1;
+    fields[2].knownAlignment = 4;
+    fields[2].valueNode = 13;
+    fields[3].fieldKey = 202;
+    fields[3].offset = 24;
+    fields[3].knownAlignment = 8;
+    fields[3].valueNode = 2;
+    fields[4].fieldKey = 203;
+    fields[4].offset = 32;
+    fields[4].knownAlignment = 1;
+    fields[4].valueNode = 12;
+    fields[5].fieldKey = 301;
+    fields[5].offset = 0;
+    fields[5].knownAlignment = 4;
     fields[5].valueNode = 0;
+    fields[6].fieldKey = 302;
+    fields[6].offset = 0;
+    fields[6].knownAlignment = 4;
+    fields[6].valueNode = 0;
+    fields[7].fieldKey = 401;
+    fields[7].offset = 1;
+    fields[7].knownAlignment = 1;
+    fields[7].valueNode = 0;
 
     SetOrigin(&origins[0], 10, (uint64_t)(uintptr_t)&originCounts[0],
         (uint32_t)ROOTPIN_TYPE_ORIGIN_SEMANTIC_LAYOUT, RetainOrigin, ReleaseOrigin);
@@ -240,7 +309,7 @@ static void BuildValidBatch(
     batch->targetProfileId = 2;
     batch->targetProfileRevision = 1;
     batch->nodeCount = 19;
-    batch->fieldCount = 6;
+    batch->fieldCount = 8;
     batch->originCount = 3;
     batch->originUseCount = 23;
     batch->nodes = nodes;
@@ -264,6 +333,230 @@ static int OutputsAreZero(RootPinLoadedTypeV1** outputs, uint32_t count)
     return 1;
 }
 
+#define LOAD_FUNCTION(exportName, functionVariable) \
+    do { \
+        FARPROC functionAddress = GetProcAddress(library, exportName); \
+        CHECK(functionAddress != NULL && sizeof(functionVariable) == sizeof(functionAddress)); \
+        memcpy(&(functionVariable), &functionAddress, sizeof(functionVariable)); \
+    } while (0)
+
+static int RunCellCases(
+    HMODULE library,
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1** types,
+    SetFailureFunction setFailure)
+{
+    RegisterObjectFunction registerObject = NULL;
+    CanRootFunction canRoot = NULL;
+    CanPinObjectFunction canPinObject = NULL;
+    RootExactFunction rootExact = NULL;
+    PinExactFunction pinExact = NULL;
+    PinObjectFunction pinObject = NULL;
+    ResolveExactFunction resolveExact = NULL;
+    ReplacePayloadFunction replacePayload = NULL;
+    ReleaseRootFunction releaseRoot = NULL;
+    ReleasePinFunction releasePin = NULL;
+    GetObjectCountsFunction getObjectCounts = NULL;
+    RootPinTestPayloadV2 payload = { 0 };
+    RootPinTestPayloadV2 movedPayload = { 0 };
+    int32_t boxStorage = 42;
+    RootPinObjectCellV1 object = NULL;
+    RootPinObjectCellV1 boxObject = NULL;
+    RootPinRootCellV1 root = NULL;
+    RootPinRootCellV1 rootArray = NULL;
+    RootPinRootCellV1 rootPair = NULL;
+    RootPinRootCellV1 rootSlot = NULL;
+    RootPinRootCellV1 packedRoot = NULL;
+    RootPinRootCellV1 movedRoot = NULL;
+    RootPinRootCellV1 boxRoot = NULL;
+    RootPinStableValue16V1 firstPin = { 0 };
+    RootPinStableValue16V1 secondPin = { 0 };
+    RootPinStableValue16V1 objectPin = { 0 };
+    RootPinStableValue16V1 movedPin = { 0 };
+    RootPinStableValue16V1 boxPin = { 0 };
+    RootPinStableValue16V1 packedPin = { 0 };
+    RootPinPlaceRequestV1 request;
+    uint64_t rootEdges;
+    uint64_t activePins;
+    uint32_t canSelect;
+    uint32_t status;
+
+    LOAD_FUNCTION("RootPinTestRegisterObjectV2", registerObject);
+    LOAD_FUNCTION("RootPinTestCanRootV2", canRoot);
+    LOAD_FUNCTION("RootPinTestCanPinObjectV2", canPinObject);
+    LOAD_FUNCTION("RootPinTestRootExactV2", rootExact);
+    LOAD_FUNCTION("RootPinTestPinExactV2", pinExact);
+    LOAD_FUNCTION("RootPinTestPinObjectV2", pinObject);
+    LOAD_FUNCTION("RootPinTestResolveExactV2", resolveExact);
+    LOAD_FUNCTION("RootPinTestReplaceObjectPayloadV2", replacePayload);
+    LOAD_FUNCTION("RootPinTestReleaseRootV2", releaseRoot);
+    LOAD_FUNCTION("RootPinTestReleasePinV2", releasePin);
+    LOAD_FUNCTION("RootPinTestGetObjectCountsV2", getObjectCounts);
+
+    CHECK(sizeof(payload) == 40
+        && offsetof(RootPinTestPayloadV2, packed) == 32
+        && offsetof(RootPinTestPackedV2, value) == 1);
+    payload.values[0] = 10;
+    payload.values[1] = 11;
+    payload.values[2] = 20;
+    payload.values[3] = 21;
+    payload.values[4] = 30;
+    payload.values[5] = 31;
+    status = registerObject(domain, &payload, sizeof(payload), 8, types[3], &object);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && object != NULL);
+    payload.next = object;
+    movedPayload = payload;
+    status = canPinObject(domain, object, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 1);
+    setFailure((uint32_t)6);
+    status = pinObject(domain, object, &objectPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_EXHAUSTED
+        && objectPin.address == 0 && objectPin.support == NULL);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 0 && activePins == 0);
+
+    SetPlaceRequest(&request, 20, 4, 4, types[0], (uint32_t)ROOTPIN_ACCESS_READ_WRITE);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 1);
+    status = rootExact(domain, object, &request, &root);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && root != NULL);
+    CHECK(resolveExact(domain, root) == (uint64_t)(uintptr_t)&payload.values[5]);
+
+    SetPlaceRequest(&request, 0, 24, 4, types[13], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 1);
+    status = rootExact(domain, object, &request, &rootArray);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootArray != NULL);
+    CHECK(resolveExact(domain, rootArray) == (uint64_t)(uintptr_t)&payload.values[0]);
+    releaseRoot(domain, rootArray);
+
+    SetPlaceRequest(&request, 8, 8, 4, types[1], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = rootExact(domain, object, &request, &rootPair);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootPair != NULL);
+    CHECK(resolveExact(domain, rootPair) == (uint64_t)(uintptr_t)&payload.values[2]);
+    releaseRoot(domain, rootPair);
+
+    SetPlaceRequest(&request, 32, 4, 4, types[0], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 0);
+    SetPlaceRequest(&request, 20, 8, 4, types[1], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 0);
+    SetPlaceRequest(&request, 20, 4, 8, types[0], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 0);
+    SetPlaceRequest(&request, 33, 4, 4, types[0], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 0);
+    SetPlaceRequest(&request, 33, 4, 1, types[0], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 1);
+    status = rootExact(domain, object, &request, &packedRoot);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && resolveExact(domain, packedRoot) == (uint64_t)(uintptr_t)&payload.packed.value);
+    status = pinExact(domain, packedRoot, &packedPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && packedPin.address == (uint64_t)(uintptr_t)&payload.packed.value);
+    releasePin(domain, packedPin.support);
+    releaseRoot(domain, packedRoot);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+    SetPlaceRequest(&request, 20, 4, 4, types[0], 2);
+    status = canRoot(domain, object, &request, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 0);
+    SetPlaceRequest(&request, 20, 4, 4, types[0], (uint32_t)ROOTPIN_ACCESS_READ_WRITE);
+
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+    setFailure((uint32_t)4);
+    RootPinRootCellV1 failedRoot = NULL;
+    status = rootExact(domain, object, &request, &failedRoot);
+    CHECK(status == ROOTPIN_TYPE_STATUS_EXHAUSTED && failedRoot == NULL);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+
+    setFailure((uint32_t)5);
+    status = pinExact(domain, root, &firstPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_EXHAUSTED
+        && firstPin.address == 0 && firstPin.support == NULL);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
+
+    status = pinExact(domain, root, &firstPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && firstPin.address == (uint64_t)(uintptr_t)&payload.values[5]
+        && firstPin.support != NULL);
+    status = pinExact(domain, root, &secondPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && secondPin.address == firstPin.address
+        && secondPin.support != NULL && secondPin.support != firstPin.support);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 2);
+    status = replacePayload(domain, object, &movedPayload);
+    CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED);
+    releaseRoot(domain, root);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 2);
+    releasePin(domain, firstPin.support);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 1);
+    releasePin(domain, secondPin.support);
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 0 && activePins == 0);
+
+    SetPlaceRequest(&request, 20, 4, 4, types[0], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = rootExact(domain, object, &request, &movedRoot);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && movedRoot != root
+        && resolveExact(domain, movedRoot) == (uint64_t)(uintptr_t)&payload.values[5]);
+    status = replacePayload(domain, object, &movedPayload);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && resolveExact(domain, movedRoot) == (uint64_t)(uintptr_t)&movedPayload.values[5]);
+    status = pinExact(domain, movedRoot, &movedPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && movedPin.address == (uint64_t)(uintptr_t)&movedPayload.values[5]);
+    status = replacePayload(domain, object, &payload);
+    CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED
+        && resolveExact(domain, movedRoot) == movedPin.address);
+    releasePin(domain, movedPin.support);
+    releaseRoot(domain, movedRoot);
+
+    status = pinObject(domain, object, &objectPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && objectPin.address == (uint64_t)(uintptr_t)&movedPayload
+        && objectPin.support != NULL);
+    status = replacePayload(domain, object, &payload);
+    CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED);
+    releasePin(domain, objectPin.support);
+
+    SetPlaceRequest(&request, 24, 8, 8, types[2], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = rootExact(domain, object, &request, &rootSlot);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && resolveExact(domain, rootSlot) == (uint64_t)(uintptr_t)&movedPayload.next);
+    movedPayload.next = NULL;
+    CHECK(resolveExact(domain, rootSlot) == (uint64_t)(uintptr_t)&movedPayload.next);
+    releaseRoot(domain, rootSlot);
+
+    status = registerObject(domain, &boxStorage, sizeof(boxStorage), 4, types[9], &boxObject);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && boxObject != NULL);
+    status = canPinObject(domain, boxObject, &canSelect);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && canSelect == 0);
+    SetPlaceRequest(&request, 0, 4, 4, types[0], (uint32_t)ROOTPIN_ACCESS_READ);
+    status = rootExact(domain, boxObject, &request, &boxRoot);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && resolveExact(domain, boxRoot) == (uint64_t)(uintptr_t)&boxStorage);
+    status = pinExact(domain, boxRoot, &boxPin);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS
+        && boxPin.address == (uint64_t)(uintptr_t)&boxStorage);
+    releasePin(domain, boxPin.support);
+    releaseRoot(domain, boxRoot);
+
+    status = getObjectCounts(domain, object, &rootEdges, &activePins);
+    CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 0 && activePins == 0);
+    return 0;
+}
+
+#undef LOAD_FUNCTION
+
 static int RunProbe(const char* libraryPath)
 {
     HMODULE library = LoadLibraryA(libraryPath);
@@ -274,7 +567,7 @@ static int RunProbe(const char* libraryPath)
     RootPinDomainV1 domain;
     RootPinTypeBatchV2 batch;
     RootPinTypeNodeV2 nodes[19];
-    RootPinTypeFieldV1 fields[6];
+    RootPinTypeFieldV1 fields[8];
     RootPinTypeOriginV1 origins[3];
     uint32_t originUses[23];
     uint32_t originCounts[3] = { 0, 0, 0 };
@@ -317,6 +610,10 @@ static int RunProbe(const char* libraryPath)
         && outputs[12] != outputs[1] && outputs[13] != outputs[14]
         && outputs[13] == outputs[18]);
     CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
+    if (RunCellCases(library, domain, outputs, setFailure) != 0)
+    {
+        return 1;
+    }
 
     status = admit(domain, &batch, repeated, 19);
     CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS);
@@ -352,6 +649,7 @@ static int RunProbe(const char* libraryPath)
     status = admit(domain, &batch, repeated, 19);
     CHECK(status == ROOTPIN_TYPE_STATUS_UNSUPPORTED && OutputsAreZero(repeated, 19));
     batch.abiRevision = 2;
+    fflush(stderr);
 
     nodes[0].elementCount = 1;
     memset(repeated, 0xA5, sizeof(repeated));
@@ -498,7 +796,6 @@ static int RunProbe(const char* libraryPath)
         CHECK(status == ROOTPIN_TYPE_STATUS_SUCCESS && extraOutput[0] != NULL);
         CHECK(originCounts[0] == 2);
     }
-
     puts("rootpin-loaded-types=pass");
     return 0;
 }
