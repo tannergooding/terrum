@@ -185,6 +185,75 @@ public sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void NativeDeclarationConventionsAcceptForwardedEnumConstants()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            alias ABI = NativeCallingConvention;
+
+            [ConstEval]
+            internal ABI Forward(ABI value, bool choose) {
+                ABI copy = value;
+                return choose ? copy : ABI.Stdcall;
+            }
+
+            [ConstEval]
+            internal NativeImportResolutionMode ForwardMode(
+                NativeImportResolutionMode value) {
+                return value;
+            }
+
+            [ConstEval]
+            internal NativeImportResolutionPolicy ForwardPolicy(
+                NativeImportResolutionPolicy value) {
+                return value;
+            }
+
+            [NativeImport(
+                "example.dll", "Read",
+                CallConv: Forward(ABI.Cdecl, true))]
+            extern int32 Read();
+
+            [NativeImport(
+                "example.dll", "ReadDynamic",
+                ResolutionMode: ForwardMode(NativeImportResolutionMode.Dynamic),
+                ResolutionPolicy: ForwardPolicy(
+                    NativeImportResolutionPolicy.CompatibilitySearch),
+                CallConv: Forward(ABI.Stdcall, true))]
+            extern int32 ReadDynamic();
+
+            [NativeCallable(CallConv: Forward(ABI.Stdcall, true))]
+            int32 Callback(int32 value) { return value; }
+            """), reference);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var import = program.Functions.Single(static function =>
+            function.Name == "Read");
+        Assert.That(import.DirectNativeImport!.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+        var dynamicImport = program.Functions.Single(static function =>
+            function.Name == "ReadDynamic");
+        Assert.That(dynamicImport.DirectNativeImport!.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Stdcall));
+        Assert.That(dynamicImport.DirectNativeImport.ResolutionMode,
+            Is.EqualTo(NativeImportResolutionMode.Dynamic));
+        Assert.That(dynamicImport.DirectNativeImport.ResolutionPolicy,
+            Is.EqualTo(NativeImportResolutionPolicy.CompatibilitySearch));
+        var callable = program.Functions.Single(static function =>
+            function.Name == "Callback");
+        Assert.That(callable.NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Stdcall));
+        var signature = program.NativeFunctionPointerSignatures[
+            NativeFunctionPointerTypes.Index(callable.NativeFunctionPointerType!.Value)];
+        Assert.That(signature.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Stdcall));
+    }
+
+    [Test]
     public void UnrelatedRegisteredEnumUsesTheSameOrdinaryValueModel()
     {
         var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
