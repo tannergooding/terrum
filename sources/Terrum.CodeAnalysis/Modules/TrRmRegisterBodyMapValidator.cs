@@ -1085,7 +1085,69 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (instruction[0] is 0x20 or 0x26)
+        {
+            var destination = instruction[1] & 0x0F;
+            var source = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceType = source < 14 && registerTypes[source].IsKnown
+                ? GetRegisterTypeSpecRef(body, registerTypes[source])
+                : 0;
+            var isFloating = instruction[0] == 0x26;
+            registerTypes[destination] = sourceType != 0
+                && IsRegisterArithmeticType(typeSpecs, sourceType, isFloating)
+                    ? registerTypes[source]
+                    : RegisterTypeState.Unknown;
+            return;
+        }
+
+        if (instruction[0] is (>= 0x21 and <= 0x25)
+            or (>= 0x27 and <= 0x2B))
+        {
+            var destination = instruction[1] & 0x0F;
+            var right = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var destinationState = registerTypes[destination];
+            var rightState = right < 14
+                ? registerTypes[right] : RegisterTypeState.Unknown;
+            if (destinationState.IsKnown && rightState.IsKnown)
+            {
+                var destinationType = GetRegisterTypeSpecRef(
+                    body, destinationState);
+                var rightType = GetRegisterTypeSpecRef(body, rightState);
+                var isFloating = instruction[0] >= 0x27;
+                if (typeSpecs.AreEquivalentTypeSpecRefs(
+                        destinationType, rightType)
+                    && IsRegisterArithmeticType(
+                        typeSpecs, destinationType, isFloating))
+                {
+                    return;
+                }
+            }
+
+            registerTypes[destination] = RegisterTypeState.Unknown;
+            return;
+        }
+
         Array.Fill(registerTypes, RegisterTypeState.Unknown);
+    }
+
+    private static bool IsRegisterArithmeticType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef, bool isFloating)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        return type.Form == 0x01 && type.Qualifiers == 0
+            && (isFloating
+                ? type.TypeCode is 0x14 or 0x15
+                : type.TypeCode is >= 0x06 and <= 0x0F);
     }
 
     private static RegisterTypeState GetRegisterTypeState(
