@@ -1137,7 +1137,125 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (instruction[0] is >= 0x30 and <= 0x32)
+        {
+            var destination = instruction[1] & 0x0F;
+            var right = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var destinationState = registerTypes[destination];
+            var rightState = right < 14
+                ? registerTypes[right] : RegisterTypeState.Unknown;
+            if (destinationState.IsKnown && rightState.IsKnown)
+            {
+                var destinationType = GetRegisterTypeSpecRef(
+                    body, destinationState);
+                var rightType = GetRegisterTypeSpecRef(body, rightState);
+                if (typeSpecs.AreEquivalentTypeSpecRefs(
+                        destinationType, rightType)
+                    && IsRegisterBitwiseType(typeSpecs, destinationType))
+                {
+                    return;
+                }
+            }
+
+            registerTypes[destination] = RegisterTypeState.Unknown;
+            return;
+        }
+
+        if (instruction[0] == 0x33)
+        {
+            var destination = instruction[1] & 0x0F;
+            var source = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = source < 14
+                ? registerTypes[source] : RegisterTypeState.Unknown;
+            registerTypes[destination] = sourceState.IsKnown
+                && IsRegisterBitwiseType(typeSpecs,
+                    GetRegisterTypeSpecRef(body, sourceState))
+                    ? sourceState : RegisterTypeState.Unknown;
+            return;
+        }
+
+        if (instruction[0] == 0x40)
+        {
+            var destination = instruction[1] & 0x0F;
+            var right = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var destinationState = registerTypes[destination];
+            var rightState = right < 14
+                ? registerTypes[right] : RegisterTypeState.Unknown;
+            registerTypes[destination] =
+                destinationState.IsKnown && rightState.IsKnown
+                    && typeSpecs.AreEquivalentTypeSpecRefs(
+                        GetRegisterTypeSpecRef(body, destinationState),
+                        GetRegisterTypeSpecRef(body, rightState))
+                    ? RegisterTypeState.FromTypeSpecRef(0xF200_000B)
+                    : RegisterTypeState.Unknown;
+            return;
+        }
+
+        if (instruction[0] == 0x41)
+        {
+            var destination = instruction[1] & 0x0F;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var sourceState = registerTypes[destination];
+            registerTypes[destination] = sourceState.IsKnown
+                && IsRegisterType(typeSpecs,
+                    GetRegisterTypeSpecRef(body, sourceState), 0x0B)
+                    ? RegisterTypeState.FromTypeSpecRef(0xF200_0001)
+                    : RegisterTypeState.Unknown;
+            return;
+        }
+
+        if (instruction[0] is >= 0x50 and <= 0x52)
+        {
+            var destination = instruction[1] & 0x0F;
+            var typeMapIndex = instruction[1] >> 4;
+            if (destination >= 14 || typeMapIndex >= body.TypeCount)
+            {
+                throw InvalidMap();
+            }
+
+            registerTypes[destination] = registerTypes[destination].IsKnown
+                ? RegisterTypeState.FromTypeMap(typeMapIndex)
+                : RegisterTypeState.Unknown;
+            return;
+        }
+
         Array.Fill(registerTypes, RegisterTypeState.Unknown);
+    }
+
+    private static bool IsRegisterBitwiseType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        return type.Form == 0x01 && type.Qualifiers == 0
+            && (type.TypeCode == 0x01
+                || type.TypeCode is >= 0x06 and <= 0x0F);
+    }
+
+    private static bool IsRegisterType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef, byte typeCode)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        return type.Form == 0x01 && type.Qualifiers == 0
+            && type.TypeCode == typeCode;
     }
 
     private static bool IsRegisterArithmeticType(

@@ -1087,6 +1087,51 @@ public sealed class TrRmRegisterBodyReaderTests
             0xF200_0008, addArithmetic: true, mismatchedRightType: true);
         Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(mismatchedOperands));
+
+        var bitwiseResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0008,
+            registerInstructionPrefix: [0x10, 0x01, 0x30, 0x10]);
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(bitwiseResult));
+        var bitwiseNotResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0008, registerInstructionPrefix: [0x33, 0x00]);
+        Assert.DoesNotThrow(() =>
+            ValidateSelectedArtifactBodyMaps(bitwiseNotResult));
+        var booleanBitwiseResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0001, constantTypeSpecRef: 0xF200_0001,
+            constantBits: 1,
+            registerInstructionPrefix: [0x10, 0x01, 0x30, 0x10]);
+        Assert.DoesNotThrow(() =>
+            ValidateSelectedArtifactBodyMaps(booleanBitwiseResult));
+        var booleanNotResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0001, constantTypeSpecRef: 0xF200_0001,
+            constantBits: 1, registerInstructionPrefix: [0x33, 0x00]);
+        Assert.DoesNotThrow(() =>
+            ValidateSelectedArtifactBodyMaps(booleanNotResult));
+
+        var predicateResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0001,
+            registerInstructionPrefix: [0x10, 0x01, 0x40, 0x10, 0x41, 0x20]);
+        Assert.DoesNotThrow(() =>
+            ValidateSelectedArtifactBodyMaps(predicateResult));
+
+        var convertedResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0009, registerInstructionPrefix: [0x51, 0x00],
+            registerTargetTypeToken: 0xF200_0009);
+        Assert.DoesNotThrow(() =>
+            ValidateSelectedArtifactBodyMaps(convertedResult));
+        var wrongConvertedFormal = CreateStandardConstantCallSiteArtifact(
+            0xF200_0008, registerInstructionPrefix: [0x51, 0x00],
+            registerTargetTypeToken: 0xF200_0009);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateSelectedArtifactBodyMaps(wrongConvertedFormal));
+        foreach (var conversionOpcode in new byte[] { 0x50, 0x52 })
+        {
+            var convertedFloatResult = CreateStandardConstantCallSiteArtifact(
+                0xF200_0014, registerInstructionPrefix: [conversionOpcode, 0x00],
+                registerTargetTypeToken: 0xF200_0014);
+            Assert.DoesNotThrow(() =>
+                ValidateSelectedArtifactBodyMaps(convertedFloatResult));
+        }
         Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
@@ -1719,7 +1764,9 @@ public sealed class TrRmRegisterBodyReaderTests
         uint targetFormalTypeSpecRef, bool addArithmetic = false,
         uint constantTypeSpecRef = 0xF200_0008, uint constantBits = 42,
         byte binaryOpcode = 0x21, byte unaryOpcode = 0x20,
-        bool mismatchedRightType = false)
+        bool mismatchedRightType = false,
+        byte[]? registerInstructionPrefix = null,
+        uint? registerTargetTypeToken = null)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("Caller", 1), ("Target", 1),
@@ -1765,31 +1812,47 @@ public sealed class TrRmRegisterBodyReaderTests
         };
         var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows,
             strings, modules, typeDefs, signatures, 0, 1);
-        var methodMap = TrRmRegisterBodyMapBuilder.Create(
-            [], [0x1600_0002]).MethodMap;
+        var typeTokens = registerTargetTypeToken is uint targetType
+            ? new[] { targetType }
+            : Array.Empty<uint>();
+        var maps = TrRmRegisterBodyMapBuilder.Create(
+            typeTokens, [0x1600_0002]);
         var constantMap = new byte[8];
         BinaryPrimitives.WriteUInt32LittleEndian(constantMap, constantTypeSpecRef);
         BinaryPrimitives.WriteUInt32LittleEndian(constantMap.AsSpan(4), 1);
         var entryState = new byte[8];
         entryState[0] = 0x01;
+        var callInputRegister = addArithmetic && registerInstructionPrefix is null
+            ? (ushort)2 : (ushort)0;
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
             1, 0, 0, 0,
-            [new TrRmRegisterBodyCallInput(
-                1, 1, addArithmetic ? (ushort)2 : (ushort)0)], []);
-        byte[] code = !addArithmetic
-            ? [0x16, 0, 0xE0, 0, 1, 0, 0x18, 0]
-            : mismatchedRightType
-                ? [0x16, 0, 0x11, 0x01, binaryOpcode, 0x10,
-                    unaryOpcode, 0x02, 0xE0, 0, 1, 0, 0x18, 0]
-                : [0x16, 0, 0x10, 0x01, binaryOpcode, 0x10,
-                    unaryOpcode, 0x02, 0xE0, 0, 1, 0, 0x18, 0];
-        var body = TrRmRegisterBodyWriter.Encode(default, default, methodMap,
+            [new TrRmRegisterBodyCallInput(1, 1, callInputRegister)], []);
+        var codeBytes = new List<byte> { 0x16, 0 };
+        if (registerInstructionPrefix is not null)
+        {
+            codeBytes.AddRange(registerInstructionPrefix);
+        }
+        else if (addArithmetic)
+        {
+            codeBytes.AddRange(mismatchedRightType
+                ? [0x11, 0x01, binaryOpcode, 0x10, unaryOpcode, 0x02]
+                : [0x10, 0x01, binaryOpcode, 0x10, unaryOpcode, 0x02]);
+        }
+        codeBytes.AddRange([0xE0, 0, 1, 0, 0x18, 0]);
+        var code = codeBytes.ToArray();
+        var body = TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
+            maps.MethodMap,
             default, constantMap,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
             [entryState, callSite], code);
 
-        var scalarPayload = new byte[sizeof(uint)];
-        BinaryPrimitives.WriteUInt32LittleEndian(scalarPayload, constantBits);
+        var scalarPayload = constantTypeSpecRef == 0xF200_0001
+            ? new byte[] { (byte)constantBits }
+            : new byte[sizeof(uint)];
+        if (scalarPayload.Length != 1)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(scalarPayload, constantBits);
+        }
         var blobBytes = TrRmVariableTableWriter.EncodeBlobs([scalarPayload]);
         var constantSourceBytes = TrRmConstantSourceTableWriter.Encode([
             new TrRmConstantSourceRow(1, 1),
