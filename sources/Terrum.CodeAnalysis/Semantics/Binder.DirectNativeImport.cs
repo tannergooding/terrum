@@ -12,7 +12,7 @@ internal sealed partial class Binder
     private static bool TryDecodeNativeParameterAttribute(SyntaxNode attribute,
         out NativeParameterDefinition parameter)
     {
-        parameter = new(-1, default, default, -1);
+        parameter = new(-1, default, default, 0);
         var children = attribute.Children;
         if (children.Length != 16
             || children[0] is not SyntaxTokenElement { Token.Kind: TokenKind.OpenBracket }
@@ -36,7 +36,7 @@ internal sealed partial class Binder
             || children[13] is not SyntaxTokenElement extentToken
             || extentToken.Token.Kind != TokenKind.NumericLiteral
             || !ScannerHost.TryParseIntegerMagnitude(extentToken.Token.Text.AsSpan(), out var extent)
-            || extent > int.MaxValue
+            || extent > uint.MaxValue
             || children[14] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseParen }
             || children[15] is not SyntaxTokenElement { Token.Kind: TokenKind.CloseBracket })
         {
@@ -59,7 +59,7 @@ internal sealed partial class Binder
             return false;
         }
 
-        parameter = new((int)ordinal, access, retention, (int)extent);
+        parameter = new((int)ordinal, access, retention, (uint)extent);
         return true;
     }
 

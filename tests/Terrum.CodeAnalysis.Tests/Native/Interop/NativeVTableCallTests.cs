@@ -20,6 +20,30 @@ public sealed class NativeVTableCallTests
     private delegate int NativeVTableDispatch(IntPtr receiver);
 
     [Test]
+    public void NativeVTableParameterPreservesFullUnsignedExtent()
+    {
+        var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 4294967295)]
+            [Terrum.Interop.NativeVTableMethod(3)]
+            public extern unsafe uint32 Invoke(ptr<void> receiver, ptr<uint32> value);
+            """));
+        Assert.That(provider.HasErrors, Is.False,
+            string.Join(Environment.NewLine, provider.Diagnostics));
+
+        var method = provider.Program!.Functions.Single(static function =>
+            function.Name == "Invoke");
+        Assert.That(method.NativeVTableMethod!.Parameters.Single().Extent,
+            Is.EqualTo(uint.MaxValue));
+
+        var artifact = TrRmExecutableCompiler.Emit(provider.Program, "native-vtable-extent");
+        var loaded = TrRmExecutableCompiler.Load(artifact);
+        var loadedMethod = loaded.Functions.Single(static function =>
+            function.Name == "Invoke");
+        Assert.That(loadedMethod.NativeVTableMethod!.Parameters.Single().Extent,
+            Is.EqualTo(uint.MaxValue));
+    }
+
+    [Test]
     public void NativeVTableDeclarationRoundTripsThroughStandardTrRm()
     {
         var provider = Compilation.CreateLibrary(SyntaxTree.Parse("""

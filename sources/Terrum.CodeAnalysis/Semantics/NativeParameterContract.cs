@@ -16,4 +16,4 @@ internal enum NativeParameterRetention : byte
 }
 
 internal sealed record NativeParameterDefinition(int ParameterIndex,
-    NativeParameterAccess Access, NativeParameterRetention Retention, int Extent);
+    NativeParameterAccess Access, NativeParameterRetention Retention, uint Extent);

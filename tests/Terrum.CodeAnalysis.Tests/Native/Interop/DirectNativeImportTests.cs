@@ -1705,6 +1705,30 @@ public sealed class DirectNativeImportTests
             Does.Contain("ObserveValues"));
     }
 
+    [TestCase("4294967295", true)]
+    [TestCase("4294967296", false)]
+    public void DirectNativeParameterSourceExtentUsesUnsigned32BitDomain(
+        string extent, bool shouldBind)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("extent.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 ObserveValues(ptr<uint32> values);
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldBind),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldBind)
+        {
+            return;
+        }
+
+        var import = compilation.Program!.Functions.Single(static function =>
+            function.Name == "ObserveValues").DirectNativeImport!;
+        Assert.That(import.Parameters.Single().Extent, Is.EqualTo(uint.MaxValue));
+    }
+
     [Test]
     public void BlittableAggregateNativeParameterSurvivesTypeRemappingAndIsRevalidated()
     {
