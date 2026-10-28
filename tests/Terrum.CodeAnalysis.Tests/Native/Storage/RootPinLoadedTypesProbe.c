@@ -951,6 +951,7 @@ static int RunSupportCases(
     RootPinInputTransferV1 exceptionalInput;
     RootPinCallTransferV1 exceptionalCall;
     RootPinRootCellV1 exceptionalCalleeRoot = NULL;
+    RootPinLoadedMethodV1 receiverMethod = NULL;
     RootPinPlaceRequestV1 request;
     uint64_t rootEdges;
     uint64_t activePins;
@@ -1291,6 +1292,13 @@ static int RunSupportCases(
     CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
         == ROOTPIN_TYPE_STATUS_SUCCESS
         && methodOutputs[0] != NULL && methodOriginCounts[2] == 1);
+    receiverMethod = methodOutputs[0];
+    methodNodes[0].methodKey = 5;
+    memset(methodOutputs, 0, sizeof(methodOutputs));
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_SUCCESS
+        && methodOutputs[0] != NULL && methodOutputs[0] != receiverMethod
+        && methodOriginCounts[2] == 1);
 
     rootedObject = objectA;
     callerSlots[0] = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };

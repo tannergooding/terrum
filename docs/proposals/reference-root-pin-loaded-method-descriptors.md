@@ -75,7 +75,8 @@ provider-side structural/type/origin validation, exact interning, conflict
 rejection and transactional publication; the former test-only method factory
 has been removed. The [native probe](../../tests/Terrum.CodeAnalysis.Tests/Native/Storage/RootPinLoadedTypesProbe.c)
 checks provider admission, map/profile rejection, borrowed receiver mapping,
-call/frame transfer and injected origin-retain rollback. It does **not**
+call/frame transfer, distinct keys for equivalent maps and injected
+origin-retain rollback. It does **not**
 derive or authenticate the loader's complete method identity, prove binding
 expectations, reconstruct keys from Standard/private artifacts or resolve
 JIT/AOT provider lifetime. Those remain compiler/loader gates, not provider
