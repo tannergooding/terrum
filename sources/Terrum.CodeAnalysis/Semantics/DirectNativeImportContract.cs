@@ -188,13 +188,10 @@ internal static class DirectNativeImportContract
         bool isNullPointer = false)
     {
         if (!MatchesNativeParameterFormalType(formalType, parameter.PointeeType,
-                parameter.Access, pointerTypes))
+                parameter.Access, pointerTypes)
+            || (isNullPointer && parameter.Extent != 0))
         {
             return false;
-        }
-        if (isNullPointer)
-        {
-            return argumentType == PrimitiveType.NativeRawPointer;
         }
         if (formalType == PrimitiveType.NativeRawPointer)
         {
@@ -209,6 +206,11 @@ internal static class DirectNativeImportContract
         return argumentPointer.PointeeType == parameter.PointeeType
             && (parameter.Access == NativeParameterAccess.Read || argumentPointer.IsWritable);
     }
+
+    internal static bool IsNullNativePointerValue(BoundExpression argument) =>
+        argument is BoundConstant { Value: 0 } constant
+        && (constant.Type == PrimitiveType.NativeRawPointer
+            || NativePointerTypes.IsType(constant.Type));
 
     internal static bool TryGetNativeParameterArgumentType(PrimitiveType formalType,
         DirectNativeParameter parameter,

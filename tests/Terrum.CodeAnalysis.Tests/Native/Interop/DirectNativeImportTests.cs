@@ -1729,6 +1729,67 @@ public sealed class DirectNativeImportTests
         Assert.That(import.Parameters.Single().Extent, Is.EqualTo(uint.MaxValue));
     }
 
+    [TestCase(0, true)]
+    [TestCase(1, false)]
+    public void DirectNativeParameterNullValueMustSatisfyExtent(int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            int32 Main() {
+                unsafe { return ObserveValues(null); }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            return;
+        }
+
+        var program = compilation.Program!;
+        Assert.That(NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast),
+            Is.Not.Empty);
+        _ = TrRmExecutableCompiler.Load(
+            TrRmExecutableCompiler.Emit(program, "null-native-parameter"));
+    }
+
+    [Test]
+    public void SemanticVerifierRejectsTypedNullForPositiveNativeParameterExtent()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            int32 Main() {
+                unsafe { return ObserveValues(null); }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var function = program.Functions.Single(static function =>
+            function.Name == "ObserveValues");
+        var functionIndex = program.Functions.IndexOf(function);
+        var import = function.DirectNativeImport!;
+        var invalidImport = import with {
+            Parameters = import.Parameters.SetItem(0,
+                import.Parameters[0] with { Extent = 1 }),
+        };
+        var invalidProgram = program with {
+            Functions = program.Functions.SetItem(functionIndex,
+                function with { DirectNativeImport = invalidImport }),
+        };
+
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
+    }
+
     [Test]
     public void BlittableAggregateNativeParameterSurvivesTypeRemappingAndIsRevalidated()
     {

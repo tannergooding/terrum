@@ -43,6 +43,64 @@ public sealed class NativeVTableCallTests
             Is.EqualTo(uint.MaxValue));
     }
 
+    [TestCase(0, true)]
+    [TestCase(1, false)]
+    public void NativeVTableParameterNullValueMustSatisfyExtent(
+        int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, {{extent}})]
+            [Terrum.Interop.NativeVTableMethod(3)]
+            public extern unsafe uint32 Invoke(ptr<void> receiver, ptr<uint32> value);
+
+            int32 Main() {
+                unsafe {
+                    uint32 ignored = Invoke(null, null);
+                    return int32(ignored);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void SemanticVerifierRejectsTypedNullForPositiveNativeVTableExtent()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeVTableMethod(3)]
+            public extern unsafe uint32 Invoke(ptr<void> receiver, ptr<uint32> value);
+
+            int32 Main() {
+                unsafe {
+                    uint32 ignored = Invoke(null, null);
+                    return int32(ignored);
+                }
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var functionIndex = program.Functions.IndexOf(program.Functions.Single(
+            static function => function.Name == "Invoke"));
+        var function = program.Functions[functionIndex];
+        var nativeVTableMethod = function.NativeVTableMethod!;
+        var invalidMethod = nativeVTableMethod with {
+            Parameters = nativeVTableMethod.Parameters.SetItem(0,
+                nativeVTableMethod.Parameters[0] with { Extent = 1 }),
+        };
+        var invalidProgram = program with {
+            Functions = program.Functions.SetItem(functionIndex,
+                function with { NativeVTableMethod = invalidMethod }),
+        };
+
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
+    }
+
     [Test]
     public void NativeVTableDeclarationRoundTripsThroughStandardTrRm()
     {

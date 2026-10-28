@@ -540,10 +540,7 @@ public static partial class TrRmExecutableCompiler
                                     ? !DirectNativeImportContract.MatchesNativeParameterArgumentType(
                                         value.Type, formal.Type, valueContract,
                                         [.. nativePointerTypeDefinitions],
-                                        value is BoundConstant {
-                                            Type: PrimitiveType.NativeRawPointer,
-                                            Value: 0,
-                                        })
+                                        DirectNativeImportContract.IsNullNativePointerValue(value))
                                         && !DirectNativeImportContract.IsReadonlyStringParameter(
                                             value.Type, valueContract)
                                     : formal.Type != value.Type)
@@ -1801,10 +1798,7 @@ public static partial class TrRmExecutableCompiler
                             ? DirectNativeImportContract.MatchesNativeParameterArgumentType(
                                 value.Type, parameter.Type, parameterContract,
                                 _program.NativePointerTypes,
-                                value is BoundConstant {
-                                    Type: PrimitiveType.NativeRawPointer,
-                                    Value: 0,
-                                })
+                                DirectNativeImportContract.IsNullNativePointerValue(value))
                                 || DirectNativeImportContract.IsReadonlyStringParameter(
                                     value.Type, parameterContract)
                             : value.Type == parameter.Type;

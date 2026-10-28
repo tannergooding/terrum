@@ -541,8 +541,9 @@ accepted format. No canonical COM metadata records have been assigned.
 
 `NativeParameter` remains a generic pointer access/retention/extent annotation
 for native declarations; its minimum extent uses the full unsigned 32-bit
-domain. `NativeOutput` can describe result-correlated output validity. These
-annotations do not prove foreign-provider behavior or confer ownership.
+domain. A known null pointer satisfies only zero extent. `NativeOutput` can
+describe result-correlated output validity. These annotations do not prove
+foreign-provider behavior or confer ownership.
 Writable `ptr<T>` values remain ABI-shaped pointer values; without an output
 contract the compiler does not infer that the pointee becomes initialized.
 

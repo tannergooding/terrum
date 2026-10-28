@@ -93,8 +93,15 @@ internal sealed partial class Binder
         if (expression.Kind == SyntaxKind.LiteralExpression
             && expression.Children is [SyntaxTokenElement { Token.Text: "null" }])
         {
+            if (parameter.Extent != 0)
+            {
+                Report("TRM3030",
+                    "A null NativeParameter value cannot satisfy a positive extent.",
+                    expression.Span);
+                return ErrorExpression(expression.Span);
+            }
             if (!DirectNativeImportContract.TryGetNativeParameterArgumentType(
-                formalType, parameter, [.. _nativePointerTypes], out var pointerType))
+                    formalType, parameter, [.. _nativePointerTypes], out var pointerType))
             {
                 Report("TRM3030",
                     "A null NativeParameter value has no matching pointer contract.",

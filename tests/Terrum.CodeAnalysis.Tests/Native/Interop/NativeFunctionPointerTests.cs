@@ -664,6 +664,76 @@ public sealed class NativeFunctionPointerTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
+    [TestCase(0, true)]
+    [TestCase(1, false)]
+    public void IndirectNativeParameterNullValueMustSatisfyExtent(
+        int extent, bool shouldCompile)
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern unsafe int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                unsafe {
+                    var observe = &Observe;
+                    return observe(null);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void SemanticVerifierRejectsTypedNullForPositiveIndirectNativeParameterExtent()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 0)]
+            extern unsafe int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                unsafe {
+                    var observe = &Observe;
+                    return observe(null);
+                }
+            }
+            """), reference);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        var importedIndex = program.Functions.IndexOf(program.Functions.Single(
+            static function => function.Name == "Observe"));
+        var importedFunction = program.Functions[importedIndex];
+        var import = importedFunction.DirectNativeImport!;
+        var invalidImport = import with {
+            Parameters = import.Parameters.SetItem(0,
+                import.Parameters[0] with { Extent = 1 }),
+        };
+        var signature = program.NativeFunctionPointerSignatures.Single();
+        var signatureIndex = program.NativeFunctionPointerSignatures.IndexOf(signature);
+        var invalidSignature = signature with {
+            NativeParameters = signature.NativeParameters.SetItem(0,
+                signature.NativeParameters[0] with { Extent = 1 }),
+        };
+        var invalidProgram = program with {
+            Functions = program.Functions.SetItem(importedIndex,
+                importedFunction with { DirectNativeImport = invalidImport }),
+            NativeFunctionPointerSignatures =
+                program.NativeFunctionPointerSignatures.SetItem(signatureIndex, invalidSignature),
+        };
+
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(invalidProgram));
+    }
+
     [Test]
     public void NativeImportPointerIdentityRetainsOutputAndParameterContracts()
     {
