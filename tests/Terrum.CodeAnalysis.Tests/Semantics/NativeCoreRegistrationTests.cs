@@ -811,6 +811,8 @@ public sealed class NativeCoreRegistrationTests
         var import = compilation.Program!.Functions.Single();
         Assert.That(import.DirectNativeImport!.ResolutionMode,
             Is.EqualTo(NativeImportResolutionMode.Dynamic));
+        Assert.That(import.DirectNativeImport.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Unmanaged));
         Assert.That(import.DirectNativeImport.ResolutionPolicy,
             Is.EqualTo(NativeImportResolutionPolicy.Default));
     }
