@@ -1,10 +1,13 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
@@ -39,8 +42,10 @@ public sealed class NativeRootPinLoadedTypesTests
         var directory = TestArtifactPaths.CreateDirectory("terrum-rootpin-loaded-types-");
         var providerPath = Path.Combine(directory, "terrum-root-pin-runtime.dll");
         var providerObjectPath = Path.Combine(directory, "root-pin-loaded-types.obj");
-        var productionProviderPath = Path.Combine(directory, "terrum-root-pin-runtime-production.dll");
-        var productionProviderObjectPath = Path.Combine(directory, "root-pin-loaded-types-production.obj");
+        var runtimeProviderDirectory = Path.Combine(AppContext.BaseDirectory, "RootPinRuntimeProvider");
+        Directory.CreateDirectory(runtimeProviderDirectory);
+        var productionProviderPath = Path.Combine(runtimeProviderDirectory, "terrum-root-pin-runtime.dll");
+        var productionProviderObjectPath = Path.Combine(runtimeProviderDirectory, "root-pin-loaded-types-production.obj");
         var probePath = Path.Combine(directory, "root-pin-loaded-types-probe.exe");
         var probeObjectPath = Path.Combine(directory, "root-pin-loaded-types-probe.obj");
         var runtimeAbiProbePath = Path.Combine(directory, "root-pin-runtime-abi-probe.exe");
@@ -54,6 +59,9 @@ public sealed class NativeRootPinLoadedTypesTests
         var testSource = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
             "Native", "Storage", "NativeRootPinLoadedTypesTests.cs");
         var includePath = Path.Combine(root, "sources", "Terrum.RootPin.Runtime");
+        Assume.That(Path.IsPathFullyQualified(productionProviderPath)
+            && productionProviderPath.All(static character => character is >= ' ' and <= '~'),
+            "The selected RootPin provider path must be absolute ASCII.");
         try
         {
             var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
@@ -77,6 +85,20 @@ public sealed class NativeRootPinLoadedTypesTests
                 .ConfigureAwait(true);
             Assert.That(runtimeAbiOutput, Does.Contain("rootpin-runtime-abi=pass"));
             TestContext.WriteLine(runtimeAbiOutput);
+            Assert.That(NativeJit.ExecuteImportedCode(
+                CreateRootPinRuntimeGetterCode(productionProviderPath), [], []), Is.Zero);
+            TestContext.WriteLine("rootpin-jit-provider=pass");
+            var alternateProviderDirectory = Path.Combine(directory, "alternate-provider");
+            Directory.CreateDirectory(alternateProviderDirectory);
+            var alternateProviderPath = Path.Combine(alternateProviderDirectory,
+                Path.GetFileName(productionProviderPath));
+            File.Copy(productionProviderPath, alternateProviderPath);
+            var conflictingProvider = Assert.Throws<NotSupportedException>(() =>
+                NativeJit.ExecuteImportedCode(
+                    CreateRootPinRuntimeGetterCode(alternateProviderPath), [], []));
+            Assert.That(conflictingProvider!.Message,
+                Does.Contain("A process cannot select a second RootPin provider path."));
+            TestContext.WriteLine("rootpin-jit-conflicting-provider-path=reject");
             TestContext.WriteLine($"test-assembly-sha256={GetSha256(typeof(NativeRootPinLoadedTypesTests).Assembly.Location)}");
             TestContext.WriteLine($"test-source-sha256={GetSha256(testSource)}");
             TestContext.WriteLine($"provider-source-sha256={GetSha256(providerSource)}");
@@ -103,6 +125,22 @@ public sealed class NativeRootPinLoadedTypesTests
 
     private static string GetSha256(string path)
         => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static NativeCode CreateRootPinRuntimeGetterCode(string providerPath)
+    {
+        byte[] code = [
+            0x48, 0x81, 0xEC, 0x28, 0, 0, 0,
+            0xFF, 0x15, 0, 0, 0, 0,
+            0x31, 0xC0,
+            0x48, 0x81, 0xC4, 0x28, 0, 0, 0,
+            0xC3,
+        ];
+        return new NativeCode(code, 0, [new NativeFunctionRange(0, code.Length, 40)], []) {
+            NativeImports = [
+                new NativeImportFixup(9, providerPath, "TerrumRootPinGetRuntimeV1"),
+            ],
+        };
+    }
 
     private static async Task<string> RunProcessAsync(
         ProcessStartInfo start,

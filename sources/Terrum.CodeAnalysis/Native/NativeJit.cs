@@ -31,8 +31,9 @@ internal sealed record NativeJitModule(string DllName, string FullPath, IReadOnl
 /// <remarks>
 /// Unhandled checked failures terminate the process; recovery occurs only within generated Terrum regions.
 /// Run untrusted programs only in a separately supervised process; this method provides no timeout or isolation.
+/// Explicit source-grant and frontend-profile entry points are test-only prototypes, not the compiler input boundary.
 /// </remarks>
-public static unsafe class NativeJit
+public static unsafe partial class NativeJit
 {
     private const int MaximumInvocationSourceCodeUnits = 16_384;
     private static readonly List<INativeJitContinuationRegistration> s_retainedRegistrations = [];
@@ -491,6 +492,7 @@ public static unsafe class NativeJit
                 }
             }
         }
+        modules = IncludeRootPinRuntimeProvider(code, modules);
         var moduleNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var providersByName = new Dictionary<string, NativeJitModule>(modules.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var module in modules)
@@ -507,6 +509,7 @@ public static unsafe class NativeJit
         foreach (var binding in expectedImports)
         {
             if (!providersByName.TryGetValue(binding.DllName, out var module)
+                || IsRootPinRuntimeLibrary(module.DllName)
                 || !ContainsSortedExport(module.Exports, binding.ExportName)
                 || !allowed.Add(GetImportIdentity(binding.DllName, binding.ExportName)))
             {
@@ -517,14 +520,16 @@ public static unsafe class NativeJit
         var hasRaiseException = false;
         foreach (var fixup in code.NativeImports)
         {
+            var supportedImport = fixup.DeclarationIndex >= 0
+                ? allowed.Contains(GetImportIdentity(fixup.DllName, fixup.ExportName))
+                : (fixup.DllName.Equals("KERNEL32.dll", StringComparison.OrdinalIgnoreCase)
+                        && fixup.ExportName is "RaiseException" or "ExitProcess" or "GetProcessHeap"
+                            or "HeapAlloc" or "HeapFree")
+                    || (fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
+                        && fixup.ExportName == "__C_specific_handler")
+                    || IsRootPinRuntimeImport(fixup, providersByName);
             if (fixup.DisplacementOffset < 0 || fixup.DisplacementOffset > text.Length - sizeof(int)
-                || (fixup.DeclarationIndex >= 0
-                    ? !allowed.Contains(GetImportIdentity(fixup.DllName, fixup.ExportName))
-                    : !((fixup.DllName.Equals("KERNEL32.dll", StringComparison.OrdinalIgnoreCase)
-                            && fixup.ExportName is "RaiseException" or "ExitProcess" or "GetProcessHeap"
-                                or "HeapAlloc" or "HeapFree")
-                        || (fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
-                            && fixup.ExportName == "__C_specific_handler"))))
+                || !supportedImport)
             {
                 throw new ArgumentException("Invalid or unowned JIT import.", nameof(code));
             }
@@ -584,7 +589,9 @@ public static unsafe class NativeJit
         {
             foreach (var module in modules)
             {
-                var handle = JitWindows.LoadLibraryEx(module.FullPath, 0, 0x100 | 0x800);
+                var handle = IsRootPinRuntimeLibrary(module.DllName)
+                    ? LoadRootPinRuntimeProvider(module.FullPath)
+                    : JitWindows.LoadLibraryEx(module.FullPath, 0, 0x100 | 0x800);
                 if (handle == 0)
                 {
                     throw new Win32Exception(Marshal.GetLastPInvokeError());
@@ -614,7 +621,9 @@ public static unsafe class NativeJit
                 }
                 var module = fixup.DeclarationIndex >= 0 ? loaded[fixup.DllName]
                     : fixup.DllName.Equals("NTDLL.dll", StringComparison.OrdinalIgnoreCase)
-                        ? handlerModule : exitProcessModule;
+                        ? handlerModule
+                        : IsRootPinRuntimeLibrary(fixup.DllName)
+                            ? loaded[fixup.DllName] : exitProcessModule;
                 var key = (module, fixup.ExportName);
                 if (!resolvedExports.TryGetValue(key, out var target))
                 {
@@ -778,7 +787,10 @@ public static unsafe class NativeJit
         {
             if (loaded.TryGetValue(modules[index].DllName, out var handle))
             {
-                NativeLibrary.Free(handle);
+                if (!ShouldKeepRootPinRuntimeModule(handle))
+                {
+                    NativeLibrary.Free(handle);
+                }
             }
         }
         if (handlerModule != 0)
