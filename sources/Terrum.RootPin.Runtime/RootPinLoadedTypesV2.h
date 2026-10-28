@@ -171,6 +171,8 @@ typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RootPinPinObjectEntryV1)(
 typedef uint64_t (ROOTPIN_LOADED_TYPES_CALL *RootPinResolveExactEntryV1)(
     RootPinDomainV1 domain,
     RootPinRootCellV1 root);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *RootPinPollEntryV1)(
+    RootPinDomainV1 domain);
 
 enum
 {
@@ -315,6 +317,10 @@ RootPinTestExitFrameV1(
     RootPinSupportFrameV1* frame);
 
 ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPollV1(
+    RootPinDomainV1 domain);
+
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
 RootPinTestBeginCallV1(
     RootPinDomainV1 domain,
     RootPinCallTransferV1* transfer);
@@ -332,6 +338,13 @@ RootPinTestFinishCallV1(
 
 ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
 RootPinTestTraceCurrentFramesV1(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1* objects,
+    uint32_t capacity,
+    uint32_t* outCount);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestTraceAllFramesV1(
     RootPinDomainV1 domain,
     RootPinObjectCellV1* objects,
     uint32_t capacity,

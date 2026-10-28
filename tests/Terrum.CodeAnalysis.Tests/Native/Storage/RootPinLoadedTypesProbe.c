@@ -57,6 +57,23 @@ typedef void (ROOTPIN_LOADED_TYPES_CALL *FinishCallFunction)(
     RootPinDomainV1, RootPinCallTransferV1*, uint32_t);
 typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *TraceCurrentFramesFunction)(
     RootPinDomainV1, RootPinObjectCellV1*, uint32_t, uint32_t*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *PollFunction)(RootPinDomainV1);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *TraceAllFramesFunction)(
+    RootPinDomainV1, RootPinObjectCellV1*, uint32_t, uint32_t*);
+
+typedef struct RootPinTestMutatorContext
+{
+    RootPinDomainV1 domain;
+    RootPinLoadedTypeV1* completeType;
+    RootPinObjectCellV1 object;
+    EnterFrameFunction enterFrame;
+    ExitFrameFunction exitFrame;
+    PollFunction poll;
+    HANDLE ready;
+    volatile LONG stop;
+    volatile LONG polls;
+    volatile LONG failed;
+} RootPinTestMutatorContext;
 
 #define CHECK(expression) \
     do { \
@@ -85,6 +102,149 @@ static void RetirePayload(RootPinDomainV1 domain, void* payload)
     (void)domain;
     (void)payload;
     s_retirementCount++;
+}
+
+static DWORD WINAPI RootPinTestMutatorThread(void* parameter)
+{
+    RootPinTestMutatorContext* context = (RootPinTestMutatorContext*)parameter;
+    RootPinObjectCellV1 rootedObject = context->object;
+    RootPinSupportSlotV1 slot = {
+        &rootedObject, context->completeType, 1, 0 };
+    RootPinSupportFrameV1 frame = { NULL, 1, 0, &slot, NULL };
+    context->enterFrame(context->domain, &frame);
+    if (!SetEvent(context->ready))
+    {
+        InterlockedExchange(&context->failed, 1);
+    }
+
+    while (InterlockedCompareExchange(&context->stop, 0, 0) == 0)
+    {
+        context->poll(context->domain);
+        InterlockedIncrement(&context->polls);
+        SwitchToThread();
+    }
+
+    context->exitFrame(context->domain, &frame);
+    return 0;
+}
+
+static int WaitForMutatorPolls(
+    RootPinTestMutatorContext* first,
+    RootPinTestMutatorContext* second,
+    LONG target)
+{
+    const ULONGLONG start = GetTickCount64();
+    while (InterlockedCompareExchange(&first->polls, 0, 0) < target
+        || InterlockedCompareExchange(&second->polls, 0, 0) < target)
+    {
+        if (GetTickCount64() - start >= 10000)
+        {
+            return 0;
+        }
+        SwitchToThread();
+    }
+    return InterlockedCompareExchange(&first->failed, 0, 0) == 0
+        && InterlockedCompareExchange(&second->failed, 0, 0) == 0;
+}
+
+static int RunConcurrentMutatorChecks(
+    RootPinDomainV1 domain,
+    RootPinLoadedTypeV1* objectType,
+    RootPinObjectCellV1 objectA,
+    RootPinObjectCellV1 objectB,
+    EnterFrameFunction enterFrame,
+    ExitFrameFunction exitFrame,
+    PollFunction poll,
+    TraceAllFramesFunction traceAllFrames)
+{
+    RootPinTestMutatorContext contexts[2] = { 0 };
+    HANDLE threads[2] = { NULL, NULL };
+    RootPinObjectCellV1 tracedObjects[8] = { 0 };
+    uint32_t tracedCount = 0;
+    int result = 1;
+
+    contexts[0].domain = domain;
+    contexts[0].completeType = objectType;
+    contexts[0].object = objectA;
+    contexts[0].enterFrame = enterFrame;
+    contexts[0].exitFrame = exitFrame;
+    contexts[0].poll = poll;
+    contexts[1].domain = domain;
+    contexts[1].completeType = objectType;
+    contexts[1].object = objectB;
+    contexts[1].enterFrame = enterFrame;
+    contexts[1].exitFrame = exitFrame;
+    contexts[1].poll = poll;
+
+    for (uint32_t index = 0; index < 2; index++)
+    {
+        contexts[index].ready = CreateEventA(NULL, TRUE, FALSE, NULL);
+        if (contexts[index].ready == NULL)
+        {
+            goto cleanup;
+        }
+        threads[index] = CreateThread(NULL, 0, RootPinTestMutatorThread,
+            &contexts[index], 0, NULL);
+        if (threads[index] == NULL)
+        {
+            goto cleanup;
+        }
+    }
+
+    for (uint32_t index = 0; index < 2; index++)
+    {
+        if (WaitForSingleObject(contexts[index].ready, 10000) != WAIT_OBJECT_0)
+        {
+            goto cleanup;
+        }
+    }
+
+    for (LONG iteration = 1; iteration <= 4; iteration++)
+    {
+        if (traceAllFrames(domain, tracedObjects, 8, &tracedCount)
+                != ROOTPIN_TYPE_STATUS_SUCCESS
+            || tracedCount != 2)
+        {
+            goto cleanup;
+        }
+
+        int foundA = 0;
+        int foundB = 0;
+        for (uint32_t index = 0; index < tracedCount; index++)
+        {
+            foundA |= tracedObjects[index] == objectA;
+            foundB |= tracedObjects[index] == objectB;
+        }
+        if (!foundA || !foundB
+            || !WaitForMutatorPolls(&contexts[0], &contexts[1], iteration))
+        {
+            goto cleanup;
+        }
+    }
+
+    result = 0;
+
+cleanup:
+    for (uint32_t index = 0; index < 2; index++)
+    {
+        InterlockedExchange(&contexts[index].stop, 1);
+    }
+    for (uint32_t index = 0; index < 2; index++)
+    {
+        if (threads[index] != NULL)
+        {
+            if (WaitForSingleObject(threads[index], 10000) != WAIT_OBJECT_0)
+            {
+                result = 1;
+            }
+            CloseHandle(threads[index]);
+        }
+        if (contexts[index].ready != NULL)
+        {
+            CloseHandle(contexts[index].ready);
+        }
+    }
+    return result;
 }
 
 static void SetNode(
@@ -709,6 +869,8 @@ static int RunSupportCases(
     ReturnSupportFunction returnSupport = NULL;
     FinishCallFunction finishCall = NULL;
     TraceCurrentFramesFunction traceCurrentFrames = NULL;
+    PollFunction poll = NULL;
+    TraceAllFramesFunction traceAllFrames = NULL;
     RootPinTypeBatchV2 batch = { 0 };
     RootPinTypeNodeV2 nodes[10] = { 0 };
     RootPinTypeFieldV1 fields[7] = { 0 };
@@ -779,6 +941,8 @@ static int RunSupportCases(
     LOAD_FUNCTION("RootPinTestReturnSupportV1", returnSupport);
     LOAD_FUNCTION("RootPinTestFinishCallV1", finishCall);
     LOAD_FUNCTION("RootPinTestTraceCurrentFramesV1", traceCurrentFrames);
+    LOAD_FUNCTION("RootPinTestPollV1", poll);
+    LOAD_FUNCTION("RootPinTestTraceAllFramesV1", traceAllFrames);
 
     SetNode(&nodes[0], 15000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_LEAF, 4, 4,
@@ -1061,6 +1225,10 @@ static int RunSupportCases(
         == ROOTPIN_TYPE_STATUS_SUCCESS && rootEdges == 1 && activePins == 0);
     CHECK(originCounts[0] == 1 && originCounts[1] == 1 && originCounts[2] == 1);
     CHECK(s_retirementCount == 0);
+    CHECK(RunConcurrentMutatorChecks(domain, types[2], objectA, objectB,
+        enterFrame, exitFrame, poll, traceAllFrames) == 0);
+    CHECK(traceAllFrames(domain, tracedObjects, 8, &traceCount)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 0);
     return 0;
 }
 

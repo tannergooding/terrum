@@ -920,6 +920,17 @@ struct RootPinPinCellImpl
     bool active;
 };
 
+struct RootPinMutatorRegistration
+{
+    RootPinMutatorRegistration* previous;
+    RootPinMutatorRegistration* next;
+    RootPinDomainV1 domain;
+    RootPinSupportFrameV1* frameTop;
+    DWORD threadId;
+    bool registered;
+    bool parked;
+};
+
 struct CellChunk
 {
     uint8_t* base;
@@ -939,7 +950,14 @@ static_assert(alignof(RootPinPinCellImpl) <= 16);
 
 struct RootPinDomainImpl
 {
+    SRWLOCK coordination = SRWLOCK_INIT;
+    CONDITION_VARIABLE coordinationCondition = CONDITION_VARIABLE_INIT;
     SRWLOCK gate = SRWLOCK_INIT;
+    RootPinMutatorRegistration* mutators = nullptr;
+    size_t mutatorCount = 0;
+    size_t parkedMutatorCount = 0;
+    RootPinMutatorRegistration* collectionOwner = nullptr;
+    bool collectionRequested = false;
     std::unordered_map<TypeKey, RootPinLoadedTypeV1*, TypeKeyHash> types;
     std::unordered_map<uint64_t, Origin> origins;
     std::vector<std::unique_ptr<RootPinLoadedTypeV1>> ownedTypes;
@@ -960,24 +978,37 @@ struct RootPinThreadState
 {
     RootPinSupportFrameV1* frameTop;
     RootPinCallTransferV1* callTop;
+    RootPinMutatorRegistration mutator;
 };
 
-static thread_local RootPinThreadState s_threadState = { nullptr, nullptr };
+static thread_local RootPinThreadState s_threadState = {};
 
 namespace
 {
+    extern RootPinDomainImpl s_domain;
+
     class ExclusiveLock
     {
     public:
-        explicit ExclusiveLock(SRWLOCK* gate) noexcept
-            : _gate(gate)
+        explicit ExclusiveLock(SRWLOCK* gate, bool coordinateDomainGate = true) noexcept
+            : _gate(gate),
+              _coordination(coordinateDomainGate && gate == &s_domain.gate
+                  ? &s_domain.coordination : nullptr)
         {
+            if (_coordination != nullptr)
+            {
+                AcquireSRWLockExclusive(_coordination);
+            }
             AcquireSRWLockExclusive(_gate);
         }
 
         ~ExclusiveLock()
         {
             ReleaseSRWLockExclusive(_gate);
+            if (_coordination != nullptr)
+            {
+                ReleaseSRWLockExclusive(_coordination);
+            }
         }
 
         ExclusiveLock(const ExclusiveLock&) = delete;
@@ -985,9 +1016,160 @@ namespace
 
     private:
         SRWLOCK* _gate;
+        SRWLOCK* _coordination;
     };
 
     [[noreturn]] void ContractViolation() noexcept;
+
+    void WaitForCollectionLocked(RootPinDomainV1 domain)
+    {
+        auto* mutator = &s_threadState.mutator;
+        if (mutator->registered && mutator->domain != domain)
+        {
+            ContractViolation();
+        }
+
+        while (domain->collectionRequested)
+        {
+            if (domain->collectionOwner == mutator)
+            {
+                ContractViolation();
+            }
+
+            if (mutator->registered && !mutator->parked)
+            {
+                if (domain->parkedMutatorCount == std::numeric_limits<size_t>::max())
+                {
+                    ContractViolation();
+                }
+                mutator->parked = true;
+                domain->parkedMutatorCount++;
+                WakeAllConditionVariable(&domain->coordinationCondition);
+            }
+
+            if (!SleepConditionVariableSRW(&domain->coordinationCondition,
+                    &domain->coordination, INFINITE, 0))
+            {
+                ContractViolation();
+            }
+        }
+
+        if (mutator->parked)
+        {
+            if (domain->parkedMutatorCount == 0)
+            {
+                ContractViolation();
+            }
+            mutator->parked = false;
+            domain->parkedMutatorCount--;
+            WakeAllConditionVariable(&domain->coordinationCondition);
+        }
+    }
+
+    void RegisterMutatorLocked(RootPinDomainV1 domain)
+    {
+        auto* mutator = &s_threadState.mutator;
+        if (mutator->registered || mutator->parked || domain->collectionRequested
+            || mutator->frameTop != nullptr)
+        {
+            ContractViolation();
+        }
+        if (domain->mutatorCount == std::numeric_limits<size_t>::max())
+        {
+            ContractViolation();
+        }
+
+        mutator->domain = domain;
+        mutator->threadId = GetCurrentThreadId();
+        mutator->previous = nullptr;
+        mutator->next = domain->mutators;
+        mutator->registered = true;
+        if (mutator->next != nullptr)
+        {
+            mutator->next->previous = mutator;
+        }
+        domain->mutators = mutator;
+        domain->mutatorCount++;
+    }
+
+    void UnregisterMutatorLocked(RootPinDomainV1 domain)
+    {
+        auto* mutator = &s_threadState.mutator;
+        if (!mutator->registered || mutator->domain != domain || mutator->parked
+            || mutator->frameTop != nullptr || mutator->threadId != GetCurrentThreadId()
+            || domain->mutatorCount == 0)
+        {
+            ContractViolation();
+        }
+
+        if (mutator->previous == nullptr)
+        {
+            if (domain->mutators != mutator)
+            {
+                ContractViolation();
+            }
+            domain->mutators = mutator->next;
+        }
+        else
+        {
+            mutator->previous->next = mutator->next;
+        }
+        if (mutator->next != nullptr)
+        {
+            mutator->next->previous = mutator->previous;
+        }
+        domain->mutatorCount--;
+        *mutator = {};
+        WakeAllConditionVariable(&domain->coordinationCondition);
+    }
+
+    class StopTheWorld
+    {
+    public:
+        explicit StopTheWorld(RootPinDomainV1 domain)
+            : _domain(domain), _coordination(&domain->coordination)
+        {
+            WaitForCollectionLocked(domain);
+            auto* current = &s_threadState.mutator;
+            _domain->collectionOwner = current->registered ? current : nullptr;
+            _domain->collectionRequested = true;
+            _active = true;
+            WakeAllConditionVariable(&_domain->coordinationCondition);
+
+            const size_t ownerCount = _domain->collectionOwner == nullptr ? 0 : 1;
+            if (ownerCount > _domain->mutatorCount)
+            {
+                ContractViolation();
+            }
+            while (_domain->parkedMutatorCount
+                < _domain->mutatorCount - ownerCount)
+            {
+                if (!SleepConditionVariableSRW(&_domain->coordinationCondition,
+                        &_domain->coordination, INFINITE, 0))
+                {
+                    ContractViolation();
+                }
+            }
+        }
+
+        ~StopTheWorld()
+        {
+            if (_active)
+            {
+                _domain->collectionRequested = false;
+                _domain->collectionOwner = nullptr;
+                WakeAllConditionVariable(&_domain->coordinationCondition);
+            }
+        }
+
+        StopTheWorld(const StopTheWorld&) = delete;
+        StopTheWorld& operator=(const StopTheWorld&) = delete;
+
+    private:
+        RootPinDomainV1 _domain;
+        ExclusiveLock _coordination;
+        bool _active = false;
+    };
 
     template<typename T>
     T* AllocateCellLocked(RootPinDomainV1 domain, size_t& chunkIndex)
@@ -2276,9 +2458,12 @@ namespace
         return domain->traceEpoch;
     }
 
-    void TraceCurrentFramesLocked(RootPinDomainV1 domain, ObjectTraceQueue& queue)
+    void TraceFrameSlotsLocked(
+        RootPinDomainV1 domain,
+        RootPinSupportFrameV1* frame,
+        ObjectTraceQueue& queue)
     {
-        for (auto* frame = s_threadState.frameTop; frame != nullptr; frame = frame->previous)
+        for (; frame != nullptr; frame = frame->previous)
         {
             if (frame->flags != 0 || frame->slotCount > std::numeric_limits<size_t>::max()
                 / sizeof(*frame->slots)
@@ -2307,11 +2492,62 @@ namespace
                 }
             }
         }
+    }
 
+    void TraceQueuedPayloadsLocked(RootPinDomainV1 domain, ObjectTraceQueue& queue)
+    {
         for (auto* object = queue.first; object != nullptr; object = object->traceNext)
         {
             TracePayloadLocked(domain, object, queue);
         }
+    }
+
+    void TraceCurrentFramesLocked(RootPinDomainV1 domain, ObjectTraceQueue& queue)
+    {
+        TraceFrameSlotsLocked(domain, s_threadState.frameTop, queue);
+        TraceQueuedPayloadsLocked(domain, queue);
+    }
+
+    void TraceAllFramesLocked(RootPinDomainV1 domain, ObjectTraceQueue& queue)
+    {
+        auto* current = &s_threadState.mutator;
+        size_t mutatorCount = 0;
+        bool sawCollectionOwner = false;
+        for (auto* mutator = domain->mutators; mutator != nullptr; mutator = mutator->next)
+        {
+            if (!mutator->registered || mutator->domain != domain
+                || mutator->threadId == 0
+                || (mutator->previous == nullptr
+                    ? domain->mutators != mutator
+                    : mutator->previous->next != mutator)
+                || (mutator->next != nullptr && mutator->next->previous != mutator))
+            {
+                ContractViolation();
+            }
+            if (mutator == current)
+            {
+                if (domain->collectionOwner != current || current->parked
+                    || current->frameTop != s_threadState.frameTop)
+                {
+                    ContractViolation();
+                }
+                sawCollectionOwner = true;
+            }
+            else if (!mutator->parked)
+            {
+                ContractViolation();
+            }
+            TraceFrameSlotsLocked(domain, mutator->frameTop, queue);
+            mutatorCount++;
+        }
+        const size_t ownerCount = domain->collectionOwner == nullptr ? 0 : 1;
+        if (mutatorCount != domain->mutatorCount || ownerCount > mutatorCount
+            || sawCollectionOwner != (domain->collectionOwner != nullptr)
+            || domain->parkedMutatorCount != mutatorCount - ownerCount)
+        {
+            ContractViolation();
+        }
+        TraceQueuedPayloadsLocked(domain, queue);
     }
 
     bool SlotBelongsToFrame(
@@ -3050,7 +3286,20 @@ RootPinTestEnterFrameV1(
         ContractViolation();
     }
 
-    ExclusiveLock lock(&domain->gate);
+    ExclusiveLock coordination(&domain->coordination);
+    auto* mutator = &s_threadState.mutator;
+    if (mutator->registered && (mutator->domain != domain
+        || mutator->threadId != GetCurrentThreadId()
+        || mutator->frameTop != s_threadState.frameTop))
+    {
+        ContractViolation();
+    }
+    if (!mutator->registered)
+    {
+        WaitForCollectionLocked(domain);
+    }
+
+    ExclusiveLock lock(&domain->gate, false);
     if (frame->previous != nullptr || frame->flags != 0
         || !ValidArray(frame->slots, frame->slotCount, sizeof(*frame->slots),
             alignof(RootPinSupportSlotV1), slotsRange)
@@ -3158,8 +3407,13 @@ RootPinTestEnterFrameV1(
         }
     }
 
+    if (!mutator->registered)
+    {
+        RegisterMutatorLocked(domain);
+    }
     frame->previous = s_threadState.frameTop;
     s_threadState.frameTop = frame;
+    mutator->frameTop = frame;
     if (enteringCall)
     {
         for (uint32_t index = 0; index < call->inputCount; index++)
@@ -3187,7 +3441,16 @@ RootPinTestExitFrameV1(
         ContractViolation();
     }
 
-    ExclusiveLock lock(&domain->gate);
+    ExclusiveLock coordination(&domain->coordination);
+    auto* mutator = &s_threadState.mutator;
+    if (!mutator->registered || mutator->domain != domain
+        || mutator->threadId != GetCurrentThreadId()
+        || mutator->frameTop != frame || s_threadState.frameTop != frame)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock lock(&domain->gate, false);
     if (s_threadState.frameTop != frame || frame->flags != 0)
     {
         ContractViolation();
@@ -3210,7 +3473,24 @@ RootPinTestExitFrameV1(
     }
 
     s_threadState.frameTop = frame->previous;
+    mutator->frameTop = s_threadState.frameTop;
     frame->previous = nullptr;
+    if (mutator->frameTop == nullptr)
+    {
+        UnregisterMutatorLocked(domain);
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestPollV1(RootPinDomainV1 domain)
+{
+    if (domain != &s_domain)
+    {
+        ContractViolation();
+    }
+
+    ExclusiveLock coordination(&domain->coordination);
+    WaitForCollectionLocked(domain);
 }
 
 extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
@@ -3472,6 +3752,56 @@ RootPinTestTraceCurrentFramesV1(
         ExclusiveLock lock(&domain->gate);
         ObjectTraceQueue queue = { NextTraceEpochLocked(domain), nullptr, nullptr, 0 };
         TraceCurrentFramesLocked(domain, queue);
+        if (queue.count > std::numeric_limits<uint32_t>::max()
+            || queue.count > capacity)
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+
+        *outCount = static_cast<uint32_t>(queue.count);
+        uint32_t index = 0;
+        for (auto object = queue.first; object != nullptr; object = object->traceNext)
+        {
+            objects[index++] = object;
+        }
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestTraceAllFramesV1(
+    RootPinDomainV1 domain,
+    RootPinObjectCellV1* objects,
+    uint32_t capacity,
+    uint32_t* outCount)
+{
+    if (domain != &s_domain || outCount == nullptr
+        || reinterpret_cast<uintptr_t>(outCount) % alignof(uint32_t) != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    MemoryRange objectsRange;
+    if (!ValidArray(objects, capacity, sizeof(*objects), alignof(RootPinObjectCellV1),
+            objectsRange))
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    try
+    {
+        StopTheWorld stop(domain);
+        ExclusiveLock lock(&domain->gate, false);
+        ObjectTraceQueue queue = { NextTraceEpochLocked(domain), nullptr, nullptr, 0 };
+        TraceAllFramesLocked(domain, queue);
         if (queue.count > std::numeric_limits<uint32_t>::max()
             || queue.count > capacity)
         {
