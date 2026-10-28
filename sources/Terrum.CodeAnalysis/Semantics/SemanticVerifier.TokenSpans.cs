@@ -3249,8 +3249,8 @@ public static partial class SemanticVerifier
     private static bool IsInlineStructStorage(PrimitiveType type, BoundProgram program)
     {
         var index = (int)type - 100;
-        return !ManagedClassTypes.IsClass(type)
-            && (uint)index < (uint)program.Structures.Length;
+        return index >= 0 && index < program.Structures.Length
+            && !ManagedClassTypes.IsClass(type);
     }
 
     private static bool IsNativePointerValue(PrimitiveType type, BoundProgram program)
@@ -4874,7 +4874,7 @@ public static partial class SemanticVerifier
         int slot, out CopyValueOrigin origin)
     {
         origin = default;
-        if ((uint)slot >= (uint)function.Variables.Length || function.IsClassConstructor)
+        if (slot < 0 || slot >= function.Variables.Length || function.IsClassConstructor)
         {
             return false;
         }
@@ -4898,7 +4898,7 @@ public static partial class SemanticVerifier
         var formalOffset = function.IsConstructor || hasBorrowedReceiver ? 1 : 0;
         var formalOrdinal = slot - formalOffset;
         var formalCount = function.ParameterCount - (hasBorrowedReceiver ? 1 : 0);
-        if ((uint)formalOrdinal >= (uint)formalCount)
+        if (formalOrdinal < 0 || formalOrdinal >= formalCount)
         {
             return false;
         }
