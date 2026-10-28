@@ -1084,7 +1084,8 @@ public sealed class TrRmRegisterBodyReaderTests
         Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(wrongFloatFormal));
         var mismatchedOperands = CreateStandardConstantCallSiteArtifact(
-            0xF200_0008, addArithmetic: true, mismatchedRightType: true);
+            0xF200_0008, addArithmetic: true,
+            callerInputTypeSpecRef: 0xF200_0009);
         Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedArtifactBodyMaps(mismatchedOperands));
 
@@ -1132,6 +1133,37 @@ public sealed class TrRmRegisterBodyReaderTests
             Assert.DoesNotThrow(() =>
                 ValidateSelectedArtifactBodyMaps(convertedFloatResult));
         }
+        foreach (var shiftOpcode in new byte[] { 0x34, 0x35, 0x36 })
+        {
+            foreach (var countTypeSpecRef in new uint[]
+                { 0xF200_0008, 0xF200_0009, 0xF200_0010, 0xF200_0011 })
+            {
+                var shiftedResult = CreateStandardConstantCallSiteArtifact(
+                    0xF200_0008,
+                    registerInstructionPrefix: [
+                        0x11, 0x01, shiftOpcode, 0x10,
+                    ],
+                    callerInputTypeSpecRef: countTypeSpecRef);
+                Assert.DoesNotThrow(() =>
+                    ValidateSelectedArtifactBodyMaps(shiftedResult));
+            }
+
+            var floatingCount = CreateStandardConstantCallSiteArtifact(
+                0xF200_0008,
+                registerInstructionPrefix: [
+                    0x11, 0x01, shiftOpcode, 0x10,
+                ],
+                callerInputTypeSpecRef: 0xF200_0014);
+            Assert.Throws<InvalidDataException>(() =>
+                ValidateSelectedArtifactBodyMaps(floatingCount));
+        }
+        var nativeShiftResult = CreateStandardConstantCallSiteArtifact(
+            0xF200_0010,
+            registerInstructionPrefix: [0x11, 0x00, 0x11, 0x11, 0x34, 0x10],
+            callerInputTypeSpecRef: 0xF200_0010,
+            secondCallerInputTypeSpecRef: 0xF200_0011);
+        Assert.DoesNotThrow(() =>
+            ValidateSelectedArtifactBodyMaps(nativeShiftResult));
         Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
@@ -1764,7 +1796,8 @@ public sealed class TrRmRegisterBodyReaderTests
         uint targetFormalTypeSpecRef, bool addArithmetic = false,
         uint constantTypeSpecRef = 0xF200_0008, uint constantBits = 42,
         byte binaryOpcode = 0x21, byte unaryOpcode = 0x20,
-        bool mismatchedRightType = false,
+        uint? callerInputTypeSpecRef = null,
+        uint? secondCallerInputTypeSpecRef = null,
         byte[]? registerInstructionPrefix = null,
         uint? registerTargetTypeToken = null)
     {
@@ -1785,22 +1818,42 @@ public sealed class TrRmRegisterBodyReaderTests
             TrRmTypeSpecTableWriter.Builtin(8),
         ], 0, 0, 0);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2, 0, 0, 0);
+        var callerParameterCount = (callerInputTypeSpecRef.HasValue ? 1 : 0)
+            + (secondCallerInputTypeSpecRef.HasValue ? 1 : 0);
+        if (secondCallerInputTypeSpecRef.HasValue
+            && !callerInputTypeSpecRef.HasValue)
+        {
+            throw new ArgumentException(
+                "The second caller formal requires the first caller formal.");
+        }
+        var targetFirstParameter = callerParameterCount + 1;
         var signatureBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(0xF200_0000, 0,
-                mismatchedRightType ? 1 : 0,
-                mismatchedRightType ? 1 : 0, 0, 0),
+                callerParameterCount == 0 ? 0 : 1,
+                callerParameterCount, 0, 0),
             new TrRmMethodSigRow(0xF200_0000, 0,
-                mismatchedRightType ? 2 : 1, 1, 0, 0),
-        ], typeSpecs, mismatchedRightType ? 2 : 1, 0);
+                targetFirstParameter, 1, 0, 0),
+        ], typeSpecs, callerParameterCount + 1, 0);
         var signatures = new TrRmMethodSigTableReader(
             signatureBytes, 2, typeSpecs,
-            mismatchedRightType ? 2 : 1, 0);
-        TrRmParamRow[] parameterRows = mismatchedRightType
-            ? [
-                new TrRmParamRow(1, 0, 0xF200_0009, 0),
+            callerParameterCount + 1, 0);
+        TrRmParamRow[] parameterRows = callerParameterCount switch
+        {
+            0 => [new TrRmParamRow(2, 0, targetFormalTypeSpecRef, 0)],
+            1 => [
+                new TrRmParamRow(1, 0,
+                    callerInputTypeSpecRef.GetValueOrDefault(), 0),
                 new TrRmParamRow(2, 0, targetFormalTypeSpecRef, 0),
-            ]
-            : [new TrRmParamRow(2, 0, targetFormalTypeSpecRef, 0)];
+            ],
+            2 => [
+                new TrRmParamRow(1, 0,
+                    callerInputTypeSpecRef.GetValueOrDefault(), 0),
+                new TrRmParamRow(1, 1,
+                    secondCallerInputTypeSpecRef.GetValueOrDefault(), 0),
+                new TrRmParamRow(2, 0, targetFormalTypeSpecRef, 0),
+            ],
+            _ => throw new ArgumentOutOfRangeException(nameof(callerParameterCount)),
+        };
         var parameterBytes = TrRmParamTableWriter.Encode(
             parameterRows, signatures, typeSpecs);
         var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
@@ -1834,7 +1887,7 @@ public sealed class TrRmRegisterBodyReaderTests
         }
         else if (addArithmetic)
         {
-            codeBytes.AddRange(mismatchedRightType
+            codeBytes.AddRange(callerInputTypeSpecRef.HasValue
                 ? [0x11, 0x01, binaryOpcode, 0x10, unaryOpcode, 0x02]
                 : [0x10, 0x01, binaryOpcode, 0x10, unaryOpcode, 0x02]);
         }

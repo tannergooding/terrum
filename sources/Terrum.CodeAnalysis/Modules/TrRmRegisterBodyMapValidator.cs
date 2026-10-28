@@ -1184,6 +1184,31 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (instruction[0] is >= 0x34 and <= 0x36)
+        {
+            var destination = instruction[1] & 0x0F;
+            var countRegister = instruction[1] >> 4;
+            if (destination >= 14)
+            {
+                throw InvalidMap();
+            }
+
+            var destinationState = registerTypes[destination];
+            var countState = countRegister < 14
+                ? registerTypes[countRegister] : RegisterTypeState.Unknown;
+            if (destinationState.IsKnown && countState.IsKnown
+                && IsRegisterShiftIntegerType(typeSpecs,
+                    GetRegisterTypeSpecRef(body, destinationState))
+                && IsRegisterShiftIntegerType(typeSpecs,
+                    GetRegisterTypeSpecRef(body, countState)))
+            {
+                return;
+            }
+
+            registerTypes[destination] = RegisterTypeState.Unknown;
+            return;
+        }
+
         if (instruction[0] == 0x40)
         {
             var destination = instruction[1] & 0x0F;
@@ -1248,6 +1273,14 @@ internal static class TrRmRegisterBodyMapValidator
         return type.Form == 0x01 && type.Qualifiers == 0
             && (type.TypeCode == 0x01
                 || type.TypeCode is >= 0x06 and <= 0x0F);
+    }
+
+    private static bool IsRegisterShiftIntegerType(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        return type.Form == 0x01 && type.Qualifiers == 0
+            && type.TypeCode is >= 0x06 and <= 0x11;
     }
 
     private static bool IsRegisterType(
