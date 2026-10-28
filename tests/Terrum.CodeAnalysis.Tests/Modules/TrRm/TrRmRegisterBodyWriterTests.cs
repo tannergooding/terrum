@@ -60,22 +60,17 @@ public sealed class TrRmRegisterBodyWriterTests
         var entryState = new byte[13];
         entryState[0] = 0x01;
         BinaryPrimitives.WriteUInt32LittleEndian(entryState.AsSpan(4), 1);
-        var nativeAddress = new byte[12];
-        nativeAddress[0] = 0x0D;
-        nativeAddress[4] = 1;
-        BinaryPrimitives.WriteUInt16LittleEndian(nativeAddress.AsSpan(8),
-            maps.GetMethodMapIndex(targetMethodToken));
-        BinaryPrimitives.WriteUInt16LittleEndian(nativeAddress.AsSpan(10),
+        var nativeAddressRecord = TrRmRegisterBodyRecordWriter.EncodeNativeAddress(
+            1, 0, maps.GetMethodMapIndex(targetMethodToken),
             maps.GetTypeMapIndex(pointerTypeToken));
-        var callSite = new byte[20];
-        callSite[0] = 0x02;
-        callSite[4] = 2;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            2, 0, 0, 0, [], []);
         byte[] code = [0xE9, 0, 1, 0, 0xE0, 0, 2, 0, 0x17, 0];
 
         var body = TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
-            [entryState, nativeAddress, callSite], code);
+            [entryState, nativeAddressRecord, callSite], code);
 
         var reader = new TrRmRegisterBodyReader(body);
         Assert.That(reader.MapMask, Is.EqualTo((byte)0x06));
@@ -83,6 +78,48 @@ public sealed class TrRmRegisterBodyWriterTests
         Assert.That(reader.GetRecord(1)[0], Is.EqualTo((byte)0x0D));
         Assert.That(reader.GetRecord(2)[0], Is.EqualTo((byte)0x02));
         Assert.That(reader.GetBlockCode(0).ToArray(), Is.EqualTo(code));
+    }
+
+    [Test]
+    public void TypedRecordsRejectInvalidResultAndInputSelectors()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            TrRmRegisterBodyRecordWriter.EncodeNativeAddress(1, 14, 0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            TrRmRegisterBodyRecordWriter.EncodeCallSite(2, 0, 14, 0, [], []));
+        Assert.Throws<ArgumentException>(() =>
+            TrRmRegisterBodyRecordWriter.EncodeCallSite(2, 0, 0, 0,
+                [new TrRmRegisterBodyCallInput(0, 1, 0)], []));
+    }
+
+    [Test]
+    public void CallSiteWriterPreservesInputAndPreparationOrder()
+    {
+        TrRmRegisterBodyCallInput[] inputs =
+        [
+            new(2, 3, 5),
+            new(1, 1, 3),
+        ];
+        ushort[] preparations = [6, 2];
+
+        var record = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            1, 1, 4, 0, inputs, preparations);
+
+        Assert.That(record.Length, Is.EqualTo(32));
+        Assert.That(record[4], Is.EqualTo((byte)1));
+        Assert.That(record[5], Is.EqualTo((byte)1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(8)),
+            Is.EqualTo((ushort)4));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(record.AsSpan(12)),
+            Is.EqualTo(2u));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(record.AsSpan(16)),
+            Is.EqualTo(2u));
+        Assert.That(record[20..24], Is.EqualTo(new byte[] { 2, 3, 5, 0 }));
+        Assert.That(record[24..28], Is.EqualTo(new byte[] { 1, 1, 3, 0 }));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(28)),
+            Is.EqualTo((ushort)6));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(30)),
+            Is.EqualTo((ushort)2));
     }
 
     [Test]
