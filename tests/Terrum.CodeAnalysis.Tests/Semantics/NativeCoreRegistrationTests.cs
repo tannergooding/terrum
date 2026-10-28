@@ -73,6 +73,39 @@ public sealed class NativeCoreRegistrationTests
     }
 
     [Test]
+    public void CompilationOptionsSupplyTheExplicitNativeCoreRegistration()
+    {
+        var options = new CompilationOptions {
+            NativeCoreRegistration = CreateRegistration(),
+        };
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            using Terrum.Interop;
+            [NativeImport("example.dll", "Read", CallConv: NativeCallingConvention.Cdecl)]
+            extern int32 Read();
+            """), options);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Functions.Single(static function =>
+            function.Name == "Read").DirectNativeImport!.CallingConvention,
+            Is.EqualTo(NativeCallingConvention.Cdecl));
+    }
+
+    [Test]
+    public void CompilationOptionsRejectDuplicateNativeCoreRegistration()
+    {
+        var registration = CreateRegistration();
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: registration);
+        var options = new CompilationOptions {
+            NativeCoreRegistration = registration,
+        };
+
+        Assert.Throws<ArgumentException>(() => Compilation.CreateLibrary(
+            SyntaxTree.Parse("int32 Read() { return 0; }"), reference, options));
+    }
+
+    [Test]
     public void NativeCallConvBindsAgainstTheSelectedCoreEnum()
     {
         var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
@@ -1042,9 +1075,11 @@ public sealed class NativeCoreRegistrationTests
                 }
             }
             """;
-        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
-            nativeCoreRegistration: CreateRegistration());
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration = CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
 
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));

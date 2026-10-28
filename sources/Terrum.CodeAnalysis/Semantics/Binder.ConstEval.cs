@@ -96,7 +96,7 @@ internal sealed partial class Binder
 
     private bool ResolveNativeEnumArguments(ImmutableArray<BoundFunction>.Builder functions)
     {
-        if (_reference?.NativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        if (_nativeCoreRegistration is not NativeCoreRegistrationSet registration)
         {
             return true;
         }
@@ -283,7 +283,7 @@ internal sealed partial class Binder
         {
             return true;
         }
-        if (_reference?.NativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        if (_nativeCoreRegistration is not NativeCoreRegistrationSet registration)
         {
             Report("TRM3005",
                 "NativeCallConv requires an explicitly selected Core schema registration.",

@@ -133,7 +133,8 @@ public static unsafe class NativeJit
     public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
         SourceText source, NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
         => ExecuteWithScalarFrontendProfileCore(program, source,
-            (BoundRuntimePolicy)runtimePolicy, SourceArithmeticProfile.Development, registrarAssembly);
+            (BoundRuntimePolicy)runtimePolicy, SourceArithmeticProfile.Development,
+            registrarAssembly, null);
 
     /// <summary>Executes the complete frontend component and binds subject source with the selected options.</summary>
     public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
@@ -143,12 +144,12 @@ public static unsafe class NativeJit
         ArgumentNullException.ThrowIfNull(source);
         Compilation.ValidateOptions(options);
         return ExecuteWithScalarFrontendProfileCore(program, source, options.RuntimePolicy,
-            options.SourceArithmeticProfile, registrarAssembly);
+            options.SourceArithmeticProfile, registrarAssembly, options.NativeCoreRegistration);
     }
 
     private static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfileCore(BoundProgram program,
         SourceText source, BoundRuntimePolicy boundPolicy, SourceArithmeticProfile sourceArithmeticProfile,
-        string? registrarAssembly)
+        string? registrarAssembly, NativeCoreRegistrationSet? nativeCoreRegistration)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(source);
@@ -174,6 +175,7 @@ public static unsafe class NativeJit
             new CompilationOptions {
                 SourceArithmeticProfile = sourceArithmeticProfile,
                 RuntimePolicy = boundPolicy,
+                NativeCoreRegistration = nativeCoreRegistration,
             });
     }
 

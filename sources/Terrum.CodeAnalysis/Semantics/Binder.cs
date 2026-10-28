@@ -79,6 +79,7 @@ internal sealed partial class Binder
     private readonly HashSet<SyntaxNode> _acceptedPrimitiveDeclarations = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
+    private readonly NativeCoreRegistrationSet? _nativeCoreRegistration;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private readonly SourceArithmeticProfile _sourceArithmeticProfile;
     private bool _usesNativeBuffer;
@@ -144,7 +145,8 @@ internal sealed partial class Binder
     internal Binder(ImmutableArray<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, CancellationToken cancellationToken,
         bool isLibrary = false, CompilationReference? reference = null,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
-        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development)
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
+        NativeCoreRegistrationSet? nativeCoreRegistration = null)
     {
         if (coreLibrary && (!isLibrary || reference is not null))
         {
@@ -157,6 +159,7 @@ internal sealed partial class Binder
         _isLibrary = isLibrary;
         _coreLibrary = coreLibrary;
         _reference = reference;
+        _nativeCoreRegistration = nativeCoreRegistration ?? reference?.NativeCoreRegistration;
         _runtimePolicy = runtimePolicy;
         _sourceArithmeticProfile = sourceArithmeticProfile;
     }
@@ -336,6 +339,13 @@ internal sealed partial class Binder
             Report("TRM3022", "The referenced module requires a different checked-failure runtime policy.", _trees[0].Root.Span);
             return null;
         }
+        if (_reference is null && _nativeCoreRegistration is NativeCoreRegistrationSet standaloneRegistration)
+        {
+            foreach (var definition in standaloneRegistration.EnumDefinitions)
+            {
+                _ = AddBoundEnumDefinition(BoundEnumDefinition.FromCore(definition));
+            }
+        }
         _usesNativeBuffer = _reference?.Functions.Any(static function =>
             function.ReturnType == PrimitiveType.OwnedInt32Buffer
             || function.Variables.Any(static variable => variable.Type == PrimitiveType.OwnedInt32Buffer)) == true
@@ -357,7 +367,7 @@ internal sealed partial class Binder
             {
                 _ = AddBoundEnumDefinition(definition);
             }
-            if (_reference.NativeCoreRegistration is NativeCoreRegistrationSet nativeCoreRegistration)
+            if (_nativeCoreRegistration is NativeCoreRegistrationSet nativeCoreRegistration)
             {
                 foreach (var definition in nativeCoreRegistration.EnumDefinitions)
                 {
@@ -964,7 +974,7 @@ internal sealed partial class Binder
         resolutionPolicy = NativeImportResolutionPolicy.NotApplicable;
         enumArguments = null;
 
-        if (_reference?.NativeCoreRegistration is not NativeCoreRegistrationSet registration)
+        if (_nativeCoreRegistration is not NativeCoreRegistrationSet registration)
         {
             return TryDecodeLegacyDirectNativeImportAttribute(attribute,
                 out libraryName, out var legacyExportName)
@@ -2346,7 +2356,7 @@ internal sealed partial class Binder
                     continue;
                 }
                 if (attributeName == DirectNativeImportContract.AttributeFullyQualifiedName
-                    || (_reference?.NativeCoreRegistration is NativeCoreRegistrationSet nativeImportRegistration
+                    || (_nativeCoreRegistration is NativeCoreRegistrationSet nativeImportRegistration
                         && NativeCoreRegistrationSet.NameResolvesTo(attributeName,
                             nativeImportRegistration.NativeImport.QualifiedName, _namespace, _usings)))
                 {
@@ -2416,7 +2426,7 @@ internal sealed partial class Binder
                     continue;
                 }
                 if (attributeName == "Terrum.Interop.NativeCallable"
-                    || (_reference?.NativeCoreRegistration is NativeCoreRegistrationSet nativeCallableRegistration
+                    || (_nativeCoreRegistration is NativeCoreRegistrationSet nativeCallableRegistration
                         && NativeCoreRegistrationSet.NameResolvesTo(attributeName,
                             nativeCallableRegistration.NativeCallable.QualifiedName, _namespace, _usings)))
                 {
@@ -4067,7 +4077,7 @@ internal sealed partial class Binder
     {
         callingConvention = default;
         conventionExpression = null;
-        var registration = _reference?.NativeCoreRegistration;
+        var registration = _nativeCoreRegistration;
         if (registration is null)
         {
             Report("TRM3005",
@@ -4115,7 +4125,7 @@ internal sealed partial class Binder
         callingConvention = default;
         usesLegacyRole = false;
         conventionExpression = null;
-        var registration = _reference?.NativeCoreRegistration;
+        var registration = _nativeCoreRegistration;
         var attributeName = AttributeName(attribute);
         if (registration is null)
         {

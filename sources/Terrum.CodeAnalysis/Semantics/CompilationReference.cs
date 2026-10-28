@@ -12,12 +12,18 @@ public sealed class CompilationReference
         BoundRuntimePolicy runtimePolicy, bool requiresSourceGrant = false, string? invocationProfileId = null,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
-        NativeCoreRegistrationSet? nativeCoreRegistration = null)
+        NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        ImmutableArray<BoundEnumDefinition> enumDefinitions = default)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
             throw new ArgumentException("The selected Core native registration is invalid.",
                 nameof(nativeCoreRegistration));
+        }
+        if (!enumDefinitions.IsDefault && !BoundEnumTypes.IsValidTable(enumDefinitions))
+        {
+            throw new ArgumentException("The selected nominal enum declarations are invalid.",
+                nameof(enumDefinitions));
         }
 
         Structures = structures;
@@ -29,6 +35,7 @@ public sealed class CompilationReference
             ? [] : nativeFunctionPointerSignatures;
         NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
         NativeCoreRegistration = nativeCoreRegistration;
+        EnumDefinitions = enumDefinitions.IsDefault ? [] : enumDefinitions;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -52,4 +59,6 @@ public sealed class CompilationReference
 
     // This host-selected Core profile is deliberately separate from normalized module declarations.
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; }
+
+    internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; }
 }

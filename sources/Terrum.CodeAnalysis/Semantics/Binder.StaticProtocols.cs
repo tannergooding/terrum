@@ -1153,7 +1153,8 @@ internal sealed partial class Binder
             SetContext(template.Tree);
             var proofBinder = new Binder([template.Tree], [], _cancellationToken,
                 isLibrary: true, runtimePolicy: _runtimePolicy,
-                sourceArithmeticProfile: _sourceArithmeticProfile);
+                sourceArithmeticProfile: _sourceArithmeticProfile,
+                nativeCoreRegistration: _nativeCoreRegistration);
             foreach (var (tree, context) in _contexts)
             {
                 proofBinder._contexts.Add(tree, context);
