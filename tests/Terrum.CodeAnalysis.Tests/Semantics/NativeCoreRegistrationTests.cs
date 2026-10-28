@@ -226,6 +226,9 @@ public sealed class NativeCoreRegistrationTests
 
             [NativeCallable(CallConv: Forward(ABI.Stdcall, true))]
             int32 Callback(int32 value) { return value; }
+
+            [NativeCallable]
+            int32 DefaultCallback(int32 value) { return value; }
             """), reference);
 
         Assert.That(compilation.HasErrors, Is.False,
@@ -251,6 +254,10 @@ public sealed class NativeCoreRegistrationTests
             NativeFunctionPointerTypes.Index(callable.NativeFunctionPointerType!.Value)];
         Assert.That(signature.CallingConvention,
             Is.EqualTo(NativeCallingConvention.Stdcall));
+        var defaultCallable = program.Functions.Single(static function =>
+            function.Name == "DefaultCallback");
+        Assert.That(defaultCallable.NativeCallableConvention,
+            Is.EqualTo(NativeCallingConvention.Unmanaged));
     }
 
     [Test]
