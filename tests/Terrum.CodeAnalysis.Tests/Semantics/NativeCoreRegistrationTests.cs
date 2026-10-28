@@ -1052,6 +1052,44 @@ public sealed class NativeCoreRegistrationTests
             Is.EqualTo(42));
     }
 
+    [TestCase("Cdecl")]
+    [TestCase("Stdcall")]
+    public void RegisteredNativeImportConventionExecutesOnWindowsX64(string convention)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = $$"""
+            using Terrum.Interop;
+            [NativeImport("kernel32.dll", "GetCurrentThreadId",
+                CallConv: NativeCallingConvention.{{convention}})]
+            extern unsafe uint32 GetCurrentThreadId();
+
+            int32 Main() {
+                unsafe {
+                    if (GetCurrentThreadId() == 0) { return 1; }
+                    return 0;
+                }
+            }
+            """;
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var import = compilation.Program!.Functions.Single(static function =>
+            function.Name == "GetCurrentThreadId");
+        var expectedConvention = convention switch {
+            "Cdecl" => NativeCallingConvention.Cdecl,
+            "Stdcall" => NativeCallingConvention.Stdcall,
+            _ => throw new ArgumentOutOfRangeException(nameof(convention)),
+        };
+        Assert.That(import.DirectNativeImport!.CallingConvention,
+            Is.EqualTo(expectedConvention));
+        Assert.That(NativeJit.Execute(compilation.Program, NativeRuntimePolicy.FailFast),
+            Is.Zero);
+    }
+
     internal static NativeCoreRegistrationSet CreateRegistration()
     {
         var conventions = CreateEnum("NativeCallingConvention",
