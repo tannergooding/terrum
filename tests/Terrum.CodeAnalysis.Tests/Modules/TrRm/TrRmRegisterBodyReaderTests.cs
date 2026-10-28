@@ -986,6 +986,18 @@ public sealed class TrRmRegisterBodyReaderTests
                 targetKind: 2, registerTargetInitialized: true)));
         Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true,
+                moveRegisterTarget: true)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true,
+                moveRegisterTarget: true, moveRegisterInput: true)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
                 doesNotReturn: true, resultKind: 0, hasContinuation: false,
                 targetKind: 2, registerTargetInitialized: true)));
@@ -1006,6 +1018,12 @@ public sealed class TrRmRegisterBodyReaderTests
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
                 doesNotReturn: false, resultKind: 1, hasContinuation: true,
                 targetKind: 2, registerTargetInitialized: true)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true,
+                unsupportedPrefix: true)));
     }
 
     [Test]
@@ -1404,7 +1422,9 @@ public sealed class TrRmRegisterBodyReaderTests
         bool pointerTarget, uint anchorResultTypeSpecRef,
         bool doesNotReturn, byte resultKind, bool hasContinuation,
         byte targetKind = 3, bool registerTargetInitialized = false,
-        uint entryTargetTypeToken = 0, uint entryArgumentTypeToken = 0xF200_0008)
+        uint entryTargetTypeToken = 0, uint entryArgumentTypeToken = 0xF200_0008,
+        bool moveRegisterTarget = false, bool moveRegisterInput = false,
+        bool unsupportedPrefix = false)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("Caller", 1), ("Anchor", 1),
@@ -1500,14 +1520,31 @@ public sealed class TrRmRegisterBodyReaderTests
                 maps.GetTypeMapIndex(entryArgumentTypeToken));
         }
         var input = targetKind == 2
-            ? new TrRmRegisterBodyCallInput(1, 1, 1)
+            ? new TrRmRegisterBodyCallInput(
+                1, 1, moveRegisterInput ? (ushort)3 : (ushort)1)
             : new TrRmRegisterBodyCallInput(2, 1, 1);
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
-            targetKind, resultKind, 0, 0,
+            targetKind, resultKind, moveRegisterTarget ? (ushort)2 : (ushort)0, 0,
             [input], []);
-        byte[] code = hasContinuation
-            ? [0xE0, 0, 1, 0, 0x18, 0]
-            : [0xE0, 0, 1, 0];
+        var codeBytes = new List<byte>();
+        if (moveRegisterTarget)
+        {
+            codeBytes.AddRange([0x10, 0x02]);
+        }
+        if (moveRegisterInput)
+        {
+            codeBytes.AddRange([0x10, 0x13]);
+        }
+        if (unsupportedPrefix)
+        {
+            codeBytes.AddRange([0x20, 0x11]);
+        }
+        codeBytes.AddRange([0xE0, 0, 1, 0]);
+        if (hasContinuation)
+        {
+            codeBytes.AddRange([0x18, 0]);
+        }
+        var code = codeBytes.ToArray();
         var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             default, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],

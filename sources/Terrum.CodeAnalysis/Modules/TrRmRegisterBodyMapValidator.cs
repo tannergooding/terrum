@@ -714,6 +714,8 @@ internal static class TrRmRegisterBodyMapValidator
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             var code = body.GetBlockCode(blockIndex);
+            var registerTypeMapIndexes =
+                CreateBlockEntryRegisterTypeMapIndexes(body, blockIndex);
             var position = 0;
             while (position < code.Length)
             {
@@ -729,13 +731,14 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                     case 0x90:
                         ValidateCallSiteEffects(body, instruction[1], blockIndex,
-                            position == 0,
+                            registerTypeMapIndexes,
                             typeSpecs, methods, signatures, parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
                         break;
                     case 0xE0:
                         ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
-                            blockIndex, position == 0, typeSpecs, methods, signatures,
+                            blockIndex, registerTypeMapIndexes,
+                            typeSpecs, methods, signatures,
                             parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
                         break;
@@ -756,13 +759,14 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                 }
 
+                UpdateRegisterTypeMapIndexes(instruction, registerTypeMapIndexes);
                 position += instructionLength;
             }
         }
     }
 
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
-        int recordIndex, int blockIndex, bool isBlockEntry,
+        int recordIndex, int blockIndex, int[] registerTypeMapIndexes,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmContractTableReader contracts,
@@ -770,8 +774,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var payload = body.GetRecord(recordIndex)[4..];
-        var targetMethod = GetCallSiteTargetMethod(body, payload, blockIndex,
-            isBlockEntry, typeSpecs, methods, imports,
+        var targetMethod = GetCallSiteTargetMethod(body, payload,
+            registerTypeMapIndexes, typeSpecs, methods, imports,
             nativeFunctionPointerAnchors);
         var signature = methods.GetSignature(targetMethod);
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
@@ -815,7 +819,7 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static int GetCallSiteTargetMethod(TrRmRegisterBodyReader body,
-        ReadOnlySpan<byte> payload, int blockIndex, bool isBlockEntry,
+        ReadOnlySpan<byte> payload, int[] registerTypeMapIndexes,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
@@ -824,8 +828,8 @@ internal static class TrRmRegisterBodyMapValidator
         return payload[0] switch
         {
             1 => GetMethodMapTarget(body, targetIndex, methods, imports),
-            2 when isBlockEntry => GetRegisterFunctionPointerAnchorMethod(
-                body, blockIndex, targetIndex, typeSpecs,
+            2 => GetRegisterFunctionPointerAnchorMethod(
+                body, registerTypeMapIndexes, targetIndex, typeSpecs,
                 nativeFunctionPointerAnchors),
             3 => GetHomeFunctionPointerAnchorMethod(body, targetIndex,
                 typeSpecs, nativeFunctionPointerAnchors),
@@ -851,12 +855,11 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static int GetRegisterFunctionPointerAnchorMethod(
-        TrRmRegisterBodyReader body, int blockIndex, int register,
+        TrRmRegisterBodyReader body, int[] registerTypeMapIndexes, int register,
         TrRmTypeSpecTableReader typeSpecs,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
-        var typeMapIndex = GetBlockEntryRegisterTypeMapIndex(
-            body, blockIndex, register);
+        var typeMapIndex = GetRegisterTypeMapIndex(registerTypeMapIndexes, register);
         var typeSpec = typeSpecs.GetTypeSpecRef(
             GetTypeMapTypeSpecRef(body, typeMapIndex));
         if (!typeSpec.IsRow || typeSpec.Form != 0x0D || typeSpec.Qualifiers != 0
@@ -868,28 +871,59 @@ internal static class TrRmRegisterBodyMapValidator
         return nativeFunctionPointerAnchors.GetAnchorMethodDefRow(typeSpec.Row);
     }
 
-    private static int GetBlockEntryRegisterTypeMapIndex(
-        TrRmRegisterBodyReader body, int blockIndex, int register)
+    private static int[] CreateBlockEntryRegisterTypeMapIndexes(
+        TrRmRegisterBodyReader body, int blockIndex)
     {
+        var registerTypeMapIndexes = new int[16];
+        Array.Fill(registerTypeMapIndexes, -1);
         var block = body.GetBlock(blockIndex);
         var entryState = body.GetRecord(ReadUInt16(block, 8));
         var registerCount = checked((int)ReadUInt32(entryState, 4));
         for (var entry = 0; entry < registerCount; entry++)
         {
             var offset = 8 + (entry * 5);
-            if (entryState[offset] != register)
+            var register = entryState[offset];
+            if (entryState[offset + 1] != 0 || entryState[offset + 4] != 0)
             {
                 continue;
             }
-            if (entryState[offset + 1] != 0 || entryState[offset + 4] != 0)
+
+            registerTypeMapIndexes[register] = ReadUInt16(entryState, offset + 2);
+        }
+
+        return registerTypeMapIndexes;
+    }
+
+    private static void UpdateRegisterTypeMapIndexes(
+        ReadOnlySpan<byte> instruction, int[] registerTypeMapIndexes)
+    {
+        if (instruction[0] == 0x10)
+        {
+            var destination = instruction[1] & 0x0F;
+            var source = instruction[1] >> 4;
+            if (destination >= 14)
             {
                 throw InvalidMap();
             }
 
-            return ReadUInt16(entryState, offset + 2);
+            registerTypeMapIndexes[destination] = source < 14
+                ? registerTypeMapIndexes[source] : -1;
+            return;
         }
 
-        throw InvalidMap();
+        Array.Fill(registerTypeMapIndexes, -1);
+    }
+
+    private static int GetRegisterTypeMapIndex(
+        int[] registerTypeMapIndexes, int register)
+    {
+        if ((uint)register >= (uint)registerTypeMapIndexes.Length
+            || registerTypeMapIndexes[register] < 0)
+        {
+            throw InvalidMap();
+        }
+
+        return registerTypeMapIndexes[register];
     }
 
     private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,
@@ -903,6 +937,8 @@ internal static class TrRmRegisterBodyMapValidator
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             var code = body.GetBlockCode(blockIndex);
+            var registerTypeMapIndexes =
+                CreateBlockEntryRegisterTypeMapIndexes(body, blockIndex);
             var position = 0;
             while (position < code.Length)
             {
@@ -920,7 +956,7 @@ internal static class TrRmRegisterBodyMapValidator
                     if (payload[0] is 1 or 2 or 3)
                     {
                         var targetMethod = GetCallSiteTargetMethod(body, payload,
-                            blockIndex, position == 0, typeSpecs, methods, imports,
+                            registerTypeMapIndexes, typeSpecs, methods, imports,
                             nativeFunctionPointerAnchors);
                         var signature = methods.GetSignature(targetMethod);
                         var (firstParameter, parameterCount) =
@@ -934,14 +970,9 @@ internal static class TrRmRegisterBodyMapValidator
                             {
                                 var selectorIndex = ReadUInt16(payload,
                                     inputOffset + 2);
-                                if (selectorKind == 1 && position != 0)
-                                {
-                                    throw InvalidMap();
-                                }
-
                                 var typeMapIndex = selectorKind == 1
-                                    ? GetBlockEntryRegisterTypeMapIndex(
-                                        body, blockIndex, selectorIndex)
+                                    ? GetRegisterTypeMapIndex(
+                                        registerTypeMapIndexes, selectorIndex)
                                     : ReadUInt16(body.HomeMap,
                                         (selectorIndex * 8) + 2);
                                 var formalType = parameters.GetTypeSpec(
@@ -989,6 +1020,7 @@ internal static class TrRmRegisterBodyMapValidator
                     }
                 }
 
+                UpdateRegisterTypeMapIndexes(instruction, registerTypeMapIndexes);
                 position += instruction.Length;
             }
         }
