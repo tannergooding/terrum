@@ -59,7 +59,7 @@ internal static class TrRmRegisterBodyMapValidator
         ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ValidateCallSiteEffects(body, typeSpecs, methods, signatures,
-            parameters, contracts, imports);
+            parameters, contracts, imports, nativeFunctionPointerAnchors);
         ValidateCallSiteHomeTypes(body, ownerModule, types, typeSpecs,
             genericParams, methods, signatures, parameters, imports,
             constantValues, contracts, nativeFunctionPointerAnchors);
@@ -708,7 +708,8 @@ internal static class TrRmRegisterBodyMapValidator
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
-        TrRmContractTableReader contracts, TrRmImportTableReader imports)
+        TrRmContractTableReader contracts, TrRmImportTableReader imports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
@@ -728,12 +729,14 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                     case 0x90:
                         ValidateCallSiteEffects(body, instruction[1], blockIndex,
-                            typeSpecs, methods, signatures, parameters, contracts, imports);
+                            typeSpecs, methods, signatures, parameters, contracts, imports,
+                            nativeFunctionPointerAnchors);
                         break;
                     case 0xE0:
                         ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
                             blockIndex, typeSpecs, methods, signatures,
-                            parameters, contracts, imports);
+                            parameters, contracts, imports,
+                            nativeFunctionPointerAnchors);
                         break;
                     case 0xE1:
                         var methodMapIndex = ReadUInt16(instruction, 2);
@@ -761,16 +764,12 @@ internal static class TrRmRegisterBodyMapValidator
         int recordIndex, int blockIndex, TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmContractTableReader contracts,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var payload = body.GetRecord(recordIndex)[4..];
-        if (payload[0] != 1)
-        {
-            return;
-        }
-
-        var targetMethod = GetMethodMapTarget(
-            body, ReadUInt16(payload, 4), methods, imports);
+        var targetMethod = GetCallSiteTargetMethod(body, payload, typeSpecs,
+            methods, imports, nativeFunctionPointerAnchors);
         var signature = methods.GetSignature(targetMethod);
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
         var inputCount = ReadUInt32(payload, 8);
@@ -807,6 +806,38 @@ internal static class TrRmRegisterBodyMapValidator
         }
     }
 
+    private static int GetCallSiteTargetMethod(TrRmRegisterBodyReader body,
+        ReadOnlySpan<byte> payload, TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods, TrRmImportTableReader imports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        var targetIndex = ReadUInt16(payload, 4);
+        return payload[0] switch
+        {
+            1 => GetMethodMapTarget(body, targetIndex, methods, imports),
+            3 => GetHomeFunctionPointerAnchorMethod(body, targetIndex,
+                typeSpecs, nativeFunctionPointerAnchors),
+            _ => throw InvalidMap(),
+        };
+    }
+
+    private static int GetHomeFunctionPointerAnchorMethod(
+        TrRmRegisterBodyReader body, int homeIndex,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        var typeMapIndex = ReadUInt16(body.HomeMap, (homeIndex * 8) + 2);
+        var typeSpec = typeSpecs.GetTypeSpecRef(
+            GetTypeMapTypeSpecRef(body, typeMapIndex));
+        if (!typeSpec.IsRow || typeSpec.Form != 0x0D || typeSpec.Qualifiers != 0
+            || !nativeFunctionPointerAnchors.HasAnchorForTypeSpec(typeSpec.Row))
+        {
+            throw InvalidMap();
+        }
+
+        return nativeFunctionPointerAnchors.GetAnchorMethodDefRow(typeSpec.Row);
+    }
+
     private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,
         int ownerModule, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmGenericParamTableReader genericParams,
@@ -832,10 +863,11 @@ internal static class TrRmRegisterBodyMapValidator
                 if (recordIndex >= 0)
                 {
                     var payload = body.GetRecord(recordIndex)[4..];
-                    if (payload[0] == 1)
+                    if (payload[0] is 1 or 3)
                     {
-                        var targetMethod = GetMethodMapTarget(
-                            body, ReadUInt16(payload, 4), methods, imports);
+                        var targetMethod = GetCallSiteTargetMethod(body, payload,
+                            typeSpecs, methods, imports,
+                            nativeFunctionPointerAnchors);
                         var signature = methods.GetSignature(targetMethod);
                         var (firstParameter, parameterCount) =
                             signatures.GetParamRange(signature);

@@ -951,6 +951,37 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesHomeTargetCallSiteSignatureAndEffects()
+    {
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
+                doesNotReturn: true, resultKind: 0, hasContinuation: false)));
+
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
+                doesNotReturn: true, resultKind: 1, hasContinuation: false)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
+                doesNotReturn: true, resultKind: 0, hasContinuation: true)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: false, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2)));
+    }
+
+    [Test]
     public void RestrictsBoundMethodCallDiscardToUnitResults()
     {
         ValidateSelectedImportedMethodBodyMaps(
@@ -1233,6 +1264,13 @@ public sealed class TrRmRegisterBodyReaderTests
         tables.ValidateRegisterBodyMapsForMethod(1);
     }
 
+    private static void ValidateSelectedArtifactBodyMaps(byte[] artifact)
+    {
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
+            new TrRmArtifactIndex(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
     private static void ValidateSelectedHomeBodyMaps(byte[] body,
         uint formalTypeSpecRef, uint receiverTypeSpecRef = 0)
     {
@@ -1333,6 +1371,120 @@ public sealed class TrRmRegisterBodyReaderTests
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
             [entryState, callSite], code);
+    }
+
+    private static byte[] CreateStandardFunctionPointerHomeCallSiteArtifact(
+        bool pointerTarget, uint anchorResultTypeSpecRef,
+        bool doesNotReturn, byte resultKind, bool hasContinuation,
+        byte targetKind = 3)
+    {
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("Caller", 1), ("Anchor", 1),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 4);
+        var featureRows = new[]
+        {
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.RootlessNativeValues,
+        };
+        var featuresBytes = TrRmFeatureTableWriter.Encode(featureRows);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1,
+                1, featureRows.Length),
+        ], strings, 0, 0, 2, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 2, 0, featureRows.Length);
+        ReadOnlyMemory<byte>[] typeSpecRows =
+        [
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2),
+        ];
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, 0, 0, 0, 0,
+            TrRmArtifactSchema.Standard, methodDefCount: 2);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Length, 0, 0, 0, 0,
+            TrRmArtifactSchema.Standard, methodDefCount: 2);
+        var targetTypeSpecRef = pointerTarget ? 1u : 0xF200_0008u;
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 1, 2, 0, 0),
+            new TrRmMethodSigRow(anchorResultTypeSpecRef, 0, 3, 1, 0, 0),
+        ], typeSpecs, 3, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 2, typeSpecs, 3, 0);
+        var parameterBytes = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, targetTypeSpecRef, 0),
+            new TrRmParamRow(1, 1, 0xF200_0008, 0),
+            new TrRmParamRow(2, 0, 0xF200_0008, 0),
+        ], signatures, typeSpecs);
+        var parameters = new TrRmParamTableReader(
+            parameterBytes, 3, signatures, typeSpecs);
+        var contractRows = doesNotReturn
+            ? new[]
+            {
+                new TrRmContractRow(0x1600_0002, 1, new byte[] { 2, 0, 0, 0 }),
+            }
+            : [];
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, contractRows.Length);
+        var methodRows = new[]
+        {
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+            new TrRmMethodDefRow(0, 4, 2, 0,
+                contractRows.Length == 0 ? 0 : 1,
+                contractRows.Length, 0),
+        };
+        var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows,
+            strings, modules, typeDefs, signatures, contractRows.Length, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes,
+            methodRows.Length, strings, modules, typeDefs, signatures,
+            contractRows.Length, 1);
+        var contractBytes = contractRows.Length == 0
+            ? []
+            : TrRmContractTableWriter.Encode(contractRows, typeDefs,
+                methods, signatures, parameters, typeSpecs);
+
+        var targetTypeToken = pointerTarget ? 0x1100_0001u : 0xF200_0008u;
+        var maps = TrRmRegisterBodyMapBuilder.Create(
+            [targetTypeToken, 0xF200_0008], []);
+        var homeMap = new byte[16];
+        homeMap[0] = 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            homeMap.AsSpan(2), maps.GetTypeMapIndex(targetTypeToken));
+        homeMap[8] = 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            homeMap.AsSpan(10), maps.GetTypeMapIndex(0xF200_0008));
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(12), 1);
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            targetKind, resultKind, 0, 0,
+            [new TrRmRegisterBodyCallInput(2, 1, 1)], []);
+        byte[] code = hasContinuation
+            ? [0xE0, 0, 1, 0, 0x18, 0]
+            : [0xE0, 0, 1, 0];
+        var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            [entryState, callSite], code, contractRows.Length);
+
+        var sections = new List<TrRmSection>
+        {
+            new(0x0001, 0, 1, moduleBytes),
+            new(0x0002, 0, 4, stringsBytes),
+            new(0x0004, 0, (uint)featureRows.Length, featuresBytes),
+            new(0x0011, 0, (uint)typeSpecRows.Length, typeSpecBytes),
+            new(0x0016, 0, (uint)methodRows.Length, methodBytes),
+            new(0x0017, 0, 2, signatureBytes),
+            new(0x0018, 0, 3, parameterBytes),
+        };
+        if (contractRows.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x001B, 0,
+                (uint)contractRows.Length, contractBytes));
+        }
+        sections.Add(new TrRmSection(0x0020, 0, 1,
+            TrRmVariableTableWriter.EncodeBodies([body])));
+        return TrRmArtifactWriter.Encode(sections);
     }
 
     private static byte[] CreateForeignInvocationCallSiteHomeArtifact(
