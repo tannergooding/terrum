@@ -35,6 +35,65 @@ typedef char AssertRuntimeFinishCallOffset[
         } \
     } while (0)
 
+static int IsModuleRange(
+    HMODULE library,
+    const void* address,
+    SIZE_T length,
+    int requireExecutable)
+{
+    MEMORY_BASIC_INFORMATION information;
+    uintptr_t start;
+    uintptr_t base;
+    uintptr_t offset;
+    DWORD protection;
+    int executable;
+    int readable;
+
+    if (address == NULL || VirtualQuery(address, &information,
+            sizeof(information)) != sizeof(information)
+        || information.AllocationBase != library
+        || information.State != MEM_COMMIT
+        || (information.Protect & PAGE_GUARD) != 0
+        || (uintptr_t)address < (uintptr_t)information.BaseAddress)
+    {
+        return 0;
+    }
+
+    start = (uintptr_t)address;
+    base = (uintptr_t)information.BaseAddress;
+    offset = start - base;
+    protection = information.Protect & 0xFF;
+    executable = protection == PAGE_EXECUTE
+        || protection == PAGE_EXECUTE_READ
+        || protection == PAGE_EXECUTE_READWRITE
+        || protection == PAGE_EXECUTE_WRITECOPY;
+    readable = protection == PAGE_READONLY
+        || protection == PAGE_READWRITE
+        || protection == PAGE_WRITECOPY
+        || protection == PAGE_EXECUTE_READ
+        || protection == PAGE_EXECUTE_READWRITE
+        || protection == PAGE_EXECUTE_WRITECOPY;
+
+    return offset <= information.RegionSize
+        && length <= information.RegionSize - offset
+        && (requireExecutable ? executable : readable);
+}
+
+static int IsFunctionInModule(
+    HMODULE library,
+    const void* functionStorage,
+    size_t functionSize)
+{
+    void* address = NULL;
+    if (functionStorage == NULL || functionSize != sizeof(address))
+    {
+        return 0;
+    }
+
+    memcpy(&address, functionStorage, sizeof(address));
+    return IsModuleRange(library, address, 1, 1);
+}
+
 int main(int argc, char** argv)
 {
     HMODULE library;
@@ -53,8 +112,11 @@ int main(int argc, char** argv)
     procedure = GetProcAddress(library, "TerrumRootPinGetRuntimeV1");
     CHECK(procedure != NULL && sizeof(getRuntimeInfo) == sizeof(procedure));
     memcpy(&getRuntimeInfo, &procedure, sizeof(getRuntimeInfo));
+    CHECK(IsFunctionInModule(library, &getRuntimeInfo, sizeof(getRuntimeInfo)));
     runtimeInfo = getRuntimeInfo();
-    CHECK(runtimeInfo != NULL && runtimeInfo->domain != NULL
+    CHECK(IsModuleRange(library, runtimeInfo, sizeof(*runtimeInfo), 0));
+    CHECK(runtimeInfo->domain != NULL
+        && IsModuleRange(library, runtimeInfo->domain, 1, 0)
         && runtimeInfo->functionTable.abiRevision == 1
         && runtimeInfo->functionTable.byteSize == 104);
     CHECK(runtimeInfo->functionTable.rootExact != NULL
@@ -69,13 +131,39 @@ int main(int argc, char** argv)
         && runtimeInfo->functionTable.beginCall != NULL
         && runtimeInfo->functionTable.returnSupport != NULL
         && runtimeInfo->functionTable.finishCall != NULL);
+    CHECK(IsFunctionInModule(library, &runtimeInfo->functionTable.rootExact,
+            sizeof(runtimeInfo->functionTable.rootExact))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.pinExact,
+            sizeof(runtimeInfo->functionTable.pinExact))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.pinObject,
+            sizeof(runtimeInfo->functionTable.pinObject))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.resolveExact,
+            sizeof(runtimeInfo->functionTable.resolveExact))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.retainSupport,
+            sizeof(runtimeInfo->functionTable.retainSupport))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.releaseSupport,
+            sizeof(runtimeInfo->functionTable.releaseSupport))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.enterFrame,
+            sizeof(runtimeInfo->functionTable.enterFrame))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.exitFrame,
+            sizeof(runtimeInfo->functionTable.exitFrame))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.poll,
+            sizeof(runtimeInfo->functionTable.poll))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.beginCall,
+            sizeof(runtimeInfo->functionTable.beginCall))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.returnSupport,
+            sizeof(runtimeInfo->functionTable.returnSupport))
+        && IsFunctionInModule(library, &runtimeInfo->functionTable.finishCall,
+            sizeof(runtimeInfo->functionTable.finishCall)));
 
     procedure = GetProcAddress(library, "TerrumRootPinAdmitLoadedTypesV2");
     CHECK(procedure != NULL && sizeof(admitTypes) == sizeof(procedure));
     memcpy(&admitTypes, &procedure, sizeof(admitTypes));
+    CHECK(IsFunctionInModule(library, &admitTypes, sizeof(admitTypes)));
     procedure = GetProcAddress(library, "TerrumRootPinAdmitLoadedMethodsV1");
     CHECK(procedure != NULL && sizeof(admitMethods) == sizeof(procedure));
     memcpy(&admitMethods, &procedure, sizeof(admitMethods));
+    CHECK(IsFunctionInModule(library, &admitMethods, sizeof(admitMethods)));
 
     methodBatch.abiRevision = 1;
     methodBatch.byteSize = sizeof(methodBatch);
