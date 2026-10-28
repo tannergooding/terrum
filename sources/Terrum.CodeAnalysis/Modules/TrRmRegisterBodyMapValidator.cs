@@ -729,12 +729,13 @@ internal static class TrRmRegisterBodyMapValidator
                         break;
                     case 0x90:
                         ValidateCallSiteEffects(body, instruction[1], blockIndex,
+                            position == 0,
                             typeSpecs, methods, signatures, parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
                         break;
                     case 0xE0:
                         ValidateCallSiteEffects(body, ReadUInt16(instruction, 2),
-                            blockIndex, typeSpecs, methods, signatures,
+                            blockIndex, position == 0, typeSpecs, methods, signatures,
                             parameters, contracts, imports,
                             nativeFunctionPointerAnchors);
                         break;
@@ -761,15 +762,17 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
-        int recordIndex, int blockIndex, TrRmTypeSpecTableReader typeSpecs,
+        int recordIndex, int blockIndex, bool isBlockEntry,
+        TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmContractTableReader contracts,
         TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
         var payload = body.GetRecord(recordIndex)[4..];
-        var targetMethod = GetCallSiteTargetMethod(body, payload, typeSpecs,
-            methods, imports, nativeFunctionPointerAnchors);
+        var targetMethod = GetCallSiteTargetMethod(body, payload, blockIndex,
+            isBlockEntry, typeSpecs, methods, imports,
+            nativeFunctionPointerAnchors);
         var signature = methods.GetSignature(targetMethod);
         var (firstParameter, parameterCount) = signatures.GetParamRange(signature);
         var inputCount = ReadUInt32(payload, 8);
@@ -798,6 +801,11 @@ internal static class TrRmRegisterBodyMapValidator
         var unitResult = typeSpecs.AreEquivalentTypeSpecRefs(
             resultType, UnitTypeSpecRef);
         var doesNotReturn = (contracts.GetEffectsMask(targetMethod) & 2) != 0;
+        if (payload[0] == 2 && !doesNotReturn && !unitResult)
+        {
+            throw InvalidMap();
+        }
+
         if (doesNotReturn
             ? payload[1] != 0 || !body.IsCallSiteAtBlockEnd(blockIndex, recordIndex)
             : unitResult ? payload[1] != 0 : payload[1] == 0)
@@ -807,7 +815,8 @@ internal static class TrRmRegisterBodyMapValidator
     }
 
     private static int GetCallSiteTargetMethod(TrRmRegisterBodyReader body,
-        ReadOnlySpan<byte> payload, TrRmTypeSpecTableReader typeSpecs,
+        ReadOnlySpan<byte> payload, int blockIndex, bool isBlockEntry,
+        TrRmTypeSpecTableReader typeSpecs,
         TrRmMethodDefTableReader methods, TrRmImportTableReader imports,
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
     {
@@ -815,6 +824,9 @@ internal static class TrRmRegisterBodyMapValidator
         return payload[0] switch
         {
             1 => GetMethodMapTarget(body, targetIndex, methods, imports),
+            2 when isBlockEntry => GetRegisterFunctionPointerAnchorMethod(
+                body, blockIndex, targetIndex, typeSpecs,
+                nativeFunctionPointerAnchors),
             3 => GetHomeFunctionPointerAnchorMethod(body, targetIndex,
                 typeSpecs, nativeFunctionPointerAnchors),
             _ => throw InvalidMap(),
@@ -836,6 +848,48 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         return nativeFunctionPointerAnchors.GetAnchorMethodDefRow(typeSpec.Row);
+    }
+
+    private static int GetRegisterFunctionPointerAnchorMethod(
+        TrRmRegisterBodyReader body, int blockIndex, int register,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        var typeMapIndex = GetBlockEntryRegisterTypeMapIndex(
+            body, blockIndex, register);
+        var typeSpec = typeSpecs.GetTypeSpecRef(
+            GetTypeMapTypeSpecRef(body, typeMapIndex));
+        if (!typeSpec.IsRow || typeSpec.Form != 0x0D || typeSpec.Qualifiers != 0
+            || !nativeFunctionPointerAnchors.HasAnchorForTypeSpec(typeSpec.Row))
+        {
+            throw InvalidMap();
+        }
+
+        return nativeFunctionPointerAnchors.GetAnchorMethodDefRow(typeSpec.Row);
+    }
+
+    private static int GetBlockEntryRegisterTypeMapIndex(
+        TrRmRegisterBodyReader body, int blockIndex, int register)
+    {
+        var block = body.GetBlock(blockIndex);
+        var entryState = body.GetRecord(ReadUInt16(block, 8));
+        var registerCount = checked((int)ReadUInt32(entryState, 4));
+        for (var entry = 0; entry < registerCount; entry++)
+        {
+            var offset = 8 + (entry * 5);
+            if (entryState[offset] != register)
+            {
+                continue;
+            }
+            if (entryState[offset + 1] != 0 || entryState[offset + 4] != 0)
+            {
+                throw InvalidMap();
+            }
+
+            return ReadUInt16(entryState, offset + 2);
+        }
+
+        throw InvalidMap();
     }
 
     private static void ValidateCallSiteHomeTypes(TrRmRegisterBodyReader body,
@@ -863,10 +917,10 @@ internal static class TrRmRegisterBodyMapValidator
                 if (recordIndex >= 0)
                 {
                     var payload = body.GetRecord(recordIndex)[4..];
-                    if (payload[0] is 1 or 3)
+                    if (payload[0] is 1 or 2 or 3)
                     {
                         var targetMethod = GetCallSiteTargetMethod(body, payload,
-                            typeSpecs, methods, imports,
+                            blockIndex, position == 0, typeSpecs, methods, imports,
                             nativeFunctionPointerAnchors);
                         var signature = methods.GetSignature(targetMethod);
                         var (firstParameter, parameterCount) =
@@ -875,11 +929,21 @@ internal static class TrRmRegisterBodyMapValidator
                         var inputOffset = 16;
                         for (var ordinal = 0; ordinal < parameterCount; ordinal++)
                         {
-                            if (payload[inputOffset] == 2)
+                            var selectorKind = payload[inputOffset];
+                            if (selectorKind is 1 or 2)
                             {
-                                var homeIndex = ReadUInt16(payload, inputOffset + 2);
-                                var typeMapIndex = ReadUInt16(
-                                    body.HomeMap, (homeIndex * 8) + 2);
+                                var selectorIndex = ReadUInt16(payload,
+                                    inputOffset + 2);
+                                if (selectorKind == 1 && position != 0)
+                                {
+                                    throw InvalidMap();
+                                }
+
+                                var typeMapIndex = selectorKind == 1
+                                    ? GetBlockEntryRegisterTypeMapIndex(
+                                        body, blockIndex, selectorIndex)
+                                    : ReadUInt16(body.HomeMap,
+                                        (selectorIndex * 8) + 2);
                                 var formalType = parameters.GetTypeSpec(
                                     firstParameter + ordinal);
                                 var nativeParameterAccess = (byte)0;

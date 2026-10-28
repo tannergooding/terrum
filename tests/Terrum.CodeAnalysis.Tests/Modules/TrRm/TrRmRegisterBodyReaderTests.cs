@@ -979,6 +979,33 @@ public sealed class TrRmRegisterBodyReaderTests
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
+                doesNotReturn: true, resultKind: 0, hasContinuation: false,
+                targetKind: 2, registerTargetInitialized: true)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true,
+                entryArgumentTypeToken: 0xF200_0009)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true,
+                entryTargetTypeToken: 0xF200_0008)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0008,
+                doesNotReturn: false, resultKind: 1, hasContinuation: true,
+                targetKind: 2, registerTargetInitialized: true)));
     }
 
     [Test]
@@ -1376,7 +1403,8 @@ public sealed class TrRmRegisterBodyReaderTests
     private static byte[] CreateStandardFunctionPointerHomeCallSiteArtifact(
         bool pointerTarget, uint anchorResultTypeSpecRef,
         bool doesNotReturn, byte resultKind, bool hasContinuation,
-        byte targetKind = 3)
+        byte targetKind = 3, bool registerTargetInitialized = false,
+        uint entryTargetTypeToken = 0, uint entryArgumentTypeToken = 0xF200_0008)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("Caller", 1), ("Anchor", 1),
@@ -1445,7 +1473,9 @@ public sealed class TrRmRegisterBodyReaderTests
 
         var targetTypeToken = pointerTarget ? 0x1100_0001u : 0xF200_0008u;
         var maps = TrRmRegisterBodyMapBuilder.Create(
-            [targetTypeToken, 0xF200_0008], []);
+            [targetTypeToken, 0xF200_0008,
+                entryTargetTypeToken == 0 ? targetTypeToken : entryTargetTypeToken,
+                entryArgumentTypeToken], []);
         var homeMap = new byte[16];
         homeMap[0] = 2;
         BinaryPrimitives.WriteUInt16LittleEndian(
@@ -1454,11 +1484,27 @@ public sealed class TrRmRegisterBodyReaderTests
         BinaryPrimitives.WriteUInt16LittleEndian(
             homeMap.AsSpan(10), maps.GetTypeMapIndex(0xF200_0008));
         BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(12), 1);
-        var entryState = new byte[8];
+        var entryState = new byte[registerTargetInitialized ? 18 : 8];
         entryState[0] = 0x01;
+        if (registerTargetInitialized)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(entryState.AsSpan(4), 2);
+            entryState[8] = 0;
+            entryState[9] = 0;
+            BinaryPrimitives.WriteUInt16LittleEndian(entryState.AsSpan(10),
+                maps.GetTypeMapIndex(entryTargetTypeToken == 0
+                    ? targetTypeToken : entryTargetTypeToken));
+            entryState[13] = 1;
+            entryState[14] = 0;
+            BinaryPrimitives.WriteUInt16LittleEndian(entryState.AsSpan(15),
+                maps.GetTypeMapIndex(entryArgumentTypeToken));
+        }
+        var input = targetKind == 2
+            ? new TrRmRegisterBodyCallInput(1, 1, 1)
+            : new TrRmRegisterBodyCallInput(2, 1, 1);
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
             targetKind, resultKind, 0, 0,
-            [new TrRmRegisterBodyCallInput(2, 1, 1)], []);
+            [input], []);
         byte[] code = hasContinuation
             ? [0xE0, 0, 1, 0, 0x18, 0]
             : [0xE0, 0, 1, 0];
