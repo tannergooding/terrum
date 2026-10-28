@@ -29,6 +29,8 @@ public sealed class TokenCursorTests
         internal Span<Token> DefaultIdentity(Span<Token> tokens) { return tokens; }
         [return: ForwardsBacking(nameof(tokens))]
         internal Span<Token> DefaultForwarded(Span<Token> tokens) { return tokens; }
+        internal Span<Token> DefaultIgnoresTransferredOwner(
+            Span<Token> tokens, TokenSnapshot unrelated) { return tokens; }
         [return: DependsOn(nameof(first), nameof(second))]
         [return: ForwardsBacking(nameof(first))]
         internal Span<Token> ForwardFirst(Span<Token> first, Span<Token> second) {
@@ -49,6 +51,14 @@ public sealed class TokenCursorTests
                 return tokens;
             } finally { }
         }
+
+        struct PlainReceiver {
+            public int32 Value;
+            public PlainReceiver() { Value = 0; }
+            internal Span<Token> DefaultIgnoresReceiver(Span<Token> tokens) {
+                return tokens;
+            }
+        }
         """;
 
     [Test]
@@ -58,7 +68,12 @@ public sealed class TokenCursorTests
             new BoundBlock(default, default), default);
         var captured = new BoundFunction("Captured", PrimitiveType.Int32, [], 0,
             new BoundBlock(default, default), default) { CapturedParameters = [0] };
+        var receiverDependency = new BoundFunction("ReceiverDependency",
+            PrimitiveType.Int32, [], 0, new BoundBlock(default, default), default) {
+            ResultDependencyIncludesReceiver = true,
+        };
         Assert.That(InspectSpanMetadata(new BoundProgram([malformed, captured], -1)), Is.True);
+        Assert.That(InspectSpanMetadata(new BoundProgram([receiverDependency], -1)), Is.True);
 
         var spanBody = new BoundBlock([
             new BoundReturn(new BoundSnapshotSpan(0, 0, default), default),
@@ -367,6 +382,26 @@ public sealed class TokenCursorTests
         Assert.That(global::System.Linq.Enumerable.Single(defaultForwarded.DependencyContracts,
             static contract => contract.Relation == BoundDependencyRelation.ForwardsBacking)
             .Sources[0].FormalOrdinal, Is.EqualTo(0));
+        var transferredOwnerDefault = global::System.Linq.Enumerable.Single(
+            program.Functions,
+            static function => function.Name == "DefaultIgnoresTransferredOwner");
+        var transferredOwnerDependency = global::System.Linq.Enumerable.Single(
+            transferredOwnerDefault.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.DependsOn);
+        Assert.That(transferredOwnerDependency.Sources, Has.Length.EqualTo(1));
+        Assert.That(transferredOwnerDependency.Sources[0].Kind,
+            Is.EqualTo(BoundDependencySourceKind.Formal));
+        Assert.That(transferredOwnerDependency.Sources[0].FormalOrdinal, Is.EqualTo(0));
+        var unrelatedReceiverDefault = global::System.Linq.Enumerable.Single(
+            program.Functions,
+            static function => function.Name == "PlainReceiver.DefaultIgnoresReceiver");
+        var unrelatedReceiverDependency = global::System.Linq.Enumerable.Single(
+            unrelatedReceiverDefault.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.DependsOn);
+        Assert.That(unrelatedReceiverDependency.Sources, Has.Length.EqualTo(1));
+        Assert.That(unrelatedReceiverDependency.Sources[0].Kind,
+            Is.EqualTo(BoundDependencySourceKind.Formal));
+        Assert.That(unrelatedReceiverDependency.Sources[0].FormalOrdinal, Is.EqualTo(0));
         var subsetForwarding = global::System.Linq.Enumerable.Single(
             global::System.Linq.Enumerable.Single(program.Functions,
                 static function => function.Name == "ForwardFirst").DependencyContracts,

@@ -61,6 +61,17 @@ internal static class TokenSpanContract
     internal static bool IsDependent(PrimitiveType type, IReadOnlyList<BoundStruct> structures) =>
         type == PrimitiveType.TokenSpan || IsCursor(type, structures);
 
+    internal static bool IsSnapshot(PrimitiveType type, IReadOnlyList<BoundStruct> structures)
+    {
+        var index = (int)type - 100;
+        return (uint)index < (uint)structures.Count
+            && ValidSnapshot(structures[index]);
+    }
+
+    internal static bool IsSpanResultReceiver(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures) =>
+        IsDependent(type, structures) || IsSnapshot(type, structures);
+
     internal static bool HasMetadata(BoundProgram program)
     {
         if (program.Structures.Any(static structure => structure.Fields.Any(static field => field.Type == PrimitiveType.TokenSpan)))
@@ -72,6 +83,7 @@ internal static class TokenSpanContract
         {
             if (!function.CapturedParameters.IsDefaultOrEmpty || function.ReturnsForwardedBacking
                 || !function.ResultDependencyParameters.IsDefaultOrEmpty
+                || function.ResultDependencyIncludesReceiver
                 || function.ReturnType == PrimitiveType.TokenSpan
                 || function.Variables.Any(static variable => variable.Type == PrimitiveType.TokenSpan))
             {

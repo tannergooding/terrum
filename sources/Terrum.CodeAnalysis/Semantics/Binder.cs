@@ -3342,14 +3342,17 @@ internal sealed partial class Binder
             && !hasDeclaredResultDependency)
         {
             var eligibleSources = ImmutableArray.CreateBuilder<BoundDependencySource>();
-            if (containingType is not null && !isStatic && !classConstructor)
+            if (containingType is not null && !isStatic && !classConstructor
+                && TokenSpanContract.IsSpanResultReceiver(
+                    ResolveDeclaredType(containingType), _structs))
             {
                 eligibleSources.Add(new BoundDependencySource(
                     BoundDependencySourceKind.Receiver, null));
             }
             for (var parameter = 0; parameter < parameters.Length; parameter++)
             {
-                if (IsEligibleDependencySource(parameters[parameter]))
+                if (!parameters[parameter].IsOut && !parameters[parameter].IsInit
+                    && parameters[parameter].Type == PrimitiveType.TokenSpan)
                 {
                     eligibleSources.Add(new BoundDependencySource(
                         BoundDependencySourceKind.Formal, parameter));
@@ -3775,62 +3778,6 @@ internal sealed partial class Binder
         }
         return false;
     }
-
-    private bool IsEligibleDependencySource(Parameter parameter)
-        => !parameter.IsOut && !parameter.IsInit
-            && (parameter.IsImplicitRef || CarriesDependencySource(parameter.Type));
-
-    private bool CarriesDependencySource(PrimitiveType type)
-    {
-        if (CarriesDependencySourceDirectly(type))
-        {
-            return true;
-        }
-        if ((int)type < 100 || (int)type - 100 >= _structs.Count)
-        {
-            return false;
-        }
-
-        var pending = new Stack<PrimitiveType>();
-        var seen = new HashSet<PrimitiveType>();
-        pending.Push(type);
-        while (pending.TryPop(out var current))
-        {
-            if (!seen.Add(current))
-            {
-                continue;
-            }
-
-            var structureIndex = (int)current - 100;
-            if ((uint)structureIndex >= (uint)_structs.Count)
-            {
-                continue;
-            }
-            foreach (var field in _structs[structureIndex].Fields)
-            {
-                if (CarriesDependencySourceDirectly(field.Type))
-                {
-                    return true;
-                }
-                if ((int)field.Type >= 100)
-                {
-                    pending.Push(field.Type);
-                }
-            }
-        }
-        return false;
-    }
-
-    private bool CarriesDependencySourceDirectly(PrimitiveType type)
-        => type is PrimitiveType.ReadonlyInt32BufferView
-                or PrimitiveType.MutableInt32BufferView
-                or PrimitiveType.ManagedNode
-                or PrimitiveType.OptionalManagedNode
-                or PrimitiveType.WriteManagedNode
-                or PrimitiveType.OptionalWriteManagedNode
-            || TokenSpanContract.IsDependent(type, _structs)
-            || ManagedClassTypes.IsManaged(type)
-            || IsUnique(type);
 
     private bool CanCaptureValue(PrimitiveType type)
         => IsUnique(type) || ManagedClassTypes.IsManaged(type);

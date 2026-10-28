@@ -760,14 +760,7 @@ public static partial class SemanticVerifier
 
     private static bool IsSpanResultReceiver(PrimitiveType type,
         BoundProgram program)
-    {
-        if (TokenSpanContract.IsDependent(type, program.Structures))
-        {
-            return true;
-        }
-
-        return IsTokenSnapshotType(type, program);
-    }
+        => TokenSpanContract.IsSpanResultReceiver(type, program.Structures);
 
     private static BoundDependencyContract? ResultDependencyContract(
         BoundFunction function)
@@ -5413,13 +5406,7 @@ public static partial class SemanticVerifier
 
     private static bool IsTokenSnapshotType(PrimitiveType type,
         BoundProgram program)
-    {
-        var index = (int)type - 100;
-        return (uint)index < (uint)program.Structures.Length
-            && TokenSpanContract.RoleOf(program.Structures[index])
-                == TokenSpanTypeRole.Snapshot
-            && TokenSpanContract.ValidSnapshot(program.Structures[index]);
-    }
+        => TokenSpanContract.IsSnapshot(type, program.Structures);
 
     private static HashSet<ProvenanceAnchor> TokenSnapshotBackingOf(
         int variable, BackingDependencies facts)
