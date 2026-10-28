@@ -216,6 +216,9 @@ RootPinTestGetDomainV1(void);
 ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
 RootPinTestFailAdmissionAtStageV2(uint32_t stage);
 
+ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestFailRelocationAllocationAtV1(uint32_t oneBasedOrdinal);
+
 ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
 RootPinTestRegisterObjectV2(
     RootPinDomainV1 domain,
@@ -349,6 +352,11 @@ RootPinTestTraceAllFramesV1(
     RootPinObjectCellV1* objects,
     uint32_t capacity,
     uint32_t* outCount);
+
+ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRelocateReachableV1(
+    RootPinDomainV1 domain,
+    uint32_t* outMovedCount);
 #endif
 
 #ifdef __cplusplus

@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <malloc.h>
 #include <new>
 #include <numeric>
 #include <stdexcept>
@@ -873,6 +874,7 @@ struct RootPinObjectCellImpl
 {
     RootPinDomainV1 domain;
     uint8_t* currentBase;
+    bool currentBaseOwned;
     uint64_t payloadSize;
     uint64_t alignment;
     uint64_t generation;
@@ -972,6 +974,17 @@ struct RootPinDomainImpl
     uint64_t nextObjectGeneration = 1;
     uint64_t nextCellIdentity = 1;
     uint64_t traceEpoch = 0;
+
+    ~RootPinDomainImpl()
+    {
+        for (const auto& object : ownedObjects)
+        {
+            if (object->currentBaseOwned)
+            {
+                _aligned_free(object->currentBase);
+            }
+        }
+    }
 };
 
 struct RootPinThreadState
@@ -1251,6 +1264,7 @@ namespace
     RootPinDomainImpl s_domain;
 #if defined(TERRUM_ROOT_PIN_TESTS)
     std::atomic<uint32_t> s_failureStage;
+    std::atomic<uint32_t> s_relocationFailureOrdinal;
 
     void MaybeFailAtStage(uint32_t stage)
     {
@@ -2861,6 +2875,12 @@ RootPinTestFailAdmissionAtStageV2(uint32_t stage)
     s_failureStage.store(stage);
 }
 
+extern "C" ROOTPIN_LOADED_TYPES_API void ROOTPIN_LOADED_TYPES_CALL
+RootPinTestFailRelocationAllocationAtV1(uint32_t oneBasedOrdinal)
+{
+    s_relocationFailureOrdinal.store(oneBasedOrdinal);
+}
+
 extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
 RootPinTestRegisterObjectV2(
     RootPinDomainV1 domain,
@@ -2920,6 +2940,7 @@ RootPinTestRegisterObjectV2(
 
         candidate->domain = domain;
         candidate->currentBase = static_cast<uint8_t*>(payload);
+        candidate->currentBaseOwned = false;
         candidate->payloadSize = payloadSize;
         candidate->alignment = payloadAlignment;
         candidate->generation = domain->nextObjectGeneration;
@@ -3072,7 +3093,18 @@ RootPinTestReplaceObjectPayloadV2(
     {
         return ROOTPIN_TYPE_STATUS_UNSUPPORTED;
     }
+    if (object->currentBase == payload)
+    {
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    auto* previousBase = object->currentBase;
+    const bool previousBaseOwned = object->currentBaseOwned;
     object->currentBase = static_cast<uint8_t*>(payload);
+    object->currentBaseOwned = false;
+    if (previousBaseOwned)
+    {
+        _aligned_free(previousBase);
+    }
     return ROOTPIN_TYPE_STATUS_SUCCESS;
 }
 
@@ -3814,6 +3846,117 @@ RootPinTestTraceAllFramesV1(
         {
             objects[index++] = object;
         }
+        return ROOTPIN_TYPE_STATUS_SUCCESS;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+    catch (const std::length_error&)
+    {
+        return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+    }
+}
+
+extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+RootPinTestRelocateReachableV1(
+    RootPinDomainV1 domain,
+    uint32_t* outMovedCount)
+{
+    if (domain != &s_domain || outMovedCount == nullptr
+        || reinterpret_cast<uintptr_t>(outMovedCount) % alignof(uint32_t) != 0)
+    {
+        return ROOTPIN_TYPE_STATUS_INVALID;
+    }
+
+    *outMovedCount = 0;
+    const auto failOrdinal = s_relocationFailureOrdinal.exchange(0);
+    struct Relocation
+    {
+        RootPinObjectCellV1 object;
+        uint8_t* previousBase;
+        uint8_t* destinationBase;
+        bool previousBaseOwned;
+    };
+
+    try
+    {
+        StopTheWorld stop(domain);
+        ExclusiveLock lock(&domain->gate, false);
+        ObjectTraceQueue queue = { NextTraceEpochLocked(domain), nullptr, nullptr, 0 };
+        TraceAllFramesLocked(domain, queue);
+        if (queue.count > std::numeric_limits<uint32_t>::max())
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+
+        std::vector<Relocation> relocations;
+        if (queue.count > relocations.max_size())
+        {
+            return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+        }
+        relocations.reserve(static_cast<size_t>(queue.count));
+
+        const auto discardStaged = [&relocations]() {
+            for (const auto& relocation : relocations)
+            {
+                _aligned_free(relocation.destinationBase);
+            }
+        };
+
+        uint32_t allocationOrdinal = 0;
+        for (auto* object = queue.first; object != nullptr; object = object->traceNext)
+        {
+            if (object->activePins != 0 || object->payloadSize == 0)
+            {
+                continue;
+            }
+            if (object->currentBase == nullptr || object->alignment == 0
+                || !IsPowerOfTwo(object->alignment))
+            {
+                ContractViolation();
+            }
+            if (allocationOrdinal == std::numeric_limits<uint32_t>::max())
+            {
+                discardStaged();
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+            allocationOrdinal++;
+            if (failOrdinal == allocationOrdinal)
+            {
+                discardStaged();
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+
+            const auto alignment = std::max<size_t>(
+                static_cast<size_t>(object->alignment), alignof(void*));
+            auto* destination = static_cast<uint8_t*>(
+                _aligned_malloc(static_cast<size_t>(object->payloadSize), alignment));
+            if (destination == nullptr)
+            {
+                discardStaged();
+                return ROOTPIN_TYPE_STATUS_EXHAUSTED;
+            }
+            std::memcpy(destination, object->currentBase,
+                static_cast<size_t>(object->payloadSize));
+            relocations.push_back({
+                object, object->currentBase, destination, object->currentBaseOwned });
+        }
+
+        for (const auto& relocation : relocations)
+        {
+            relocation.object->currentBase = relocation.destinationBase;
+            relocation.object->currentBaseOwned = true;
+        }
+        for (const auto& relocation : relocations)
+        {
+            if (relocation.previousBaseOwned)
+            {
+                _aligned_free(relocation.previousBase);
+            }
+        }
+
+        *outMovedCount = static_cast<uint32_t>(relocations.size());
         return ROOTPIN_TYPE_STATUS_SUCCESS;
     }
     catch (const std::bad_alloc&)

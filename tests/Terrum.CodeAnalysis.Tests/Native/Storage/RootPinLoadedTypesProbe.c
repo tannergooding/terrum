@@ -60,6 +60,9 @@ typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *TraceCurrentFramesFunction)(
 typedef void (ROOTPIN_LOADED_TYPES_CALL *PollFunction)(RootPinDomainV1);
 typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *TraceAllFramesFunction)(
     RootPinDomainV1, RootPinObjectCellV1*, uint32_t, uint32_t*);
+typedef void (ROOTPIN_LOADED_TYPES_CALL *FailRelocationFunction)(uint32_t);
+typedef uint32_t (ROOTPIN_LOADED_TYPES_CALL *RelocateReachableFunction)(
+    RootPinDomainV1, uint32_t*);
 
 typedef struct RootPinTestMutatorContext
 {
@@ -869,8 +872,11 @@ static int RunSupportCases(
     ReturnSupportFunction returnSupport = NULL;
     FinishCallFunction finishCall = NULL;
     TraceCurrentFramesFunction traceCurrentFrames = NULL;
+    ResolveExactFunction resolveExact = NULL;
     PollFunction poll = NULL;
     TraceAllFramesFunction traceAllFrames = NULL;
+    FailRelocationFunction failRelocation = NULL;
+    RelocateReachableFunction relocateReachable = NULL;
     RootPinTypeBatchV2 batch = { 0 };
     RootPinTypeNodeV2 nodes[10] = { 0 };
     RootPinTypeFieldV1 fields[7] = { 0 };
@@ -888,8 +894,11 @@ static int RunSupportCases(
     RootPinRootCellV1 rootA = NULL;
     RootPinRootCellV1 rootB = NULL;
     RootPinRootCellV1 slotRoot = NULL;
+    RootPinRootCellV1 relocatedPlaceRoot = NULL;
     RootPinStableValue16V1 stable = { 0 };
     RootPinStableValue16V1 stableClass = { 0 };
+    RootPinStableValue16V1 movementPin = { 0 };
+    RootPinStableValue16V1 overlappingMovementPin = { 0 };
     RootPinStableValue16V1 oldStable = { 0 };
     RootPinStableValue16V1 newStable = { 0 };
     RootPinStableValue16V1 destination = { 0 };
@@ -923,7 +932,12 @@ static int RunSupportCases(
     RootPinPlaceRequestV1 request;
     uint64_t rootEdges;
     uint64_t activePins;
+    uint64_t objectABase;
+    uint64_t objectBBase;
+    uint64_t placeAddress;
+    RootPinObjectCellV1 nextObject;
     uint32_t traceCount;
+    uint32_t movedCount;
     uint32_t status;
 
     LOAD_FUNCTION("RootPinTestRegisterObjectV2", registerObject);
@@ -941,8 +955,11 @@ static int RunSupportCases(
     LOAD_FUNCTION("RootPinTestReturnSupportV1", returnSupport);
     LOAD_FUNCTION("RootPinTestFinishCallV1", finishCall);
     LOAD_FUNCTION("RootPinTestTraceCurrentFramesV1", traceCurrentFrames);
+    LOAD_FUNCTION("RootPinTestResolveExactV2", resolveExact);
     LOAD_FUNCTION("RootPinTestPollV1", poll);
     LOAD_FUNCTION("RootPinTestTraceAllFramesV1", traceAllFrames);
+    LOAD_FUNCTION("RootPinTestFailRelocationAllocationAtV1", failRelocation);
+    LOAD_FUNCTION("RootPinTestRelocateReachableV1", relocateReachable);
 
     SetNode(&nodes[0], 15000, (uint32_t)ROOTPIN_TYPE_ROLE_VALUE,
         (uint32_t)ROOTPIN_TYPE_SHAPE_LEAF, 4, 4,
@@ -1227,6 +1244,76 @@ static int RunSupportCases(
     CHECK(s_retirementCount == 0);
     CHECK(RunConcurrentMutatorChecks(domain, types[2], objectA, objectB,
         enterFrame, exitFrame, poll, traceAllFrames) == 0);
+    CHECK(traceAllFrames(domain, tracedObjects, 8, &traceCount)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 0);
+
+    SetPlaceRequest(&request, 8, 8, 8, types[3], (uint32_t)ROOTPIN_ACCESS_READ);
+    CHECK(rootExact(domain, objectA, &request, &relocatedPlaceRoot)
+        == ROOTPIN_TYPE_STATUS_SUCCESS);
+    rootedObject = objectA;
+    traceSlot = (RootPinSupportSlotV1){ &rootedObject, types[2], 1, 0 };
+    traceFrame = (RootPinSupportFrameV1){ NULL, 1, 0, &traceSlot, NULL };
+    enterFrame(domain, &traceFrame);
+    objectABase = resolveExact(domain, rootA);
+    objectBBase = resolveExact(domain, rootB);
+    placeAddress = resolveExact(domain, relocatedPlaceRoot);
+    CHECK(placeAddress - objectABase == 8);
+
+    CHECK(pinExact(domain, rootA, &movementPin) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(pinExact(domain, rootA, &overlappingMovementPin) == ROOTPIN_TYPE_STATUS_SUCCESS);
+    CHECK(relocateReachable(domain, &movedCount) == ROOTPIN_TYPE_STATUS_SUCCESS
+        && movedCount == 1);
+    CHECK(resolveExact(domain, rootA) == objectABase);
+    CHECK(movementPin.address == objectABase
+        && overlappingMovementPin.address == objectABase);
+    CHECK(resolveExact(domain, relocatedPlaceRoot) == placeAddress);
+    CHECK(resolveExact(domain, rootB) != objectBBase);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 2);
+    CHECK(getObjectCounts(domain, objectB, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 0);
+    memcpy(&nextObject, (const void*)(uintptr_t)resolveExact(domain, rootB),
+        sizeof(nextObject));
+    CHECK(nextObject == objectA);
+
+    releaseSupport(domain, types[4], &movementPin);
+    memset(&movementPin, 0, sizeof(movementPin));
+    objectBBase = resolveExact(domain, rootB);
+    CHECK(relocateReachable(domain, &movedCount) == ROOTPIN_TYPE_STATUS_SUCCESS
+        && movedCount == 1);
+    CHECK(resolveExact(domain, rootA) == objectABase
+        && resolveExact(domain, rootB) != objectBBase);
+    CHECK(overlappingMovementPin.address == objectABase);
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 1);
+
+    releaseSupport(domain, types[4], &overlappingMovementPin);
+    memset(&overlappingMovementPin, 0, sizeof(overlappingMovementPin));
+    CHECK(getObjectCounts(domain, objectA, &rootEdges, &activePins)
+        == ROOTPIN_TYPE_STATUS_SUCCESS && activePins == 0);
+    objectABase = resolveExact(domain, rootA);
+    objectBBase = resolveExact(domain, rootB);
+    CHECK(relocateReachable(domain, &movedCount) == ROOTPIN_TYPE_STATUS_SUCCESS
+        && movedCount == 2);
+    CHECK(resolveExact(domain, rootA) != objectABase
+        && resolveExact(domain, rootB) != objectBBase);
+    CHECK(resolveExact(domain, relocatedPlaceRoot) - resolveExact(domain, rootA) == 8);
+    memcpy(&nextObject, (const void*)(uintptr_t)resolveExact(domain, rootA),
+        sizeof(nextObject));
+    CHECK(nextObject == objectB);
+    memcpy(&nextObject, (const void*)(uintptr_t)resolveExact(domain, rootB),
+        sizeof(nextObject));
+    CHECK(nextObject == objectA);
+
+    objectABase = resolveExact(domain, rootA);
+    objectBBase = resolveExact(domain, rootB);
+    failRelocation(2);
+    CHECK(relocateReachable(domain, &movedCount) == ROOTPIN_TYPE_STATUS_EXHAUSTED
+        && movedCount == 0);
+    CHECK(resolveExact(domain, rootA) == objectABase
+        && resolveExact(domain, rootB) == objectBBase);
+    exitFrame(domain, &traceFrame);
+    releaseRoot(domain, relocatedPlaceRoot);
     CHECK(traceAllFrames(domain, tracedObjects, 8, &traceCount)
         == ROOTPIN_TYPE_STATUS_SUCCESS && traceCount == 0);
     return 0;
