@@ -84,6 +84,11 @@ initializer MethodDef, EagerGroup or StaticDependency. A definition-kind
 candidate does not allocate its missing table/section. Until that complete
 schema is selected and supported, a `0x24` word cannot authorize affected
 use, even when an existing table has the same row number.
+The separate unapproved
+[static persistence proposal](immutable-static-field-persistence.md)
+recommends section `0x0055` plus the related group/access/publication records;
+the accepted registry remains unassigned until that proposal is reviewed and
+adopted.
 
 Retain ImmutableData section `0x0041`, its 12-byte row, zero flags/reserved
 fields and complete four-byte `ownerTypeSpec` TypeSpecRef. There is no
@@ -217,11 +222,12 @@ particular, `0x23` stays excluded from Import/Export, and GenericParam
 
 The remaining decisions and acceptance gates are:
 
-1. **Associated declarations and witnesses:** select AssociatedConstDef's
-   first-class identity/reference/Import codec and complete witness
-   origin/expected-binding, inheritance/projection and value-domain checks.
-   Assigning the binding kind does not complete the requirement codec or
-   witness authority/runtime carrier.
+1. **Associated declarations and witnesses:** a separate unapproved
+   [AssociatedConstDef identity proposal](associated-constant-definition-identity.md)
+   now recommends its own `0x25` requirement identity/reference/Import
+   codec. It does not complete witness origin/expected-binding,
+   inheritance/projection and value-domain checks or witness authority/runtime
+   carriers; assigning `0x23` still does not complete those obligations.
 2. **Declaration publication:** complete effective access, semantic
    source-unit identity and imported expected-definition encodings. Do not
    erase access, value promises or static initialization obligations to fit
@@ -232,12 +238,14 @@ The remaining decisions and acceptance gates are:
    does not admit ImmutableData through its scalar-only proposed `11/1`.
    Select the richer coherent registration/revision and predicate,
    execution, view, witness and static prerequisites explicitly.
-4. **Static storage and immutable publication:** select the StaticField
-   physical section and full static/group/lazy/dependency/access/authority
-   codecs, plus the immutable extent/publication/backing carrier. Preserve
-   trigger/effect ordering, failures/recovery, loaded closed-owner/storage
-   generations, sharing, cleanup and unload obligations. No DefId is an
-   address, proof of successful initialization or lifetime extension.
+4. **Static storage and immutable publication:** the separate unapproved
+   [static persistence proposal](immutable-static-field-persistence.md)
+   recommends the physical sections and a whole-inline publication carrier.
+   It does not complete richer source-unit access, StaticPlace/recovery
+   execution, indirect backing or runtime support. Preserve trigger/effect
+   ordering, failures/recovery, loaded closed-owner/storage generations,
+   sharing, cleanup and unload obligations. No DefId is an address, proof of
+   successful initialization or lifetime extension.
 5. **Exact schema and implementation:** approve/integrate one amended draft
    and its governing catalog, then implement and qualify producer,
    structural reader, binding/replacement, remapping and lowering paths.

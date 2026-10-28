@@ -124,6 +124,13 @@ storage or non-field-backed RVA data require their own reviewed identity
 carrier. Do not manufacture a hidden StaticField or guess a region codec.
 Until the static/publication representation is complete, kind 2 remains
 gated, not satisfied by the presence of a StaticField-shaped row.
+Separate unapproved candidates now address the direct DefId assignments in
+[ImmutableData definition kinds](immutable-data-definition-kinds.md),
+the [StaticField/publication physical schema](immutable-static-field-persistence.md),
+and [AssociatedConstDef identity](associated-constant-definition-identity.md).
+They remain proposals: this document still selects no numeric kind or
+StaticField section, and implementation must preserve its direct-only
+ImmutableData reference.
 
 ## Exact owner substitution
 
