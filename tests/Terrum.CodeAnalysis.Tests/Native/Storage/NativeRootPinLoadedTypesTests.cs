@@ -39,12 +39,18 @@ public sealed class NativeRootPinLoadedTypesTests
         var directory = TestArtifactPaths.CreateDirectory("terrum-rootpin-loaded-types-");
         var providerPath = Path.Combine(directory, "terrum-root-pin-runtime.dll");
         var providerObjectPath = Path.Combine(directory, "root-pin-loaded-types.obj");
+        var productionProviderPath = Path.Combine(directory, "terrum-root-pin-runtime-production.dll");
+        var productionProviderObjectPath = Path.Combine(directory, "root-pin-loaded-types-production.obj");
         var probePath = Path.Combine(directory, "root-pin-loaded-types-probe.exe");
         var probeObjectPath = Path.Combine(directory, "root-pin-loaded-types-probe.obj");
+        var runtimeAbiProbePath = Path.Combine(directory, "root-pin-runtime-abi-probe.exe");
+        var runtimeAbiProbeObjectPath = Path.Combine(directory, "root-pin-runtime-abi-probe.obj");
         var providerSource = Path.Combine(root, "sources", "Terrum.RootPin.Runtime", "RootPinLoadedTypesV2.cpp");
         var providerHeader = Path.Combine(root, "sources", "Terrum.RootPin.Runtime", "RootPinLoadedTypesV2.h");
         var probeSource = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
             "Native", "Storage", "RootPinLoadedTypesProbe.c");
+        var runtimeAbiProbeSource = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
+            "Native", "Storage", "RootPinRuntimeAbiProbe.c");
         var testSource = Path.Combine(root, "tests", "Terrum.CodeAnalysis.Tests",
             "Native", "Storage", "NativeRootPinLoadedTypesTests.cs");
         var includePath = Path.Combine(root, "sources", "Terrum.RootPin.Runtime");
@@ -52,7 +58,7 @@ public sealed class NativeRootPinLoadedTypesTests
         {
             var build = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec")
                 ?? throw new InvalidOperationException("ComSpec is unset.")) {
-                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /Bv /nologo /W4 /WX /O2 /MT /EHsc /std:c++20 /D TERRUM_ROOT_PIN_TESTS /D TERRUM_ROOT_PIN_EXPORTS /LD /Fo\"{providerObjectPath}\" /Fe\"{providerPath}\" \"{providerSource}\" /link /incremental:no && cl /Bv /nologo /W4 /WX /O2 /MT /D TERRUM_ROOT_PIN_TESTS /TC /I\"{includePath}\" /Fo\"{probeObjectPath}\" /Fe\"{probePath}\" \"{probeSource}\" /link /incremental:no\"",
+                Arguments = $"/d /s /c \"call \"{environment}\" >nul && cl /Bv /nologo /W4 /WX /O2 /MT /EHsc /std:c++20 /D TERRUM_ROOT_PIN_TESTS /D TERRUM_ROOT_PIN_EXPORTS /LD /Fo\"{providerObjectPath}\" /Fe\"{providerPath}\" \"{providerSource}\" /link /incremental:no && cl /Bv /nologo /W4 /WX /O2 /MT /EHsc /std:c++20 /D TERRUM_ROOT_PIN_EXPORTS /LD /Fo\"{productionProviderObjectPath}\" /Fe\"{productionProviderPath}\" \"{providerSource}\" /link /incremental:no && cl /Bv /nologo /W4 /WX /O2 /MT /D TERRUM_ROOT_PIN_TESTS /TC /I\"{includePath}\" /Fo\"{probeObjectPath}\" /Fe\"{probePath}\" \"{probeSource}\" /link /incremental:no && cl /Bv /nologo /W4 /WX /O2 /MT /TC /I\"{includePath}\" /Fo\"{runtimeAbiProbeObjectPath}\" /Fe\"{runtimeAbiProbePath}\" \"{runtimeAbiProbeSource}\" /link /incremental:no\"",
                 WorkingDirectory = root,
             };
             var buildOutput = await RunProcessAsync(build, TimeSpan.FromMinutes(2)).ConfigureAwait(true);
@@ -64,13 +70,23 @@ public sealed class NativeRootPinLoadedTypesTests
             var output = await RunProcessAsync(probe, TimeSpan.FromSeconds(10)).ConfigureAwait(true);
             Assert.That(output, Does.Contain("rootpin-loaded-types=pass"));
             TestContext.WriteLine(output);
+
+            var runtimeAbiProbe = new ProcessStartInfo(runtimeAbiProbePath) { WorkingDirectory = root };
+            runtimeAbiProbe.ArgumentList.Add(productionProviderPath);
+            var runtimeAbiOutput = await RunProcessAsync(runtimeAbiProbe, TimeSpan.FromSeconds(10))
+                .ConfigureAwait(true);
+            Assert.That(runtimeAbiOutput, Does.Contain("rootpin-runtime-abi=pass"));
+            TestContext.WriteLine(runtimeAbiOutput);
             TestContext.WriteLine($"test-assembly-sha256={GetSha256(typeof(NativeRootPinLoadedTypesTests).Assembly.Location)}");
             TestContext.WriteLine($"test-source-sha256={GetSha256(testSource)}");
             TestContext.WriteLine($"provider-source-sha256={GetSha256(providerSource)}");
             TestContext.WriteLine($"provider-header-sha256={GetSha256(providerHeader)}");
             TestContext.WriteLine($"probe-source-sha256={GetSha256(probeSource)}");
+            TestContext.WriteLine($"runtime-abi-probe-source-sha256={GetSha256(runtimeAbiProbeSource)}");
             TestContext.WriteLine($"provider-dll-sha256={GetSha256(providerPath)}");
             TestContext.WriteLine($"probe-exe-sha256={GetSha256(probePath)}");
+            TestContext.WriteLine($"production-provider-dll-sha256={GetSha256(productionProviderPath)}");
+            TestContext.WriteLine($"runtime-abi-probe-exe-sha256={GetSha256(runtimeAbiProbePath)}");
 
             var invalidSupportProbe = new ProcessStartInfo(probePath) { WorkingDirectory = root };
             invalidSupportProbe.ArgumentList.Add(providerPath);
