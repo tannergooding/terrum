@@ -986,6 +986,40 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (instruction[0] == 0x12)
+        {
+            var destination = instruction[1] & 0x0F;
+            var firstFormal = instruction[1] >> 4;
+            if (destination > 12)
+            {
+                throw InvalidMap();
+            }
+
+            var signature = methods.GetSignature(methodDefRow);
+            var (firstParameter, parameterCount) =
+                signatures.GetParamRange(signature);
+            if (firstFormal + 1 >= parameterCount)
+            {
+                throw InvalidMap();
+            }
+
+            for (var pair = 0; pair < 2; pair++)
+            {
+                var parameterRow = firstParameter + firstFormal + pair;
+                var typeSpecRef = parameters.GetTypeSpec(parameterRow);
+                if (parameters.GetMode(parameterRow) != 0
+                    || parameters.GetFlags(parameterRow) != 0
+                    || !IsCopyableRegisterValueType(typeSpecs, typeSpecRef))
+                {
+                    throw InvalidMap();
+                }
+
+                registerTypes[destination + pair] =
+                    RegisterTypeState.FromTypeSpecRef(typeSpecRef);
+            }
+            return;
+        }
+
         Array.Fill(registerTypes, RegisterTypeState.Unknown);
     }
 

@@ -1007,6 +1007,11 @@ public sealed class TrRmRegisterBodyReaderTests
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalsToRegisters: true)));
+        Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalPair: true)));
         Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
             CreateStandardFunctionPointerHomeCallSiteArtifact(
                 pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
@@ -1065,6 +1070,18 @@ public sealed class TrRmRegisterBodyReaderTests
                 doesNotReturn: false, resultKind: 0, hasContinuation: true,
                 targetKind: 2, loadFormalsToRegisters: true,
                 inputFormalOrdinal: 0)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalPair: true,
+                firstFormalPairOrdinal: 1)));
+        Assert.Throws<InvalidDataException>(() => ValidateSelectedArtifactBodyMaps(
+            CreateStandardFunctionPointerHomeCallSiteArtifact(
+                pointerTarget: true, anchorResultTypeSpecRef: 0xF200_0000,
+                doesNotReturn: false, resultKind: 0, hasContinuation: true,
+                targetKind: 2, loadFormalPair: true,
+                formalPairDestination: 13)));
     }
 
     [Test]
@@ -1467,8 +1484,9 @@ public sealed class TrRmRegisterBodyReaderTests
         bool moveRegisterTarget = false, bool moveRegisterInput = false,
         bool unsupportedPrefix = false, bool loadTargetFromHome = false,
         bool loadInputFromHome = false, bool callableHomeIsLocal = false,
-        bool loadFormalsToRegisters = false,
-        byte targetFormalOrdinal = 0, byte inputFormalOrdinal = 1)
+        bool loadFormalsToRegisters = false, byte targetFormalOrdinal = 0,
+        byte inputFormalOrdinal = 1, bool loadFormalPair = false,
+        byte firstFormalPairOrdinal = 0, byte formalPairDestination = 0)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("Caller", 1), ("Anchor", 1),
@@ -1563,13 +1581,15 @@ public sealed class TrRmRegisterBodyReaderTests
             BinaryPrimitives.WriteUInt16LittleEndian(entryState.AsSpan(15),
                 maps.GetTypeMapIndex(entryArgumentTypeToken));
         }
-        var input = targetKind == 2
-            ? new TrRmRegisterBodyCallInput(
-                1, 1, moveRegisterInput || loadInputFromHome
-                    ? (ushort)3 : (ushort)1)
-            : new TrRmRegisterBodyCallInput(2, 1, 1);
         var targetRegister = moveRegisterTarget || loadTargetFromHome
-            ? (ushort)2 : (ushort)0;
+            ? (ushort)2
+            : loadFormalPair ? formalPairDestination : (ushort)0;
+        var inputRegister = loadFormalPair
+            ? checked((ushort)(formalPairDestination + 1))
+            : moveRegisterInput || loadInputFromHome ? (ushort)3 : (ushort)1;
+        var input = targetKind == 2
+            ? new TrRmRegisterBodyCallInput(1, 1, inputRegister)
+            : new TrRmRegisterBodyCallInput(2, 1, 1);
         var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
             targetKind, resultKind, targetRegister, 0,
             [input], []);
@@ -1596,6 +1616,12 @@ public sealed class TrRmRegisterBodyReaderTests
                 0x11, (byte)(targetFormalOrdinal << 4),
                 0x11, (byte)((inputFormalOrdinal << 4) | 1),
             ]);
+        }
+        if (loadFormalPair)
+        {
+            codeBytes.Add(0x12);
+            codeBytes.Add((byte)((firstFormalPairOrdinal << 4)
+                | formalPairDestination));
         }
         if (unsupportedPrefix)
         {
