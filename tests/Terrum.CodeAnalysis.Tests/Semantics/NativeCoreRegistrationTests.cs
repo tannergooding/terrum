@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -1019,6 +1020,36 @@ public sealed class NativeCoreRegistrationTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.Throws<NotSupportedException>(() => NativeEmitter.EmitLibrary(
             compilation.Program!, ["Invoke"], NativeRuntimePolicy.FailFast));
+    }
+
+    [TestCase("Unmanaged")]
+    [TestCase("Cdecl")]
+    [TestCase("Stdcall")]
+    public void RegisteredNativeCallableConventionExecutesIndirectlyOnWindowsX64(string convention)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = $$"""
+            using Terrum.Interop;
+            [NativeCallable(CallConv: NativeCallingConvention.{{convention}})]
+            public int32 Identity(int32 value) { return value; }
+
+            int32 Main() {
+                unsafe {
+                    [NativeCallConv(NativeCallingConvention.{{convention}})]
+                    fnptr<int32, int32> callback = &Identity;
+                    return callback(42);
+                }
+            }
+            """;
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
     }
 
     internal static NativeCoreRegistrationSet CreateRegistration()
