@@ -1209,6 +1209,39 @@ static int RunSupportCases(
     methodBatch.inputs = methodInputs;
     methodBatch.origins = methodOrigins;
     methodBatch.originUses = methodOriginUses;
+    methodOriginUses[0] = 1;
+    methodOriginUses[1] = 0;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 2)
+        == ROOTPIN_TYPE_STATUS_INVALID
+        && methodOutputs[0] == NULL && methodOutputs[1] == NULL);
+    methodOriginUses[0] = 0;
+    methodOriginUses[1] = 1;
+    methodNodes[0].entryOrigin = 0;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 2)
+        == ROOTPIN_TYPE_STATUS_INVALID
+        && methodOutputs[0] == NULL && methodOutputs[1] == NULL);
+    methodNodes[0].entryOrigin = 1;
+    methodBatch.methodCount = 1;
+    methodBatch.inputCount = 2;
+    methodBatch.originUseCount = 2;
+    methodNodes[0].formalCount = 2;
+    methodNodes[0].inputCount = 2;
+    methodInputs[0].formalOrdinal = 0;
+    methodInputs[1].formalOrdinal = 1;
+    methodInputs[1].entrySlot = 0;
+    methodInputs[1].completeType = types[3];
+    methodInputs[1].sourceRole = (uint8_t)ROOTPIN_METHOD_SOURCE_FORMAL;
+    methodInputs[1].handoffKind = (uint8_t)ROOTPIN_METHOD_HANDOFF_OWNED;
+    CHECK(admitMethods(domain, &methodBatch, methodOutputs, 1)
+        == ROOTPIN_TYPE_STATUS_INVALID && methodOutputs[0] == NULL);
+    methodBatch.methodCount = 2;
+    methodBatch.inputCount = 2;
+    methodBatch.originUseCount = 4;
+    methodNodes[0].formalCount = 1;
+    methodNodes[0].inputCount = 1;
+    methodInputs[0].formalOrdinal = 0;
+    methodInputs[1].formalOrdinal = 0;
+    methodInputs[1].entrySlot = 0;
     methodBatch.targetProfileId = 3;
     CHECK(admitMethods(domain, &methodBatch, methodOutputs, 2)
         == ROOTPIN_TYPE_STATUS_UNSUPPORTED
