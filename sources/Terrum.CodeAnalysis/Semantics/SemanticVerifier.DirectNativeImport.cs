@@ -102,6 +102,15 @@ public static partial class SemanticVerifier
                 }
                 dependencies.SetNativePointerProvenance(
                     reservation.Variable, sources, mayBeUnknown);
+                var pointerOutputType = outputContract?.PointeeType
+                    ?? legacyOutput?.PointeeType;
+                if (pointerOutputType is PrimitiveType outputType
+                    && CarriesNativePointer(outputType, initialized.Program))
+                {
+                    dependencies.SetNativePointerExtentProvenance(
+                        reservation.Variable, EmptyBackingSources,
+                        mayBeOpaque: true, unavailable: false);
+                }
             }
         }
     }
@@ -160,6 +169,12 @@ public static partial class SemanticVerifier
             }
             dependencies.SetNativePointerProvenance(
                 reservation.Variable, sources, mayBeUnknown);
+            if (CarriesNativePointer(outputContract.PointeeType, initialized.Program))
+            {
+                dependencies.SetNativePointerExtentProvenance(
+                    reservation.Variable, EmptyBackingSources,
+                    mayBeOpaque: true, unavailable: false);
+            }
         }
     }
 
@@ -267,6 +282,8 @@ public static partial class SemanticVerifier
                 if (target is not null && argumentsComplete)
                 {
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
+                    InvalidateNativePointerExtentsForCall(
+                        call, target, initialized, program);
                     ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
                     if (CreateNativeOutputCallFact(call, initialized) is NativeOutputCallFact fact)
                     {
@@ -336,6 +353,11 @@ public static partial class SemanticVerifier
                     && MayWriteNativePointerStorage(indirectCall, program))
                 {
                     dependencies.MarkAllNativePointerProvenanceUnknown();
+                }
+                if (argumentsComplete)
+                {
+                    InvalidateNativePointerExtentsForCall(
+                        indirectCall, signature, initialized, program);
                 }
                 if (argumentsComplete && !signature.OutputStates.IsEmpty)
                 {

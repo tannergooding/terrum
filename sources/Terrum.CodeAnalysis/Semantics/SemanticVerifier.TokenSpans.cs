@@ -579,6 +579,11 @@ public static partial class SemanticVerifier
         HashSet<ProvenanceAnchor> NativePointerSources,
         bool NativePointerMayBeUnknown);
 
+    private readonly record struct NativePointerExtentFact(
+        HashSet<ProvenanceAnchor> Sources,
+        bool MayBeOpaque,
+        bool IsUnavailable);
+
     private sealed class NativePointerFieldValue
     {
         internal HashSet<ProvenanceAnchor> Sources { get; }
@@ -806,6 +811,9 @@ public static partial class SemanticVerifier
         internal bool[] BackingMayBeUnknown { get; }
         internal HashSet<ProvenanceAnchor>?[] NativePointerSources { get; }
         internal bool[] NativePointerMayBeUnknown { get; }
+        internal HashSet<ProvenanceAnchor>?[] NativePointerExtentSources { get; }
+        internal bool[] NativePointerExtentMayBeOpaque { get; }
+        internal bool[] NativePointerExtentUnavailable { get; }
         private Dictionary<StorageKey, BackingFieldValue> BackingFieldValues { get; } = [];
         private Dictionary<StorageKey, NativePointerFieldValue> NativePointerFieldValues { get; } = [];
         private Dictionary<BoundExpression,
@@ -850,6 +858,9 @@ public static partial class SemanticVerifier
             BackingMayBeUnknown = new bool[length];
             NativePointerSources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerMayBeUnknown = new bool[length];
+            NativePointerExtentSources = new HashSet<ProvenanceAnchor>?[length];
+            NativePointerExtentMayBeOpaque = new bool[length];
+            NativePointerExtentUnavailable = new bool[length];
             CopyOriginRoots = new CopyOriginFact[length];
             StorageInstances = new HashSet<StorageInstance>[length];
             for (var slot = 0; slot < length; slot++)
@@ -885,6 +896,12 @@ public static partial class SemanticVerifier
                 destination.BackingMayBeUnknown[slot] = BackingMayBeUnknown[slot];
                 destination.NativePointerSources[slot] = CloneSet(NativePointerSources[slot]);
                 destination.NativePointerMayBeUnknown[slot] = NativePointerMayBeUnknown[slot];
+                destination.NativePointerExtentSources[slot] =
+                    CloneSet(NativePointerExtentSources[slot]);
+                destination.NativePointerExtentMayBeOpaque[slot] =
+                    NativePointerExtentMayBeOpaque[slot];
+                destination.NativePointerExtentUnavailable[slot] =
+                    NativePointerExtentUnavailable[slot];
                 destination.CopyOriginRoots[slot] = CopyOriginRoots[slot].Clone();
                 destination.StorageInstances[slot] = [.. StorageInstances[slot]];
             }
@@ -1160,10 +1177,24 @@ public static partial class SemanticVerifier
                 changed = true;
             }
             changed |= MergeSet(ref NativePointerSources[slot], other.NativePointerSources[slot]);
+            changed |= MergeSet(ref NativePointerExtentSources[slot],
+                other.NativePointerExtentSources[slot]);
             changed |= CopyOriginRoots[slot].Merge(other.CopyOriginRoots[slot]);
             if (other.NativePointerMayBeUnknown[slot] && !NativePointerMayBeUnknown[slot])
             {
                 NativePointerMayBeUnknown[slot] = true;
+                changed = true;
+            }
+            if (other.NativePointerExtentMayBeOpaque[slot]
+                && !NativePointerExtentMayBeOpaque[slot])
+            {
+                NativePointerExtentMayBeOpaque[slot] = true;
+                changed = true;
+            }
+            if (other.NativePointerExtentUnavailable[slot]
+                && !NativePointerExtentUnavailable[slot])
+            {
+                NativePointerExtentUnavailable[slot] = true;
                 changed = true;
             }
             if (other.FunctionActivation != FunctionActivation
@@ -1306,6 +1337,12 @@ public static partial class SemanticVerifier
                 || BackingMayBeUnknown[slot] != other.BackingMayBeUnknown[slot]
                 || !SetEquals(NativePointerSources[slot], other.NativePointerSources[slot])
                 || NativePointerMayBeUnknown[slot] != other.NativePointerMayBeUnknown[slot]
+                || !SetEquals(NativePointerExtentSources[slot],
+                    other.NativePointerExtentSources[slot])
+                || NativePointerExtentMayBeOpaque[slot]
+                    != other.NativePointerExtentMayBeOpaque[slot]
+                || NativePointerExtentUnavailable[slot]
+                    != other.NativePointerExtentUnavailable[slot]
                 || !CopyOriginRoots[slot].IsEquivalentTo(other.CopyOriginRoots[slot])
                 || !StorageInstances[slot].SetEquals(other.StorageInstances[slot])
                 || !BackingFieldValuesEqualForSlot(slot, other)
@@ -1316,6 +1353,12 @@ public static partial class SemanticVerifier
             BackingMayBeUnknown[slot] = other.BackingMayBeUnknown[slot];
             NativePointerSources[slot] = CloneSet(other.NativePointerSources[slot]);
             NativePointerMayBeUnknown[slot] = other.NativePointerMayBeUnknown[slot];
+            NativePointerExtentSources[slot] =
+                CloneSet(other.NativePointerExtentSources[slot]);
+            NativePointerExtentMayBeOpaque[slot] =
+                other.NativePointerExtentMayBeOpaque[slot];
+            NativePointerExtentUnavailable[slot] =
+                other.NativePointerExtentUnavailable[slot];
             CopyOriginRoots[slot] = other.CopyOriginRoots[slot].Clone();
             StorageInstances[slot] = [.. other.StorageInstances[slot]];
             ClearBackingFieldValues(slot);
@@ -1739,16 +1782,68 @@ public static partial class SemanticVerifier
             }
             NativePointerSources[slot] = null;
             NativePointerMayBeUnknown[slot] = false;
+            ClearNativePointerExtentProvenance(slot);
             ClearNativePointerFieldValues(slot);
         }
 
         internal void MarkAllNativePointerProvenanceUnknown()
         {
             Array.Fill(NativePointerMayBeUnknown, true);
+            Array.Fill(NativePointerExtentUnavailable, true);
             foreach (var fieldValue in NativePointerFieldValues.Values)
             {
                 fieldValue.MayBeUnknown = true;
             }
+        }
+
+        internal void SetNativePointerExtentProvenance(int slot,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeOpaque, bool unavailable)
+        {
+            if ((uint)slot >= (uint)NativePointerExtentSources.Length)
+            {
+                throw Invalid();
+            }
+            NativePointerExtentSources[slot] = sources.Count == 0 ? null : [.. sources];
+            NativePointerExtentMayBeOpaque[slot] = mayBeOpaque;
+            NativePointerExtentUnavailable[slot] = unavailable;
+        }
+
+        internal bool AddNativePointerExtentProvenance(int slot,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeOpaque, bool unavailable)
+        {
+            if ((uint)slot >= (uint)NativePointerExtentSources.Length)
+            {
+                throw Invalid();
+            }
+
+            var changed = MergeSet(ref NativePointerExtentSources[slot], sources);
+            if (mayBeOpaque && !NativePointerExtentMayBeOpaque[slot])
+            {
+                NativePointerExtentMayBeOpaque[slot] = true;
+                changed = true;
+            }
+            if (unavailable && !NativePointerExtentUnavailable[slot])
+            {
+                NativePointerExtentUnavailable[slot] = true;
+                changed = true;
+            }
+            return changed;
+        }
+
+        internal void MarkNativePointerExtentUnavailable(int slot)
+        {
+            if ((uint)slot >= (uint)NativePointerExtentSources.Length)
+            {
+                throw Invalid();
+            }
+            NativePointerExtentUnavailable[slot] = true;
+        }
+
+        private void ClearNativePointerExtentProvenance(int slot)
+        {
+            NativePointerExtentSources[slot] = null;
+            NativePointerExtentMayBeOpaque[slot] = false;
+            NativePointerExtentUnavailable[slot] = false;
         }
 
         internal void SetNativePointerFieldValue(int slot, StorageProjection projection,
@@ -1877,6 +1972,11 @@ public static partial class SemanticVerifier
             var sourceBackingMayBeUnknown = BackingMayBeUnknown[source];
             var sourcePointers = CloneSet(NativePointerSources[source]);
             var sourcePointerMayBeUnknown = NativePointerMayBeUnknown[source];
+            var sourcePointerExtentSources = CloneSet(NativePointerExtentSources[source]);
+            var sourcePointerExtentMayBeOpaque =
+                NativePointerExtentMayBeOpaque[source];
+            var sourcePointerExtentUnavailable =
+                NativePointerExtentUnavailable[source];
             var sourceFieldValues = NativePointerFieldValues
                 .Where(pair => pair.Key.Site == source)
                 .Select(static pair => (pair.Key.Projection, Value: pair.Value.Clone()))
@@ -1934,6 +2034,14 @@ public static partial class SemanticVerifier
             NativePointerSources[source] = null;
             NativePointerMayBeUnknown[destination] = sourcePointerMayBeUnknown;
             NativePointerMayBeUnknown[source] = false;
+            NativePointerExtentSources[destination] = sourcePointerExtentSources;
+            NativePointerExtentSources[source] = null;
+            NativePointerExtentMayBeOpaque[destination] =
+                sourcePointerExtentMayBeOpaque;
+            NativePointerExtentMayBeOpaque[source] = false;
+            NativePointerExtentUnavailable[destination] =
+                sourcePointerExtentUnavailable;
+            NativePointerExtentUnavailable[source] = false;
             CopyOriginRoots[destination] = sourceCopyOrigins;
             CopyOriginRoots[source] = CopyOriginFact.Unavailable();
             ClearBackingFieldValues(destination);
@@ -2468,6 +2576,7 @@ public static partial class SemanticVerifier
                 {
                     facts.AddNativePointerProvenance(target.Identity, sources,
                         mayBeUnknown: true);
+                    facts.MarkNativePointerExtentUnavailable(target.Identity);
                 }
             }
         }
@@ -2512,6 +2621,10 @@ public static partial class SemanticVerifier
         var valueSources = NativePointerBackingOf(value, facts, program, ref remaining, depth + 1);
         var valueMayBeUnknown = NativePointerMayBeUnknownOf(
             value, facts, program, ref remaining, depth + 1);
+        var valueExtent = CarriesNativePointer(value.Type, program)
+            ? NativePointerExtentFactsOfExpression(value, facts, facts.Function,
+                program, ref remaining, depth + 1)
+            : new NativePointerExtentFact([], MayBeOpaque: false, IsUnavailable: false);
         var addressMayBeUnknown = NativePointerMayBeUnknownOf(
             address, facts, program, ref remaining, depth + 1);
         if (valueSources.Count != 0 && (targets.Count == 0
@@ -2539,6 +2652,21 @@ public static partial class SemanticVerifier
                 }
                 facts.AddNativePointerProvenance(
                     target.Identity, valueSources, valueMayBeUnknown);
+                if (CarriesNativePointer(value.Type, program))
+                {
+                    if (targets.Count == 1 && !addressMayBeUnknown
+                        && storage.Projection.Kind == StorageProjectionKind.WholeObject
+                        && facts.Function.Variables[target.Identity].Type == value.Type)
+                    {
+                        facts.SetNativePointerExtentProvenance(target.Identity,
+                            valueExtent.Sources, valueExtent.MayBeOpaque,
+                            valueExtent.IsUnavailable);
+                    }
+                    else
+                    {
+                        facts.MarkNativePointerExtentUnavailable(target.Identity);
+                    }
+                }
                 if (CarriesCopyOrigin(facts.Function.Variables[target.Identity].Type, program))
                 {
                     var projection = storage.Projection.Kind is
@@ -2548,6 +2676,68 @@ public static partial class SemanticVerifier
                         program, ref remaining, depth + 1);
                 }
             }
+        }
+    }
+
+    private static void InvalidateNativePointerExtentForWrite(BoundExpression argument,
+        DirectNativeParameter parameter, BackingDependencies facts, BoundProgram program)
+    {
+        if (parameter.Access == NativeParameterAccess.Read
+            || !CarriesNativePointer(parameter.PointeeType, program))
+        {
+            return;
+        }
+
+        argument = UnwrapUnsafeExpression(argument);
+        if (argument is BoundNativeStorageAddress address
+            && (uint)address.Variable < (uint)facts.NativePointerExtentSources.Length)
+        {
+            facts.MarkNativePointerExtentUnavailable(address.Variable);
+            return;
+        }
+
+        facts.MarkAllNativePointerProvenanceUnknown();
+    }
+
+    private static void InvalidateNativePointerExtentsForCall(BoundCall call,
+        BoundFunction target, InitializationState initialized, BoundProgram program)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+
+        for (var argumentIndex = 0; argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            var parameterIndex = call.ParameterIndex(argumentIndex);
+            var parameter = DirectNativeImportContract.ParameterForParameter(
+                target, parameterIndex)
+                ?? NativeVTableCallContract.ParameterForParameter(target, parameterIndex);
+            if (parameter is not null)
+            {
+                InvalidateNativePointerExtentForWrite(
+                    call.Arguments[argumentIndex], parameter, facts, program);
+            }
+        }
+    }
+
+    private static void InvalidateNativePointerExtentsForCall(BoundIndirectCall call,
+        NativeFunctionPointerSignatureDefinition signature,
+        InitializationState initialized, BoundProgram program)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+
+        foreach (var parameter in signature.NativeParameters)
+        {
+            if ((uint)parameter.ParameterIndex >= (uint)call.Arguments.Length)
+            {
+                throw Invalid(call.Span);
+            }
+            InvalidateNativePointerExtentForWrite(
+                call.Arguments[parameter.ParameterIndex], parameter, facts, program);
         }
     }
 
@@ -2621,6 +2811,7 @@ public static partial class SemanticVerifier
                 if (CarriesNativePointer(function.Variables[slot].Type, program))
                 {
                     facts.NativePointerMayBeUnknown[slot] = true;
+                    facts.NativePointerExtentMayBeOpaque[slot] = true;
                 }
             }
         }
@@ -5258,6 +5449,230 @@ public static partial class SemanticVerifier
                 return branchBacking;
             default:
                 return EmptyBackingSources;
+        }
+    }
+
+    private static NativePointerExtentFact NativePointerExtentFactsOfExpression(
+        BoundExpression expression, BackingDependencies facts,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is null)
+        {
+            throw Invalid();
+        }
+
+        switch (expression)
+        {
+            case BoundNativePointerAddress address:
+                if ((uint)address.Variable >= (uint)function.Variables.Length
+                    || !NativePointerTypeContract.IsValidType(address.Type,
+                        program.NativePointerTypes))
+                {
+                    throw InvalidEffect(address.Span, "NativePointer");
+                }
+                return new NativePointerExtentFact(
+                    NativeStorageAnchors(address.Variable, facts,
+                        StorageProjection.WholeObject),
+                    MayBeOpaque: false,
+                    IsUnavailable: HasUnknownStorageInstances(
+                        facts.StorageInstanceSet(address.Variable)));
+            case BoundNativeFixedArrayPointerAddress address:
+                if ((uint)address.Variable >= (uint)function.Variables.Length
+                    || function.Variables[address.Variable].NativeFixedArrayLayout
+                        != address.Layout
+                    || !NativeFixedArrayContract.MatchesLayout(
+                        address.Layout, program.Structures)
+                    || !NativePointerTypeContract.IsValidType(address.Type,
+                        program.NativePointerTypes))
+                {
+                    throw InvalidEffect(address.Span, "NativePointer");
+                }
+                return new NativePointerExtentFact(
+                    NativeStorageAnchors(address.Variable, facts,
+                        StorageProjection.ForArrayElement(address.Index)),
+                    MayBeOpaque: false,
+                    IsUnavailable: HasUnknownStorageInstances(
+                        facts.StorageInstanceSet(address.Variable)));
+            case BoundNativeStorageAddress address:
+                if ((uint)address.Variable >= (uint)function.Variables.Length
+                    || !NativePointerTypeContract.IsValidType(address.Type,
+                        program.NativePointerTypes))
+                {
+                    throw InvalidEffect(address.Span, "NativePointer");
+                }
+                return new NativePointerExtentFact(
+                    NativeStorageAnchors(address.Variable, facts,
+                        StorageProjection.ForStorageAddress(address)),
+                    MayBeOpaque: false,
+                    IsUnavailable: HasUnknownStorageInstances(
+                        facts.StorageInstanceSet(address.Variable)));
+            case BoundRead read when CarriesNativePointer(read.Type, program):
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != read.Type)
+                {
+                    throw Invalid(read.Span);
+                }
+                return new NativePointerExtentFact(
+                    facts.NativePointerExtentSources[read.Variable] ?? [],
+                    facts.NativePointerExtentMayBeOpaque[read.Variable],
+                    facts.NativePointerExtentUnavailable[read.Variable]);
+            case BoundMove move when CarriesNativePointer(move.Type, program):
+                if ((uint)move.Variable >= (uint)function.Variables.Length
+                    || function.Variables[move.Variable].Type != move.Type)
+                {
+                    throw Invalid(move.Span);
+                }
+                return new NativePointerExtentFact(
+                    facts.NativePointerExtentSources[move.Variable] ?? [],
+                    facts.NativePointerExtentMayBeOpaque[move.Variable],
+                    facts.NativePointerExtentUnavailable[move.Variable]);
+            case BoundUnsafeExpression unsafeExpression:
+                return NativePointerExtentFactsOfExpression(
+                    unsafeExpression.Expression, facts, function, program,
+                    ref remaining, depth + 1);
+            case BoundConditional conditional when CarriesNativePointer(
+                conditional.Type, program):
+                var whenTrue = NativePointerExtentFactsOfExpression(
+                    conditional.WhenTrue, facts, function, program,
+                    ref remaining, depth + 1);
+                var whenFalse = NativePointerExtentFactsOfExpression(
+                    conditional.WhenFalse, facts, function, program,
+                    ref remaining, depth + 1);
+                whenTrue.Sources.UnionWith(whenFalse.Sources);
+                return new NativePointerExtentFact(whenTrue.Sources,
+                    whenTrue.MayBeOpaque || whenFalse.MayBeOpaque,
+                    whenTrue.IsUnavailable || whenFalse.IsUnavailable);
+            case BoundCall call when CarriesNativePointer(call.Type, program):
+                if ((uint)call.Function >= (uint)program.Functions.Length)
+                {
+                    throw Invalid(call.Span);
+                }
+                var callee = program.Functions[call.Function];
+                return callee.IsExternal
+                    && (callee.DirectNativeImport is not null
+                        || callee.NativeVTableMethod is not null)
+                    ? new NativePointerExtentFact([], MayBeOpaque: true, IsUnavailable: false)
+                    : new NativePointerExtentFact([], MayBeOpaque: false, IsUnavailable: true);
+            case BoundIndirectCall call when CarriesNativePointer(call.Type, program):
+                return new NativePointerExtentFact([], MayBeOpaque: true, IsUnavailable: false);
+            case BoundConstant constant when CarriesNativePointer(constant.Type, program):
+                return new NativePointerExtentFact([], MayBeOpaque: false,
+                    IsUnavailable: constant.Value != 0);
+            case BoundFieldRead field when CarriesNativePointer(field.Type, program):
+            case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
+                return new NativePointerExtentFact([], MayBeOpaque: false, IsUnavailable: true);
+            default:
+                return new NativePointerExtentFact([], MayBeOpaque: false,
+                    IsUnavailable: CarriesNativePointer(expression.Type, program));
+        }
+    }
+
+    private static void VerifyNativeParameterValueExtent(BoundExpression argument,
+        DirectNativeParameter parameter, bool isUnsafeAuthorized,
+        InitializationState initialized, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (parameter.Extent == 0)
+        {
+            return;
+        }
+
+        if (parameter.PointeeType == PrimitiveType.Void
+            || initialized.Dependencies is not BackingDependencies facts)
+        {
+            throw InvalidEffect(argument.Span, "NativeImport");
+        }
+
+        var extentFact = NativePointerExtentFactsOfExpression(argument, facts,
+            function, program, ref remaining, depth + 1);
+        if (extentFact.IsUnavailable
+            || (extentFact.Sources.Count == 0 && !extentFact.MayBeOpaque))
+        {
+            throw InvalidEffect(argument.Span, "NativeImport");
+        }
+
+        foreach (var source in extentFact.Sources)
+        {
+            if (!TryGetNativePointerElementExtent(source, parameter.PointeeType,
+                    facts, function, program, out var availableElements)
+                || (ulong)availableElements < parameter.Extent)
+            {
+                throw InvalidEffect(argument.Span, "NativeImport");
+            }
+        }
+
+        if (extentFact.MayBeOpaque && !isUnsafeAuthorized)
+        {
+            throw InvalidEffect(argument.Span, "UnsafeCaller");
+        }
+    }
+
+    private static bool TryGetNativePointerElementExtent(ProvenanceAnchor source,
+        PrimitiveType pointeeType, BackingDependencies facts, BoundFunction function,
+        BoundProgram program, out uint availableElements)
+    {
+        availableElements = 0;
+        if (source.Kind != ProvenanceAnchorKind.NativeStorage
+            || (uint)source.Identity >= (uint)function.Variables.Length
+            || source.Storage is not StorageKey storage
+            || !storage.IsKnown
+            || storage.Activation != facts.FunctionActivation
+            || storage.Site != source.Identity)
+        {
+            return false;
+        }
+
+        var storageInstances = facts.StorageInstanceSet(source.Identity);
+        if (HasUnknownStorageInstances(storageInstances)
+            || !storageInstances.Contains(storage.Instance))
+        {
+            return false;
+        }
+
+        var variable = function.Variables[source.Identity];
+        if (variable.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout)
+        {
+            if (storage.Projection.Kind != StorageProjectionKind.WholeObject
+                || variable.Type != pointeeType)
+            {
+                return false;
+            }
+
+            availableElements = 1;
+            return true;
+        }
+
+        if (!NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
+            || layout.ElementCount <= 0 || layout.ElementType != pointeeType)
+        {
+            return false;
+        }
+
+        switch (storage.Projection.Kind)
+        {
+            case StorageProjectionKind.ArrayElement:
+                if (storage.Projection.Start < 0
+                    || storage.Projection.Start >= layout.ElementCount)
+                {
+                    return false;
+                }
+                availableElements = (uint)(layout.ElementCount - (int)storage.Projection.Start);
+                return true;
+            case StorageProjectionKind.UnknownElement:
+                availableElements = 1;
+                return true;
+            case StorageProjectionKind.ElementRange:
+                if (storage.Projection.Start < 0 || storage.Projection.Length <= 0
+                    || (ulong)storage.Projection.Start + (ulong)storage.Projection.Length
+                        > (ulong)layout.ElementCount)
+                {
+                    return false;
+                }
+                availableElements = (uint)storage.Projection.Length;
+                return true;
+            default:
+                return false;
         }
     }
 

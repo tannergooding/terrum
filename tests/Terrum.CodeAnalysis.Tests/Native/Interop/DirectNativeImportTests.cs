@@ -1740,6 +1740,125 @@ public sealed class DirectNativeImportTests
             Does.Contain("ObserveValues"));
     }
 
+    [TestCase(0, 3, true)]
+    [TestCase(1, 2, true)]
+    [TestCase(1, 3, false)]
+    [TestCase(0, 4, false)]
+    public void DirectNativeParameterExtentTracksCopiedArrayPointers(
+        int index, int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            int32 Main() {
+                InlineArray<uint32, 3> values = [1, 2, 3];
+                unsafe {
+                    ptr<uint32> pointer = &values[{{index}}];
+                    ptr<uint32> forwarded = pointer;
+                    return ObserveValues(forwarded);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ObserveValues"));
+    }
+
+    [TestCase(1, false)]
+    [TestCase(2, true)]
+    public void DirectNativeParameterExtentChecksKnownAlternativesBesideOpaqueInputs(
+        int backingCount, bool shouldCompile)
+    {
+        var values = string.Join(", ", Enumerable.Range(1, backingCount));
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            unsafe int32 Forward(ptr<uint32> opaque, bool chooseOpaque) {
+                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                unsafe {
+                    ptr<uint32> local = &values[0];
+                    ptr<uint32> selected = chooseOpaque ? opaque : local;
+                    return ObserveValues(selected);
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void PositiveDirectNativeParameterExtentAcceptsOpaqueInputAtUnsafeCall()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            unsafe int32 Forward(ptr<uint32> values) {
+                unsafe { return ObserveValues(values); }
+            }
+
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast)), Does.Contain("ObserveValues"));
+    }
+
+    [Test]
+    public void PositiveDirectNativeParameterExtentAcceptsOpaqueImportResultAtUnsafeCall()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "GetValues")]
+            extern ptr<uint32> GetValues();
+
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
+            extern int32 ObserveValues(ptr<uint32> values);
+
+            int32 Main() {
+                unsafe { return ObserveValues(GetValues()); }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast)),
+            Does.Contain("GetValues").And.Contain("ObserveValues"));
+    }
+
     [TestCase("4294967295", true)]
     [TestCase("4294967296", false)]
     public void DirectNativeParameterSourceExtentUsesUnsigned32BitDomain(

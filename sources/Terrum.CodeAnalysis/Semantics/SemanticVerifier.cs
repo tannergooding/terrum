@@ -108,6 +108,11 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (program.NativeCoreRegistration is NativeCoreRegistrationSet coreRegistration
+            && !BoundEnumTypes.ContainsRegistration(program.EnumDefinitions, coreRegistration))
+        {
+            throw Invalid();
+        }
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes, program.Structures,
                 program.NativeFunctionPointerSignatures))
         {
@@ -2486,6 +2491,12 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1),
                         NativePointerMayBeUnknownOf(local.Initializer, localPointerDependencies,
                             program, ref remaining, depth + 1));
+                    var extentFact = NativePointerExtentFactsOfExpression(
+                        local.Initializer, localPointerDependencies, function, program,
+                        ref remaining, depth + 1);
+                    localPointerDependencies.SetNativePointerExtentProvenance(
+                        local.Variable, extentFact.Sources,
+                        extentFact.MayBeOpaque, extentFact.IsUnavailable);
                     if (IsInlineStructStorage(local.Initializer.Type, program))
                     {
                         SetNativePointerFieldValuesFromExpression(local.Variable,
@@ -2711,6 +2722,12 @@ public static partial class SemanticVerifier
                             program, ref remaining, depth + 1),
                         NativePointerMayBeUnknownOf(assignment.Value, assignmentPointerDependencies,
                             program, ref remaining, depth + 1));
+                    var extentFact = NativePointerExtentFactsOfExpression(
+                        assignment.Value, assignmentPointerDependencies, function, program,
+                        ref remaining, depth + 1);
+                    assignmentPointerDependencies.SetNativePointerExtentProvenance(
+                        assignment.Variable, extentFact.Sources,
+                        extentFact.MayBeOpaque, extentFact.IsUnavailable);
                     if (IsInlineStructStorage(assignment.Value.Type, program))
                     {
                         SetNativePointerFieldValuesFromExpression(assignment.Variable,
@@ -5689,6 +5706,16 @@ public static partial class SemanticVerifier
                             depth + 1, failures);
                         if (indirectCallCompletes)
                         {
+                            if (nativeParameter is not null
+                                && argument is not BoundNativeStorageAddress
+                                && !DirectNativeImportContract.IsStringPointerArgument(
+                                    argument, nativeParameter, program))
+                            {
+                                VerifyNativeParameterValueExtent(argument,
+                                    nativeParameter, call.IsUnsafeAuthorized,
+                                    initialized, function, program,
+                                    ref remaining, depth + 1);
+                            }
                             StageIndirectDependencySource(call, index, argument,
                                 indirectSignature, initialized, program,
                                 ref remaining, depth + 1);
@@ -5708,6 +5735,8 @@ public static partial class SemanticVerifier
                             dependencies.InvalidateAllCopyOriginValues(
                                 program, ref remaining, depth + 1);
                         }
+                        InvalidateNativePointerExtentsForCall(
+                            call, indirectSignature, initialized, program);
                         if (indirectSignature.OutputStates.IsEmpty)
                         {
                             initialized.InvalidateNativeOutputCorrelations();
@@ -6186,6 +6215,24 @@ public static partial class SemanticVerifier
                                         nonCompletingArgumentState = initialized.Clone();
                                         nonCompletingArgumentMasks = (uint[])fieldMasks.Clone();
                                     }
+                                    else if (directNativeParameter is not null
+                                        && argument is not BoundNativeStorageAddress
+                                        && !isDirectNativeStringPointerArgument)
+                                    {
+                                        VerifyNativeParameterValueExtent(argument,
+                                            directNativeParameter, call.IsUnsafeAuthorized,
+                                            initialized, function, program,
+                                            ref remaining, depth + 1);
+                                    }
+                                    else if (nativeVTableParameter is not null
+                                        && argument is not BoundNativeStorageAddress
+                                        && !isNativeVTableStringPointerArgument)
+                                    {
+                                        VerifyNativeParameterValueExtent(argument,
+                                            nativeVTableParameter, call.IsUnsafeAuthorized,
+                                            initialized, function, program,
+                                            ref remaining, depth + 1);
+                                    }
                                 }
                             }
                         }
@@ -6297,6 +6344,8 @@ public static partial class SemanticVerifier
                     ApplyBackingCallEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
+                    InvalidateNativePointerExtentsForCall(
+                        call, target, initialized, program);
                     ApplyNativeOutputCallEffects(call, target, initialized, ref remaining);
                     if (!ProvidesNoFailureGuarantee(target))
                     {

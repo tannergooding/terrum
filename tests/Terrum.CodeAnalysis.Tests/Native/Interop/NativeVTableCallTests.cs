@@ -866,6 +866,64 @@ public sealed class NativeVTableCallTests
         Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
     }
 
+    [TestCase(0, 3, true)]
+    [TestCase(1, 2, true)]
+    [TestCase(1, 3, false)]
+    [TestCase(0, 4, false)]
+    public void NativeVTableParameterExtentTracksCopiedArrayPointers(
+        int index, int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestVTable {
+                public fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32> Method;
+                public TestVTable(fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32> method) {
+                    Method = method;
+                }
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestObject {
+                public ptr<TestVTable> VTable;
+                public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
+            }
+
+            [Terrum.Interop.NativeCallable]
+            int32 ReadFirst(ptr<TestObject> receiver, ptr<uint32> value) {
+                unsafe { return *value == 42 ? 42 : 0; }
+            }
+
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, {{extent}})]
+            [Terrum.Interop.NativeVTableMethod(0)]
+            extern unsafe int32 Invoke(ptr<TestObject> receiver, ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 3> values = [42, 42, 42];
+                unsafe {
+                    TestVTable vtable = new TestVTable(&ReadFirst);
+                    TestObject instance = new TestObject(&vtable);
+                    ptr<uint32> pointer = &values[{{index}}];
+                    ptr<uint32> forwarded = pointer;
+                    return Invoke(&instance, forwarded) == 42 ? 0 : -1;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
     [Test]
     public void NativeVTableMethodReturnsRawPointer()
     {

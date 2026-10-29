@@ -462,6 +462,13 @@ round-trips through private semantic-module revision 80, native packages,
 consumer sets, and graph-JIT roots. The experimental TRRM direct-import path
 also round-trips scalar, opaque-pointer, and `ptr<void>` pointees, plus
 supported scalar and `ptr<void>` results, using provisional clause kind 10.
+Positive `NativeParameter` extents carried by typed pointer values are checked
+against known local or fixed-array backing through local copies; array capacity
+is measured from the selected element. Opaque incoming or native-result
+pointers remain usable only at unsafe calls and do not mask known undersized
+alternatives. Field and pointer-cell reads, plus source-call `CopyOrigin`
+results, do not yet preserve the quantitative fact and reject rather than
+infer size from the existing lifetime dependency union.
 It includes extent-zero scalar and character-pointer inputs and explicitly
 committed `ptr<TypeDef>` aggregate pointees using provisional feature ID 4 and
 contract kind 12. The loader recomputes supported scalar/nested-struct layouts,

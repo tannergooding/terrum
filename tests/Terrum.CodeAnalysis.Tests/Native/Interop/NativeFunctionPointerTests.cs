@@ -727,6 +727,47 @@ public sealed class NativeFunctionPointerTests
             Does.Contain("Observe"));
     }
 
+    [TestCase(0, 3, true)]
+    [TestCase(1, 2, true)]
+    [TestCase(1, 3, false)]
+    [TestCase(0, 4, false)]
+    public void IndirectNativeParameterExtentTracksCopiedArrayPointers(
+        int index, int extent, bool shouldCompile)
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveValues")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern unsafe int32 ObserveValues(ptr<uint32> values);
+
+            int32 Main() {
+                InlineArray<uint32, 3> values = [1, 2, 3];
+                unsafe {
+                    var observe = &ObserveValues;
+                    ptr<uint32> pointer = &values[{{index}}];
+                    ptr<uint32> forwarded = pointer;
+                    return observe(forwarded);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ObserveValues"));
+    }
+
     [Test]
     public void SemanticVerifierRejectsTypedNullForPositiveIndirectNativeParameterExtent()
     {
