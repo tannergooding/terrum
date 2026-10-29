@@ -951,6 +951,40 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ValidatesNativeParameterAccessForIndirectFunctionPointerHomeInputs()
+    {
+        var readOnlyRead = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+            access: 1, actualQualifier: 0, actualPointeeCode: 0x0D);
+        Assert.DoesNotThrow(() =>
+            ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(readOnlyRead));
+
+        var writableRead = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+            access: 1, actualQualifier: 1, actualPointeeCode: 0x0D);
+        Assert.DoesNotThrow(() =>
+            ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(writableRead));
+
+        var writableWrite = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+            access: 2, actualQualifier: 1, actualPointeeCode: 0x0D);
+        Assert.DoesNotThrow(() =>
+            ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(writableWrite));
+
+        var readOnlyWrite = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+            access: 2, actualQualifier: 0, actualPointeeCode: 0x0D);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(readOnlyWrite));
+
+        var readOnlyReadWrite = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+            access: 3, actualQualifier: 0, actualPointeeCode: 0x0D);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(readOnlyReadWrite));
+
+        var wrongPointee = CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+            access: 1, actualQualifier: 0, actualPointeeCode: 0x0E);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(wrongPointee));
+    }
+
+    [Test]
     public void ValidatesHomeTargetCallSiteSignatureAndEffects()
     {
         Assert.DoesNotThrow(() => ValidateSelectedArtifactBodyMaps(
@@ -2152,6 +2186,122 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     private static void ValidateForeignInvocationCallSiteHomeArtifact(byte[] artifact)
+    {
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static byte[] CreateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+        byte access, byte actualQualifier, byte actualPointeeCode)
+    {
+        const TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft;
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("Caller", 1), ("Anchor", 1),
+        ]);
+        var strings = new TrRmStringTableReader(stringsBytes, 4);
+        var featureRows = new[]
+        {
+            TrRmFeatureRow.NativeBoundaryContracts,
+            TrRmFeatureRow.RootlessNativeValues,
+            TrRmFeatureRow.DirectNativeCalls,
+            TrRmFeatureRow.ForeignInvocationContractsCandidate,
+        };
+        var featuresBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = new TrRmFeatureTableReader(
+            featuresBytes, featureRows.Length, schema);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1,
+                1, featureRows.Length),
+        ], strings, 0, 0, 2, 0, featureRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 2, 0, featureRows.Length);
+        ReadOnlyMemory<byte>[] typeSpecRows =
+        [
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 2),
+            TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D, 1),
+            TrRmTypeSpecTableWriter.InlineFamily(
+                0x8C, actualPointeeCode, actualQualifier),
+        ];
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            0, 0, 0, 0, schema, methodDefCount: 2);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Length, 0, 0, 0, 0, schema, methodDefCount: 2);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 1, 2, 0, 0),
+            new TrRmMethodSigRow(0xF200_0000, 0, 3, 1, 0, 0),
+        ], typeSpecs, 3, 0);
+        var signatures = new TrRmMethodSigTableReader(
+            signatureBytes, 2, typeSpecs, 3, 0);
+        var parameterBytes = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, 1, 0),
+            new TrRmParamRow(1, 1, 3, 0),
+            new TrRmParamRow(2, 0, 2, 0),
+        ], signatures, typeSpecs, schema);
+        var parameters = new TrRmParamTableReader(
+            parameterBytes, 3, signatures, typeSpecs, schema);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 1);
+        var methodRows = new[]
+        {
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+            new TrRmMethodDefRow(0, 4, 2, 0, 1, 1, 0),
+        };
+        var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows,
+            strings, modules, typeDefs, signatures, 1, 1);
+        var methods = new TrRmMethodDefTableReader(methodBytes,
+            methodRows.Length, strings, modules, typeDefs, signatures, 1, 1);
+        var nativeParameterPayload = new byte[12];
+        nativeParameterPayload[4] = access;
+        nativeParameterPayload[5] = 1;
+        nativeParameterPayload[6] = 1;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            nativeParameterPayload.AsSpan(8), 1);
+        var contractRows = new[]
+        {
+            new TrRmContractRow(0x1600_0002, 0x0E, nativeParameterPayload),
+        };
+        var contractBytes = TrRmContractTableWriter.EncodeForeignInvocationDraft(
+            contractRows, typeDefs, methods, signatures, parameters,
+            typeSpecs, features, modules, predicateGraphCount: 0);
+        var maps = TrRmRegisterBodyMapBuilder.Create(
+            [0x1100_0001, 0x1100_0003], []);
+        var homeMap = new byte[16];
+        homeMap[0] = 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            homeMap.AsSpan(2), maps.GetTypeMapIndex(0x1100_0001));
+        homeMap[8] = 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            homeMap.AsSpan(10), maps.GetTypeMapIndex(0x1100_0003));
+        BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(12), 1);
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        var callSite = TrRmRegisterBodyRecordWriter.EncodeCallSite(
+            3, 0, 0, 0,
+            [new TrRmRegisterBodyCallInput(2, 1, 1)], []);
+        byte[] code = [0xE0, 0, 1, 0, 0x18, 0];
+        var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            [entryState, callSite], code, contractRows.Length);
+
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 4, stringsBytes),
+            new TrRmSection(0x0004, 0, (uint)featureRows.Length, featuresBytes),
+            new TrRmSection(0x0011, 0, (uint)typeSpecRows.Length, typeSpecBytes),
+            new TrRmSection(0x0016, 0, (uint)methodRows.Length, methodBytes),
+            new TrRmSection(0x0017, 0, 2, signatureBytes),
+            new TrRmSection(0x0018, 0, 3, parameterBytes),
+            new TrRmSection(0x001B, 0, (uint)contractRows.Length, contractBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+        ], schema);
+    }
+
+    private static void ValidateForeignInvocationFunctionPointerCallSiteHomeArtifact(
+        byte[] artifact)
     {
         var tables = TrRmStructuralMetadataValidator
             .ValidateForeignInvocationDraftAndGetExecutionTables(
