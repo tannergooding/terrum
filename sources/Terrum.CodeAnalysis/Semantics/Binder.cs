@@ -31,6 +31,7 @@ internal sealed partial class Binder
     private readonly List<Signature> _signatures = [];
     private readonly List<NativeFunctionPointerSignatureDefinition> _nativeFunctionPointerSignatures = [];
     private readonly List<NativePointerTypeDefinition> _nativePointerTypes = [];
+    private readonly List<CheckedReferenceTypeDefinition> _checkedReferenceTypes = [];
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Expression)>
         _pendingNativeCallConvExpressions = [];
     private readonly List<BoundEnumDefinition> _enumDefinitions = [];
@@ -357,6 +358,7 @@ internal sealed partial class Binder
         {
             _nativeFunctionPointerSignatures.AddRange(_reference.NativeFunctionPointerSignatures);
             _nativePointerTypes.AddRange(_reference.NativePointerTypes);
+            _checkedReferenceTypes.AddRange(_reference.CheckedReferenceTypes);
             foreach (var structure in _reference.Structures)
             {
                 _structNames.Add(structure.Name, (PrimitiveType)(100 + _structs.Count));
@@ -833,8 +835,10 @@ internal sealed partial class Binder
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
             EnumDefinitions = [.. _enumDefinitions],
+            NativeCoreRegistration = _nativeCoreRegistration,
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
             NativePointerTypes = [.. _nativePointerTypes],
+            CheckedReferenceTypes = [.. _checkedReferenceTypes],
             Classes = [.. _classes],
             Buffers = _buffers,
             RequiresSourceGrant = _buffers.Any(static buffer => buffer.IsInvocationScoped)
@@ -861,6 +865,7 @@ internal sealed partial class Binder
                 "UnsafeRecovery" => ("TRM3021", "Checked failure recovery requires an unsafe block."),
                 "CheckedPolicy" => ("TRM3022", "Recovery requires the checked-exceptions runtime policy."),
                 "Ownership" => ("TRM3023", "A unique value must be moved from a live named owner; copies, vacant reads, and escaping receiver loans are not allowed."),
+                "CheckedReference" => ("TRM3030", "Checked reference formation or use violates its type or access contract."),
                 "NativeImport" => ("TRM3030",
                     $"The source native import does not match its selected compiler-owned catalog in '{_signatures[functionIndex].Name}'."),
                 _ => ("TRM3016", exceededWorkLimit
@@ -1971,7 +1976,7 @@ internal sealed partial class Binder
                     }
                     else if (child is SyntaxNode node)
                     {
-                        if (target is null && node.Kind == SyntaxKind.TypeName)
+                        if (target is null && IsTypeSyntax(node))
                         {
                             target = node;
                         }
@@ -2163,7 +2168,7 @@ internal sealed partial class Binder
 
     private static IEnumerable<SyntaxNode> DescendantTypeNames(SyntaxNode node)
     {
-        if (node.Kind == SyntaxKind.TypeName)
+        if (IsTypeSyntax(node))
         {
             yield return node;
         }
@@ -3362,7 +3367,7 @@ internal sealed partial class Binder
             for (var parameter = 0; parameter < parameters.Length; parameter++)
             {
                 if (!parameters[parameter].IsOut && !parameters[parameter].IsInit
-                    && parameters[parameter].Type == PrimitiveType.TokenSpan)
+                    && IsEligibleTokenSpanDependencySource(parameters[parameter].Type))
                 {
                     eligibleSources.Add(new BoundDependencySource(
                         BoundDependencySourceKind.Formal, parameter));
@@ -3419,6 +3424,24 @@ internal sealed partial class Binder
         }
 
         return boundContracts;
+    }
+
+    private bool IsEligibleTokenSpanDependencySource(PrimitiveType type)
+    {
+        if (type == PrimitiveType.TokenSpan)
+        {
+            return true;
+        }
+        if (!CheckedReferenceTypeContract.IsValidType(type, [.. _checkedReferenceTypes]))
+        {
+            return false;
+        }
+
+        var referenceType = _checkedReferenceTypes[CheckedReferenceTypes.Index(type)];
+        return referenceType.ReferentType == PrimitiveType.TokenSpan
+            && !referenceType.IsGarbageCollected
+            && !referenceType.IsInitialization
+            && !referenceType.IsOptional;
     }
 
     private bool TryResolveDependencyDestination(
@@ -3746,6 +3769,17 @@ internal sealed partial class Binder
 
     private bool CanCaptureParameter(Parameter parameter)
     {
+        if (CheckedReferenceTypeContract.IsValidType(
+            parameter.Type, [.. _checkedReferenceTypes]))
+        {
+            var referenceType = _checkedReferenceTypes[
+                CheckedReferenceTypes.Index(parameter.Type)];
+            return referenceType.IsWritable && !referenceType.IsGarbageCollected
+                && !referenceType.IsInitialization && !referenceType.IsOptional
+                && (IsUnique(referenceType.ReferentType)
+                    || ManagedClassTypes.IsManaged(referenceType.ReferentType)
+                    || TokenSpanContract.IsDependent(referenceType.ReferentType, _structs));
+        }
         if (parameter.IsOut || parameter.IsImplicitRef
             || IsUnique(parameter.Type) || ManagedClassTypes.IsManaged(parameter.Type))
         {
@@ -3883,6 +3917,18 @@ internal sealed partial class Binder
 
             return BindNativeFunctionPointerType(functionPointerTypeNode, callingConvention,
                 allowLegacyAbiPrefix: false, pendingConventionExpression: conventionExpression);
+        }
+
+        if (node.Kind == SyntaxKind.ReferenceTypeName)
+        {
+            return BindCheckedReferenceType(node);
+        }
+
+        if (node.Children.OfType<SyntaxTokenElement>()
+            .Any(static element => element.Token.Kind == TokenKind.GcKeyword))
+        {
+            Report("TRM3005", "GC backing is not supported for this type.", node.Span);
+            return PrimitiveType.Int32;
         }
 
         var name = TypeNameIdentifier(node);
@@ -4028,6 +4074,223 @@ internal sealed partial class Binder
 
         return type ?? PrimitiveType.Int32;
     }
+
+    private PrimitiveType BindCheckedReferenceType(SyntaxNode node)
+    {
+        var typeArguments = node.Children.OfType<SyntaxNode>().ToArray();
+        if (typeArguments.Length != 1)
+        {
+            Report("TRM3005", "A checked reference type requires exactly one referent type.", node.Span);
+            return PrimitiveType.Int32;
+        }
+
+        var isWritable = node.Children[0] is SyntaxTokenElement { Token.Kind: TokenKind.WriteKeyword };
+        var isGarbageCollected = node.Children.OfType<SyntaxTokenElement>()
+            .Any(static element => element.Token.Kind == TokenKind.GcKeyword);
+        var isInitialization = false;
+        foreach (var child in node.Children)
+        {
+            if (child is SyntaxTokenElement { Token.Kind: TokenKind.Less })
+            {
+                continue;
+            }
+            if (child is SyntaxNode)
+            {
+                break;
+            }
+            if (child is SyntaxTokenElement { Token.Kind: TokenKind.Identifier, Token.Text: "init" })
+            {
+                isInitialization = true;
+                break;
+            }
+        }
+
+        var diagnosticCount = DiagnosticCount;
+        var referentType = BindType(typeArguments[0], allowVoid: false);
+        if (DiagnosticCount != diagnosticCount)
+        {
+            return PrimitiveType.Int32;
+        }
+        if (isGarbageCollected && isInitialization)
+        {
+            Report("TRM3005", "A GC-backed reference cannot designate an uninitialized place.", node.Span);
+            return PrimitiveType.Int32;
+        }
+
+        var isOptional = node.Children[^1] is SyntaxTokenElement { Token.Kind: TokenKind.Question };
+        return GetCheckedReferenceType(new CheckedReferenceTypeDefinition(
+            referentType, isWritable, isGarbageCollected, isInitialization, isOptional), node.Span);
+    }
+
+    private BoundExpression BindCheckedReferenceExpression(SyntaxNode node, PrimitiveType? expected)
+    {
+        var placeNodes = node.Children.OfType<SyntaxNode>().ToArray();
+        if (placeNodes.Length != 1)
+        {
+            Report("TRM3030", "Reference formation requires one addressable place.", node.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        var isInitialization = node.Children.OfType<SyntaxTokenElement>()
+            .Any(static element => element.Token.Kind == TokenKind.Identifier
+                && element.Token.Text == "init");
+        var expectedDefinition = expected is PrimitiveType expectedType
+            && CheckedReferenceTypeContract.IsValidType(expectedType, [.. _checkedReferenceTypes])
+                ? _checkedReferenceTypes[CheckedReferenceTypes.Index(expectedType)] : null;
+        if (expected is not null && expectedDefinition is null)
+        {
+            Report("TRM3007", "Reference formation requires a checked-reference expected type.", node.Span);
+            return ErrorExpression(node.Span);
+        }
+        if (isInitialization || expectedDefinition is { IsInitialization: true }
+            or { IsGarbageCollected: true } or { IsOptional: true })
+        {
+            Report("TRM3030",
+                "Initialization, GC-backed and optional reference formation require their dedicated runtime contracts.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        if (placeNodes[0].Kind == SyntaxKind.UnaryExpression
+            && ((SyntaxTokenElement)placeNodes[0].Children[0]).Token.Kind == TokenKind.Star)
+        {
+            var descriptorNode = (SyntaxNode)placeNodes[0].Children[1];
+            var knownDescriptorType = KnownType(descriptorNode);
+            var descriptor = BindExpression(descriptorNode,
+                descriptorNode.Kind == SyntaxKind.NameExpression ? knownDescriptorType : null);
+            if (!CheckedReferenceTypeContract.IsValidType(
+                descriptor.Type, [.. _checkedReferenceTypes]))
+            {
+                Report("TRM3030", "An ordinary reference reborrow requires a checked reference source.",
+                    placeNodes[0].Span);
+                return ErrorExpression(node.Span);
+            }
+
+            var sourceReference = _checkedReferenceTypes[
+                CheckedReferenceTypes.Index(descriptor.Type)];
+            if (sourceReference.IsGarbageCollected || sourceReference.IsInitialization
+                || sourceReference.IsOptional)
+            {
+                Report("TRM3030",
+                    "Only an ordinary initialized reference can be reborrowed in this source profile.",
+                    placeNodes[0].Span);
+                return ErrorExpression(node.Span);
+            }
+            if (expectedDefinition is not null
+                && (expectedDefinition.ReferentType != sourceReference.ReferentType
+                    || (expectedDefinition.IsWritable && !sourceReference.IsWritable)))
+            {
+                Report("TRM3007",
+                    "A reference reborrow cannot change its referent or amplify write authority.",
+                    node.Span);
+                return ErrorExpression(node.Span);
+            }
+
+            return new BoundReferenceReborrow(descriptor,
+                expected ?? descriptor.Type, node.Span);
+        }
+
+        var place = BindExpression(placeNodes[0], expectedDefinition?.ReferentType);
+        if (!TryGetCheckedReferencePlace(place, out _, out var isWritable))
+        {
+            Report("TRM3030", "Reference formation requires a live addressable place in this source profile.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        if (expectedDefinition is not null
+            && (expectedDefinition.ReferentType != place.Type
+                || (expectedDefinition.IsWritable && !isWritable)))
+        {
+            Report("TRM3007", "The place does not satisfy the checked-reference referent and access type.",
+                node.Span);
+            return ErrorExpression(node.Span);
+        }
+
+        var referenceType = expected ?? GetCheckedReferenceType(new CheckedReferenceTypeDefinition(
+            place.Type, isWritable, IsGarbageCollected: false,
+            IsInitialization: false, IsOptional: false), node.Span);
+        return new BoundReferenceFormation(place, referenceType, node.Span);
+    }
+
+    private bool TryGetCheckedReferencePlace(
+        BoundExpression place, out int rootVariable, out bool isWritable)
+    {
+        switch (place)
+        {
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)_variables.Count
+                    || _variables[read.Variable].Type != read.Type
+                    || _constLocals.Contains(read.Variable))
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                rootVariable = read.Variable;
+                isWritable = _variables[read.Variable].IsMutable;
+                return true;
+            case BoundNativeFixedArrayElement element:
+                if ((uint)element.Variable >= (uint)_variables.Count
+                    || _variables[element.Variable].Type != element.Layout.CarrierType
+                    || _variables[element.Variable].NativeFixedArrayLayout != element.Layout
+                    || !NativeFixedArrayContract.MatchesLayout(element.Layout, _structs)
+                    || element.Type != element.Layout.ElementType
+                    || _constLocals.Contains(element.Variable))
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                rootVariable = element.Variable;
+                isWritable = _variables[element.Variable].IsMutable
+                    && NativeFixedArrayContract.AllowsElementWrites(element.Layout);
+                return true;
+            case BoundFieldRead field:
+                if (!TryGetCheckedReferencePlace(
+                        field.Receiver, out rootVariable, out var receiverWritable))
+                {
+                    isWritable = false;
+                    return false;
+                }
+                var structureIndex = (int)field.Receiver.Type - 100;
+                if (structureIndex < 0 || structureIndex >= _structs.Count
+                    || ManagedClassTypes.IsClass(field.Receiver.Type)
+                    || (field.Receiver is not BoundRead
+                        && (IsUnique(field.Receiver.Type)
+                            || _structs[structureIndex].CleanupMethod is not null))
+                    || (_structs[structureIndex].CleanupMethod is not null
+                        && !IsUnique(field.Receiver.Type))
+                    || (uint)field.Field >= (uint)_structs[structureIndex].Fields.Length)
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                var fieldDefinition = _structs[structureIndex].Fields[field.Field];
+                if (fieldDefinition.Type != field.Type)
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                if (!IsSupportedCheckedReferenceStoreType(fieldDefinition.Type))
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                isWritable = receiverWritable && fieldDefinition.IsMutable;
+                return true;
+            default:
+                rootVariable = -1;
+                isWritable = false;
+                return false;
+        }
+    }
+
+    private bool IsSupportedCheckedReferenceStoreType(PrimitiveType type) =>
+        CheckedReferenceTypeContract.IsSupportedWriteValueType(type, _structs, _enumDefinitions.Count);
 
     private PrimitiveType BindNativeFunctionPointerType(SyntaxNode node,
         NativeCallingConvention callingConvention, bool allowLegacyAbiPrefix,
@@ -4227,7 +4490,10 @@ internal sealed partial class Binder
         }
 
         member = new CoreEnumMemberDefinition(enumMember.Identity, enumMember.DeclaringEnum,
-            enumMember.Name, enumMember.Value, enumMember.IsPublic);
+            enumMember.Name, enumMember.Value, enumMember.IsPublic)
+        {
+            DeclarationKey = enumMember.DeclarationKey,
+        };
         return true;
     }
 
@@ -4430,6 +4696,26 @@ internal sealed partial class Binder
         return type;
     }
 
+    private PrimitiveType GetCheckedReferenceType(CheckedReferenceTypeDefinition definition, TextSpan span)
+    {
+        for (var index = 0; index < _checkedReferenceTypes.Count; index++)
+        {
+            if (_checkedReferenceTypes[index] == definition)
+            {
+                return CheckedReferenceTypes.Type(index);
+            }
+        }
+
+        if (_checkedReferenceTypes.Count >= SemanticVerifier.MaximumAnalysisVisits)
+        {
+            Report("TRM3005", "The compilation exceeds the checked-reference type limit.", span);
+            return PrimitiveType.Int32;
+        }
+        var type = CheckedReferenceTypes.Type(_checkedReferenceTypes.Count);
+        _checkedReferenceTypes.Add(definition);
+        return type;
+    }
+
     private bool TryGetAliasTypeArgument(string name, out PrimitiveType type)
     {
         for (var index = _aliasTypeArguments.Count - 1; index >= 0; index--)
@@ -4445,6 +4731,11 @@ internal sealed partial class Binder
 
     private static string TypeNameIdentifier(SyntaxNode node)
     {
+        if (node.Kind == SyntaxKind.ReferenceTypeName)
+        {
+            return "ref";
+        }
+
         var builder = new StringBuilder();
         foreach (var child in node.Children)
         {
@@ -4464,6 +4755,9 @@ internal sealed partial class Binder
         }
         return builder.ToString();
     }
+
+    private static bool IsTypeSyntax(SyntaxNode node) => node.Kind is SyntaxKind.TypeName
+        or SyntaxKind.ReferenceTypeName or SyntaxKind.AttributedTypeName or SyntaxKind.InlineArrayTypeName;
 
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
@@ -5714,8 +6008,39 @@ internal sealed partial class Binder
                 if (target.Kind == SyntaxKind.UnaryExpression
                     && ((SyntaxTokenElement)target.Children[0]).Token.Kind == TokenKind.Star)
                 {
-                    var pointer = BindExpression((SyntaxNode)target.Children[1], null);
-                    var pointerType = pointer.Type;
+                    var descriptorNode = (SyntaxNode)target.Children[1];
+                    var knownDescriptorType = KnownType(descriptorNode);
+                    var descriptor = BindExpression(descriptorNode,
+                        descriptorNode.Kind == SyntaxKind.NameExpression ? knownDescriptorType : null);
+                    if (CheckedReferenceTypeContract.IsValidType(
+                        descriptor.Type, [.. _checkedReferenceTypes]))
+                    {
+                        var referenceType = _checkedReferenceTypes[
+                            CheckedReferenceTypes.Index(descriptor.Type)];
+                        var referenceValue = BindExpression(valueNode, referenceType.ReferentType);
+                        if (!referenceType.IsWritable)
+                        {
+                            Report("TRM3008", "The checked reference does not grant writable referent access.",
+                                target.Span);
+                        }
+                        if (referenceType.IsGarbageCollected || referenceType.IsInitialization
+                            || referenceType.IsOptional
+                            || !IsSupportedCheckedReferenceStoreType(referenceType.ReferentType))
+                        {
+                            Report("TRM3030",
+                                "This checked-reference referent requires a separate store, ownership, or initialization contract.",
+                                target.Span);
+                        }
+                        if (referenceValue.Type != referenceType.ReferentType)
+                        {
+                            Report("TRM3007", "A checked-reference store requires the exact referent type.",
+                                valueNode.Span);
+                        }
+                        return new BoundExpressionStatement(
+                            new BoundReferenceWrite(descriptor, referenceValue, node.Span), node.Span);
+                    }
+
+                    var pointerType = descriptor.Type;
                     if (!NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
                     {
                         Report("TRM3030", "A pointer assignment requires a typed native pointer.", target.Span);
@@ -5741,7 +6066,7 @@ internal sealed partial class Binder
                     }
                     var pointerValue = BindExpression(valueNode, pointerDefinition.PointeeType);
                     return new BoundExpressionStatement(
-                        new BoundNativePointerWrite(pointer, pointerValue, node.Span) {
+                        new BoundNativePointerWrite(descriptor, pointerValue, node.Span) {
                             IsUnsafeAuthorized = _unsafeDepth != 0,
                         },
                         node.Span);
@@ -6526,6 +6851,10 @@ internal sealed partial class Binder
                 expression = new BoundConstant(0, PrimitiveType.Void, node.Span);
                 break;
 
+            case SyntaxKind.ReferenceExpression:
+                expression = BindCheckedReferenceExpression(node, expected);
+                break;
+
             case SyntaxKind.LiteralExpression:
                 var literalToken = ((SyntaxTokenElement)node.Children[0]).Token;
                 if (literalToken.Kind == TokenKind.NullKeyword)
@@ -6797,36 +7126,61 @@ internal sealed partial class Binder
                     {
                         expression = new BoundRead(destination, _variables[destination].Type, node.Span);
                     }
-                    else if (KnownType(operandNode) is PrimitiveType pointerType
-                        && NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
-                    {
-                        var pointeeType = _nativePointerTypes[NativePointerTypes.Index(pointerType)].PointeeType;
-                        if (pointeeType == PrimitiveType.Void)
-                        {
-                            Report("TRM3030", "A void pointer cannot be dereferenced.", node.Span);
-                            expression = ErrorExpression(node.Span);
-                            break;
-                        }
-                        if (!DirectNativeImportContract.IsCopyablePointee(pointeeType, _structs))
-                        {
-                            Report("TRM3023",
-                                "A raw pointer cannot load or store an owning value without preserving its ownership and cleanup.",
-                                node.Span);
-                        }
-                        if (_unsafeDepth == 0)
-                        {
-                            Report("TRM3028", "A pointer read requires an explicit unsafe context.", node.Span);
-                        }
-                        expression = new BoundNativePointerRead(
-                            BindExpression(operandNode, pointerType), pointeeType, node.Span) {
-                            IsUnsafeAuthorized = _unsafeDepth != 0,
-                        };
-                    }
                     else
                     {
-                        Report("TRM3030", "Dereference requires an init ref destination in this source profile.",
-                            op.Span);
-                        expression = ErrorExpression(node.Span);
+                        var knownOperandType = KnownType(operandNode);
+                        var boundOperand = BindExpression(operandNode,
+                            operandNode.Kind == SyntaxKind.NameExpression ? knownOperandType : null);
+                        if (CheckedReferenceTypeContract.IsValidType(
+                                boundOperand.Type, [.. _checkedReferenceTypes]))
+                        {
+                            var referenceType = _checkedReferenceTypes[CheckedReferenceTypes.Index(boundOperand.Type)];
+                            if (referenceType.IsGarbageCollected || referenceType.IsInitialization
+                                || referenceType.IsOptional)
+                            {
+                                Report("TRM3030",
+                                    "This checked-reference form cannot be dereferenced in the current source profile.",
+                                    node.Span);
+                                expression = ErrorExpression(node.Span);
+                            }
+                            else
+                            {
+                                expression = new BoundReferenceRead(
+                                    boundOperand, referenceType.ReferentType, node.Span);
+                            }
+                        }
+                        else if (NativePointerTypeContract.IsValidType(
+                            boundOperand.Type, [.. _nativePointerTypes]))
+                        {
+                            var pointerType = boundOperand.Type;
+                            var pointeeType = _nativePointerTypes[NativePointerTypes.Index(pointerType)].PointeeType;
+                            if (pointeeType == PrimitiveType.Void)
+                            {
+                                Report("TRM3030", "A void pointer cannot be dereferenced.", node.Span);
+                                expression = ErrorExpression(node.Span);
+                                break;
+                            }
+                            if (!DirectNativeImportContract.IsCopyablePointee(pointeeType, _structs))
+                            {
+                                Report("TRM3023",
+                                    "A raw pointer cannot load or store an owning value without preserving its ownership and cleanup.",
+                                    node.Span);
+                            }
+                            if (_unsafeDepth == 0)
+                            {
+                                Report("TRM3028", "A pointer read requires an explicit unsafe context.", node.Span);
+                            }
+                            expression = new BoundNativePointerRead(boundOperand, pointeeType, node.Span) {
+                                IsUnsafeAuthorized = _unsafeDepth != 0,
+                            };
+                        }
+                        else
+                        {
+                            Report("TRM3030",
+                                "Dereference requires an init ref destination in this source profile.",
+                                op.Span);
+                            expression = ErrorExpression(node.Span);
+                        }
                     }
                     break;
                 }
@@ -9406,6 +9760,37 @@ internal sealed partial class Binder
                 {
                     AppendNativeFunctionPointerTypeName(type, builder, ref remainingCharacters,
                         ref remainingNodes, depth);
+                }
+                else if (CheckedReferenceTypes.IsType(type))
+                {
+                    var index = CheckedReferenceTypes.Index(type);
+                    if ((uint)index >= (uint)_checkedReferenceTypes.Count)
+                    {
+                        AppendTypeNameText(builder, $"ref<{index}>", ref remainingCharacters);
+                        break;
+                    }
+
+                    var referenceType = _checkedReferenceTypes[index];
+                    if (referenceType.IsWritable)
+                    {
+                        AppendTypeNameText(builder, "write ", ref remainingCharacters);
+                    }
+                    if (referenceType.IsGarbageCollected)
+                    {
+                        AppendTypeNameText(builder, "gc ", ref remainingCharacters);
+                    }
+                    AppendTypeNameText(builder, "ref<", ref remainingCharacters);
+                    if (referenceType.IsInitialization)
+                    {
+                        AppendTypeNameText(builder, "init ", ref remainingCharacters);
+                    }
+                    AppendTypeName(referenceType.ReferentType, builder, ref remainingCharacters,
+                        ref remainingNodes, depth + 1);
+                    AppendTypeNameText(builder, ">", ref remainingCharacters);
+                    if (referenceType.IsOptional)
+                    {
+                        AppendTypeNameText(builder, "?", ref remainingCharacters);
+                    }
                 }
                 else if (ManagedClassTypes.IsOptional(type))
                 {

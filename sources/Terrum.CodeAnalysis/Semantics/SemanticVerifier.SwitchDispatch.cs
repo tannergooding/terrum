@@ -202,13 +202,31 @@ public static partial class SemanticVerifier
         return result;
     }
 
+    private static bool IsMisidentifiedCleanupSwitchDispatcher(BoundWhile loop, BoundFunction function)
+    {
+        if (loop.Condition is not BoundConstant { Type: PrimitiveType.Bool, Value: 1 }
+            || loop.Body is not BoundIf {
+                Condition: BoundBinary {
+                    Operator: TokenKind.EqualsEquals,
+                    Left: BoundRead { Variable: var variable, Type: PrimitiveType.Int32 },
+                    Right: BoundConstant { Type: PrimitiveType.Int32 },
+                },
+            }
+            || (uint)variable >= (uint)function.Variables.Length)
+        {
+            return false;
+        }
+        return function.Variables[variable].Name == "<switch-arm>"
+            && loop.SwitchArmVariable != variable;
+    }
+
     private static CleanupSwitchFlow? VisitCleanupSwitchArm(int arm, HashSet<int>[] edges,
         CleanupSwitchFlow[] exits, byte[] colors, CleanupSwitchFlow?[] outcomes, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
         if (colors[arm] == 1)
         {
-            return null;
+            return new CleanupSwitchFlow(false);
         }
         if (colors[arm] == 2)
         {
@@ -225,10 +243,6 @@ public static partial class SemanticVerifier
                 return null;
             }
             result.Join(successor, ref remaining, depth + 1);
-        }
-        if (!result.CanComplete && result.Transfers.Count == 0)
-        {
-            return null;
         }
         colors[arm] = 2;
         outcomes[arm] = result;
@@ -280,6 +294,10 @@ public static partial class SemanticVerifier
                     sequence.Join(next, ref remaining, depth + 1);
                 }
                 return sequence;
+            case BoundExpressionStatement { Expression: BoundCall call }
+                when (uint)call.Function < (uint)program.Functions.Length
+                    && program.Functions[call.Function].DoesNotReturn:
+                return new CleanupSwitchFlow(false);
             case BoundIf conditional:
                 if (!CleanupSwitchExpressionIsSafe(conditional.Condition, variable, program, ref remaining, depth + 1))
                 {
@@ -313,10 +331,19 @@ public static partial class SemanticVerifier
                 return AnalyzeCleanupSwitchLoop(nested, nested.Body, variable, armCount, dispatcherDepth,
                     function, program, ref remaining, depth + 1, canBeFacts);
             case BoundTryFinally region:
-                if (!CleanupSwitchStateIsPrivate(region.Finally, variable, program, ref remaining, depth + 1)
-                    || HasUnsupportedCleanupFlow(region.Finally, function, program, ref remaining, depth + 1, canBeFacts))
+                if (!CleanupSwitchStateIsPrivate(region.Finally, variable, program, ref remaining, depth + 1))
                 {
                     return null;
+                }
+                var finalizer = AnalyzeCleanupSwitchStatement(region.Finally, variable, armCount,
+                    dispatcherDepth, function, program, ref remaining, depth + 1, canBeFacts);
+                if (finalizer is null || finalizer.Transfers.Count != 0)
+                {
+                    return null;
+                }
+                if (!finalizer.CanComplete)
+                {
+                    return new CleanupSwitchFlow(false);
                 }
                 return AnalyzeCleanupSwitchStatement(region.Body, variable, armCount, dispatcherDepth,
                     function, program, ref remaining, depth + 1, canBeFacts);
@@ -343,6 +370,11 @@ public static partial class SemanticVerifier
     {
         Count(ref remaining, depth);
         if (!CleanupSwitchExpressionIsSafe(loop.Condition, variable, program, ref remaining, depth + 1))
+        {
+            return null;
+        }
+        if (loop.Iterator is not null
+            && !CleanupSwitchStateIsPrivate(loop.Iterator, variable, program, ref remaining, depth + 1))
         {
             return null;
         }
@@ -385,16 +417,13 @@ public static partial class SemanticVerifier
                 _ = loopExits.Transfers.Add(transfer with { Depth = transfer.Depth - 1 });
             }
         }
-        // Reuse the body exit/transfer proof; only the recognized counted loop
-        // adds a finite backedge to the existing zero/one-iteration boundary.
-        if (repeats)
+        // A possible backedge may diverge; only a recognized counted loop proves eventual completion.
+        if (repeats && counted is not null)
         {
-            if (counted is null && (!loop.IsPostTested || mayEnter
-                || loop.Iterator is not null
-                    && !CleanupSwitchStateIsPrivate(loop.Iterator, variable, program, ref remaining, depth + 1)))
-            {
-                return null;
-            }
+            loopExits.CanComplete = true;
+        }
+        else if (repeats && loop.IsPostTested && mayExit)
+        {
             loopExits.CanComplete = true;
         }
         return loopExits;

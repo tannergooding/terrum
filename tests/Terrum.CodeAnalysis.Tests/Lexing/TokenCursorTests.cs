@@ -27,6 +27,7 @@ public sealed class TokenCursorTests
         [return: ForwardsBacking(nameof(tokens))]
         internal Span<Token> Identity(Span<Token> tokens) { return tokens; }
         internal Span<Token> DefaultIdentity(Span<Token> tokens) { return tokens; }
+        internal Span<Token> DefaultIdentityRef(ref<Span<Token>> tokens) { return *tokens; }
         [return: ForwardsBacking(nameof(tokens))]
         internal Span<Token> DefaultForwarded(Span<Token> tokens) { return tokens; }
         internal Span<Token> DefaultIgnoresTransferredOwner(
@@ -339,6 +340,355 @@ public sealed class TokenCursorTests
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceLocalReadExecutesAsync(BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 ReadReference(ref<int32> value) { return *value; }
+            int32 Main() {
+                int32 input = int32(42);
+                return ReadReference(ref input);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        var readReference = global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "ReadReference");
+        var result = global::System.Linq.Enumerable.Single(readReference.Body.Statements.OfType<BoundReturn>());
+        Assert.That(result.Value, Is.TypeOf<BoundReferenceRead>());
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NestedCheckedReferenceReadsExecuteAsync(BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 ReadNested(ref<ref<int32>> slot) { return *(*slot); }
+            int32 Main() {
+                int32 input = int32(42);
+                ref<int32> inner = ref input;
+                return ReadNested(ref inner);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task OrdinaryReferenceReborrowPreservesPlaceAndAccessAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 ReadWithReborrow(ref<int32> value) {
+                ref<int32> local = ref *value;
+                return *local;
+            }
+            int32 Main() {
+                mut int32 input = int32(7);
+                require ReadWithReborrow(ref input) == int32(7);
+                write ref<int32> writable = ref input;
+                ref<int32> readonlyReborrow = ref *writable;
+                write ref<int32> writableReborrow = ref *writable;
+                *writableReborrow = int32(42);
+                return *readonlyReborrow;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceToInlineFieldWritesTheSelectedFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell {
+                public mut int32 Value;
+                public ReferenceCell(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                mut ReferenceCell cell = new ReferenceCell(int32(1));
+                write ref<int32> value = ref cell.Value;
+                cell = new ReferenceCell(int32(41));
+                *value = int32(42);
+                return cell.Value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceToNestedInlineFieldWritesTheSelectedFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell {
+                public mut int32 Value;
+                public ReferenceCell(int32 value) { Value = value; }
+            }
+            struct ReferenceEnvelope {
+                public mut ReferenceCell Cell;
+                public ReferenceEnvelope(ReferenceCell cell) { Cell = cell; }
+            }
+            int32 Main() {
+                mut ReferenceEnvelope envelope =
+                    new ReferenceEnvelope(new ReferenceCell(int32(1)));
+                write ref<int32> value = ref envelope.Cell.Value;
+                *value = int32(42);
+                return envelope.Cell.Value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceToCompleteUniqueOwnerFieldWritesTheSelectedFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            unique struct ReferenceOwner {
+                public mut int32 Value;
+                public ReferenceOwner(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                mut ReferenceOwner owner = new ReferenceOwner(int32(1));
+                write ref<int32> value = ref owner.Value;
+                *value = int32(42);
+                return owner.Value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceToLivePartialOwnerFieldWorksDuringConstructionAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            unique struct PartialCell {
+                public mut int32 First;
+                public mut int32 Second;
+                public PartialCell(int32 first, int32 second) {
+                    First = first;
+                    write ref<int32> firstField = ref this.First;
+                    *firstField = int32(42);
+                    Second = second;
+                }
+            }
+            int32 Main() {
+                mut PartialCell value = new PartialCell(int32(1), int32(2));
+                return value.First;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceToFixedArrayElementWritesTheSelectedElementAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 Main() {
+                mut InlineArray<uint32, 3> values = [4, 5, 6];
+                mut int32 index = 1;
+                write ref<uint32> selected = ref values[index];
+                index = int32(2);
+                *selected = uint32(42);
+                return int32(values[1]);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CheckedReferenceToFixedArrayConstantElementWritesTheSelectedElementAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 Main() {
+                mut InlineArray<uint32, 3> values = [4, 5, 6];
+                write ref<uint32> selected = ref values[1];
+                *selected = uint32(42);
+                return int32(values[1]);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WritableReferenceStoresAndRebindingExecuteAsync(BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut int32 second = int32(2);
+                mut write ref<int32> current = ref first;
+                current = ref second;
+                *current = int32(42);
+                return second;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WritableReferenceStoresThroughAFormalAsync(BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            int32 Store(write ref<int32> destination, int32 value) {
+                *destination = value;
+                return *destination;
+            }
+            int32 Main() {
+                mut int32 destination = int32(1);
+                return Store(ref destination, int32(42));
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WritableReferencesReplaceCopyAggregatePlacesAsync(BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferencePair {
+                public int32 First;
+                public int32 Second;
+                public int32 Third;
+                public ReferencePair(int32 first, int32 second, int32 third) {
+                    First = first;
+                    Second = second;
+                    Third = third;
+                }
+            }
+            int32 Main() {
+                mut ReferencePair first = new ReferencePair(1, 2, 3);
+                mut ReferencePair second = new ReferencePair(3, 4, 5);
+                mut write ref<ReferencePair> current = ref first;
+                current = ref second;
+                *current = new ReferencePair(42, 0, 0);
+                return second.First + second.Second + second.Third;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturesBackingThroughWritableReferenceStoreAsync(
+        BoundRuntimePolicy policy)
+    {
+        var entry = ForwardingDeclarations + """
+            [param(destination): Captures(nameof(source))]
+            internal void StoreSpan(write ref<Span<Token>> destination, Span<Token> source) {
+                *destination = source;
+            }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                require TokenSnapshot.TryScan(init var secondScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenSnapshot second = move secondScanned;
+                {
+                    mut Span<Token> destination = first.AsSpan();
+                    Span<Token> source = second.AsSpan();
+                    StoreSpan(ref destination, source);
+                    require destination.Length == uint64(second.GetCount());
+                    destination = _;
+                    source = _;
+                }
+                first = _;
+                second = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha 42", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task RejectsReferenceStoreOutsideDeclaredCaptureAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            [param(destination): Captures(nameof(first))]
+            internal void StoreSpan(write ref<Span<Token>> destination,
+                Span<Token> first, Span<Token> second) {
+                *destination = second;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRetainsCallerBackingAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            [param(destination): Captures(nameof(source))]
+            internal void StoreSpan(write ref<Span<Token>> destination, Span<Token> source) {
+                *destination = source;
+            }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var firstScanned);
+                require TokenSnapshot.TryScan(init var secondScanned);
+                mut TokenSnapshot first = move firstScanned;
+                mut TokenSnapshot second = move secondScanned;
+                {
+                    mut Span<Token> destination = first.AsSpan();
+                    Span<Token> source = second.AsSpan();
+                    StoreSpan(ref destination, source);
+                    source = _;
+                    second = _;
+                }
+                first = _;
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("alpha 42", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task RejectsCaptureThroughReadonlyReferenceParameterAsync()
+    {
+        var entry = ForwardingDeclarations + """
+            [param(destination): Captures(nameof(source))]
+            internal void CaptureSpan(ref<Span<Token>> destination, Span<Token> source) { }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task ForwardedSpanResultsRetainDeclaredBackingThroughTransitiveCallsAsync(BoundRuntimePolicy policy)
     {
         var entry = ForwardingDeclarations + """
@@ -351,6 +701,18 @@ public sealed class TokenCursorTests
                     useFirst: false));
                 require result.Length == uint64(first.GetCount());
                 require result[0].Kind == 2;
+                {
+                    Span<Token> localInput = first.AsSpan();
+                    ref<Span<Token>> localReference = ref localInput;
+                    Span<Token> localResult = *localReference;
+                    require localResult.Length == uint64(first.GetCount());
+                    localResult = _;
+                }
+                Span<Token> referenceInput = first.AsSpan();
+                Span<Token> referenceResult = DefaultIdentityRef(ref referenceInput);
+                require referenceResult.Length == uint64(first.GetCount());
+                referenceResult = _;
+                referenceInput = _;
                 result = _;
                 first = _;
                 second = _;
@@ -374,6 +736,18 @@ public sealed class TokenCursorTests
         Assert.That(defaultDependency.Sources[0].Kind,
             Is.EqualTo(BoundDependencySourceKind.Formal));
         Assert.That(defaultDependency.Sources[0].FormalOrdinal, Is.EqualTo(0));
+        var defaultIdentityRef = global::System.Linq.Enumerable.Single(
+            program.Functions, static function => function.Name == "DefaultIdentityRef");
+        var referenceReturn = global::System.Linq.Enumerable.Single(
+            defaultIdentityRef.Body.Statements.OfType<BoundReturn>());
+        Assert.That(referenceReturn.Value, Is.TypeOf<BoundReferenceRead>());
+        var defaultReferenceDependency = global::System.Linq.Enumerable.Single(
+            defaultIdentityRef.DependencyContracts,
+            static contract => contract.Relation == BoundDependencyRelation.DependsOn);
+        Assert.That(defaultReferenceDependency.Sources, Has.Length.EqualTo(1));
+        Assert.That(defaultReferenceDependency.Sources[0].Kind,
+            Is.EqualTo(BoundDependencySourceKind.Formal));
+        Assert.That(defaultReferenceDependency.Sources[0].FormalOrdinal, Is.EqualTo(0));
         var defaultForwarded = global::System.Linq.Enumerable.Single(program.Functions,
             static function => function.Name == "DefaultForwarded");
         Assert.That(global::System.Linq.Enumerable.Single(defaultForwarded.DependencyContracts,
@@ -1476,7 +1850,6 @@ public sealed class TokenCursorTests
     [TestCase("write Span<Token> tokens = owner.AsSpan(); return 42;")]
     [TestCase("Span<Token>? tokens = owner.AsSpan(); return 42;")]
     [TestCase("Span<Token>?? tokens = owner.AsSpan(); return 42;")]
-    [TestCase("mut Span<Token> tokens = owner.AsSpan(); return 42;")]
     [TestCase("nuint index = 0; return 42;")]
     [TestCase("nint index = 0; return 42;")]
     [TestCase("Span<Token> tokens = owner.AsSpan(); Token token = tokens[nuint(0)]; return 42;")]

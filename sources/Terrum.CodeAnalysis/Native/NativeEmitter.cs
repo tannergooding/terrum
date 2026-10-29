@@ -740,6 +740,11 @@ public static class NativeEmitter
             {
                 isPublic = true;
             }
+            else if (BoundEnumTypes.IsType(type))
+            {
+                isPublic = BoundEnumTypes.IsValidType(
+                    type, program.EnumDefinitions);
+            }
             else if ((int)type < 100)
             {
                 isPublic = true;
@@ -1891,6 +1896,15 @@ internal sealed partial class PeCompiler
                 return 0;
             case BoundNativePointerRead pointerRead:
                 return ExpressionSpills(pointerRead.Address, ref maximumArguments);
+            case BoundReferenceFormation formation:
+                return ExpressionSpills(formation.Place, ref maximumArguments);
+            case BoundReferenceReborrow reborrow:
+                return ExpressionSpills(reborrow.Descriptor, ref maximumArguments);
+            case BoundReferenceRead referenceRead:
+                return ExpressionSpills(referenceRead.Descriptor, ref maximumArguments);
+            case BoundReferenceWrite referenceWrite:
+                return Math.Max(2, Math.Max(1 + ExpressionSpills(referenceWrite.Descriptor, ref maximumArguments),
+                    1 + ExpressionSpills(referenceWrite.Value, ref maximumArguments)));
             case BoundNativePointerWrite pointerWrite:
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(pointerWrite.Address, ref maximumArguments),
                     1 + ExpressionSpills(pointerWrite.Value, ref maximumArguments)));
@@ -2420,8 +2434,10 @@ internal sealed partial class PeCompiler
             or PrimitiveType.NativeStorageAddress
             || NativePointerTypes.IsType(type)
             || NativeFunctionPointerTypes.IsType(type)
+            || CheckedReferenceTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
-    private int Size(PrimitiveType type) => ValueLayout.Size(type, _program.Structures);
+    private int Size(PrimitiveType type) =>
+        ValueLayout.Size(type, _program.Structures, _program.CheckedReferenceTypes);
     private static bool IsNarrowInteger(PrimitiveType type) =>
         PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
 
@@ -2446,7 +2462,7 @@ internal sealed partial class PeCompiler
 
     private int ScratchSize(PrimitiveType type) => Math.Max(8, Size(type));
     private int ScratchAlignment(PrimitiveType type) =>
-        Math.Max(8, ValueLayout.Alignment(type, _program.Structures));
+        Math.Max(8, ValueLayout.Alignment(type, _program.Structures, _program.CheckedReferenceTypes));
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
 
@@ -5735,6 +5751,18 @@ internal sealed partial class PeCompiler
                 break;
             case BoundNativePointerWrite pointerWrite:
                 EmitNativePointerWrite(pointerWrite, spill);
+                break;
+            case BoundReferenceFormation formation:
+                EmitCheckedReferenceFormation(formation, spill);
+                break;
+            case BoundReferenceReborrow reborrow:
+                EmitCheckedReferenceReborrow(reborrow, spill);
+                break;
+            case BoundReferenceRead referenceRead:
+                EmitCheckedReferenceRead(referenceRead, spill);
+                break;
+            case BoundReferenceWrite referenceWrite:
+                EmitCheckedReferenceWrite(referenceWrite, spill);
                 break;
             case BoundNativeFunctionAddress address:
                 NativeEmitter.EnsureNativeFunctionPointerConventionSupported(address.Type,

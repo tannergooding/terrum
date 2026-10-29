@@ -118,6 +118,12 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "NativePointer");
         }
+        if (!CheckedReferenceTypeContract.IsValidTable(program.CheckedReferenceTypes)
+            || program.CheckedReferenceTypes.Any(referenceType =>
+                referenceType is null || !ValidType(referenceType.ReferentType, false, program)))
+        {
+            throw InvalidEffect(default, "CheckedReference");
+        }
         if (!NativeFunctionPointerContract.IsValidNativeImportContractTable(
             program.NativeFunctionPointerSignatures, program.NativePointerTypes,
             program.Structures))
@@ -1073,6 +1079,19 @@ public static partial class SemanticVerifier
                     break;
                 case BoundNativeOutputReservation:
                     break;
+                case BoundReferenceFormation formation:
+                    Expression(formation.Place, scope, depth + 1);
+                    break;
+                case BoundReferenceReborrow reborrow:
+                    Expression(reborrow.Descriptor, scope, depth + 1);
+                    break;
+                case BoundReferenceRead referenceRead:
+                    Expression(referenceRead.Descriptor, scope, depth + 1);
+                    break;
+                case BoundReferenceWrite referenceWrite:
+                    Expression(referenceWrite.Descriptor, scope, depth + 1);
+                    Expression(referenceWrite.Value, scope, depth + 1);
+                    break;
                 case BoundNativePointerRead pointerRead:
                     Expression(pointerRead.Address, scope, depth + 1);
                     break;
@@ -1679,6 +1698,19 @@ public static partial class SemanticVerifier
                     break;
                 case BoundNativeFixedArrayPointerAddress pointerAddress:
                     Expression(pointerAddress.Index, depth + 1, acquiringRoot);
+                    break;
+                case BoundReferenceFormation formation:
+                    Expression(formation.Place, depth + 1, acquiringRoot);
+                    break;
+                case BoundReferenceReborrow reborrow:
+                    Expression(reborrow.Descriptor, depth + 1, acquiringRoot);
+                    break;
+                case BoundReferenceRead referenceRead:
+                    Expression(referenceRead.Descriptor, depth + 1, acquiringRoot);
+                    break;
+                case BoundReferenceWrite referenceWrite:
+                    Expression(referenceWrite.Descriptor, depth + 1, acquiringRoot);
+                    Expression(referenceWrite.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundNativePointerRead pointerRead:
                     Expression(pointerRead.Address, depth + 1, acquiringRoot);
@@ -2460,6 +2492,22 @@ public static partial class SemanticVerifier
                     local.Initializer, initialized, local.Variable);
                 initialized.MarkAssigned(local.Variable);
                 initialized.SetNativeOutputResult(local.Variable, nativeOutputResult);
+                if (CheckedReferenceTypeContract.IsValidType(
+                        local.Initializer.Type, program.CheckedReferenceTypes))
+                {
+                    if (initialized.Dependencies is not BackingDependencies referenceDependencies)
+                    {
+                        throw InvalidEffect(local.Span, "CheckedReference");
+                    }
+                    referenceDependencies.SetReferenceTargets(local.Variable,
+                        ReferenceTargetsOfExpression(local.Initializer, referenceDependencies,
+                            initialized, function, program, ref remaining, depth + 1,
+                            fieldMasks));
+                    referenceDependencies.SetReferenceObligations(local.Variable,
+                        ReferenceObligationsOfExpression(local.Initializer,
+                            referenceDependencies, initialized, function, program,
+                            ref remaining, depth + 1, fieldMasks));
+                }
                 if (HasFields(program, local.Initializer.Type))
                 {
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
@@ -2695,6 +2743,22 @@ public static partial class SemanticVerifier
                 }
                 initialized.MarkAssigned(assignment.Variable);
                 initialized.SetNativeOutputResult(assignment.Variable, nativeOutputAssignmentResult);
+                if (CheckedReferenceTypeContract.IsValidType(
+                        assignment.Value.Type, program.CheckedReferenceTypes))
+                {
+                    if (initialized.Dependencies is not BackingDependencies referenceDependencies)
+                    {
+                        throw InvalidEffect(assignment.Span, "CheckedReference");
+                    }
+                    referenceDependencies.SetReferenceTargets(assignment.Variable,
+                        ReferenceTargetsOfExpression(assignment.Value, referenceDependencies,
+                            initialized, function, program, ref remaining, depth + 1,
+                            fieldMasks));
+                    referenceDependencies.SetReferenceObligations(assignment.Variable,
+                        ReferenceObligationsOfExpression(assignment.Value,
+                            referenceDependencies, initialized, function, program,
+                            ref remaining, depth + 1, fieldMasks));
+                }
                 if (assignment.Value is not BoundMove
                     && TokenSpanContract.IsDependent(assignment.Value.Type, program.Structures)
                     && initialized.Dependencies is BackingDependencies assignmentBackingDependencies)
@@ -3052,7 +3116,7 @@ public static partial class SemanticVerifier
                 var effect = UnwrapUnsafeExpression(expressionStatement.Expression);
                 if (effect is not (BoundCall or BoundIndirectCall or BoundViewRead or BoundUpdate
                     or BoundNominalUpdate or BoundCompoundAssignment or BoundNativeFixedArrayWrite
-                    or BoundNativePointerWrite))
+                    or BoundNativePointerWrite or BoundReferenceWrite))
                 {
                     throw Invalid();
                 }
@@ -3629,6 +3693,8 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(pointerResult.Span, "NativePointer");
                 }
                 CheckNativePointerReturn(function, initialized, result.Span);
+                CheckReferenceReturn(result.Value, function, initialized,
+                    fieldMasks, program, result.Span, ref remaining);
                 IReadOnlySet<ProvenanceAnchor>? forwardedBacking = null;
                 if (result.Value is { Type: PrimitiveType.TokenSpan } spanResult)
                 {
@@ -3706,7 +3772,8 @@ public static partial class SemanticVerifier
                                 throw InvalidEffect(result.Span, "Ownership");
                             }
                             dependencies.Staged.Add(new StagedDependencySource(
-                                null, -1, [.. forwardedBacking], EmptyBackingSources, false,
+                                null, -1, [.. forwardedBacking], EmptyBackingSources,
+                                EmptyBackingSources, EmptyBackingSources, false,
                                 new NativePointerExtentFact([], MayBeOpaque: false,
                                     IsUnavailable: false)));
                         }
@@ -4630,7 +4697,7 @@ public static partial class SemanticVerifier
         if (expression is null || !ValidType(expression.Type,
             allowVoid: expression is BoundCall or BoundIndirectCall
                 or BoundUnsafeExpression { Type: PrimitiveType.Void }
-                or BoundNativeFixedArrayWrite or BoundNativePointerWrite, program))
+                or BoundNativeFixedArrayWrite or BoundNativePointerWrite or BoundReferenceWrite, program))
         {
             throw Invalid();
         }
@@ -4772,6 +4839,174 @@ public static partial class SemanticVerifier
                 }
                 Expression(pointerRead.Address, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
+                break;
+            case BoundReferenceFormation formation:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        formation.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                var formedReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(formation.Type)];
+                if (formedReference.IsGarbageCollected || formedReference.IsInitialization
+                    || formedReference.IsOptional
+                    || formation.Place.Type != formedReference.ReferentType
+                    || !TryGetReferencePlaceStorage(formation.Place, function,
+                        program, out _, out _)
+                    || (formedReference.IsWritable && !IsWritableReferencePlace(
+                        formation.Place, function, program)))
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                if (initialized.Dependencies is not BackingDependencies formationDependencies)
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                _ = ReferenceTargetsOfExpression(formation, formationDependencies,
+                    initialized, function, program, ref remaining, depth + 1,
+                    fieldMasks);
+                Expression(formation.Place, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
+                break;
+            case BoundReferenceReborrow reborrow:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        reborrow.Type, program.CheckedReferenceTypes)
+                    || !CheckedReferenceTypeContract.IsValidType(
+                        reborrow.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(reborrow.Span, "CheckedReference");
+                }
+                var reborrowType = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(reborrow.Type)];
+                var sourceReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(reborrow.Descriptor.Type)];
+                if (reborrowType.IsGarbageCollected || reborrowType.IsInitialization
+                    || reborrowType.IsOptional || sourceReference.IsGarbageCollected
+                    || sourceReference.IsInitialization || sourceReference.IsOptional
+                    || reborrowType.ReferentType != sourceReference.ReferentType
+                    || (reborrowType.IsWritable && !sourceReference.IsWritable)
+                    || initialized.Dependencies is not BackingDependencies reborrowDependencies)
+                {
+                    throw InvalidEffect(reborrow.Span, "CheckedReference");
+                }
+                _ = ReferenceTargetsOfExpression(reborrow, reborrowDependencies,
+                    initialized, function, program, ref remaining, depth + 1,
+                    fieldMasks);
+                Expression(reborrow.Descriptor, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
+                break;
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                var readReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                if (readReference.IsGarbageCollected || readReference.IsInitialization
+                    || readReference.IsOptional || readReference.ReferentType != referenceRead.Type)
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                if (initialized.Dependencies is not BackingDependencies readDependencies)
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                foreach (var referenceTarget in ReferenceTargetsOfExpression(
+                    referenceRead.Descriptor, readDependencies, initialized,
+                    function, program, ref remaining, depth + 1, fieldMasks))
+                {
+                    ValidateReferenceTarget(referenceTarget, readReference.ReferentType,
+                        readDependencies, initialized, function, program,
+                        referenceRead.Span, fieldMasks);
+                }
+                Expression(referenceRead.Descriptor, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
+                break;
+            case BoundReferenceWrite referenceWrite:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceWrite.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(referenceWrite.Span, "CheckedReference");
+                }
+                var writeReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceWrite.Descriptor.Type)];
+                if (!writeReference.IsWritable || writeReference.IsGarbageCollected
+                    || writeReference.IsInitialization || writeReference.IsOptional
+                    || writeReference.ReferentType != referenceWrite.Value.Type
+                    || !CheckedReferenceTypeContract.IsSupportedWriteValueType(
+                        referenceWrite.Value.Type, program.Structures, program.EnumDefinitions.Length))
+                {
+                    throw InvalidEffect(referenceWrite.Span, "CheckedReference");
+                }
+                if (initialized.Dependencies is not BackingDependencies writeDependencies)
+                {
+                    throw InvalidEffect(referenceWrite.Span, "CheckedReference");
+                }
+                var referenceWriteTargets = ReferenceTargetsOfExpression(
+                    referenceWrite.Descriptor, writeDependencies, initialized,
+                    function, program, ref remaining, depth + 1, fieldMasks);
+                foreach (var referenceTarget in referenceWriteTargets)
+                {
+                    ValidateReferenceTarget(referenceTarget, writeReference.ReferentType,
+                        writeDependencies, initialized, function, program,
+                        referenceWrite.Span, fieldMasks);
+                }
+                var valueCompletes = CanCompleteNormally(referenceWrite.Value,
+                    initialized, program, ref remaining, depth + 1);
+                Expression(referenceWrite.Descriptor, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
+                Expression(referenceWrite.Value, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
+                if (valueCompletes && referenceWrite.Value.Type == PrimitiveType.TokenSpan)
+                {
+                    var backingSources = BackingOf(referenceWrite.Value,
+                        writeDependencies, program, ref remaining, depth + 1);
+                    if (backingSources.Count == 0)
+                    {
+                        throw InvalidEffect(referenceWrite.Span, "Ownership");
+                    }
+                    foreach (var referenceTarget in referenceWriteTargets)
+                    {
+                        ValidateReferenceTarget(referenceTarget, writeReference.ReferentType,
+                            writeDependencies, initialized, function, program,
+                            referenceWrite.Span, fieldMasks);
+                        if (referenceTarget.Kind == ProvenanceAnchorKind.ReferencePlace)
+                        {
+                            var projection = referenceTarget.Storage?.Projection
+                                ?? throw Invalid(referenceWrite.Span);
+                            if (projection.Kind == StorageProjectionKind.WholeObject)
+                            {
+                                writeDependencies.SetBackingSources(referenceTarget.Identity,
+                                    backingSources);
+                            }
+                            else if (projection.Kind == StorageProjectionKind.InlineFieldPath)
+                            {
+                                SetBackingFieldValuesFromExpression(
+                                    referenceTarget.Identity, projection,
+                                    referenceWrite.Value.Type, referenceWrite.Value,
+                                    writeDependencies, function, program,
+                                    ref remaining, depth + 1);
+                                RefreshBackingAggregateProvenance(
+                                    referenceTarget.Identity,
+                                    function.Variables[referenceTarget.Identity].Type,
+                                    writeDependencies, program,
+                                    ref remaining, depth + 1);
+                            }
+                            else
+                            {
+                                throw InvalidEffect(referenceWrite.Span, "Ownership");
+                            }
+                        }
+                        else
+                        {
+                            VerifyReferenceWriteCapture(function, referenceTarget.Identity,
+                                backingSources, referenceWrite.Span);
+                            writeDependencies.SetReferenceBackingSources(
+                                referenceTarget.Identity, backingSources);
+                        }
+                    }
+                }
                 break;
             case BoundNativePointerWrite pointerWrite:
                 if (!pointerWrite.IsUnsafeAuthorized
@@ -5128,7 +5363,8 @@ public static partial class SemanticVerifier
                 }
                 var readBacking = BackingOf(spanRead.View, initialized.Dependencies, program, ref remaining, depth + 1);
                 initialized.Dependencies?.Staged.Add(new StagedDependencySource(
-                    null, -1, [.. readBacking], EmptyBackingSources, false,
+                    null, -1, [.. readBacking], EmptyBackingSources,
+                    EmptyBackingSources, EmptyBackingSources, false,
                     new NativePointerExtentFact([], MayBeOpaque: false,
                         IsUnavailable: false)));
                 try
@@ -6336,7 +6572,7 @@ public static partial class SemanticVerifier
                             }
                         }
                         StageDependencySource(call, parameterIndex, argument, target,
-                            initialized, program, ref remaining, depth + 1);
+                            initialized, program, ref remaining, depth + 1, fieldMasks);
                     }
                     if (!argumentsComplete)
                     {
@@ -6379,6 +6615,8 @@ public static partial class SemanticVerifier
                         program, ref remaining, depth + 1);
                     ApplyBackingCallEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
+                    ApplyReferenceBackingCallEffects(call, target, initialized,
+                        fieldMasks, function, program, ref remaining, depth + 1);
                     ApplyNativePointerCaptureEffects(call, target, initialized, ref remaining);
                     InvalidateNativePointerExtentsForCall(
                         call, target, initialized, program);
@@ -6624,6 +6862,7 @@ public static partial class SemanticVerifier
             || BoundEnumTypes.IsValidType(type, program.EnumDefinitions)
             || NativePointerTypeContract.IsValidType(type, program.NativePointerTypes)
             || NativeFunctionPointerContract.IsValidType(type, program.NativeFunctionPointerSignatures)
+            || CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes)
             || (ManagedClassTypes.IsManaged(type) && (ManagedClassTypes.Readonly(type) is
                 PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode))
             || ((ManagedClassTypes.IsClass(type) || (ManagedClassTypes.IsOptional(type)
@@ -7179,6 +7418,19 @@ public static partial class SemanticVerifier
             case BoundNativePointerRead pointerRead:
                 VacateNestedOutputs(pointerRead.Address, state, ref remaining);
                 break;
+            case BoundReferenceFormation formation:
+                VacateNestedOutputs(formation.Place, state, ref remaining);
+                break;
+            case BoundReferenceReborrow reborrow:
+                VacateNestedOutputs(reborrow.Descriptor, state, ref remaining);
+                break;
+            case BoundReferenceRead referenceRead:
+                VacateNestedOutputs(referenceRead.Descriptor, state, ref remaining);
+                break;
+            case BoundReferenceWrite referenceWrite:
+                VacateNestedOutputs(referenceWrite.Descriptor, state, ref remaining);
+                VacateNestedOutputs(referenceWrite.Value, state, ref remaining);
+                break;
             case BoundNativePointerWrite pointerWrite:
                 VacateNestedOutputs(pointerWrite.Address, state, ref remaining);
                 VacateNestedOutputs(pointerWrite.Value, state, ref remaining);
@@ -7300,6 +7552,13 @@ public static partial class SemanticVerifier
                 FlowFacts(fixedArrayWrite.Index, flowFacts, ref remaining),
                 fixedArrayWrite.Value, flowFacts, ref remaining),
             BoundNativeStorageAddress address => FlowFacts(address.Index, flowFacts, ref remaining),
+            BoundReferenceFormation formation => FlowFacts(formation.Place, flowFacts, ref remaining),
+            BoundReferenceReborrow reborrow =>
+                FlowFacts(reborrow.Descriptor, flowFacts, ref remaining),
+            BoundReferenceRead referenceRead => FlowFacts(referenceRead.Descriptor, flowFacts, ref remaining),
+            BoundReferenceWrite referenceWrite => AddFlowFact(
+                FlowFacts(referenceWrite.Descriptor, flowFacts, ref remaining),
+                referenceWrite.Value, flowFacts, ref remaining),
             BoundNativePointerAddress => 0,
             BoundNativePointerRead pointerRead => FlowFacts(pointerRead.Address, flowFacts, ref remaining),
             BoundNativePointerWrite pointerWrite => AddFlowFact(

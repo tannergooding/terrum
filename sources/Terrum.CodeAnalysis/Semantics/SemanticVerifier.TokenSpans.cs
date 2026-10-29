@@ -15,6 +15,10 @@ public static partial class SemanticVerifier
         BackingSource,
         IncomingBacking,
         NativeStorage,
+        ReferencePlace,
+        IncomingReference,
+        ReferenceDescriptor,
+        IncomingReferenceDescriptor,
     }
 
     private enum StorageProjectionKind : byte
@@ -588,6 +592,28 @@ public static partial class SemanticVerifier
             StorageInstance instance, StorageProjection projection)
             => new(ProvenanceAnchorKind.NativeStorage, variable,
                 new StorageKey(activation, variable, instance, projection));
+
+        internal static ProvenanceAnchor ForReferencePlace(int activation, int variable,
+            StorageInstance instance)
+            => ForReferencePlace(activation, variable, instance,
+                StorageProjection.WholeObject);
+
+        internal static ProvenanceAnchor ForReferencePlace(int activation, int variable,
+            StorageInstance instance, StorageProjection projection)
+            => new(ProvenanceAnchorKind.ReferencePlace, variable,
+                new StorageKey(activation, variable, instance, projection));
+
+        internal static ProvenanceAnchor ForIncomingReference(int formal)
+            => new(ProvenanceAnchorKind.IncomingReference, formal, null);
+
+        internal static ProvenanceAnchor ForReferenceDescriptor(int activation,
+            int variable, StorageInstance instance)
+            => new(ProvenanceAnchorKind.ReferenceDescriptor, variable,
+                new StorageKey(activation, variable, instance,
+                    StorageProjection.WholeObject));
+
+        internal static ProvenanceAnchor ForIncomingReferenceDescriptor(int formal)
+            => new(ProvenanceAnchorKind.IncomingReferenceDescriptor, formal, null);
     }
 
     private static readonly HashSet<ProvenanceAnchor> EmptyBackingSources
@@ -597,6 +623,8 @@ public static partial class SemanticVerifier
         BoundExpression? Call,
         int ParameterIndex,
         HashSet<ProvenanceAnchor> BackingSources,
+        HashSet<ProvenanceAnchor> ReferenceTargets,
+        HashSet<ProvenanceAnchor> ReferenceObligations,
         HashSet<ProvenanceAnchor> NativePointerSources,
         bool NativePointerMayBeUnknown,
         NativePointerExtentFact NativePointerExtent);
@@ -764,11 +792,8 @@ public static partial class SemanticVerifier
                     var slot = parameter + receiverOffset;
                     if ((uint)parameter >= (uint)explicitParameterCount || !seen.Add(parameter)
                         || (uint)slot >= (uint)function.Variables.Length
-                        || function.Variables[slot] is not {
-                            Type: PrimitiveType.TokenSpan,
-                            IsOut: false,
-                            IsInit: false,
-                        })
+                        || function.Variables[slot].IsOut || function.Variables[slot].IsInit
+                        || !IsSpanDependencySource(function.Variables[slot].Type, program))
                     {
                         throw InvalidEffect(function.Span, "Ownership");
                     }
@@ -783,8 +808,7 @@ public static partial class SemanticVerifier
                 var variable = function.Variables[slot];
                 if (TokenSpanContract.IsDependent(variable.Type, program.Structures)
                     && (function.IsExternal || function.Intrinsic != BoundIntrinsic.None
-                        || variable.IsOut || variable.IsInit || variable.IsInitializationLocal
-                        || (variable.Type == PrimitiveType.TokenSpan && variable.IsMutable)))
+                        || variable.IsOut || variable.IsInit || variable.IsInitializationLocal))
                 {
                     throw InvalidEffect(variable.Span, "Ownership");
                 }
@@ -797,6 +821,24 @@ public static partial class SemanticVerifier
         BoundProgram program)
         => TokenSpanContract.IsSpanResultReceiver(type, program.Structures);
 
+    private static bool IsSpanDependencySource(PrimitiveType type, BoundProgram program)
+    {
+        if (TokenSpanContract.IsDependent(type, program.Structures))
+        {
+            return true;
+        }
+        if (!CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes))
+        {
+            return false;
+        }
+
+        var referenceType = program.CheckedReferenceTypes[CheckedReferenceTypes.Index(type)];
+        return TokenSpanContract.IsDependent(referenceType.ReferentType, program.Structures)
+            && !referenceType.IsGarbageCollected
+            && !referenceType.IsInitialization
+            && !referenceType.IsOptional;
+    }
+
     private static BoundDependencyContract? ResultDependencyContract(
         BoundFunction function)
         => function.DependencyContracts.FirstOrDefault(static contract =>
@@ -808,6 +850,54 @@ public static partial class SemanticVerifier
         => function.DependencyContracts.FirstOrDefault(static contract =>
             contract.Relation == BoundDependencyRelation.Captures
             && contract.Destination == BoundDependencyDestination.Receiver);
+
+    private static BoundDependencyContract? RetainedReferenceCaptureContract(
+        BoundFunction function, int parameterSlot)
+    {
+        var receiverOffset = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor
+                ? 1 : 0;
+        var ordinal = parameterSlot - receiverOffset;
+        if (ordinal < 0 || parameterSlot >= function.ParameterCount)
+        {
+            return null;
+        }
+        return function.DependencyContracts.FirstOrDefault(contract =>
+            contract.Relation == BoundDependencyRelation.Captures
+            && contract.Destination == BoundDependencyDestination.RetainedFormal
+            && contract.DestinationOrdinal == ordinal);
+    }
+
+    private static void VerifyReferenceWriteCapture(
+        BoundFunction function, int parameterSlot,
+        IReadOnlySet<ProvenanceAnchor> sources, TextSpan span)
+    {
+        var capture = RetainedReferenceCaptureContract(function, parameterSlot)
+            ?? throw InvalidEffect(span, "Ownership");
+        var receiverOffset = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor
+                ? 1 : 0;
+        var permittedSources = new HashSet<ProvenanceAnchor>();
+        foreach (var source in capture.Sources)
+        {
+            var sourceSlot = source.Kind switch
+            {
+                BoundDependencySourceKind.Receiver when receiverOffset != 0 => 0,
+                BoundDependencySourceKind.Formal when source.FormalOrdinal is int ordinal
+                    => ordinal + receiverOffset,
+                _ => -1,
+            };
+            if ((uint)sourceSlot >= (uint)function.ParameterCount)
+            {
+                throw InvalidEffect(span, "Ownership");
+            }
+            _ = permittedSources.Add(ProvenanceAnchor.ForBackingSource(~sourceSlot));
+        }
+        if (sources.Count == 0 || sources.Any(source => !permittedSources.Contains(source)))
+        {
+            throw InvalidEffect(span, "Ownership");
+        }
+    }
 
     private static BoundExpression DependencyCallArgument(BoundCall call,
         BoundFunction callee, BoundDependencySource source)
@@ -838,6 +928,9 @@ public static partial class SemanticVerifier
         // remains path-sensitive in InitializationState, including unwind replay.
         internal HashSet<ProvenanceAnchor>?[] Sources { get; }
         internal HashSet<ProvenanceAnchor>?[] BackingBounds { get; }
+        internal HashSet<ProvenanceAnchor>?[] ReferenceTargets { get; }
+        internal HashSet<ProvenanceAnchor>?[] ReferenceObligations { get; }
+        internal HashSet<ProvenanceAnchor>?[] ReferenceBackingSources { get; }
         internal bool[] BackingMayBeUnknown { get; }
         internal HashSet<ProvenanceAnchor>?[] NativePointerSources { get; }
         internal bool[] NativePointerMayBeUnknown { get; }
@@ -885,6 +978,9 @@ public static partial class SemanticVerifier
             CopyOriginSummaryBuilder = copyOriginSummaryBuilder;
             Sources = new HashSet<ProvenanceAnchor>?[length];
             BackingBounds = new HashSet<ProvenanceAnchor>?[length];
+            ReferenceTargets = new HashSet<ProvenanceAnchor>?[length];
+            ReferenceObligations = new HashSet<ProvenanceAnchor>?[length];
+            ReferenceBackingSources = new HashSet<ProvenanceAnchor>?[length];
             BackingMayBeUnknown = new bool[length];
             NativePointerSources = new HashSet<ProvenanceAnchor>?[length];
             NativePointerMayBeUnknown = new bool[length];
@@ -923,6 +1019,11 @@ public static partial class SemanticVerifier
             {
                 destination.Sources[slot] = CloneSet(Sources[slot]);
                 destination.BackingBounds[slot] = CloneSet(BackingBounds[slot]);
+                destination.ReferenceTargets[slot] = CloneSet(ReferenceTargets[slot]);
+                destination.ReferenceObligations[slot] =
+                    CloneSet(ReferenceObligations[slot]);
+                destination.ReferenceBackingSources[slot] =
+                    CloneSet(ReferenceBackingSources[slot]);
                 destination.BackingMayBeUnknown[slot] = BackingMayBeUnknown[slot];
                 destination.NativePointerSources[slot] = CloneSet(NativePointerSources[slot]);
                 destination.NativePointerMayBeUnknown[slot] = NativePointerMayBeUnknown[slot];
@@ -940,6 +1041,8 @@ public static partial class SemanticVerifier
             {
                 destination.Staged.Add(staged with {
                     BackingSources = [.. staged.BackingSources],
+                    ReferenceTargets = [.. staged.ReferenceTargets],
+                    ReferenceObligations = [.. staged.ReferenceObligations],
                     NativePointerSources = [.. staged.NativePointerSources],
                     NativePointerExtent = staged.NativePointerExtent with {
                         Sources = [.. staged.NativePointerExtent.Sources],
@@ -1238,6 +1341,11 @@ public static partial class SemanticVerifier
 
             var changed = MergeSet(ref Sources[slot], other.Sources[slot]);
             changed |= MergeSet(ref BackingBounds[slot], other.BackingBounds[slot]);
+            changed |= MergeSet(ref ReferenceTargets[slot], other.ReferenceTargets[slot]);
+            changed |= MergeSet(ref ReferenceObligations[slot],
+                other.ReferenceObligations[slot]);
+            changed |= MergeSet(ref ReferenceBackingSources[slot],
+                other.ReferenceBackingSources[slot]);
             if (other.BackingMayBeUnknown[slot] && !BackingMayBeUnknown[slot])
             {
                 BackingMayBeUnknown[slot] = true;
@@ -1424,6 +1532,11 @@ public static partial class SemanticVerifier
 
             var changed = !SetEquals(Sources[slot], other.Sources[slot])
                 || !SetEquals(BackingBounds[slot], other.BackingBounds[slot])
+                || !SetEquals(ReferenceTargets[slot], other.ReferenceTargets[slot])
+                || !SetEquals(ReferenceObligations[slot],
+                    other.ReferenceObligations[slot])
+                || !SetEquals(ReferenceBackingSources[slot],
+                    other.ReferenceBackingSources[slot])
                 || BackingMayBeUnknown[slot] != other.BackingMayBeUnknown[slot]
                 || !SetEquals(NativePointerSources[slot], other.NativePointerSources[slot])
                 || NativePointerMayBeUnknown[slot] != other.NativePointerMayBeUnknown[slot]
@@ -1440,6 +1553,11 @@ public static partial class SemanticVerifier
             changed |= !CopyOriginFieldValuesEqualForSlot(slot, other);
             Sources[slot] = CloneSet(other.Sources[slot]);
             BackingBounds[slot] = CloneSet(other.BackingBounds[slot]);
+            ReferenceTargets[slot] = CloneSet(other.ReferenceTargets[slot]);
+            ReferenceObligations[slot] =
+                CloneSet(other.ReferenceObligations[slot]);
+            ReferenceBackingSources[slot] =
+                CloneSet(other.ReferenceBackingSources[slot]);
             BackingMayBeUnknown[slot] = other.BackingMayBeUnknown[slot];
             NativePointerSources[slot] = CloneSet(other.NativePointerSources[slot]);
             NativePointerMayBeUnknown[slot] = other.NativePointerMayBeUnknown[slot];
@@ -1503,6 +1621,9 @@ public static partial class SemanticVerifier
             }
             ClearCopyOriginFacts(slot);
             BackingBounds[slot] = null;
+            ReferenceTargets[slot] = null;
+            ReferenceObligations[slot] = null;
+            ReferenceBackingSources[slot] = null;
             ClearBackingFieldValues(slot);
             BackingMayBeUnknown[slot] = false;
             StorageInstances[slot] = [new StorageInstance(supportingScopeActivation, generation)];
@@ -1516,6 +1637,9 @@ public static partial class SemanticVerifier
             }
             ClearCopyOriginFacts(slot);
             BackingBounds[slot] = null;
+            ReferenceTargets[slot] = null;
+            ReferenceObligations[slot] = null;
+            ReferenceBackingSources[slot] = null;
             ClearBackingFieldValues(slot);
             BackingMayBeUnknown[slot] = false;
             StorageInstances[slot] = [.. StorageInstances[slot]
@@ -1704,6 +1828,64 @@ public static partial class SemanticVerifier
             Sources[slot] = sources.Count == 0 ? null : [.. sources];
             BackingBounds[slot] = sources.Count == 0 ? null : [.. sources];
             BackingMayBeUnknown[slot] = false;
+        }
+
+        internal void SetReferenceTargets(int slot, IReadOnlySet<ProvenanceAnchor> targets)
+        {
+            if ((uint)slot >= (uint)ReferenceTargets.Length || targets is null)
+            {
+                throw Invalid();
+            }
+            ReferenceTargets[slot] = targets.Count == 0 ? null : [.. targets];
+        }
+
+        internal void SetReferenceObligations(
+            int slot, IReadOnlySet<ProvenanceAnchor> obligations)
+        {
+            if ((uint)slot >= (uint)ReferenceObligations.Length || obligations is null)
+            {
+                throw Invalid();
+            }
+            ReferenceObligations[slot] =
+                obligations.Count == 0 ? null : [.. obligations];
+        }
+
+        internal void ClearReferenceTargets(int slot)
+        {
+            if ((uint)slot >= (uint)ReferenceTargets.Length)
+            {
+                throw Invalid();
+            }
+            ReferenceTargets[slot] = null;
+        }
+
+        internal void SetReferenceBackingSources(
+            int slot, IReadOnlySet<ProvenanceAnchor> sources)
+        {
+            if ((uint)slot >= (uint)ReferenceBackingSources.Length || sources is null)
+            {
+                throw Invalid();
+            }
+            ReferenceBackingSources[slot] = sources.Count == 0 ? null : [.. sources];
+        }
+
+        internal void AddReferenceBackingSources(
+            int slot, IReadOnlySet<ProvenanceAnchor> sources)
+        {
+            if ((uint)slot >= (uint)ReferenceBackingSources.Length || sources is null)
+            {
+                throw Invalid();
+            }
+            _ = MergeSet(ref ReferenceBackingSources[slot], sources);
+        }
+
+        internal void AddReferenceTargets(int slot, IReadOnlySet<ProvenanceAnchor> targets)
+        {
+            if ((uint)slot >= (uint)ReferenceTargets.Length || targets is null)
+            {
+                throw Invalid();
+            }
+            _ = MergeSet(ref ReferenceTargets[slot], targets);
         }
 
         internal void SetBackingAggregateProvenance(int slot,
@@ -3087,6 +3269,7 @@ public static partial class SemanticVerifier
     {
         if (!hasSpans && program.NativePointerTypes.IsEmpty
             && program.NativeFunctionPointerSignatures.IsEmpty
+            && program.CheckedReferenceTypes.IsEmpty
             && !CarriesNativePointer(function.ReturnType, program)
             && !function.Variables.Any(variable => CarriesNativePointer(variable.Type, program))
             && !CarriesCopyOrigin(function.ReturnType, program)
@@ -3121,6 +3304,26 @@ public static partial class SemanticVerifier
             if (TryGetCopyOriginInput(function, program, slot, out var copyOrigin))
             {
                 facts.SetCopyOriginRoot(slot, CopyOriginFact.Known([copyOrigin]));
+            }
+            if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
+                && !(slot == 0 && (function.IsConstructor || function.IsClassConstructor))
+                && !function.Variables[slot].IsOut && !function.Variables[slot].IsInit
+                && CheckedReferenceTypeContract.IsValidType(
+                    function.Variables[slot].Type, program.CheckedReferenceTypes))
+            {
+                var reference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(function.Variables[slot].Type)];
+                facts.SetReferenceTargets(slot, new HashSet<ProvenanceAnchor>
+                {
+                    ProvenanceAnchor.ForIncomingReference(slot),
+                });
+                if (TokenSpanContract.IsDependent(reference.ReferentType, program.Structures))
+                {
+                    facts.SetReferenceBackingSources(slot, new HashSet<ProvenanceAnchor>
+                    {
+                        ProvenanceAnchor.ForBackingSource(~slot),
+                    });
+                }
             }
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 && !(slot == 0 && (function.IsConstructor || function.IsClassConstructor)))
@@ -3249,6 +3452,78 @@ public static partial class SemanticVerifier
                         throw Invalid(move.Span);
                     }
                     AddSnapshotSources(destination, move.Variable, move.Span, depth + 1);
+                    break;
+                case BoundReferenceFormation formation:
+                    if (!CheckedReferenceTypeContract.IsValidType(
+                            formation.Type, program.CheckedReferenceTypes))
+                    {
+                        throw Invalid(formation.Span);
+                    }
+                    var formedReference = program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(formation.Type)];
+                    if (formedReference.IsGarbageCollected || formedReference.IsInitialization
+                        || formedReference.IsOptional || formedReference.ReferentType != formation.Place.Type
+                        || !TokenSpanContract.IsDependent(formedReference.ReferentType, program.Structures))
+                    {
+                        throw Invalid(formation.Span);
+                    }
+                    Source(destination, formation.Place, depth + 1);
+                    break;
+                case BoundReferenceRead referenceRead:
+                    if (!CheckedReferenceTypeContract.IsValidType(
+                            referenceRead.Descriptor.Type, program.CheckedReferenceTypes))
+                    {
+                        throw Invalid(referenceRead.Span);
+                    }
+                    var readReference = program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                    if (readReference.IsGarbageCollected || readReference.IsInitialization
+                        || readReference.IsOptional || readReference.ReferentType != referenceRead.Type
+                        || !TokenSpanContract.IsDependent(referenceRead.Type, program.Structures))
+                    {
+                        throw Invalid(referenceRead.Span);
+                    }
+                    foreach (var target in ReferenceTargetsSummary(
+                        referenceRead.Descriptor, facts, function, program,
+                        ref remaining, depth + 1))
+                    {
+                        if (target.Kind == ProvenanceAnchorKind.ReferencePlace
+                            && (uint)target.Identity < (uint)function.Variables.Length
+                            && function.Variables[target.Identity].Type == referenceRead.Type)
+                        {
+                            if (IsTokenSnapshotType(referenceRead.Type, program))
+                            {
+                                AddSnapshotSources(destination, target.Identity,
+                                    referenceRead.Span, depth + 1);
+                            }
+                            else
+                            {
+                                AddEdge(target.Identity, destination);
+                            }
+                        }
+                        else if (target.Kind == ProvenanceAnchorKind.IncomingReference
+                            && (uint)target.Identity < (uint)function.ParameterCount
+                            + (function.IsConstructor ? 1u : 0u))
+                        {
+                            if (facts.ReferenceBackingSources[target.Identity] is
+                            { Count: > 0 } capturedSources)
+                            {
+                            foreach (var source in capturedSources)
+                            {
+                                AddBackingSource(facts, destination, source);
+                            }
+                            }
+                            else
+                            {
+                            AddBackingSource(facts, destination,
+                                ProvenanceAnchor.ForBackingSource(~target.Identity));
+                            }
+                        }
+                        else
+                        {
+                            throw InvalidEffect(referenceRead.Span, "Ownership");
+                        }
+                    }
                     break;
                 case BoundRead read:
                     if ((uint)read.Variable >= (uint)edges.Length
@@ -3434,6 +3709,13 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid(local.Span);
                     }
+                    if (CheckedReferenceTypeContract.IsValidType(
+                        initializer.Type, program.CheckedReferenceTypes))
+                    {
+                        facts.SetReferenceTargets(local.Variable,
+                            ReferenceTargetsSummary(initializer, facts, function, program,
+                                ref remaining, depth + 1));
+                    }
                     if (TokenSpanContract.IsDependent(initializer.Type, program.Structures))
                     {
                         Source(local.Variable, initializer, depth + 1);
@@ -3453,6 +3735,13 @@ public static partial class SemanticVerifier
                     if ((uint)assignment.Variable >= (uint)facts.Sources.Length)
                     {
                         throw Invalid(assignment.Span);
+                    }
+                    if (CheckedReferenceTypeContract.IsValidType(
+                        value.Type, program.CheckedReferenceTypes))
+                    {
+                        facts.AddReferenceTargets(assignment.Variable,
+                            ReferenceTargetsSummary(value, facts, function, program,
+                                ref remaining, depth + 1));
                     }
                     if (TokenSpanContract.IsDependent(value.Type, program.Structures))
                     {
@@ -5247,6 +5536,97 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static void ApplyReferenceBackingCallEffects(BoundCall call,
+        BoundFunction callee, InitializationState initialized, uint[] fieldMasks,
+        BoundFunction caller, BoundProgram program, ref int remaining, int depth)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts
+            || callee.IsConstructor || callee.IsClassConstructor)
+        {
+            return;
+        }
+
+        var receiverOffset = callee.DeclaringStruct is not null
+            && !callee.IsStatic ? 1 : 0;
+        foreach (var capture in callee.DependencyContracts)
+        {
+            if (capture.Relation != BoundDependencyRelation.Captures
+                || capture.Destination != BoundDependencyDestination.RetainedFormal
+                || capture.DestinationOrdinal is not int destinationOrdinal)
+            {
+                continue;
+            }
+            var destinationSlot = destinationOrdinal + receiverOffset;
+            if ((uint)destinationSlot >= (uint)callee.Variables.Length
+                || !CheckedReferenceTypeContract.IsValidType(
+                    callee.Variables[destinationSlot].Type, program.CheckedReferenceTypes))
+            {
+                continue;
+            }
+            var reference = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(callee.Variables[destinationSlot].Type)];
+            if (!reference.IsWritable || reference.IsGarbageCollected
+                || reference.IsInitialization || reference.IsOptional
+                || !TokenSpanContract.IsDependent(reference.ReferentType, program.Structures))
+            {
+                continue;
+            }
+
+            var source = new BoundDependencySource(
+                BoundDependencySourceKind.Formal, destinationOrdinal);
+            var parameterIndex = DependencyCallParameterIndex(callee, source);
+            var staged = facts.Staged.LastOrDefault(candidate =>
+                ReferenceEquals(candidate.Call, call)
+                && candidate.ParameterIndex == parameterIndex);
+            if (staged.Call is null || staged.ReferenceTargets.Count == 0)
+            {
+                throw InvalidEffect(call.Span, "CheckedReference");
+            }
+            var capturedSources = BackingSourcesForCallRelationship(
+                call, callee, capture, facts, program, ref remaining, depth + 1);
+            foreach (var target in staged.ReferenceTargets)
+            {
+                ValidateReferenceTarget(target, reference.ReferentType,
+                    facts, initialized, caller, program, call.Span, fieldMasks);
+                if (target.Kind == ProvenanceAnchorKind.ReferencePlace)
+                {
+                    var projection = target.Storage?.Projection
+                        ?? throw Invalid(call.Span);
+                    if (projection.Kind == StorageProjectionKind.WholeObject)
+                    {
+                        facts.AddBackingSources(target.Identity, capturedSources);
+                    }
+                    else if (projection.Kind == StorageProjectionKind.InlineFieldPath)
+                    {
+                        _ = facts.TryGetBackingFieldValue(target.Identity,
+                            projection, out var previousValue);
+                        var possibleSources = new HashSet<ProvenanceAnchor>(
+                            previousValue.Sources);
+                        possibleSources.UnionWith(capturedSources);
+                        facts.SetBackingFieldValue(target.Identity, projection,
+                            new BackingFieldValue(possibleSources, isAvailable: false));
+                        facts.BackingMayBeUnknown[target.Identity] = true;
+                        RefreshBackingAggregateProvenance(target.Identity,
+                            caller.Variables[target.Identity].Type, facts,
+                            program, ref remaining, depth + 1);
+                    }
+                    else
+                    {
+                        throw InvalidEffect(call.Span, "Ownership");
+                    }
+                }
+                else if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+                {
+                    facts.AddReferenceBackingSources(target.Identity, capturedSources);
+                }
+                else
+                {
+                    throw InvalidEffect(call.Span, "CheckedReference");
+                }
+            }
+        }
+    }
+
     private static Dictionary<StorageProjection, NativePointerFieldValue>?
         CreateNativePointerCallResult(
             BoundCall call, BoundFunction target, BoundCopyOriginSummary? summary,
@@ -6661,6 +7041,18 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(span, "NativePointer");
         }
+        if (facts.Staged.Any(staged => staged.ReferenceTargets.Any(
+                target => IsReferenceStorageInstance(target, owner, ownerInstances,
+                    facts.FunctionActivation))))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+        if (facts.Staged.Any(staged => staged.ReferenceObligations.Any(
+                obligation => IsReferenceDescriptorInstance(obligation, owner,
+                    ownerInstances, facts.FunctionActivation))))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
         for (var slot = 0; slot < state.Length; slot++)
         {
             if ((state.Possibilities(slot) & 2) != 0
@@ -6669,6 +7061,20 @@ public static partial class SemanticVerifier
                         facts.FunctionActivation)) == true)
             {
                 throw InvalidEffect(span, "NativePointer");
+            }
+            if (slot != owner && (state.Possibilities(slot) & 2) != 0
+                && facts.ReferenceTargets[slot]?.Any(
+                    target => IsReferenceStorageInstance(target, owner, ownerInstances,
+                        facts.FunctionActivation)) == true)
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            if (slot != owner && (state.Possibilities(slot) & 2) != 0
+                && facts.ReferenceObligations[slot]?.Any(
+                    obligation => IsReferenceDescriptorInstance(obligation,
+                        owner, ownerInstances, facts.FunctionActivation)) == true)
+            {
+                throw InvalidEffect(span, "CheckedReference");
             }
         }
     }
@@ -6679,6 +7085,24 @@ public static partial class SemanticVerifier
             && source.Identity == site
             && (HasUnknownStorageInstances(instances)
                 || source.Storage is not StorageKey key || !key.IsKnown
+                || key.Activation != activation
+                || instances.Contains(key.Instance));
+
+    private static bool IsReferenceStorageInstance(ProvenanceAnchor target, int site,
+        HashSet<StorageInstance> instances, int activation)
+        => target.Kind == ProvenanceAnchorKind.ReferencePlace
+            && target.Identity == site
+            && (HasUnknownStorageInstances(instances)
+                || target.Storage is not StorageKey key || !key.IsKnown
+                || key.Activation != activation
+                || instances.Contains(key.Instance));
+
+    private static bool IsReferenceDescriptorInstance(ProvenanceAnchor obligation,
+        int site, HashSet<StorageInstance> instances, int activation)
+        => obligation.Kind == ProvenanceAnchorKind.ReferenceDescriptor
+            && obligation.Identity == site
+            && (HasUnknownStorageInstances(instances)
+                || obligation.Storage is not StorageKey key || !key.IsKnown
                 || key.Activation != activation
                 || instances.Contains(key.Instance));
 
@@ -6700,6 +7124,186 @@ public static partial class SemanticVerifier
                 throw InvalidEffect(span, "NativePointer");
             }
         }
+    }
+
+    private static void CheckReferenceReturn(BoundExpression? expression,
+        BoundFunction function, InitializationState state, uint[] fieldMasks,
+        BoundProgram program, TextSpan span, ref int remaining)
+    {
+        if (expression is null
+            || !CheckedReferenceTypeContract.IsValidType(
+                function.ReturnType, program.CheckedReferenceTypes))
+        {
+            return;
+        }
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+        var targets = ReferenceTargetsOfExpression(expression, facts, state,
+            function, program, ref remaining, 0, fieldMasks);
+        var obligations = ReferenceObligationsOfExpression(expression, facts, state,
+            function, program, ref remaining, 0, fieldMasks);
+        foreach (var target in targets)
+        {
+            if (target.Kind == ProvenanceAnchorKind.ReferencePlace)
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            if (target.Kind != ProvenanceAnchorKind.IncomingReference
+                || !ReferenceReturnDependsOnFormal(function, target.Identity))
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+        }
+        foreach (var obligation in obligations)
+        {
+            if (obligation.Kind != ProvenanceAnchorKind.IncomingReferenceDescriptor
+                || !ReferenceReturnDependsOnFormal(function, obligation.Identity))
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+        }
+    }
+
+    private static bool ReferenceReturnDependsOnFormal(BoundFunction function,
+        int parameterSlot)
+    {
+        var dependency = ResultDependencyContract(function);
+        if (dependency is null)
+        {
+            return false;
+        }
+        var receiverOffset = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor
+                ? 1 : 0;
+        if (receiverOffset != 0 && parameterSlot == 0)
+        {
+            return dependency.Sources.Any(static source =>
+                source.Kind == BoundDependencySourceKind.Receiver);
+        }
+        var formalOrdinal = parameterSlot - receiverOffset;
+        return formalOrdinal >= 0 && dependency.Sources.Any(source =>
+            source.Kind == BoundDependencySourceKind.Formal
+            && source.FormalOrdinal == formalOrdinal);
+    }
+
+    private static HashSet<ProvenanceAnchor> ReferenceTargetsSummary(
+        BoundExpression expression, BackingDependencies facts, BoundFunction function,
+        BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (expression is null
+            || !CheckedReferenceTypeContract.IsValidType(
+                expression.Type, program.CheckedReferenceTypes))
+        {
+            throw InvalidEffect(expression?.Span ?? default, "CheckedReference");
+        }
+
+        var type = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(expression.Type)];
+        var result = new HashSet<ProvenanceAnchor>();
+        switch (expression)
+        {
+            case BoundReferenceFormation formation:
+                if (formation.Type != expression.Type
+                    || type.IsGarbageCollected || type.IsInitialization || type.IsOptional
+                    || formation.Place.Type != type.ReferentType
+                    || !TryGetReferencePlaceStorage(formation.Place, function,
+                        program, out var placeVariable, out var placeProjection)
+                    || (type.IsWritable && !IsWritableReferencePlace(
+                        formation.Place, function, program)))
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                _ = result.Add(ProvenanceAnchor.ForReferencePlace(
+                    facts.FunctionActivation, placeVariable,
+                    new StorageInstance(BackingDependencies.RootScopeActivation, 0),
+                    placeProjection));
+                break;
+            case BoundReferenceReborrow reborrow:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        reborrow.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(reborrow.Span, "CheckedReference");
+                }
+                var sourceReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(reborrow.Descriptor.Type)];
+                if (reborrow.Type != expression.Type
+                    || sourceReference.IsGarbageCollected || sourceReference.IsInitialization
+                    || sourceReference.IsOptional || type.IsGarbageCollected
+                    || type.IsInitialization || type.IsOptional
+                    || sourceReference.ReferentType != type.ReferentType
+                    || (type.IsWritable && !sourceReference.IsWritable))
+                {
+                    throw InvalidEffect(reborrow.Span, "CheckedReference");
+                }
+                result = ReferenceTargetsSummary(reborrow.Descriptor, facts,
+                    function, program, ref remaining, depth + 1);
+                break;
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != expression.Type
+                    || facts.ReferenceTargets[read.Variable] is not { Count: > 0 } targets)
+                {
+                    throw InvalidEffect(read.Span, "CheckedReference");
+                }
+                result.UnionWith(targets);
+                break;
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                var descriptorType = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                if (descriptorType.IsGarbageCollected || descriptorType.IsInitialization
+                    || descriptorType.IsOptional || descriptorType.ReferentType != expression.Type)
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                foreach (var target in ReferenceTargetsSummary(
+                    referenceRead.Descriptor, facts, function, program,
+                    ref remaining, depth + 1))
+                {
+                    if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+                    {
+                        _ = result.Add(ProvenanceAnchor.ForIncomingReference(target.Identity));
+                        continue;
+                    }
+                    if (target.Kind != ProvenanceAnchorKind.ReferencePlace
+                        || (uint)target.Identity >= (uint)function.Variables.Length
+                        || function.Variables[target.Identity].Type != expression.Type
+                        || facts.ReferenceTargets[target.Identity] is not { Count: > 0 } nestedTargets)
+                    {
+                        throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                    }
+                    result.UnionWith(nestedTargets);
+                }
+                if (result.Count == 0)
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                break;
+            case BoundConditional conditional:
+                if (conditional.Type != expression.Type)
+                {
+                    throw InvalidEffect(conditional.Span, "CheckedReference");
+                }
+                result.UnionWith(ReferenceTargetsSummary(conditional.WhenTrue,
+                    facts, function, program, ref remaining, depth + 1));
+                result.UnionWith(ReferenceTargetsSummary(conditional.WhenFalse,
+                    facts, function, program, ref remaining, depth + 1));
+                break;
+            case BoundUnsafeExpression unsafeExpression:
+                result = ReferenceTargetsSummary(unsafeExpression.Expression,
+                    facts, function, program, ref remaining, depth + 1);
+                break;
+            default:
+                throw InvalidEffect(expression.Span, "CheckedReference");
+        }
+        return result;
     }
 
     private static void CheckNativePointerScopeExit(BoundBlock block, InitializationState state)
@@ -6741,6 +7345,677 @@ public static partial class SemanticVerifier
             {
                 throw InvalidEffect(block.Span, "NativePointer");
             }
+            if (facts.ReferenceTargets[slot]?.Any(source =>
+                    source.Kind == ProvenanceAnchorKind.ReferencePlace
+                    && scopedVariables.Contains(source.Identity)) == true)
+            {
+                throw InvalidEffect(block.Span, "CheckedReference");
+            }
+            if (facts.ReferenceObligations[slot]?.Any(obligation =>
+                    obligation.Kind == ProvenanceAnchorKind.ReferenceDescriptor
+                    && scopedVariables.Contains(obligation.Identity)) == true)
+            {
+                throw InvalidEffect(block.Span, "CheckedReference");
+            }
+            if (facts.ReferenceBackingSources[slot]?.Any(source =>
+                    source.Kind == ProvenanceAnchorKind.BackingSource
+                    && scopedVariables.Contains(source.Identity)) == true)
+            {
+                throw InvalidEffect(block.Span, "Ownership");
+            }
+        }
+    }
+
+    private static bool TryGetReferencePlaceStorage(BoundExpression place,
+        BoundFunction function, BoundProgram program, out int variable,
+        out StorageProjection projection)
+    {
+        switch (place)
+        {
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != read.Type)
+                {
+                    throw Invalid(read.Span);
+                }
+                variable = read.Variable;
+                projection = StorageProjection.WholeObject;
+                return true;
+            case BoundNativeFixedArrayElement element:
+                if ((uint)element.Variable >= (uint)function.Variables.Length
+                    || function.Variables[element.Variable].Type != element.Layout.CarrierType
+                    || function.Variables[element.Variable].NativeFixedArrayLayout != element.Layout
+                    || !NativeFixedArrayContract.MatchesLayout(element.Layout, program)
+                    || element.Type != element.Layout.ElementType)
+                {
+                    throw Invalid(element.Span);
+                }
+                variable = element.Variable;
+                projection = StorageProjection.ForArrayElement(element.Index);
+                return true;
+            case BoundFieldRead field:
+                if (!IsReferenceAddressablePlace(field)
+                    || !IsReferenceAddressableFieldPath(field, function, program)
+                    || !TryGetNativePointerFieldPlace(field, function, program,
+                    out variable, out projection))
+                {
+                    variable = -1;
+                    projection = default;
+                    return false;
+                }
+                var root = function.Variables[variable];
+                if (root.IsOut || root.IsInit || root.IsInitializationLocal)
+                {
+                    variable = -1;
+                    projection = default;
+                    return false;
+                }
+                if (root.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout)
+                {
+                    if (!NativeFixedArrayContract.MatchesLayout(layout, program))
+                    {
+                        throw Invalid(field.Span);
+                    }
+                    return true;
+                }
+                var rootTypeIndex = (int)root.Type - 100;
+                if (rootTypeIndex < 0 || rootTypeIndex >= program.Structures.Length
+                    || ManagedClassTypes.IsClass(root.Type)
+                    || (program.Structures[rootTypeIndex].CleanupMethod is not null
+                        && !program.Structures[rootTypeIndex].IsUnique))
+                {
+                    variable = -1;
+                    projection = default;
+                    return false;
+                }
+                return true;
+            default:
+                variable = -1;
+                projection = default;
+                return false;
+        }
+    }
+
+    private static bool IsReferenceAddressableFieldPath(BoundFieldRead field,
+    BoundFunction function, BoundProgram program)
+    {
+    var receiverIndex = (int)field.Receiver.Type - 100;
+    if (receiverIndex < 0 || receiverIndex >= program.Structures.Length
+        || ManagedClassTypes.IsClass(field.Receiver.Type)
+        || (field.Receiver is not BoundRead
+            && (program.Structures[receiverIndex].IsUnique
+                || program.Structures[receiverIndex].CleanupMethod is not null))
+        || (uint)field.Field >= (uint)program.Structures[receiverIndex].Fields.Length)
+    {
+        return false;
+    }
+    var definition = program.Structures[receiverIndex].Fields[field.Field];
+    return definition.Type == field.Type
+        && CheckedReferenceTypeContract.IsSupportedWriteValueType(
+            field.Type, program.Structures, program.EnumDefinitions.Length)
+        && (field.Receiver is not BoundFieldRead parent
+            || IsReferenceAddressableFieldPath(parent, function, program))
+        && (field.Receiver is not BoundNativeFixedArrayElement element
+            || ((uint)element.Variable < (uint)function.Variables.Length
+                && function.Variables[element.Variable].NativeFixedArrayLayout
+                    is BoundNativeFixedArrayLayout layout
+                && NativeFixedArrayContract.MatchesLayout(layout, program)));
+    }
+
+    private static bool IsReferenceAddressablePlace(BoundExpression place)
+        => place switch
+        {
+            BoundRead or BoundNativeFixedArrayElement => true,
+            BoundFieldRead field => IsReferenceAddressablePlace(field.Receiver),
+            _ => false,
+        };
+
+    private static bool IsWritableReferencePlace(BoundExpression place,
+        BoundFunction function, BoundProgram program)
+    {
+        switch (place)
+        {
+            case BoundRead read:
+                return (uint)read.Variable < (uint)function.Variables.Length
+                    && function.Variables[read.Variable].Type == read.Type
+                    && function.Variables[read.Variable].IsMutable;
+            case BoundNativeFixedArrayElement element:
+                return (uint)element.Variable < (uint)function.Variables.Length
+                    && function.Variables[element.Variable].NativeFixedArrayLayout == element.Layout
+                    && function.Variables[element.Variable].IsMutable
+                    && NativeFixedArrayContract.AllowsElementWrites(element.Layout);
+            case BoundFieldRead field:
+                var ownerIndex = (int)field.Receiver.Type - 100;
+                return ownerIndex >= 0 && ownerIndex < program.Structures.Length
+                    && (uint)field.Field < (uint)program.Structures[ownerIndex].Fields.Length
+                    && field.Type == program.Structures[ownerIndex].Fields[field.Field].Type
+                    && program.Structures[ownerIndex].Fields[field.Field].IsMutable
+                    && IsWritableReferencePlace(field.Receiver, function, program);
+            default:
+                return false;
+        }
+    }
+
+    private static bool ReferenceTargetPlaceInitialized(int variable,
+        StorageProjection projection, InitializationState state, uint[]? fieldMasks,
+        BoundFunction function, BoundProgram program)
+    {
+        if ((uint)variable >= (uint)state.Length || state.HasRetiredValue(variable))
+        {
+            return false;
+        }
+        if (projection.Kind is StorageProjectionKind.WholeObject
+            or StorageProjectionKind.ArrayElement
+            or StorageProjectionKind.UnknownArrayElement)
+        {
+            return state[variable];
+        }
+        if (projection.Kind != StorageProjectionKind.InlineFieldPath
+            || projection.FieldPath.Segments.IsEmpty)
+        {
+            return false;
+        }
+        if (fieldMasks is null)
+        {
+            return state[variable];
+        }
+        if ((uint)variable >= (uint)fieldMasks.Length)
+        {
+            return false;
+        }
+        var firstField = projection.FieldPath.Segments[0];
+        var rootType = function.Variables[variable].Type;
+        var rootTypeIndex = (int)rootType - 100;
+        return rootType == firstField.OwnerType
+            && rootTypeIndex >= 0 && rootTypeIndex < program.Structures.Length
+            && (uint)firstField.Field < (uint)program.Structures[rootTypeIndex].Fields.Length
+            && (fieldMasks[variable] & (1u << firstField.Field)) != 0;
+    }
+
+    private static HashSet<ProvenanceAnchor> ReferenceTargetsOfExpression(
+        BoundExpression expression, BackingDependencies facts, InitializationState state,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth,
+        uint[]? fieldMasks = null)
+    {
+        Count(ref remaining, depth);
+        if (expression is null || facts is null || state is null || function is null
+            || program is null
+            || !CheckedReferenceTypeContract.IsValidType(
+                expression.Type, program.CheckedReferenceTypes))
+        {
+            throw InvalidEffect(expression?.Span ?? default, "CheckedReference");
+        }
+
+        var type = program.CheckedReferenceTypes[
+            CheckedReferenceTypes.Index(expression.Type)];
+        var result = new HashSet<ProvenanceAnchor>();
+        switch (expression)
+        {
+            case BoundReferenceFormation formation:
+                if (formation.Type != expression.Type
+                    || type.IsGarbageCollected || type.IsInitialization || type.IsOptional
+                    || formation.Place.Type != type.ReferentType
+                    || !TryGetReferencePlaceStorage(formation.Place, function,
+                        program, out var placeVariable, out var placeProjection)
+                    || (type.IsWritable && !IsWritableReferencePlace(
+                        formation.Place, function, program))
+                    || !ReferenceTargetPlaceInitialized(placeVariable,
+                        placeProjection, state, fieldMasks, function, program))
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                var instances = facts.StorageInstanceSet(placeVariable);
+                if (instances.Count != 1)
+                {
+                    throw InvalidEffect(formation.Span, "CheckedReference");
+                }
+                foreach (var instance in instances)
+                {
+                    if (!instance.IsKnown)
+                    {
+                        throw InvalidEffect(formation.Span, "CheckedReference");
+                    }
+                    _ = result.Add(ProvenanceAnchor.ForReferencePlace(
+                        facts.FunctionActivation, placeVariable, instance,
+                        placeProjection));
+                }
+                break;
+            case BoundReferenceReborrow reborrow:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        reborrow.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(reborrow.Span, "CheckedReference");
+                }
+                var sourceReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(reborrow.Descriptor.Type)];
+                if (reborrow.Type != expression.Type
+                    || sourceReference.IsGarbageCollected || sourceReference.IsInitialization
+                    || sourceReference.IsOptional || type.IsGarbageCollected
+                    || type.IsInitialization || type.IsOptional
+                    || sourceReference.ReferentType != type.ReferentType
+                    || (type.IsWritable && !sourceReference.IsWritable))
+                {
+                    throw InvalidEffect(reborrow.Span, "CheckedReference");
+                }
+                _ = ReferenceObligationsOfExpression(reborrow, facts, state,
+                    function, program, ref remaining, depth + 1, fieldMasks);
+                result = ReferenceTargetsOfExpression(reborrow.Descriptor, facts,
+                    state, function, program, ref remaining, depth + 1, fieldMasks);
+                foreach (var target in result)
+                {
+                    ValidateReferenceTarget(target, type.ReferentType, facts,
+                        state, function, program, reborrow.Span, fieldMasks);
+                }
+                break;
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != expression.Type
+                    || !state[read.Variable] || state.HasRetiredValue(read.Variable)
+                    || facts.ReferenceTargets[read.Variable] is not { Count: > 0 } targets)
+                {
+                    throw InvalidEffect(read.Span, "CheckedReference");
+                }
+                if (facts.ReferenceObligations[read.Variable] is { } readObligations)
+                {
+                    foreach (var obligation in readObligations)
+                    {
+                        ValidateReferenceObligation(obligation, facts, state,
+                            function, program, read.Span);
+                    }
+                }
+                foreach (var target in targets)
+                {
+                    ValidateReferenceTarget(target, type.ReferentType, facts, state,
+                        function, program, read.Span, fieldMasks);
+                    _ = result.Add(target);
+                }
+                break;
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                var descriptorType = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                if (descriptorType.IsGarbageCollected || descriptorType.IsInitialization
+                    || descriptorType.IsOptional || descriptorType.ReferentType != expression.Type)
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                var descriptorTargets = ReferenceTargetsOfExpression(
+                    referenceRead.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                foreach (var target in descriptorTargets)
+                {
+                    ValidateReferenceTarget(target, expression.Type, facts, state,
+                        function, program, referenceRead.Span, fieldMasks);
+                    if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+                    {
+                        _ = result.Add(ProvenanceAnchor.ForIncomingReference(target.Identity));
+                        continue;
+                    }
+                    if (target.Kind != ProvenanceAnchorKind.ReferencePlace
+                        || facts.ReferenceTargets[target.Identity] is not { Count: > 0 } nestedTargets)
+                    {
+                        throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                    }
+                    if (facts.ReferenceObligations[target.Identity] is { } nestedObligations)
+                    {
+                        foreach (var obligation in nestedObligations)
+                        {
+                            ValidateReferenceObligation(obligation, facts, state,
+                                function, program, referenceRead.Span);
+                        }
+                    }
+                    foreach (var nestedTarget in nestedTargets)
+                    {
+                        ValidateReferenceTarget(nestedTarget, type.ReferentType,
+                            facts, state, function, program, referenceRead.Span,
+                            fieldMasks);
+                        _ = result.Add(nestedTarget);
+                    }
+                }
+                if (result.Count == 0)
+                {
+                    throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                }
+                break;
+            case BoundConditional conditional:
+                if (conditional.Type != expression.Type)
+                {
+                    throw InvalidEffect(conditional.Span, "CheckedReference");
+                }
+                result.UnionWith(ReferenceTargetsOfExpression(conditional.WhenTrue,
+                    facts, state, function, program, ref remaining, depth + 1,
+                    fieldMasks));
+                result.UnionWith(ReferenceTargetsOfExpression(conditional.WhenFalse,
+                    facts, state, function, program, ref remaining, depth + 1,
+                    fieldMasks));
+                break;
+            case BoundUnsafeExpression unsafeExpression:
+                result = ReferenceTargetsOfExpression(unsafeExpression.Expression,
+                    facts, state, function, program, ref remaining, depth + 1,
+                    fieldMasks);
+                break;
+            default:
+                throw InvalidEffect(expression.Span, "CheckedReference");
+        }
+        return result;
+    }
+
+    private static HashSet<ProvenanceAnchor> ReferenceObligationsOfExpression(
+        BoundExpression expression, BackingDependencies facts, InitializationState state,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth,
+        uint[]? fieldMasks = null)
+    {
+        Count(ref remaining, depth);
+        if (expression is null
+            || !CheckedReferenceTypeContract.IsValidType(
+                expression.Type, program.CheckedReferenceTypes))
+        {
+            throw InvalidEffect(expression?.Span ?? default, "CheckedReference");
+        }
+
+        var result = new HashSet<ProvenanceAnchor>();
+        switch (expression)
+        {
+            case BoundReferenceFormation:
+                break;
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != expression.Type
+                    || !state[read.Variable] || state.HasRetiredValue(read.Variable))
+                {
+                    throw InvalidEffect(read.Span, "CheckedReference");
+                }
+                if (facts.ReferenceObligations[read.Variable] is { } obligations)
+                {
+                    foreach (var obligation in obligations)
+                    {
+                        ValidateReferenceObligation(obligation, facts, state,
+                            function, program, read.Span);
+                        _ = result.Add(obligation);
+                    }
+                }
+                break;
+            case BoundReferenceReborrow reborrow:
+                result.UnionWith(ReferenceObligationsOfExpression(
+                    reborrow.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                result.UnionWith(ReferenceDescriptorPlacesOfExpression(
+                    reborrow.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                break;
+            case BoundReferenceRead referenceRead:
+                var descriptorTargets = ReferenceTargetsOfExpression(
+                    referenceRead.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                foreach (var target in descriptorTargets)
+                {
+                    if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+                    {
+                        _ = result.Add(ProvenanceAnchor.ForIncomingReferenceDescriptor(
+                            target.Identity));
+                        continue;
+                    }
+                    if (target.Kind != ProvenanceAnchorKind.ReferencePlace)
+                    {
+                        throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                    }
+                    if (facts.ReferenceObligations[target.Identity] is { } nestedObligations)
+                    {
+                        foreach (var obligation in nestedObligations)
+                        {
+                            ValidateReferenceObligation(obligation, facts, state,
+                                function, program, referenceRead.Span);
+                            _ = result.Add(obligation);
+                        }
+                    }
+                }
+                break;
+            case BoundConditional conditional:
+                result.UnionWith(ReferenceObligationsOfExpression(
+                    conditional.WhenTrue, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                result.UnionWith(ReferenceObligationsOfExpression(
+                    conditional.WhenFalse, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                break;
+            case BoundUnsafeExpression unsafeExpression:
+                result = ReferenceObligationsOfExpression(
+                    unsafeExpression.Expression, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                break;
+            default:
+                throw InvalidEffect(expression.Span, "CheckedReference");
+        }
+        foreach (var obligation in result)
+        {
+            ValidateReferenceObligation(obligation, facts, state,
+                function, program, expression.Span);
+        }
+        return result;
+    }
+
+    private static HashSet<ProvenanceAnchor> ReferenceDescriptorPlacesOfExpression(
+        BoundExpression expression, BackingDependencies facts, InitializationState state,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth,
+        uint[]? fieldMasks = null)
+    {
+        Count(ref remaining, depth);
+        if (expression is null
+            || !CheckedReferenceTypeContract.IsValidType(
+                expression.Type, program.CheckedReferenceTypes))
+        {
+            throw InvalidEffect(expression?.Span ?? default, "CheckedReference");
+        }
+
+        var result = new HashSet<ProvenanceAnchor>();
+        switch (expression)
+        {
+            case BoundRead read:
+                if ((uint)read.Variable >= (uint)function.Variables.Length
+                    || function.Variables[read.Variable].Type != expression.Type
+                    || !state[read.Variable] || state.HasRetiredValue(read.Variable))
+                {
+                    throw InvalidEffect(read.Span, "CheckedReference");
+                }
+                if (IsReferenceParameterSlot(function, read.Variable))
+                {
+                    _ = result.Add(ProvenanceAnchor.ForIncomingReferenceDescriptor(
+                        read.Variable));
+                    break;
+                }
+                var instances = facts.StorageInstanceSet(read.Variable);
+                if (instances.Count != 1)
+                {
+                    throw InvalidEffect(read.Span, "CheckedReference");
+                }
+                foreach (var instance in instances)
+                {
+                    if (!instance.IsKnown)
+                    {
+                        throw InvalidEffect(read.Span, "CheckedReference");
+                    }
+                    _ = result.Add(ProvenanceAnchor.ForReferenceDescriptor(
+                        facts.FunctionActivation, read.Variable, instance));
+                }
+                break;
+            case BoundReferenceReborrow reborrow:
+                result = ReferenceDescriptorPlacesOfExpression(
+                    reborrow.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                break;
+            case BoundReferenceRead referenceRead:
+                foreach (var target in ReferenceTargetsOfExpression(
+                    referenceRead.Descriptor, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks))
+                {
+                    ValidateReferenceTarget(target, expression.Type, facts,
+                        state, function, program, referenceRead.Span, fieldMasks);
+                    if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+                    {
+                        _ = result.Add(ProvenanceAnchor.ForIncomingReferenceDescriptor(
+                            target.Identity));
+                        continue;
+                    }
+                    if (target.Kind != ProvenanceAnchorKind.ReferencePlace
+                        || target.Storage is not StorageKey key)
+                    {
+                        throw InvalidEffect(referenceRead.Span, "CheckedReference");
+                    }
+                    _ = result.Add(ProvenanceAnchor.ForReferenceDescriptor(
+                        facts.FunctionActivation, target.Identity, key.Instance));
+                }
+                break;
+            case BoundConditional conditional:
+                result.UnionWith(ReferenceDescriptorPlacesOfExpression(
+                    conditional.WhenTrue, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                result.UnionWith(ReferenceDescriptorPlacesOfExpression(
+                    conditional.WhenFalse, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks));
+                break;
+            case BoundUnsafeExpression unsafeExpression:
+                result = ReferenceDescriptorPlacesOfExpression(
+                    unsafeExpression.Expression, facts, state, function, program,
+                    ref remaining, depth + 1, fieldMasks);
+                break;
+            default:
+                throw InvalidEffect(expression.Span, "CheckedReference");
+        }
+        return result;
+    }
+
+    private static bool IsReferenceParameterSlot(BoundFunction function, int slot)
+        => slot < function.ParameterCount + (function.IsConstructor ? 1 : 0);
+
+    private static void ValidateReferenceObligation(ProvenanceAnchor obligation,
+        BackingDependencies facts, InitializationState state, BoundFunction function,
+        BoundProgram program, TextSpan span)
+    {
+        if (obligation.Kind == ProvenanceAnchorKind.IncomingReferenceDescriptor)
+        {
+            var parameterCount = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+            if ((uint)obligation.Identity >= (uint)parameterCount
+                || !CheckedReferenceTypeContract.IsValidType(
+                    function.Variables[obligation.Identity].Type, program.CheckedReferenceTypes)
+                || !state[obligation.Identity])
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            return;
+        }
+        if (obligation.Kind != ProvenanceAnchorKind.ReferenceDescriptor
+            || obligation.Storage is not StorageKey key || !key.IsKnown
+            || key.Activation != facts.FunctionActivation
+            || key.Site != obligation.Identity
+            || key.Projection.Kind != StorageProjectionKind.WholeObject
+            || (uint)obligation.Identity >= (uint)function.Variables.Length
+            || !CheckedReferenceTypeContract.IsValidType(
+                function.Variables[obligation.Identity].Type, program.CheckedReferenceTypes)
+            || !state[obligation.Identity] || state.HasRetiredValue(obligation.Identity))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+        var instances = facts.StorageInstanceSet(obligation.Identity);
+        if (instances.Count != 1 || !instances.Contains(key.Instance))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+    }
+
+    private static bool TryGetReferencePlaceType(int variable,
+        StorageProjection projection, BoundFunction function, BoundProgram program,
+        out PrimitiveType type)
+    {
+        if ((uint)variable >= (uint)function.Variables.Length)
+        {
+            type = PrimitiveType.Int32;
+            return false;
+        }
+
+        var storage = function.Variables[variable];
+        if (projection.Kind is StorageProjectionKind.ArrayElement
+            or StorageProjectionKind.UnknownArrayElement)
+        {
+            if (storage.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
+                || !NativeFixedArrayContract.MatchesLayout(layout, program))
+            {
+                type = PrimitiveType.Int32;
+                return false;
+            }
+            type = layout.ElementType;
+        }
+        else
+        {
+            type = storage.Type;
+        }
+
+        if (projection.Kind == StorageProjectionKind.WholeObject)
+        {
+            return true;
+        }
+        if (projection.Kind is not (StorageProjectionKind.InlineFieldPath
+                or StorageProjectionKind.ArrayElement
+                or StorageProjectionKind.UnknownArrayElement)
+            || (projection.Kind == StorageProjectionKind.InlineFieldPath
+                && projection.FieldPath.Segments.IsEmpty))
+        {
+            return false;
+        }
+        foreach (var segment in projection.FieldPath.Segments)
+        {
+            if (type != segment.OwnerType)
+            {
+                return false;
+            }
+            var structureIndex = (int)type - 100;
+            if (structureIndex < 0 || structureIndex >= program.Structures.Length
+                || (uint)segment.Field >= (uint)program.Structures[structureIndex].Fields.Length)
+            {
+                return false;
+            }
+            type = program.Structures[structureIndex].Fields[segment.Field].Type;
+        }
+        return true;
+    }
+
+    private static void ValidateReferenceTarget(ProvenanceAnchor target,
+        PrimitiveType referentType, BackingDependencies facts, InitializationState state,
+        BoundFunction function, BoundProgram program, TextSpan span,
+        uint[]? fieldMasks = null)
+    {
+        if (target.Kind == ProvenanceAnchorKind.IncomingReference)
+        {
+            var parameterCount = function.ParameterCount + (function.IsConstructor ? 1 : 0);
+            if ((uint)target.Identity >= (uint)parameterCount
+                || !CheckedReferenceTypeContract.IsValidType(
+                    function.Variables[target.Identity].Type, program.CheckedReferenceTypes)
+                || !state[target.Identity])
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            return;
+        }
+        if (target.Kind != ProvenanceAnchorKind.ReferencePlace
+            || target.Storage is not StorageKey key || !key.IsKnown
+            || key.Activation != facts.FunctionActivation
+            || key.Site != target.Identity
+            || (uint)target.Identity >= (uint)function.Variables.Length
+            || !TryGetReferencePlaceType(target.Identity, key.Projection,
+                function, program, out var actualType)
+            || actualType != referentType
+            || !ReferenceTargetPlaceInitialized(target.Identity, key.Projection,
+                state, fieldMasks, function, program))
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+        var instances = facts.StorageInstanceSet(target.Identity);
+        if (instances.Count != 1 || !instances.Contains(key.Instance))
+        {
+            throw InvalidEffect(span, "CheckedReference");
         }
     }
 
@@ -6759,6 +8034,97 @@ public static partial class SemanticVerifier
         }
         switch (expression)
         {
+            case BoundReferenceFormation formation:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        formation.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(formation.Span, "Ownership");
+                }
+                var formedReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(formation.Type)];
+                if (formedReference.IsGarbageCollected || formedReference.IsInitialization
+                    || formedReference.IsOptional || formedReference.ReferentType != formation.Place.Type)
+                {
+                    throw InvalidEffect(formation.Span, "Ownership");
+                }
+                return BackingOf(formation.Place, facts, program, ref remaining, depth + 1);
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type, program.CheckedReferenceTypes))
+                {
+                    throw InvalidEffect(referenceRead.Span, "Ownership");
+                }
+                var readReference = program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                if (readReference.IsGarbageCollected || readReference.IsInitialization
+                    || readReference.IsOptional || readReference.ReferentType != referenceRead.Type
+                    || !TokenSpanContract.IsDependent(referenceRead.Type, program.Structures))
+                {
+                    throw InvalidEffect(referenceRead.Span, "Ownership");
+                }
+                var referenceBacking = new HashSet<ProvenanceAnchor>();
+                foreach (var target in ReferenceTargetsSummary(
+                    referenceRead.Descriptor, facts, facts.Function, program,
+                    ref remaining, depth + 1))
+                {
+                    if (target.Kind == ProvenanceAnchorKind.ReferencePlace
+                        && (uint)target.Identity < (uint)facts.Function.Variables.Length
+                        && facts.Function.Variables[target.Identity].Type == referenceRead.Type)
+                    {
+                        var targetProjection = target.Storage?.Projection
+                            ?? throw Invalid(referenceRead.Span);
+                        if (targetProjection.Kind == StorageProjectionKind.WholeObject)
+                        {
+                            referenceBacking.UnionWith(IsTokenSnapshotType(
+                                    referenceRead.Type, program)
+                                ? TokenSnapshotBackingOf(target.Identity, facts)
+                                : BackingSourcesOf(target.Identity, referenceRead.Type,
+                                    facts, program, referenceRead.Span));
+                        }
+                        else if (targetProjection.Kind == StorageProjectionKind.InlineFieldPath
+                            && facts.TryGetBackingFieldValue(target.Identity,
+                                targetProjection, out var fieldValue)
+                            && fieldValue.IsAvailable)
+                        {
+                            referenceBacking.UnionWith(BackingFieldValueWithBounds(
+                                target.Identity, fieldValue, facts).Sources);
+                        }
+                        else if (targetProjection.Kind == StorageProjectionKind.InlineFieldPath
+                            && facts.BackingBounds[target.Identity] is { Count: > 0 }
+                            && facts.Sources[target.Identity] is { Count: > 0 } boundedSources)
+                        {
+                            referenceBacking.UnionWith(boundedSources);
+                        }
+                        else
+                        {
+                            throw InvalidEffect(referenceRead.Span, "Ownership");
+                        }
+                    }
+                    else if (target.Kind == ProvenanceAnchorKind.IncomingReference
+                        && (uint)target.Identity < (uint)facts.Function.ParameterCount
+                            + (facts.Function.IsConstructor ? 1u : 0u))
+                    {
+                        if (facts.ReferenceBackingSources[target.Identity] is
+                            { Count: > 0 } capturedSources)
+                        {
+                            referenceBacking.UnionWith(capturedSources);
+                        }
+                        else
+                        {
+                            _ = referenceBacking.Add(
+                                ProvenanceAnchor.ForBackingSource(~target.Identity));
+                        }
+                    }
+                    else
+                    {
+                        throw InvalidEffect(referenceRead.Span, "Ownership");
+                    }
+                }
+                if (referenceBacking.Count == 0)
+                {
+                    throw InvalidEffect(referenceRead.Span, "Ownership");
+                }
+                return referenceBacking;
             case BoundSnapshotSpan snapshot when (uint)snapshot.Variable < (uint)facts.Sources.Length:
                 return facts.Sources[snapshot.Variable] ?? new HashSet<ProvenanceAnchor>
                 {
@@ -6863,7 +8229,7 @@ public static partial class SemanticVerifier
 
     private static void StageDependencySource(BoundCall call, int parameterIndex,
         BoundExpression argument, BoundFunction target, InitializationState initialized,
-        BoundProgram program, ref int remaining, int depth)
+        BoundProgram program, ref int remaining, int depth, uint[]? fieldMasks = null)
     {
         if (initialized.Dependencies is not BackingDependencies dependencies)
         {
@@ -6871,14 +8237,25 @@ public static partial class SemanticVerifier
         }
 
         var hasBacking = TokenSpanContract.IsDependent(argument.Type, program.Structures);
+        var hasReference = CheckedReferenceTypeContract.IsValidType(
+            argument.Type, program.CheckedReferenceTypes);
         var hasNativePointer = CarriesNativePointer(argument, program);
-        if (!hasBacking && !hasNativePointer && target.NativeOutputContracts.IsEmpty)
+        if (!hasBacking && !hasReference && !hasNativePointer
+            && target.NativeOutputContracts.IsEmpty)
         {
             return;
         }
 
         var backingSources = hasBacking
             ? BackingOf(argument, dependencies, program, ref remaining, depth + 1)
+            : EmptyBackingSources;
+        var referenceTargets = hasReference
+            ? ReferenceTargetsOfExpression(argument, dependencies, initialized,
+                dependencies.Function, program, ref remaining, depth + 1, fieldMasks)
+            : EmptyBackingSources;
+        var referenceObligations = hasReference
+            ? ReferenceObligationsOfExpression(argument, dependencies, initialized,
+                dependencies.Function, program, ref remaining, depth + 1, fieldMasks)
             : EmptyBackingSources;
         var nativePointerSources = hasNativePointer
             ? NativePointerBackingOf(argument, dependencies, program, ref remaining, depth + 1)
@@ -6894,7 +8271,7 @@ public static partial class SemanticVerifier
             Sources = [.. nativePointerExtent.Sources],
         };
         dependencies.Staged.Add(new StagedDependencySource(call, parameterIndex,
-            [.. backingSources],
+            [.. backingSources], [.. referenceTargets], [.. referenceObligations],
             [.. nativePointerSources],
             nativePointerMayBeUnknown,
             nativePointerExtent));
@@ -6941,7 +8318,7 @@ public static partial class SemanticVerifier
             Sources = [.. nativePointerExtent.Sources],
         };
         dependencies.Staged.Add(new StagedDependencySource(call, parameterIndex,
-            [.. backingSources], [.. nativePointerSources],
+            [.. backingSources], [], [], [.. nativePointerSources],
             nativePointerMayBeUnknown, nativePointerExtent));
     }
 
@@ -6958,6 +8335,8 @@ public static partial class SemanticVerifier
                 if ((facts.BackingMayBeUnknown[slot]
                         && facts.BackingBounds[slot] is not { Count: > 0 })
                     || facts.Sources[slot]?.Contains(
+                        ProvenanceAnchor.ForBackingSource(owner)) == true
+                    || facts.ReferenceBackingSources[slot]?.Contains(
                         ProvenanceAnchor.ForBackingSource(owner)) == true)
                 {
                     throw InvalidEffect(span, "Ownership");
