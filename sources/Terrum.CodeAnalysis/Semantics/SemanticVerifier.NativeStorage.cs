@@ -17,7 +17,7 @@ public static partial class SemanticVerifier
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
             || function.Variables[variable].Type != layout.CarrierType
             || function.Variables[variable].NativeFixedArrayLayout != layout
-            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
+            || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || (function.Variables[variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(layout))
             || initialization.Elements.IsDefault
@@ -50,6 +50,56 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static void ApplyNativeFixedArrayWriteProvenance(
+        BoundNativeFixedArrayWrite write, BackingDependencies facts,
+        BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (write.Index is BoundConstant)
+        {
+            SetNativePointerFieldValuesFromExpression(write.Variable,
+                StorageProjection.ForArrayElement(write.Index),
+                write.Layout.ElementType, write.Value, facts, function,
+                program, ref remaining, depth + 1);
+            return;
+        }
+
+        var newValues = NativePointerFieldValueSnapshotOfExpression(
+            write.Value, write.Layout.ElementType, facts, function,
+            program, ref remaining, depth + 1);
+        for (var index = 0; index < write.Layout.ElementCount; index++)
+        {
+            Count(ref remaining, depth + 1);
+            var elementProjection = StorageProjection.ForArrayElement(
+                new BoundConstant(index, PrimitiveType.Int32, write.Index.Span));
+            foreach (var (relativeProjection, newValue) in newValues)
+            {
+                Count(ref remaining, depth + 1);
+                var projection = StorageProjection.Combine(
+                    elementProjection, relativeProjection);
+                if (!IsNativePointerFieldProjection(projection))
+                {
+                    throw Invalid(write.Span);
+                }
+
+                var hasValue = facts.TryGetNativePointerFieldValue(write.Variable,
+                    projection, out var previousSources, out var previousMayBeUnknown);
+                var hasExtent = facts.TryGetNativePointerFieldExtentValue(
+                    write.Variable, projection, out var previousExtent);
+                previousSources.UnionWith(newValue.Sources);
+                previousExtent.Sources.UnionWith(newValue.ExtentSources);
+                var extent = new NativePointerExtentFact(previousExtent.Sources,
+                    previousExtent.MayBeOpaque || newValue.ExtentMayBeOpaque,
+                    !hasValue || !hasExtent || previousExtent.IsUnavailable
+                        || newValue.ExtentUnavailable);
+                facts.SetNativePointerFieldValue(write.Variable, projection,
+                    previousSources,
+                    previousMayBeUnknown || newValue.MayBeUnknown,
+                    extent);
+            }
+        }
+    }
+
     private static void VerifyNativeFixedArrayPlace(int variable, BoundExpression index,
         PrimitiveType carrierType, int? requiredStartIndex, bool isReadonly,
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
@@ -69,7 +119,7 @@ public static partial class SemanticVerifier
             || function.Variables[variable].Type != carrierType
             || function.Variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
             || layout.CarrierType != carrierType
-            || !NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
+            || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || (!isReadonly && (!function.Variables[variable].IsMutable
                 || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
             || index is null
@@ -80,7 +130,8 @@ public static partial class SemanticVerifier
                 && index is BoundConstant { Type: PrimitiveType.Int32, Value: var actual }
                 && actual != required)
             || (requiredStartIndex is null && index is BoundConstant constant
-                && (constant.Value < 0 || constant.Value >= layout.ElementCount)))
+                && (!constant.TryGetLegacyValue(out var constantValue)
+                    || constantValue < 0 || constantValue >= layout.ElementCount)))
         {
             throw InvalidEffect(index?.Span ?? default, "NativeImport");
         }

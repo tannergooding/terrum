@@ -541,6 +541,349 @@ public sealed class NativePointerModuleTests
             compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
+    [TestCase(0, 2, true)]
+    [TestCase(1, 1, true)]
+    [TestCase(1, 2, false)]
+    public void NativeParameterExtentReadsPointerArrayElements(
+        int index, int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 3> values = [42, 42, 42];
+                unsafe {
+                    InlineArray<ptr<uint32>, 2> pointers = [
+                        &values[0], &values[2]];
+                    return Observe(pointers[{{index}}]);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void TypedPointerArrayCellsRetainTheirValuesDuringJitExecution()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            int32 Main() {
+                InlineArray<uint32, 3> values = [4, 5, 6];
+                unsafe {
+                    InlineArray<ptr<uint32>, 2> pointers = [
+                        &values[0], &values[1]];
+                    return int32(*pointers[1]);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(5));
+    }
+
+    [TestCase(0, 2, true)]
+    [TestCase(1, 1, true)]
+    [TestCase(1, 2, false)]
+    public void NativeParameterExtentTracksPointerFieldsInFixedArrayElements(
+        int index, int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Blittable] [Layout(Sequential)]
+            struct PointerHolder {
+                public ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 3> values = [42, 42, 42];
+                unsafe {
+                    InlineArray<PointerHolder, 2> holders = [
+                        new PointerHolder(&values[0]),
+                        new PointerHolder(&values[2])];
+                    return Observe(holders[{{index}}].Value);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(2, true)]
+    [TestCase(3, false)]
+    public void NativeParameterExtentMergesDynamicPointerArrayElements(
+        int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Check(int32 index) {
+                InlineArray<uint32, 2> shorter = [1, 2];
+                InlineArray<uint32, 3> longer = [1, 2, 3];
+                unsafe {
+                    InlineArray<ptr<uint32>, 2> pointers = [
+                        &shorter[0], &longer[0]];
+                    return Observe(pointers[index]);
+                }
+            }
+
+            int32 Main() { return Check(0); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(2, true)]
+    [TestCase(3, false)]
+    public void NativeParameterExtentMergesConditionalPointerArrayWrites(
+        int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Check(bool useShorter) {
+                InlineArray<uint32, 2> shorter = [1, 2];
+                InlineArray<uint32, 3> longer = [1, 2, 3];
+                unsafe {
+                    mut InlineArray<ptr<uint32>, 1> pointers = [&longer[0]];
+                    if (useShorter) {
+                        pointers[0] = &shorter[0];
+                    }
+                    return Observe(pointers[0]);
+                }
+            }
+
+            int32 Main() { return Check(false); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(2, true)]
+    [TestCase(3, false)]
+    public void NativeParameterExtentMergesDynamicPointerArrayWrites(
+        int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Check(int32 index) {
+                InlineArray<uint32, 2> shorter = [1, 2];
+                InlineArray<uint32, 3> longer = [1, 2, 3];
+                unsafe {
+                    mut InlineArray<ptr<uint32>, 2> pointers = [
+                        &longer[0], &longer[0]];
+                    pointers[index] = &shorter[0];
+                    return Observe(pointers[0]);
+                }
+            }
+
+            int32 Main() { return Check(1); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(0, true)]
+    [TestCase(1, false)]
+    public void NativeParameterExtentSurvivesPointerToPointerArrayReads(
+        int index, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    InlineArray<ptr<uint32>, 2> pointers = [
+                        &values[0], &values[1]];
+                    InlineArray<ptr<ptr<uint32>>, 2> cells = [
+                        &pointers[0], &pointers[1]];
+                    ptr<uint32> value = *cells[{{index}}];
+                    return Observe(value);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(2, true)]
+    [TestCase(3, false)]
+    public void NativeParameterExtentCountsPointerArrayCells(
+        int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ObserveCells")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 ObserveCells(ptr<ptr<uint32>> cells);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    InlineArray<ptr<uint32>, 2> pointers = [
+                        &values[0], &values[1]];
+                    return ObserveCells(&pointers[0]);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase("", false)]
+    [TestCase("pointers[1] = &values[0];", true)]
+    public void NativeParameterWriteInvalidatesPointerArrayElementUntilReassigned(
+        string reassignment, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    mut InlineArray<ptr<uint32>, 2> pointers = [
+                        &values[0], &values[1]];
+                    write ptr<ptr<uint32>> cell = &pointers[1];
+                    int32 status = Overwrite(cell);
+                    {{reassignment}}
+                    return Observe(pointers[1]) + status;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
     [TestCase("", false)]
     [TestCase("pointer = &values[0];", true)]
     public void NativeParameterWriteInvalidatesPointerExtentUntilReassigned(
@@ -573,6 +916,48 @@ public sealed class NativePointerModuleTests
         {
             Assert.That(compilation.Program, Is.Null);
             Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase("", false)]
+    [TestCase("pointers[0] = &values[0];", true)]
+    public void NativeParameterAddressWriteInvalidatesPointerArrayElementUntilReassigned(
+        string reassignment, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    mut InlineArray<ptr<uint32>, 2> pointers = [
+                        &values[0], &values[1]];
+                    int32 status = Overwrite(&pointers[0]);
+                    {{reassignment}}
+                    return Observe(pointers[0]) + status;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
             return;
         }
 

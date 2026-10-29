@@ -447,7 +447,7 @@ internal static class DirectNativeImportContract
         {
             return caller.Variables[address.Variable].NativeFixedArrayLayout
                     is BoundNativeFixedArrayLayout layout
-                && NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
+                && NativeFixedArrayContract.MatchesLayout(layout, program)
                 && address.ElementType == layout.ElementType
                 && (parameter.PointeeType == PrimitiveType.Void
                     || parameter.PointeeType == layout.ElementType)

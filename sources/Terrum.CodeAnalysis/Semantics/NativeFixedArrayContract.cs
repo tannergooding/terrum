@@ -60,6 +60,10 @@ internal static class NativeFixedArrayContract
         {
             return true;
         }
+        if (NativePointerTypes.IsType(type))
+        {
+            return true;
+        }
 
         var index = (int)type - 100;
         if (index < 0 || index >= structures.Count || !visiting.Add(index))
@@ -114,6 +118,13 @@ internal static class NativeFixedArrayContract
         TryGetLayout(layout.CarrierType, layout.ElementType, layout.ElementCount,
             structures, out var expected)
             && layout == expected;
+
+    internal static bool MatchesLayout(BoundNativeFixedArrayLayout layout,
+        BoundProgram program) =>
+        MatchesLayout(layout, program.Structures)
+        && (!NativePointerTypes.IsType(layout.ElementType)
+            || NativePointerTypeContract.IsValidType(
+                layout.ElementType, program.NativePointerTypes));
 
     internal static bool AllowsEmptyInitialization(BoundNativeFixedArrayLayout layout) =>
         IsScalar(layout.ElementType);

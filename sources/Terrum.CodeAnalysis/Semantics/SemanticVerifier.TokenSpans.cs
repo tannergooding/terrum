@@ -22,6 +22,7 @@ public static partial class SemanticVerifier
         WholeObject,
         ElementRange,
         ArrayElement,
+        UnknownArrayElement,
         UnknownElement,
         InlineFieldPath,
     }
@@ -445,6 +446,8 @@ public static partial class SemanticVerifier
                 {
                     FieldPath = FieldPath.Append(ownerType, field),
                 },
+                StorageProjectionKind.ArrayElement or StorageProjectionKind.UnknownArrayElement
+                    => this with { FieldPath = FieldPath.Append(ownerType, field) },
                 _ => new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0),
             };
         }
@@ -460,11 +463,22 @@ public static partial class SemanticVerifier
             {
                 return suffix;
             }
-            return prefix.Kind == StorageProjectionKind.InlineFieldPath
-                && suffix.Kind == StorageProjectionKind.InlineFieldPath
-                    ? new StorageProjection(StorageProjectionKind.InlineFieldPath,
-                        0, 0, prefix.FieldPath.Append(suffix.FieldPath))
-                    : new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0);
+            if (suffix.Kind != StorageProjectionKind.InlineFieldPath)
+            {
+                return new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0);
+            }
+
+            return prefix.Kind switch
+            {
+                StorageProjectionKind.InlineFieldPath => new StorageProjection(
+                    StorageProjectionKind.InlineFieldPath, 0, 0,
+                    prefix.FieldPath.Append(suffix.FieldPath)),
+                StorageProjectionKind.ArrayElement or StorageProjectionKind.UnknownArrayElement
+                    => prefix with {
+                        FieldPath = prefix.FieldPath.Append(suffix.FieldPath),
+                    },
+                _ => new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0),
+            };
         }
 
         internal static StorageProjection ForArrayElement(BoundExpression index)
@@ -473,7 +487,7 @@ public static partial class SemanticVerifier
             {
                 return new StorageProjection(StorageProjectionKind.ArrayElement, value, 1);
             }
-            return new StorageProjection(StorageProjectionKind.UnknownElement, 0, 0);
+            return new StorageProjection(StorageProjectionKind.UnknownArrayElement, 0, 0);
         }
 
         internal static StorageProjection ForStorageAddress(BoundNativeStorageAddress address) =>
@@ -481,6 +495,12 @@ public static partial class SemanticVerifier
                 ? new StorageProjection(StorageProjectionKind.ElementRange, 0, address.ElementCount)
                 : WholeObject;
     }
+
+    private static bool IsNativePointerFieldProjection(StorageProjection projection) =>
+        projection.Kind is StorageProjectionKind.InlineFieldPath
+            or StorageProjectionKind.ArrayElement
+            or StorageProjectionKind.UnknownArrayElement
+            or StorageProjectionKind.ElementRange;
 
     private readonly record struct StorageInstance(int SupportingScopeActivation, long LifetimeGeneration)
     {
@@ -513,6 +533,7 @@ public static partial class SemanticVerifier
                 or StorageProjectionKind.InlineFieldPath
                 or StorageProjectionKind.ElementRange
                 or StorageProjectionKind.ArrayElement
+                or StorageProjectionKind.UnknownArrayElement
                 or StorageProjectionKind.UnknownElement;
     }
 
@@ -1921,8 +1942,7 @@ public static partial class SemanticVerifier
             NativePointerExtentFact extentFact)
         {
             if ((uint)slot >= (uint)StorageInstances.Length
-                || projection.Kind != StorageProjectionKind.InlineFieldPath
-                || projection.FieldPath.Segments.IsEmpty)
+                || !IsNativePointerFieldValueProjection(slot, projection))
             {
                 throw Invalid();
             }
@@ -1941,8 +1961,9 @@ public static partial class SemanticVerifier
             out bool mayBeUnknown)
         {
             if ((uint)slot >= (uint)StorageInstances.Length
-                || projection.Kind != StorageProjectionKind.InlineFieldPath
-                || projection.FieldPath.Segments.IsEmpty)
+                || (!IsNativePointerFieldValueProjection(slot, projection)
+                    && !TryGetNativePointerArrayElementRange(
+                        slot, projection, out _, out _)))
             {
                 throw Invalid();
             }
@@ -1952,16 +1973,43 @@ public static partial class SemanticVerifier
             var found = false;
             foreach (var instance in StorageInstances[slot])
             {
-                var key = new StorageKey(FunctionActivation, slot, instance, projection);
-                if (NativePointerFieldValues.TryGetValue(key, out var value))
+                if (TryGetNativePointerArrayElementRange(
+                    slot, projection, out var start, out var count))
                 {
-                    sources.UnionWith(value.Sources);
-                    mayBeUnknown |= value.MayBeUnknown;
-                    found = true;
+                    for (var index = start; index < start + count; index++)
+                    {
+                        var elementProjection = projection with {
+                            Kind = StorageProjectionKind.ArrayElement,
+                            Start = index,
+                            Length = 1,
+                        };
+                        var key = new StorageKey(FunctionActivation, slot, instance,
+                            elementProjection);
+                        if (NativePointerFieldValues.TryGetValue(key, out var value))
+                        {
+                            sources.UnionWith(value.Sources);
+                            mayBeUnknown |= value.MayBeUnknown;
+                            found = true;
+                        }
+                        else
+                        {
+                            mayBeUnknown = true;
+                        }
+                    }
                 }
                 else
                 {
-                    mayBeUnknown = true;
+                    var key = new StorageKey(FunctionActivation, slot, instance, projection);
+                    if (NativePointerFieldValues.TryGetValue(key, out var value))
+                    {
+                        sources.UnionWith(value.Sources);
+                        mayBeUnknown |= value.MayBeUnknown;
+                        found = true;
+                    }
+                    else
+                    {
+                        mayBeUnknown = true;
+                    }
                 }
             }
 
@@ -1972,8 +2020,9 @@ public static partial class SemanticVerifier
             StorageProjection projection, out NativePointerExtentFact extentFact)
         {
             if ((uint)slot >= (uint)StorageInstances.Length
-                || projection.Kind != StorageProjectionKind.InlineFieldPath
-                || projection.FieldPath.Segments.IsEmpty)
+                || (!IsNativePointerFieldValueProjection(slot, projection)
+                    && !TryGetNativePointerArrayElementRange(
+                        slot, projection, out _, out _)))
             {
                 throw Invalid();
             }
@@ -1984,17 +2033,45 @@ public static partial class SemanticVerifier
             var found = false;
             foreach (var instance in StorageInstances[slot])
             {
-                var key = new StorageKey(FunctionActivation, slot, instance, projection);
-                if (NativePointerFieldValues.TryGetValue(key, out var value))
+                if (TryGetNativePointerArrayElementRange(
+                    slot, projection, out var start, out var count))
                 {
-                    sources.UnionWith(value.ExtentSources);
-                    mayBeOpaque |= value.ExtentMayBeOpaque;
-                    unavailable |= value.ExtentUnavailable;
-                    found = true;
+                    for (var index = start; index < start + count; index++)
+                    {
+                        var elementProjection = projection with {
+                            Kind = StorageProjectionKind.ArrayElement,
+                            Start = index,
+                            Length = 1,
+                        };
+                        var key = new StorageKey(FunctionActivation, slot, instance,
+                            elementProjection);
+                        if (NativePointerFieldValues.TryGetValue(key, out var value))
+                        {
+                            sources.UnionWith(value.ExtentSources);
+                            mayBeOpaque |= value.ExtentMayBeOpaque;
+                            unavailable |= value.ExtentUnavailable;
+                            found = true;
+                        }
+                        else
+                        {
+                            unavailable = true;
+                        }
+                    }
                 }
                 else
                 {
-                    unavailable = true;
+                    var key = new StorageKey(FunctionActivation, slot, instance, projection);
+                    if (NativePointerFieldValues.TryGetValue(key, out var value))
+                    {
+                        sources.UnionWith(value.ExtentSources);
+                        mayBeOpaque |= value.ExtentMayBeOpaque;
+                        unavailable |= value.ExtentUnavailable;
+                        found = true;
+                    }
+                    else
+                    {
+                        unavailable = true;
+                    }
                 }
             }
 
@@ -2013,24 +2090,110 @@ public static partial class SemanticVerifier
 
             foreach (var (key, value) in NativePointerFieldValues)
             {
-                if (key.Site != slot)
+                if (key.Site != slot
+                    || !NativePointerFieldProjectionOverlaps(
+                        slot, prefix, key.Projection))
                 {
                     continue;
                 }
+                value.ExtentUnavailable = true;
+            }
+        }
 
-                var overlaps = prefix.Kind switch
+        internal void MarkNativePointerFieldValueUnknown(
+            int slot, StorageProjection prefix)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length)
+            {
+                throw Invalid();
+            }
+
+            foreach (var (key, value) in NativePointerFieldValues)
+            {
+                if (key.Site == slot
+                    && NativePointerFieldProjectionOverlaps(
+                        slot, prefix, key.Projection))
                 {
-                    StorageProjectionKind.WholeObject => true,
-                    StorageProjectionKind.InlineFieldPath =>
-                        key.Projection.Kind == StorageProjectionKind.InlineFieldPath
-                        && prefix.FieldPath.IsPrefixOf(key.Projection.FieldPath),
-                    _ => true,
-                };
-                if (overlaps)
-                {
+                    value.MayBeUnknown = true;
                     value.ExtentUnavailable = true;
                 }
             }
+        }
+
+        private bool IsNativePointerFieldValueProjection(
+            int slot, StorageProjection projection) =>
+            projection.Kind == StorageProjectionKind.InlineFieldPath
+                ? !projection.FieldPath.Segments.IsEmpty
+                : projection.Kind == StorageProjectionKind.ArrayElement
+                    && projection.Length == 1
+                    && TryGetNativePointerArrayElementRange(
+                        slot, projection, out _, out var count)
+                    && count == 1;
+
+        private bool TryGetNativePointerArrayElementRange(
+            int slot, StorageProjection projection, out int start, out int count)
+        {
+            start = 0;
+            count = 0;
+            if ((uint)slot >= (uint)Function.Variables.Length
+                || Function.Variables[slot].NativeFixedArrayLayout
+                    is not BoundNativeFixedArrayLayout layout)
+            {
+                return false;
+            }
+
+            switch (projection.Kind)
+            {
+                case StorageProjectionKind.ArrayElement:
+                    if (projection.Length != 1 || projection.Start < 0
+                        || projection.Start >= layout.ElementCount)
+                    {
+                        return false;
+                    }
+                    start = (int)projection.Start;
+                    count = 1;
+                    return true;
+                case StorageProjectionKind.UnknownArrayElement:
+                    count = layout.ElementCount;
+                    return count > 0;
+                case StorageProjectionKind.ElementRange:
+                    if (projection.Start < 0 || projection.Length <= 0
+                        || (ulong)projection.Start + (ulong)projection.Length
+                            > (ulong)layout.ElementCount)
+                    {
+                        return false;
+                    }
+                    start = (int)projection.Start;
+                    count = (int)projection.Length;
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        private bool NativePointerFieldProjectionOverlaps(
+            int slot, StorageProjection prefix, StorageProjection projection)
+        {
+            if (prefix.Kind == StorageProjectionKind.WholeObject)
+            {
+                return true;
+            }
+            if (prefix.Kind == StorageProjectionKind.InlineFieldPath)
+            {
+                return projection.Kind == StorageProjectionKind.InlineFieldPath
+                    && prefix.FieldPath.IsPrefixOf(projection.FieldPath);
+            }
+
+            if (!TryGetNativePointerArrayElementRange(
+                slot, prefix, out var start, out var count)
+                || projection.Kind != StorageProjectionKind.ArrayElement
+                || projection.Start < start
+                || projection.Start >= (long)start + count)
+            {
+                return prefix.Kind == StorageProjectionKind.UnknownElement;
+            }
+
+            return prefix.FieldPath.IsPrefixOf(projection.FieldPath);
         }
 
         private void ClearNativePointerFieldValues(int slot)
@@ -2864,8 +3027,9 @@ public static partial class SemanticVerifier
             && (uint)address.Variable < (uint)facts.NativePointerExtentSources.Length)
         {
             facts.MarkNativePointerExtentUnavailable(address.Variable);
-            facts.MarkNativePointerFieldExtentUnavailable(address.Variable,
-                StorageProjection.ForStorageAddress(address));
+            var projection = StorageProjection.ForStorageAddress(address);
+            facts.MarkNativePointerFieldValueUnknown(address.Variable, projection);
+            facts.MarkNativePointerFieldExtentUnavailable(address.Variable, projection);
             return;
         }
 
@@ -3944,6 +4108,19 @@ public static partial class SemanticVerifier
                 return TryGetNativePointerFieldPlace(loan.Place, function,
                     program, out variable, out projection);
 
+            case BoundNativeFixedArrayElement element:
+                if ((uint)element.Variable >= (uint)function.Variables.Length
+                    || function.Variables[element.Variable].Type != element.Layout.CarrierType
+                    || function.Variables[element.Variable].NativeFixedArrayLayout != element.Layout
+                    || !NativeFixedArrayContract.MatchesLayout(element.Layout, program)
+                    || element.Type != element.Layout.ElementType)
+                {
+                    throw Invalid(element.Span);
+                }
+                variable = element.Variable;
+                projection = StorageProjection.ForArrayElement(element.Index);
+                return IsInlineStructStorage(element.Type, program);
+
             case BoundFieldRead field:
                 if (field.Receiver is null
                     || !TryGetNativePointerFieldPlace(field.Receiver, function,
@@ -3966,7 +4143,7 @@ public static partial class SemanticVerifier
                     throw Invalid(field.Span);
                 }
                 projection = projection.AppendField(field.Receiver.Type, field.Field);
-                return projection.Kind == StorageProjectionKind.InlineFieldPath;
+                return IsNativePointerFieldProjection(projection);
 
             default:
                 variable = -1;
@@ -4040,7 +4217,7 @@ public static partial class SemanticVerifier
         {
             Count(ref remaining, depth + 1);
             var leafProjection = StorageProjection.Combine(projection, leaf.Projection);
-            if (leafProjection.Kind != StorageProjectionKind.InlineFieldPath
+            if (!IsNativePointerFieldProjection(leafProjection)
                 || !facts.TryGetNativePointerFieldValue(variable, leafProjection,
                     out var fieldSources, out var fieldMayBeUnknown))
             {
@@ -4107,7 +4284,7 @@ public static partial class SemanticVerifier
         {
             var sourceProjection = StorageProjection.Combine(
                 sourcePrefix, relativeProjection);
-            if (sourceProjection.Kind == StorageProjectionKind.InlineFieldPath
+            if (IsNativePointerFieldProjection(sourceProjection)
                 && facts.TryGetNativePointerFieldValue(variable, sourceProjection,
                     out var sources, out var mayBeUnknown))
             {
@@ -4162,7 +4339,7 @@ public static partial class SemanticVerifier
             out var root, out var prefix))
         {
             var projection = StorageProjection.Combine(prefix, relativeProjection);
-            if (projection.Kind != StorageProjectionKind.InlineFieldPath)
+            if (!IsNativePointerFieldProjection(projection))
             {
                 return new NativePointerExtentFact([], MayBeOpaque: false,
                     IsUnavailable: true);
@@ -4173,12 +4350,14 @@ public static partial class SemanticVerifier
 
         if (TryGetNativePointerFieldPlace(expression, function, program,
             out var variable, out var sourcePrefix)
-            && (sourcePrefix.Kind == StorageProjectionKind.InlineFieldPath
+            && (sourcePrefix.Kind is StorageProjectionKind.InlineFieldPath
+                    or StorageProjectionKind.ArrayElement
+                    or StorageProjectionKind.UnknownArrayElement
                 || relativeProjection.Kind == StorageProjectionKind.InlineFieldPath))
         {
             var sourceProjection = StorageProjection.Combine(
                 sourcePrefix, relativeProjection);
-            if (sourceProjection.Kind == StorageProjectionKind.InlineFieldPath
+            if (IsNativePointerFieldProjection(sourceProjection)
                 && facts.TryGetNativePointerFieldExtentValue(
                     variable, sourceProjection, out var fieldExtent))
             {
@@ -4269,7 +4448,7 @@ public static partial class SemanticVerifier
         }
 
         projection = projection.AppendField(field.Receiver.Type, field.Field);
-        return projection.Kind == StorageProjectionKind.InlineFieldPath;
+        return IsNativePointerFieldProjection(projection);
     }
 
     private static Dictionary<StorageProjection, NativePointerFieldValue>
@@ -5482,7 +5661,7 @@ public static partial class SemanticVerifier
             Count(ref remaining, depth + 1);
             var destinationProjection = StorageProjection.Combine(
                 destinationPrefix, leaf.Projection);
-            if (destinationProjection.Kind != StorageProjectionKind.InlineFieldPath)
+            if (!IsNativePointerFieldProjection(destinationProjection))
             {
                 throw Invalid(expression.Span);
             }
@@ -5734,6 +5913,14 @@ public static partial class SemanticVerifier
                 when (uint)address.Variable < (uint)facts.NativePointerSources.Length:
                 return NativeStorageAnchors(address.Variable, facts,
                     StorageProjection.ForStorageAddress(address));
+            case BoundNativeFixedArrayElement element
+                when CarriesNativePointer(element.Type, program)
+                    && (uint)element.Variable < (uint)facts.NativePointerSources.Length:
+                return facts.TryGetNativePointerFieldValue(
+                    element.Variable,
+                    StorageProjection.ForArrayElement(element.Index),
+                    out var elementSources, out _)
+                        ? elementSources : EmptyBackingSources;
             case BoundRead read when (uint)read.Variable < (uint)facts.NativePointerSources.Length:
                 return facts.NativePointerSources[read.Variable] ?? EmptyBackingSources;
             case BoundMove move when (uint)move.Variable < (uint)facts.NativePointerSources.Length:
@@ -5744,8 +5931,7 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1))
                 {
                     if (target.Kind == ProvenanceAnchorKind.NativeStorage
-                        && (uint)target.Identity < (uint)facts.NativePointerSources.Length
-                        && facts.NativePointerSources[target.Identity] is { } targetSources)
+                        && (uint)target.Identity < (uint)facts.NativePointerSources.Length)
                     {
                         if (target.Storage is not StorageKey targetStorage
                             || !targetStorage.IsKnown
@@ -5754,7 +5940,20 @@ public static partial class SemanticVerifier
                         {
                             throw InvalidEffect(read.Span, "NativePointer");
                         }
-                        readSources.UnionWith(targetSources);
+                        if (targetStorage.Projection.Kind
+                                == StorageProjectionKind.WholeObject
+                            && facts.NativePointerSources[target.Identity]
+                                is { } targetSources)
+                        {
+                            readSources.UnionWith(targetSources);
+                        }
+                        else if (IsNativePointerFieldProjection(targetStorage.Projection)
+                            && facts.TryGetNativePointerFieldValue(
+                                target.Identity, targetStorage.Projection,
+                                out var fieldSources, out _))
+                        {
+                            readSources.UnionWith(fieldSources);
+                        }
                     }
                 }
                 return readSources;
@@ -5846,7 +6045,7 @@ public static partial class SemanticVerifier
                     || function.Variables[address.Variable].NativeFixedArrayLayout
                         != address.Layout
                     || !NativeFixedArrayContract.MatchesLayout(
-                        address.Layout, program.Structures)
+                        address.Layout, program)
                     || !NativePointerTypeContract.IsValidType(address.Type,
                         program.NativePointerTypes))
                 {
@@ -5873,6 +6072,26 @@ public static partial class SemanticVerifier
                     MayBeOpaque: false,
                     IsUnavailable: HasUnknownStorageInstances(
                         facts.StorageInstanceSet(address.Variable)));
+            case BoundNativeFixedArrayElement element
+                when IsNativePointerValue(element.Type, program):
+                if ((uint)element.Variable >= (uint)function.Variables.Length
+                    || function.Variables[element.Variable].Type
+                        != element.Layout.CarrierType
+                    || function.Variables[element.Variable].NativeFixedArrayLayout
+                        != element.Layout
+                    || !NativeFixedArrayContract.MatchesLayout(
+                        element.Layout, program)
+                    || element.Type != element.Layout.ElementType)
+                {
+                    throw InvalidEffect(element.Span, "NativePointer");
+                }
+                return facts.TryGetNativePointerFieldExtentValue(
+                    element.Variable,
+                    StorageProjection.ForArrayElement(element.Index),
+                    out var elementExtent)
+                        ? elementExtent
+                        : new NativePointerExtentFact([], MayBeOpaque: false,
+                            IsUnavailable: true);
             case BoundRead read when CarriesNativePointer(read.Type, program):
                 if ((uint)read.Variable >= (uint)function.Variables.Length
                     || function.Variables[read.Variable].Type != read.Type)
@@ -5992,7 +6211,7 @@ public static partial class SemanticVerifier
             {
                 var projection = StorageProjection.Combine(
                     storage.Projection, relativeProjection);
-                if (projection.Kind == StorageProjectionKind.InlineFieldPath
+                if (IsNativePointerFieldProjection(projection)
                     && facts.TryGetNativePointerFieldExtentValue(
                         target.Identity, projection, out var fieldExtent))
                 {
@@ -6181,7 +6400,7 @@ public static partial class SemanticVerifier
             return true;
         }
 
-        if (!NativeFixedArrayContract.MatchesLayout(layout, program.Structures)
+        if (!NativeFixedArrayContract.MatchesLayout(layout, program)
             || layout.ElementCount <= 0 || layout.ElementType != pointeeType)
         {
             return false;
@@ -6197,7 +6416,7 @@ public static partial class SemanticVerifier
                 }
                 availableElements = (uint)(layout.ElementCount - (int)storage.Projection.Start);
                 return true;
-            case StorageProjectionKind.UnknownElement:
+            case StorageProjectionKind.UnknownArrayElement:
                 availableElements = 1;
                 return true;
             case StorageProjectionKind.ElementRange:
@@ -6230,6 +6449,13 @@ public static partial class SemanticVerifier
                 return HasUnknownStorageInstances(facts.StorageInstanceSet(address.Variable));
             case BoundNativeStorageAddress address:
                 return HasUnknownStorageInstances(facts.StorageInstanceSet(address.Variable));
+            case BoundNativeFixedArrayElement element
+                when IsNativePointerValue(element.Type, program):
+                return !facts.TryGetNativePointerFieldValue(
+                        element.Variable,
+                        StorageProjection.ForArrayElement(element.Index),
+                        out _, out var elementMayBeUnknown)
+                    || elementMayBeUnknown;
             case BoundRead read when (uint)read.Variable < (uint)facts.NativePointerMayBeUnknown.Length:
                 return facts.NativePointerMayBeUnknown[read.Variable]
                     || !NativePointerStorageInstancesMatch(read.Variable, facts);
@@ -6248,12 +6474,31 @@ public static partial class SemanticVerifier
                 {
                     if (target.Kind != ProvenanceAnchorKind.NativeStorage
                         || (uint)target.Identity >= (uint)facts.NativePointerMayBeUnknown.Length
-                        || facts.NativePointerMayBeUnknown[target.Identity]
                         || target.Storage is not StorageKey targetStorage
                         || !targetStorage.IsKnown
                         || targetStorage.Activation != facts.FunctionActivation
-                        || !facts.StorageInstanceSet(target.Identity).Contains(targetStorage.Instance)
-                        || !NativePointerStorageInstancesMatch(target.Identity, facts))
+                        || !facts.StorageInstanceSet(target.Identity).Contains(targetStorage.Instance))
+                    {
+                        return true;
+                    }
+
+                    if (targetStorage.Projection.Kind
+                            == StorageProjectionKind.WholeObject
+                        && facts.Function.Variables[target.Identity].Type == read.Type)
+                    {
+                        if (facts.NativePointerMayBeUnknown[target.Identity]
+                            || !NativePointerStorageInstancesMatch(
+                                target.Identity, facts))
+                        {
+                            return true;
+                        }
+                    }
+                    else if (!IsNativePointerFieldProjection(
+                            targetStorage.Projection)
+                        || !facts.TryGetNativePointerFieldValue(
+                            target.Identity, targetStorage.Projection,
+                            out _, out var fieldMayBeUnknown)
+                        || fieldMayBeUnknown)
                     {
                         return true;
                     }

@@ -23,13 +23,14 @@ public static partial class SemanticVerifier
                 && !(initialization.Elements.IsEmpty
                     && NativeFixedArrayContract.AllowsEmptyInitialization(initialization.Layout)))
             || function.Variables[variable].NativeFixedArrayLayout != initialization.Layout
-            || !NativeFixedArrayContract.MatchesLayout(initialization.Layout, program.Structures))
+            || !NativeFixedArrayContract.MatchesLayout(initialization.Layout, program))
         {
             throw InvalidEffect(expression.Span, "NativeImport");
         }
         var evaluationContinues = true;
-        foreach (var element in initialization.Elements)
+        for (var index = 0; index < initialization.Elements.Length; index++)
         {
+            var element = initialization.Elements[index];
             if (element is null || element.Type != initialization.Layout.ElementType)
             {
                 throw InvalidEffect(initialization.Span, "NativeImport");
@@ -38,6 +39,17 @@ public static partial class SemanticVerifier
             {
                 evaluationContinues = EvaluateExpression(element, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1, failures);
+                if (evaluationContinues
+                    && CarriesNativePointer(initialization.Layout.ElementType, program)
+                    && initialized.Dependencies is BackingDependencies facts)
+                {
+                    var elementProjection = StorageProjection.ForArrayElement(
+                        new BoundConstant(index, PrimitiveType.Int32, element.Span));
+                    SetNativePointerFieldValuesFromExpression(variable,
+                        elementProjection, initialization.Layout.ElementType,
+                        element, facts, function, program, ref remaining,
+                        depth + 1);
+                }
             }
             else
             {
@@ -70,7 +82,7 @@ public static partial class SemanticVerifier
             || (function.Variables[element.Variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(element.Layout))
             || function.Variables[element.Variable].NativeFixedArrayLayout != element.Layout
-            || !NativeFixedArrayContract.MatchesLayout(element.Layout, program.Structures)
+            || !NativeFixedArrayContract.MatchesLayout(element.Layout, program)
             || element.Type != element.Layout.ElementType || element.Index is null
             || (element.Index.Type != PrimitiveType.Int32
                 && !(element.Index.Type == PrimitiveType.UInt32
@@ -104,7 +116,7 @@ public static partial class SemanticVerifier
             || !declarations.Contains(address.Variable) || !initialized[address.Variable]
             || function.Variables[address.Variable].Type != address.Layout.CarrierType
             || function.Variables[address.Variable].NativeFixedArrayLayout != address.Layout
-            || !NativeFixedArrayContract.MatchesLayout(address.Layout, program.Structures)
+            || !NativeFixedArrayContract.MatchesLayout(address.Layout, program)
             || (function.Variables[address.Variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(address.Layout))
             || address.Index is null
@@ -150,7 +162,7 @@ public static partial class SemanticVerifier
             || !NativeFixedArrayContract.AllowsMutableLocal(write.Layout)
             || function.Variables[write.Variable].Type != write.Layout.CarrierType
             || function.Variables[write.Variable].NativeFixedArrayLayout != write.Layout
-            || !NativeFixedArrayContract.MatchesLayout(write.Layout, program.Structures)
+            || !NativeFixedArrayContract.MatchesLayout(write.Layout, program)
             || write.Value.Type != write.Layout.ElementType
             || (write.Index.Type != PrimitiveType.Int32
                 && !(write.Index.Type == PrimitiveType.UInt32
@@ -167,7 +179,15 @@ public static partial class SemanticVerifier
                 function, program, ref remaining, depth + 1);
             return;
         }
-        _ = EvaluateExpression(write.Value, initialized, fieldMasks, declarations, function,
-            program, ref remaining, depth + 1, failures);
+        var valueCompletes = EvaluateExpression(write.Value, initialized,
+            fieldMasks, declarations, function, program, ref remaining,
+            depth + 1, failures);
+        if (valueCompletes
+            && CarriesNativePointer(write.Layout.ElementType, program)
+            && initialized.Dependencies is BackingDependencies facts)
+        {
+            ApplyNativeFixedArrayWriteProvenance(write, facts, function,
+                program, ref remaining, depth + 1);
+        }
     }
 }

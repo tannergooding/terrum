@@ -473,6 +473,13 @@ snapshotted at each argument position and rechecked at invocation after later
 arguments; unsupported projections or missing summaries remain unavailable
 and reject rather than inferring size from lifetime dependency unions. This is
 in-memory source verification only; it adds no private or Standard schema.
+Fixed-array locals also support typed pointer elements and pointer-bearing
+Blittable elements. Per-cell pointer sources and extents flow through
+initialization, constant and dynamic reads/writes, branch joins, and
+pointer-to-pointer dereferences; dynamic reads join all possible cells, and a
+pointer to the array measures the pointer cells rather than their targets.
+Writable native calls invalidate the potentially affected cell facts, while a
+later exact element write restores its fact.
 It includes extent-zero scalar and character-pointer inputs and explicitly
 committed `ptr<TypeDef>` aggregate pointees using provisional feature ID 4 and
 contract kind 12. The loader recomputes supported scalar/nested-struct layouts,

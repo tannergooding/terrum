@@ -481,7 +481,7 @@ public static partial class SemanticVerifier
                                 || fixedArrayLayout.CarrierType != variable.Type
                                 || (variable.IsMutable
                                     && !NativeFixedArrayContract.AllowsMutableLocal(fixedArrayLayout))
-                                || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program.Structures)
+                                || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program)
                                 || !NativeFixedArrayContract.MatchesProgram(program)))
                                 || (!NativeFixedArrayContract.IsCarrier(variable.Type)
                                     && variable.NativeFixedArrayLayout is not null)
