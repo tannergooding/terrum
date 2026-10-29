@@ -2629,6 +2629,8 @@ public static partial class SemanticVerifier
                     throw Invalid(end.Span);
                 }
                 CheckBackingInvalidation(end.Variable, initialized, end.Span);
+                CheckReferencePlaceInvalidation(end.Variable,
+                    StorageProjection.WholeObject, initialized, end.Span);
                 CheckNativePointerLifetimeEnd(end.Variable, initialized, end.Span);
                 if (program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
                     && CleanupMayFail(endType, program))
@@ -2660,6 +2662,8 @@ public static partial class SemanticVerifier
                     throw Invalid(drop.Span);
                 }
                 CheckBackingInvalidation(drop.Variable, initialized, drop.Span);
+                CheckReferencePlaceInvalidation(drop.Variable,
+                    StorageProjection.WholeObject, initialized, drop.Span);
                 CheckNativePointerLifetimeEnd(drop.Variable, initialized, drop.Span);
                 if (program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
                     && CleanupMayFail(function.Variables[drop.Variable].Type, program))
@@ -2739,6 +2743,12 @@ public static partial class SemanticVerifier
                 if (assignmentCouldComplete)
                 {
                     CheckBackingInvalidation(assignment.Variable, initialized, assignment.Span);
+                    if (IsUnique(program, assignment.Value.Type)
+                        && HasFields(program, assignment.Value.Type))
+                    {
+                        CheckReferencePlaceInvalidation(assignment.Variable,
+                            StorageProjection.WholeObject, initialized, assignment.Span);
+                    }
                 }
                 if (assignment.Value is BoundMove assignmentMove)
                 {
@@ -2757,6 +2767,12 @@ public static partial class SemanticVerifier
                 if (!assignmentCompletes)
                 {
                     return true;
+                }
+                if (IsUnique(program, assignment.Value.Type)
+                    && HasFields(program, assignment.Value.Type))
+                {
+                    initialized.AdvanceFieldPlaceGeneration(assignment.Variable,
+                        StorageProjection.WholeObject, assignment.Span);
                 }
                 var nativeOutputAssignmentResult = NativeOutputResultForValue(
                     assignment.Value, initialized, assignment.Variable);
@@ -3015,6 +3031,22 @@ public static partial class SemanticVerifier
                     && !ManagedClassTypes.IsClass(ownerType);
                 var fieldValueCouldComplete = CanCompleteNormally(fieldAssignment.Value,
                     initialized, program, ref remaining, depth + 1);
+                var fieldProjectionPath = new FieldProjectionPath()
+                    .Append(ownerType, fieldAssignment.Field);
+                var projectionOwnerType = Fields(program, ownerType)[fieldAssignment.Field].Type;
+                foreach (var nestedField in fieldAssignment.NestedFields)
+                {
+                    fieldProjectionPath = fieldProjectionPath.Append(
+                        projectionOwnerType, nestedField);
+                    projectionOwnerType = Fields(program, projectionOwnerType)[nestedField].Type;
+                }
+                var fieldPlaceProjection = new StorageProjection(
+                    StorageProjectionKind.InlineFieldPath, 0, 0, fieldProjectionPath);
+                if (fieldValueCouldComplete && isPartialFieldRepair)
+                {
+                    CheckReferencePlaceInvalidation(fieldAssignment.Variable,
+                        fieldPlaceProjection, initialized, fieldAssignment.Span);
+                }
                 if (fieldValueCouldComplete && !isPartialFieldRepair)
                 {
                     CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
@@ -3033,6 +3065,11 @@ public static partial class SemanticVerifier
                     || fieldMasks[fieldAssignment.Variable] != FullMask(program, ownerType)))
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                if (isPartialFieldRepair)
+                {
+                    initialized.AdvanceFieldPlaceGeneration(fieldAssignment.Variable,
+                        fieldPlaceProjection, fieldAssignment.Span);
                 }
                 if (initialized.Dependencies is BackingDependencies fieldCopyOriginDependencies
                     && TryGetNativePointerFieldAssignmentPlace(fieldAssignment,
@@ -3263,6 +3300,18 @@ public static partial class SemanticVerifier
                         : thenState.PossibleFieldMask(i) | elseState.PossibleFieldMask(i));
                     if (thenCompletes && elseCompletes)
                     {
+                        _ = initialized.MergeFieldPlaceGenerations(i, thenState, elseState);
+                    }
+                    else if (thenCompletes)
+                    {
+                        _ = initialized.CopyFieldPlaceGenerations(i, thenState);
+                    }
+                    else if (elseCompletes)
+                    {
+                        _ = initialized.CopyFieldPlaceGenerations(i, elseState);
+                    }
+                    if (thenCompletes && elseCompletes)
+                    {
                         _ = initialized.CopyProvenanceSlot(i, thenState);
                         _ = initialized.MergeProvenanceSlot(i, elseState);
                     }
@@ -3477,6 +3526,9 @@ public static partial class SemanticVerifier
                         changed |= nextState != headState.Possibilities(i) || nextMask != headMasks[i];
                         headState.SetPossibilities(i, nextState);
                         headMasks[i] = nextMask;
+                        changed |= backState is not null && !localToIteration
+                            ? headState.MergeFieldPlaceGenerations(i, entryState, backState)
+                            : headState.CopyFieldPlaceGenerations(i, entryState);
                         changed |= backState is not null && !localToIteration
                             ? headState.MergeProvenanceSlot(i, backState)
                             : headState.CopyProvenanceSlot(i, entryState);
@@ -4026,6 +4078,14 @@ public static partial class SemanticVerifier
                 ? catchState.PossibleFieldMask(i)
                 : !caughtFailures.HasEdges || catchReturns ? initialized.PossibleFieldMask(i)
                 : initialized.PossibleFieldMask(i) | catchState.PossibleFieldMask(i));
+            if (recoveryBodyReturns && caughtFailures.HasEdges)
+            {
+                _ = initialized.CopyFieldPlaceGenerations(i, catchState);
+            }
+            else if (caughtFailures.HasEdges && !catchReturns)
+            {
+                _ = initialized.MergeFieldPlaceGenerations(i, initialized, catchState);
+            }
         }
         _ = initialized.MergeNativeOutputState(initialized, !recoveryBodyReturns,
             catchState, caughtFailures.HasEdges && !catchReturns);
@@ -4140,6 +4200,38 @@ public static partial class SemanticVerifier
 
     private readonly record struct ActiveStorageScope(int Activation, BoundBlock Block);
 
+    private readonly record struct FieldGenerationKey(int Variable, StorageProjection Projection);
+
+    private readonly record struct FieldGenerationEvent(
+        int Variable, StorageProjection Projection, int Activation, int Start, int Length);
+
+    private sealed class FieldGenerationContext
+    {
+        private readonly Dictionary<FieldGenerationEvent, long> _generations = [];
+        private long _nextGeneration = 1;
+
+        internal long Get(int variable, StorageProjection projection,
+            int activation, TextSpan span)
+        {
+            if (variable < 0 || activation < 0 || span.Start < 0 || span.Length < 0)
+            {
+                throw Invalid();
+            }
+            var key = new FieldGenerationEvent(variable, projection,
+                activation, span.Start, span.Length);
+            if (!_generations.TryGetValue(key, out var generation))
+            {
+                if (_nextGeneration == StorageKey.UnknownGeneration)
+                {
+                    throw Invalid(span);
+                }
+                generation = _nextGeneration++;
+                _generations.Add(key, generation);
+            }
+            return generation;
+        }
+    }
+
     private sealed class LoopScope(int cleanupDepth)
     {
         internal int CleanupDepth { get; } = cleanupDepth;
@@ -4156,6 +4248,8 @@ public static partial class SemanticVerifier
         // vacancy (4), and partial structural ownership (8).
         private readonly byte[] _possibilities;
         private readonly uint[] _possibleFieldMasks;
+        private FieldGenerationContext _fieldGenerationContext;
+        private Dictionary<FieldGenerationKey, long> _fieldPlaceGenerations;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         private readonly Dictionary<BoundExpression, byte> _completionShapeFacts;
@@ -4181,7 +4275,8 @@ public static partial class SemanticVerifier
                 new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
                 new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance),
                 new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
-                hasNativeOutputContracts, hasDoesNotReturnFunctions)
+                hasNativeOutputContracts, hasDoesNotReturnFunctions,
+                new FieldGenerationContext(), new Dictionary<FieldGenerationKey, long>())
         {
         }
 
@@ -4190,13 +4285,17 @@ public static partial class SemanticVerifier
             Dictionary<BoundExpression, byte> completionShapeFacts,
             Dictionary<BoundExpression, bool> completionFacts,
             Dictionary<BoundExpression, byte> nativeOutputFlowFacts,
-            bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions)
+            bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions,
+            FieldGenerationContext fieldGenerationContext,
+            Dictionary<FieldGenerationKey, long> fieldPlaceGenerations)
         {
             Program = program;
             HasNativeOutputContracts = hasNativeOutputContracts;
             HasDoesNotReturnFunctions = hasDoesNotReturnFunctions;
             _possibilities = new byte[length];
             _possibleFieldMasks = new uint[length];
+            _fieldGenerationContext = fieldGenerationContext;
+            _fieldPlaceGenerations = fieldPlaceGenerations;
             _canBeFacts = canBeFacts;
             _flowFacts = flowFacts;
             _completionShapeFacts = completionShapeFacts;
@@ -4277,6 +4376,170 @@ public static partial class SemanticVerifier
         internal uint PossibleFieldMask(int index) =>
             (uint)index < (uint)Length ? _possibleFieldMasks[index] : throw Invalid();
 
+        internal long FieldPlaceGeneration(int variable, StorageProjection projection)
+        {
+            if ((uint)variable >= (uint)Length
+                || (byte)projection.Kind > (byte)StorageProjectionKind.InlineFieldPath
+                || (projection.Kind == StorageProjectionKind.InlineFieldPath
+                    && projection.FieldPath.Segments.IsEmpty))
+            {
+                throw Invalid();
+            }
+
+            var generation = 0L;
+            var generationDepth = -1;
+            if (projection.Kind is StorageProjectionKind.UnknownElement
+                or StorageProjectionKind.UnknownArrayElement)
+            {
+                return _fieldPlaceGenerations.Any(pair => pair.Key.Variable == variable
+                    && pair.Key.Projection.Kind is StorageProjectionKind.WholeObject
+                        or StorageProjectionKind.InlineFieldPath)
+                    ? StorageKey.UnknownGeneration : generation;
+            }
+
+            foreach (var (key, candidate) in _fieldPlaceGenerations)
+            {
+                if (key.Variable != variable
+                    || !IsGenerationAncestor(key.Projection, projection, out var candidateDepth)
+                    || candidateDepth <= generationDepth)
+                {
+                    continue;
+                }
+                generation = candidate;
+                generationDepth = candidateDepth;
+            }
+            return generation;
+        }
+
+        internal void AdvanceFieldPlaceGeneration(int variable,
+            StorageProjection projection, TextSpan span)
+        {
+            if ((uint)variable >= (uint)Length
+                || projection.Kind is not (StorageProjectionKind.WholeObject
+                    or StorageProjectionKind.InlineFieldPath)
+                || (projection.Kind == StorageProjectionKind.InlineFieldPath
+                    && projection.FieldPath.Segments.IsEmpty))
+            {
+                throw Invalid(span);
+            }
+
+            var generation = _fieldGenerationContext.Get(
+                variable, projection, ScopeActivation, span);
+            foreach (var key in _fieldPlaceGenerations.Keys.Where(key =>
+                key.Variable == variable
+                && PlaceGenerationAffectedBy(projection, key.Projection)).ToArray())
+            {
+                _fieldPlaceGenerations[key] = generation;
+            }
+            _fieldPlaceGenerations[new FieldGenerationKey(variable, projection)] = generation;
+        }
+
+        internal bool CopyFieldPlaceGenerations(int variable, InitializationState other)
+        {
+            if (ReferenceEquals(this, other))
+            {
+                return false;
+            }
+            var previous = _fieldPlaceGenerations
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var next = other._fieldPlaceGenerations
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            ResetFieldPlaceGenerations(variable);
+            foreach (var (key, generation) in next)
+            {
+                _fieldPlaceGenerations.Add(key, generation);
+            }
+            return !GenerationMapsEqual(previous, next);
+        }
+
+        internal bool MergeFieldPlaceGenerations(int variable, InitializationState other)
+        {
+            return MergeFieldPlaceGenerations(variable, this, other);
+        }
+
+        internal bool MergeFieldPlaceGenerations(int variable,
+            InitializationState first, InitializationState second)
+        {
+            var firstValues = first._fieldPlaceGenerations
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var secondValues = second._fieldPlaceGenerations
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var keys = new HashSet<FieldGenerationKey>(firstValues.Keys);
+            keys.UnionWith(secondValues.Keys);
+            var previous = _fieldPlaceGenerations
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var next = new Dictionary<FieldGenerationKey, long>(keys.Count);
+            ResetFieldPlaceGenerations(variable);
+            foreach (var key in keys)
+            {
+                var firstGeneration = firstValues.TryGetValue(key, out var current)
+                    ? current : 0;
+                var secondGeneration = secondValues.TryGetValue(key, out var other)
+                    ? other : 0;
+                next.Add(key, firstGeneration == secondGeneration
+                    ? firstGeneration : StorageKey.UnknownGeneration);
+            }
+            foreach (var (key, generation) in next)
+            {
+                _fieldPlaceGenerations.Add(key, generation);
+            }
+            return !GenerationMapsEqual(previous, next);
+        }
+
+        private void ResetFieldPlaceGenerations(int variable)
+        {
+            foreach (var key in _fieldPlaceGenerations.Keys
+                .Where(key => key.Variable == variable).ToArray())
+            {
+                _ = _fieldPlaceGenerations.Remove(key);
+            }
+        }
+
+        private static bool GenerationMapsEqual(
+            Dictionary<FieldGenerationKey, long> left,
+            Dictionary<FieldGenerationKey, long> right)
+        {
+            return left.Count == right.Count
+                && left.All(pair => right.TryGetValue(pair.Key, out var generation)
+                    && generation == pair.Value);
+        }
+
+        private static bool IsGenerationAncestor(
+            StorageProjection generation, StorageProjection place, out int depth)
+        {
+            if (generation.Kind == StorageProjectionKind.WholeObject)
+            {
+                depth = 0;
+                return true;
+            }
+            if (generation.Kind == StorageProjectionKind.InlineFieldPath
+                && place.Kind == StorageProjectionKind.InlineFieldPath
+                && generation.FieldPath.IsPrefixOf(place.FieldPath))
+            {
+                depth = generation.FieldPath.Segments.Length;
+                return true;
+            }
+            depth = -1;
+            return false;
+        }
+
+        private static bool PlaceGenerationAffectedBy(
+            StorageProjection mutation, StorageProjection place)
+        {
+            if (mutation.Kind == StorageProjectionKind.WholeObject)
+            {
+                return true;
+            }
+            return mutation.Kind == StorageProjectionKind.InlineFieldPath
+                && place.Kind == StorageProjectionKind.InlineFieldPath
+                && mutation.FieldPath.IsPrefixOf(place.FieldPath);
+        }
+
         internal void SetPossibleFieldMask(int index, uint mask)
         {
             if ((uint)index >= (uint)Length)
@@ -4296,7 +4559,10 @@ public static partial class SemanticVerifier
         }
 
         internal void ActivateStorage(int index, long generation)
-            => Dependencies?.ActivateStorage(index, generation, ScopeActivation);
+        {
+            ResetFieldPlaceGenerations(index);
+            Dependencies?.ActivateStorage(index, generation, ScopeActivation);
+        }
 
         internal int EnterBlockActivation(TextSpan span) =>
             Dependencies?.EnterBlockActivation(ScopeActivation, span) ?? ScopeActivation;
@@ -4349,7 +4615,10 @@ public static partial class SemanticVerifier
         }
 
         internal void AdvanceStorageGeneration(int index, long generation)
-            => Dependencies?.RetireStorage(index, generation);
+        {
+            ResetFieldPlaceGenerations(index);
+            Dependencies?.RetireStorage(index, generation);
+        }
 
         internal void Retire(int index, long generation)
         {
@@ -4374,6 +4643,7 @@ public static partial class SemanticVerifier
         {
             _possibilities[index] |= other._possibilities[index];
             _possibleFieldMasks[index] |= other._possibleFieldMasks[index];
+            _ = MergeFieldPlaceGenerations(index, other);
             MergeNativeOutputSlot(index, _nativeOutputDestinations[index], _nativeOutputResults[index],
                 other._nativeOutputDestinations[index], other._nativeOutputResults[index]);
             if (Dependencies is not null && other.Dependencies is not null)
@@ -4416,7 +4686,9 @@ public static partial class SemanticVerifier
         {
             var result = new InitializationState(Program, Length, _canBeFacts, _flowFacts,
                 _completionShapeFacts, _completionFacts, _nativeOutputFlowFacts,
-                HasNativeOutputContracts, HasDoesNotReturnFunctions) {
+                HasNativeOutputContracts, HasDoesNotReturnFunctions,
+                _fieldGenerationContext,
+                new Dictionary<FieldGenerationKey, long>(_fieldPlaceGenerations)) {
                 StatementInputs = StatementInputs,
                 Dependencies = Dependencies?.Clone(),
                 NativePointerCaptureEffects = NativePointerCaptureEffects,
@@ -4437,6 +4709,9 @@ public static partial class SemanticVerifier
             Array.Copy(_possibleFieldMasks, destination._possibleFieldMasks, Length);
             Array.Copy(_nativeOutputDestinations, destination._nativeOutputDestinations, Length);
             Array.Copy(_nativeOutputResults, destination._nativeOutputResults, Length);
+            destination._fieldGenerationContext = _fieldGenerationContext;
+            destination._fieldPlaceGenerations = new Dictionary<FieldGenerationKey, long>(
+                _fieldPlaceGenerations);
             destination._nativeOutputStateCount = _nativeOutputStateCount;
             destination.ScopeActivation = ScopeActivation;
             destination._activeStorageScopes.Clear();
@@ -5603,6 +5878,8 @@ public static partial class SemanticVerifier
                 break;
             case BoundMove move:
                 CheckBackingInvalidation(move.Variable, initialized, move.Span);
+                CheckReferencePlaceInvalidation(move.Variable,
+                    StorageProjection.WholeObject, initialized, move.Span);
                 CheckNativePointerLifetimeEnd(move.Variable, initialized, move.Span);
                 if (!IsUnique(program, move.Type) || move.Variable < 0 || move.Variable >= initialized.Length
                     || (move.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
@@ -5659,6 +5936,8 @@ public static partial class SemanticVerifier
                     new FieldProjectionPath().Append(fieldRoot.Type, fieldPlace.Field));
                 CheckReferencePlaceInvalidation(fieldRoot.Variable,
                     movedFieldProjection, initialized, move.Span);
+                initialized.AdvanceFieldPlaceGeneration(fieldRoot.Variable,
+                    movedFieldProjection, move.Span);
                 if (initialized.Dependencies is BackingDependencies fieldMoveDependencies)
                 {
                     fieldMoveDependencies.ClearBackingCallResult(move);
@@ -5963,6 +6242,19 @@ public static partial class SemanticVerifier
                                 ? skippedState.PossibleFieldMask(i)
                                 : !skips ? rightState.PossibleFieldMask(i)
                                 : rightState.PossibleFieldMask(i) | skippedState.PossibleFieldMask(i));
+                            if (rightCompletes && skips)
+                            {
+                                _ = initialized.MergeFieldPlaceGenerations(i,
+                                    rightState, skippedState);
+                            }
+                            else if (rightCompletes)
+                            {
+                                _ = initialized.CopyFieldPlaceGenerations(i, rightState);
+                            }
+                            else if (skips)
+                            {
+                                _ = initialized.CopyFieldPlaceGenerations(i, skippedState);
+                            }
                         }
                         _ = initialized.MergeNativeOutputState(
                             rightState, rightCompletes, skippedState, skips);
@@ -6092,6 +6384,19 @@ public static partial class SemanticVerifier
                             ? falseState.PossibleFieldMask(i)
                             : !falseCompletes ? trueState.PossibleFieldMask(i)
                             : trueState.PossibleFieldMask(i) | falseState.PossibleFieldMask(i));
+                        if (trueCompletes && falseCompletes)
+                        {
+                            _ = initialized.MergeFieldPlaceGenerations(i,
+                                trueState, falseState);
+                        }
+                        else if (trueCompletes)
+                        {
+                            _ = initialized.CopyFieldPlaceGenerations(i, trueState);
+                        }
+                        else if (falseCompletes)
+                        {
+                            _ = initialized.CopyFieldPlaceGenerations(i, falseState);
+                        }
                         if (trueCompletes && falseCompletes)
                         {
                             _ = initialized.CopyProvenanceSlot(i, trueState);

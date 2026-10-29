@@ -513,10 +513,17 @@ public static partial class SemanticVerifier
     }
 
     private readonly record struct StorageKey(
-        int Activation, int Site, StorageInstance Instance, StorageProjection Projection)
+        int Activation, int Site, StorageInstance Instance,
+        StorageProjection Projection, long PlaceGeneration)
     {
         internal const long UnknownGeneration = long.MinValue;
         internal bool IsKnown => Activation >= 0 && Instance.IsKnown;
+
+        internal StorageKey(int activation, int site, StorageInstance instance,
+            StorageProjection projection)
+            : this(activation, site, instance, projection, 0)
+        {
+        }
     }
 
     private enum CapabilityKind : byte
@@ -602,6 +609,11 @@ public static partial class SemanticVerifier
             StorageInstance instance, StorageProjection projection)
             => new(ProvenanceAnchorKind.ReferencePlace, variable,
                 new StorageKey(activation, variable, instance, projection));
+
+        internal static ProvenanceAnchor ForReferencePlace(int activation, int variable,
+            StorageInstance instance, StorageProjection projection, long placeGeneration)
+            => new(ProvenanceAnchorKind.ReferencePlace, variable,
+                new StorageKey(activation, variable, instance, projection, placeGeneration));
 
         internal static ProvenanceAnchor ForIncomingReference(int formal)
             => new(ProvenanceAnchorKind.IncomingReference, formal, null);
@@ -7643,7 +7655,8 @@ public static partial class SemanticVerifier
                     }
                     _ = result.Add(ProvenanceAnchor.ForReferencePlace(
                         facts.FunctionActivation, placeVariable, instance,
-                        placeProjection));
+                        placeProjection,
+                        state.FieldPlaceGeneration(placeVariable, placeProjection)));
                 }
                 break;
             case BoundReferenceReborrow reborrow:
@@ -8073,6 +8086,8 @@ public static partial class SemanticVerifier
             || !TryGetReferencePlaceType(target.Identity, key.Projection,
                 function, program, out var actualType)
             || actualType != referentType
+            || key.PlaceGeneration
+                != state.FieldPlaceGeneration(target.Identity, key.Projection)
             || !ReferenceTargetPlaceInitialized(target.Identity, key.Projection,
                 state, fieldMasks, function, program))
         {
@@ -8427,8 +8442,9 @@ public static partial class SemanticVerifier
             return;
         }
         if ((uint)root >= (uint)state.Length
-            || projection.Kind != StorageProjectionKind.InlineFieldPath
-            || projection.FieldPath.Segments.IsEmpty)
+            || (projection.Kind != StorageProjectionKind.WholeObject
+                && (projection.Kind != StorageProjectionKind.InlineFieldPath
+                    || projection.FieldPath.Segments.IsEmpty)))
         {
             throw InvalidEffect(span, "CheckedReference");
         }
@@ -8495,6 +8511,10 @@ public static partial class SemanticVerifier
             return false;
         }
         if (key.Projection.Kind == StorageProjectionKind.WholeObject)
+        {
+            return true;
+        }
+        if (projection.Kind == StorageProjectionKind.WholeObject)
         {
             return true;
         }

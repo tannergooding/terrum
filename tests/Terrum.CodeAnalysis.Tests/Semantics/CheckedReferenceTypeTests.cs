@@ -203,6 +203,32 @@ public sealed class CheckedReferenceTypeTests
     }
 
     [Test]
+    public void PreservesSiblingFieldReferenceAcrossConditionalPartialOwnerMove()
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            unique struct Pair {
+                public mut OwnedInt32Buffer Owned;
+                public mut int32 Value;
+                public Pair(OwnedInt32Buffer owned, int32 value) {
+                    Owned = move owned;
+                    Value = value;
+                }
+            }
+            int32 ReadAfterOptionalMove(bool shouldMove, OwnedInt32Buffer owned) {
+                mut Pair pair = new Pair(move owned, int32(42));
+                ref<int32> value = ref pair.Value;
+                if (shouldMove) {
+                    OwnedInt32Buffer extracted = move pair.Owned;
+                }
+                return *value;
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
     public void RejectsReferenceToIncompleteUniqueReceiverAsAWhole()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
