@@ -888,6 +888,11 @@ public sealed class NativeVTableCallTests
                 public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
             }
 
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+            }
+
             [Terrum.Interop.NativeCallable]
             int32 ReadFirst(ptr<TestObject> receiver, ptr<uint32> value) {
                 unsafe { return *value == 42 ? 42 : 0; }
@@ -902,9 +907,10 @@ public sealed class NativeVTableCallTests
                 unsafe {
                     TestVTable vtable = new TestVTable(&ReadFirst);
                     TestObject instance = new TestObject(&vtable);
-                    ptr<uint32> pointer = &values[{{index}}];
-                    ptr<uint32> forwarded = pointer;
-                    return Invoke(&instance, forwarded) == 42 ? 0 : -1;
+                    mut PointerHolder holder = new PointerHolder(null);
+                    holder.Value = &values[{{index}}];
+                    PointerHolder copy = holder;
+                    return Invoke(&instance, copy.Value) == 42 ? 0 : -1;
                 }
             }
             """;
@@ -922,6 +928,57 @@ public sealed class NativeVTableCallTests
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void NativeVTableExtentUsesStagedPointerBeforeLaterWriteArgument()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestVTable {
+                public fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32, int32> Method;
+                public TestVTable(
+                    fnptr<NativeAbi, ptr<TestObject>, ptr<uint32>, int32, int32> method) {
+                    Method = method;
+                }
+            }
+
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct TestObject {
+                public ptr<TestVTable> VTable;
+                public TestObject(ptr<TestVTable> vtable) { VTable = vtable; }
+            }
+
+            [Terrum.Interop.NativeCallable]
+            int32 ObserveValue(ptr<TestObject> receiver, ptr<uint32> value, int32 status) {
+                unsafe { return *value == 42 ? status : -1; }
+            }
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
+            [Terrum.Interop.NativeVTableMethod(0)]
+            extern unsafe int32 Invoke(
+                ptr<TestObject> receiver, ptr<uint32> value, int32 status);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                mut ptr<uint32> pointer = null;
+                unsafe {
+                    TestVTable vtable = new TestVTable(&ObserveValue);
+                    TestObject instance = new TestObject(&vtable);
+                    pointer = &values[0];
+                    return Invoke(&instance, pointer, Overwrite(&pointer));
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
     [Test]

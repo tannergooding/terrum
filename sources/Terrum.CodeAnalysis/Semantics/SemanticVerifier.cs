@@ -3126,11 +3126,26 @@ public static partial class SemanticVerifier
                         reachable && elseReachable, cleanups, inCleanup, inUnsafe, failures, loops);
                 for (var i = 0; i < initialized.Length; i++)
                 {
-                    initialized.SetPossibilities(i, !thenReachable || thenReturns ? elseState.Possibilities(i)
-                        : !elseReachable || elseReturns ? thenState.Possibilities(i)
+                    var thenCompletes = thenReachable && !thenReturns;
+                    var elseCompletes = elseReachable && !elseReturns;
+                    initialized.SetPossibilities(i, !thenCompletes ? elseState.Possibilities(i)
+                        : !elseCompletes ? thenState.Possibilities(i)
                         : (byte)(thenState.Possibilities(i) | elseState.Possibilities(i)));
-                    fieldMasks[i] = !thenReachable || thenReturns ? elseMasks[i]
-                        : !elseReachable || elseReturns ? thenMasks[i] : thenMasks[i] & elseMasks[i];
+                    fieldMasks[i] = !thenCompletes ? elseMasks[i]
+                        : !elseCompletes ? thenMasks[i] : thenMasks[i] & elseMasks[i];
+                    if (thenCompletes && elseCompletes)
+                    {
+                        _ = initialized.CopyProvenanceSlot(i, thenState);
+                        _ = initialized.MergeProvenanceSlot(i, elseState);
+                    }
+                    else if (thenCompletes)
+                    {
+                        _ = initialized.CopyProvenanceSlot(i, thenState);
+                    }
+                    else if (elseCompletes)
+                    {
+                        _ = initialized.CopyProvenanceSlot(i, elseState);
+                    }
                 }
                 _ = initialized.MergeNativeOutputState(thenState, thenReachable && !thenReturns,
                     elseState, elseReachable && !elseReturns);
@@ -3691,7 +3706,9 @@ public static partial class SemanticVerifier
                                 throw InvalidEffect(result.Span, "Ownership");
                             }
                             dependencies.Staged.Add(new StagedDependencySource(
-                                null, -1, [.. forwardedBacking], EmptyBackingSources, false));
+                                null, -1, [.. forwardedBacking], EmptyBackingSources, false,
+                                new NativePointerExtentFact([], MayBeOpaque: false,
+                                    IsUnavailable: false)));
                         }
                         try
                         {
@@ -5111,7 +5128,9 @@ public static partial class SemanticVerifier
                 }
                 var readBacking = BackingOf(spanRead.View, initialized.Dependencies, program, ref remaining, depth + 1);
                 initialized.Dependencies?.Staged.Add(new StagedDependencySource(
-                    null, -1, [.. readBacking], EmptyBackingSources, false));
+                    null, -1, [.. readBacking], EmptyBackingSources, false,
+                    new NativePointerExtentFact([], MayBeOpaque: false,
+                        IsUnavailable: false)));
                 try
                 {
                     if (!EvaluateExpression(spanRead.Index, initialized, fieldMasks, declarations,
@@ -5629,6 +5648,19 @@ public static partial class SemanticVerifier
                             : (byte)(trueState.Possibilities(i) | falseState.Possibilities(i)));
                         fieldMasks[i] = !trueCompletes ? falseMasks[i] : !falseCompletes ? trueMasks[i]
                             : trueMasks[i] & falseMasks[i];
+                        if (trueCompletes && falseCompletes)
+                        {
+                            _ = initialized.CopyProvenanceSlot(i, trueState);
+                            _ = initialized.MergeProvenanceSlot(i, falseState);
+                        }
+                        else if (trueCompletes)
+                        {
+                            _ = initialized.CopyProvenanceSlot(i, trueState);
+                        }
+                        else if (falseCompletes)
+                        {
+                            _ = initialized.CopyProvenanceSlot(i, falseState);
+                        }
                     }
                     _ = initialized.MergeNativeOutputState(trueState, trueCompletes,
                         falseState, falseCompletes);
@@ -5728,6 +5760,8 @@ public static partial class SemanticVerifier
                     }
                     if (indirectCallCompletes)
                     {
+                        VerifyStagedNativeParameterExtents(call, indirectSignature,
+                            initialized, function, program, ref remaining, depth + 1);
                         if (initialized.Dependencies is BackingDependencies dependencies
                             && MayWriteNativePointerStorage(call, program))
                         {
@@ -6318,6 +6352,8 @@ public static partial class SemanticVerifier
                     {
                         throw InvalidEffect(call.Span, "NativeImport");
                     }
+                    VerifyStagedNativeParameterExtents(call, target,
+                        initialized, program, ref remaining, depth + 1);
                     var copyOriginCallResult = CarriesCopyOrigin(call.Type, program)
                         && initialized.Dependencies is BackingDependencies
                         copyOriginResultDependencies

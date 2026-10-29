@@ -466,9 +466,13 @@ Positive `NativeParameter` extents carried by typed pointer values are checked
 against known local or fixed-array backing through local copies; array capacity
 is measured from the selected element. Opaque incoming or native-result
 pointers remain usable only at unsafe calls and do not mask known undersized
-alternatives. Field and pointer-cell reads, plus source-call `CopyOrigin`
-results, do not yet preserve the quantitative fact and reject rather than
-infer size from the existing lifetime dependency union.
+alternatives. Selected pointer-bearing fields and whole-object pointer cells
+preserve the fact through reads, writes, copies, and supported `CopyOrigin`
+summaries, including entry-value and entry-referent views. The value fact is
+snapshotted at each argument position and rechecked at invocation after later
+arguments; unsupported projections or missing summaries remain unavailable
+and reject rather than inferring size from lifetime dependency unions. This is
+in-memory source verification only; it adds no private or Standard schema.
 It includes extent-zero scalar and character-pointer inputs and explicitly
 committed `ptr<TypeDef>` aggregate pointees using provisional feature ID 4 and
 contract kind 12. The loader recomputes supported scalar/nested-struct layouts,

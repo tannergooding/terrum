@@ -741,13 +741,19 @@ public sealed class NativeFunctionPointerTests
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
             extern unsafe int32 ObserveValues(ptr<uint32> values);
 
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+            }
+
             int32 Main() {
                 InlineArray<uint32, 3> values = [1, 2, 3];
                 unsafe {
                     var observe = &ObserveValues;
-                    ptr<uint32> pointer = &values[{{index}}];
-                    ptr<uint32> forwarded = pointer;
-                    return observe(forwarded);
+                    mut PointerHolder holder = new PointerHolder(null);
+                    holder.Value = &values[{{index}}];
+                    PointerHolder copy = holder;
+                    return observe(copy.Value);
                 }
             }
             """;
@@ -766,6 +772,38 @@ public sealed class NativeFunctionPointerTests
         Assert.That(Encoding.ASCII.GetString(
             NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
             Does.Contain("ObserveValues"));
+    }
+
+    [Test]
+    public void IndirectNativeParameterExtentUsesStagedPointerBeforeLaterWriteArgument()
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern unsafe int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern unsafe int32 Observe(ptr<uint32> value, int32 status);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                mut ptr<uint32> pointer = null;
+                unsafe {
+                    var observe = &Observe;
+                    pointer = &values[0];
+                    return observe(pointer, Overwrite(&pointer));
+                }
+            }
+            """), reference);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast)),
+            Does.Contain("Overwrite").And.Contain("Observe"));
     }
 
     [Test]

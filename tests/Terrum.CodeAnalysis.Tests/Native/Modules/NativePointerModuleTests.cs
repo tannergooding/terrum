@@ -387,6 +387,318 @@ public sealed class NativePointerModuleTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
+    [TestCase(1, false)]
+    [TestCase(2, true)]
+    public void NativeParameterExtentUsesCopiedPointerFieldBacking(
+        int backingCount, bool shouldCompile)
+    {
+        var values = string.Join(", ", Enumerable.Range(1, backingCount));
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+            }
+
+            int32 Main() {
+                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                unsafe {
+                    mut PointerHolder holder = new PointerHolder(null);
+                    holder.Value = &values[0];
+                    PointerHolder copy = holder;
+                    return Observe(copy.Value);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void PositiveNativeParameterExtentAcceptsOpaquePointerFieldAtUnsafeCall()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]
+            extern int32 Observe(ptr<uint32> value);
+
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+            }
+
+            unsafe int32 Forward(ptr<uint32> opaque) {
+                unsafe {
+                    mut PointerHolder holder = new PointerHolder(null);
+                    holder.Value = opaque;
+                    return Observe(holder.Value);
+                }
+            }
+
+            int32 Main() { return 0; }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(0, true)]
+    [TestCase(1, false)]
+    public void NativeParameterExtentChecksFieldAlternativesBesideOpaqueInput(
+        int index, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+            }
+
+            unsafe int32 Forward(ptr<uint32> opaque, bool chooseOpaque) {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    mut PointerHolder holder = new PointerHolder(null);
+                    if (chooseOpaque) {
+                        holder.Value = opaque;
+                    } else {
+                        holder.Value = &values[{{index}}];
+                    }
+                    return Observe(holder.Value);
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(0, 3, true)]
+    [TestCase(1, 2, true)]
+    [TestCase(1, 3, false)]
+    [TestCase(0, 4, false)]
+    public void NativeParameterExtentTracksPointerCellWritesAndReads(
+        int index, int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 3> values = [42, 42, 42];
+                mut ptr<uint32> pointer = null;
+                unsafe {
+                    write ptr<ptr<uint32>> cell = &pointer;
+                    *cell = &values[{{index}}];
+                    ptr<uint32> observed = *cell;
+                    return Observe(observed);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase("", false)]
+    [TestCase("pointer = &values[0];", true)]
+    public void NativeParameterWriteInvalidatesPointerExtentUntilReassigned(
+        string reassignment, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    mut ptr<uint32> pointer = &values[0];
+                    int32 status = Overwrite(&pointer);
+                    {{reassignment}}
+                    return Observe(pointer) + status;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void NativeParameterExtentUsesStagedPointerBeforeLaterWriteArgument()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value, int32 status);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                mut ptr<uint32> pointer = null;
+                unsafe {
+                    pointer = &values[0];
+                    return Observe(pointer, Overwrite(&pointer));
+                }
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(Encoding.ASCII.GetString(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast)),
+            Does.Contain("Overwrite").And.Contain("Observe"));
+    }
+
+    [TestCase(1, false)]
+    [TestCase(2, true)]
+    public void NativeParameterExtentFlowsThroughCopyOriginPointerFields(
+        int backingCount, bool shouldCompile)
+    {
+        var values = string.Join(", ", Enumerable.Range(1, backingCount));
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            struct PointerPair {
+                public mut ptr<uint32> Left;
+                public mut ptr<uint32> Right;
+                public unsafe PointerPair(ptr<uint32> left, ptr<uint32> right) {
+                    Left = left;
+                    Right = right;
+                }
+            }
+
+            unsafe PointerPair Identity(PointerPair value) { return value; }
+
+            unsafe int32 Forward(ptr<uint32> opaque) {
+                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                unsafe {
+                    PointerPair pair = new PointerPair(&values[0], opaque);
+                    PointerPair copy = Identity(pair);
+                    return Observe(copy.Left) + Observe(copy.Right);
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(1, false)]
+    [TestCase(2, true)]
+    public void NativeParameterExtentFlowsThroughBorrowedReceiverFieldSummary(
+        int backingCount, bool shouldCompile)
+    {
+        var values = string.Join(", ", Enumerable.Range(1, backingCount));
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            struct PointerHolder {
+                public mut ptr<uint32> Value;
+                public unsafe PointerHolder(ptr<uint32> value) { Value = value; }
+                public unsafe ptr<uint32> ReadValue() { return Value; }
+            }
+
+            unsafe int32 Forward() {
+                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                unsafe {
+                    PointerHolder holder = new PointerHolder(&values[0]);
+                    return Observe(holder.ReadValue());
+                }
+            }
+
+            int32 Main() { return 0; }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
     [TestCase("SelectLeft", false)]
     [TestCase("SelectRight", true)]
     public void NativePointerFieldProvenanceFlowsThroughBorrowedReceiverSummary(
