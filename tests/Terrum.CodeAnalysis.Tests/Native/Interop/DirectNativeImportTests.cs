@@ -1629,6 +1629,41 @@ public sealed class DirectNativeImportTests
             compilation.Program!, NativeRuntimePolicy.FailFast)), Does.Contain("ReadUtf16Path"));
     }
 
+    [TestCase("abc", 0, true)]
+    [TestCase("abc", 3, true)]
+    [TestCase("abc", 4, true)]
+    [TestCase("abc", 5, false)]
+    [TestCase("A😀", 4, true)]
+    [TestCase("A😀", 5, false)]
+    public void DirectNativeUtf16LiteralPointerMustMeetNativeParameterExtent(
+        string value, int extent, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "ReadUtf16Path")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern int32 ReadUtf16Path(ptr<char16> path);
+
+            int32 Main() {
+                unsafe { return ReadUtf16Path(utf16z("{{value}}")); }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("ReadUtf16Path"));
+    }
+
     [Test]
     public void DirectNativePointerInputSurvivesPrivateSemanticMetadataAndIsRevalidated()
     {

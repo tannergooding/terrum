@@ -87,21 +87,33 @@ internal static class DirectNativeImportContract
             || NativeFunctionPointerContract.IsValidType(type, functionPointerSignatures);
 
     internal static bool IsStringPointerArgument(BoundExpression argument,
-        DirectNativeParameter parameter, BoundProgram program) =>
-        IsReadonlyStringParameter(argument.Type, parameter)
-        && (argument switch {
+        DirectNativeParameter parameter, BoundProgram program)
+    {
+        if (parameter.Access != NativeParameterAccess.Read
+            || parameter.Retention != NativeParameterRetention.NoEscape)
+        {
+            return false;
+        }
+
+        return argument switch {
             BoundConstant {
                 Type: PrimitiveType.NativeUtf16ZPointer,
                 Value: >= 0,
             } literal => (parameter.PointeeType is PrimitiveType.Void or PrimitiveType.Char16)
-                && literal.Value < program.NativeUtf16ZLiterals.Length,
+                && literal.Value < program.NativeUtf16ZLiterals.Length
+                && (parameter.Extent == 0
+                    || (parameter.PointeeType == PrimitiveType.Char16
+                        && (ulong)parameter.Extent
+                            <= (ulong)program.NativeUtf16ZLiterals[(int)literal.Value].Length + 1)),
             BoundConstant {
                 Type: PrimitiveType.NativeUtf8ZPointer,
                 Value: >= 0,
             } literal => parameter.PointeeType == PrimitiveType.Void
+                && parameter.Extent == 0
                 && literal.Value < program.NativeUtf8ZLiterals.Length,
             _ => false,
-        });
+        };
+    }
 
     internal static bool IsReadonlyStringParameter(PrimitiveType type,
         DirectNativeParameter parameter) =>

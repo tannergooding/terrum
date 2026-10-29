@@ -445,8 +445,11 @@ aliases do not receive generic direct-import parameter admission; spell those
 ABI values as explicitly contracted pointers. `NativeOutput` remains limited
 to scalar and raw-pointer pointees, and `ptr<void>` input values are limited to
 readonly, zero-extent metadata. Direct pointer arguments also accept `null`;
-matching `utf8z`/`utf16z` literals require read-only, no-escape, zero-extent
-metadata and do not require a selected API catalog. When a call forms an
+matching `utf8z`/`utf16z` literals require read-only, no-escape metadata and do
+not require a selected API catalog. A `utf16z` literal passed to a `ptr<char16>`
+parameter may satisfy a positive extent up to its stored UTF-16 element count,
+including the terminator; `utf8z` and `ptr<void>` literal inputs remain limited
+to extent zero. When a call forms an
 address with `&local` or the first element of a fixed array, the backing must be initialized
 and match the pointee type; `Write` and `ReadWrite` require mutable backing.
 Raw pointer values remain caller-authored unsafe inputs. Caller-unsafe source

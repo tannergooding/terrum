@@ -811,12 +811,13 @@ public sealed class NativeVTableCallTests
             NativeRuntimePolicy.FailFast).ConfigureAwait(true), Is.Zero);
     }
 
-    [Test]
-    public void NativeVTableMethodAcceptsNulTerminatedStringArguments()
+    [TestCase(0, true)]
+    [TestCase(4, true)]
+    [TestCase(5, false)]
+    public void NativeVTableMethodAcceptsNulTerminatedStringArguments(
+        int extent, bool shouldCompile)
     {
-        Assume.That(OperatingSystem.IsWindows()
-            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var source = $$"""
             [Blittable] [Layout(LayoutKind.Sequential)]
             struct TestVTable {
                 public fnptr<NativeAbi, ptr<TestObject>, ptr<char16>, int32> Method;
@@ -837,7 +838,7 @@ public sealed class NativeVTableCallTests
                 unsafe { return *value == 'a' ? 42 : 0; }
             }
 
-            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 0)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, {{extent}})]
             [Terrum.Interop.NativeVTableMethod(0)]
             extern unsafe int32 Invoke(ptr<TestObject> receiver, ptr<char16> value);
 
@@ -848,10 +849,20 @@ public sealed class NativeVTableCallTests
                     return Invoke(&instance, utf16z("abc")) == 42 ? 0 : -1;
                 }
             }
-            """));
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
 
-        Assert.That(compilation.HasErrors, Is.False,
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.Zero);
     }
 

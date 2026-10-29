@@ -689,6 +689,44 @@ public sealed class NativeFunctionPointerTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
+    [TestCase(0, true)]
+    [TestCase(3, true)]
+    [TestCase(4, true)]
+    [TestCase(5, false)]
+    public void IndirectNativeUtf16LiteralPointerMustMeetNativeParameterExtent(
+        int extent, bool shouldCompile)
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{extent}})]
+            extern unsafe int32 Observe(ptr<char16> value);
+
+            int32 Main() {
+                unsafe {
+                    var observe = &Observe;
+                    return observe(utf16z("abc"));
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics, Is.Not.Empty);
+            return;
+        }
+
+        var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(Encoding.ASCII.GetString(
+            NativeEmitter.EmitWithNativeImports(program, NativeRuntimePolicy.FailFast)),
+            Does.Contain("Observe"));
+    }
+
     [Test]
     public void SemanticVerifierRejectsTypedNullForPositiveIndirectNativeParameterExtent()
     {
