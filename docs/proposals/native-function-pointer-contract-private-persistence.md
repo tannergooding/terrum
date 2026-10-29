@@ -11,6 +11,15 @@ document and allocates no Standard Feature, section, clause or operation.
 The source, anchor, selector and convention directions referenced below
 remain unapproved/provisional independently of this recommendation.
 
+The [checked-reference private-persistence companion](checked-reference-private-persistence.md)
+now selects the previously missing recursive checked-reference/optional type
+and checked Body carrier, plus ordinary declaration publication facts, as an
+exact amendment to the complete candidate 97. It remains unapproved and
+unimplemented; its explicit composition also retains the later
+foreign-invocation, direct-import expectation and enum amendments. This file
+continues to own pointer invocation rows and `fnptr#i`/address-contract
+references, not a competing checked-reference codec.
+
 ## Decision and precise supersession
 
 Amend the **still-unimplemented candidate private structured-module revision
@@ -67,9 +76,9 @@ composed proposals.
 
 | Inspected owner | Relevant boundary |
 |---|---|
-| [`NativeFunctionPointerContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/NativeFunctionPointerContract.cs) | `NativeFunctionPointerSignatureDefinition` contains only convention, result and parameter types. Its target matcher excludes DoesNotReturn. Recognizing additional host convention enum cases does not add contract persistence. |
-| [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs) | `BoundFunction` separately carries DoesNotReturn, RequiresUnsafeCaller, NativeOutputContracts and logical dependency contracts. Host dependency enum values/source sets are not the shared wire payload. Effective native-role unsafety is not sufficient evidence of a declared Effects `04`. |
-| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs) | The inspected header reader selects 92; signature writing/reading is shape-only. `Contract`/`AppendTypeName` embed shape identities, while imported ModuleFunctions can have no Function payload. A larger table without references from those expectations would still be lossy. |
+| [`NativeFunctionPointerContract.cs`](../../sources/Terrum.CodeAnalysis/Semantics/NativeFunctionPointerContract.cs) | The in-memory `NativeFunctionPointerSignatureDefinition` now carries declared Effects, bounded selector identities, checked-output slots and normalized Dependency rows; its target matcher checks declared effects against the target, and projection supports DoesNotReturn weakening plus source subsets/backing-only refinements under exact destination/phase correspondence. Checked OutputState remains unsupported for the current ABI parameter subset. These in-memory additions do not change private bytes. |
+| [`BoundProgram.cs`](../../sources/Terrum.CodeAnalysis/Semantics/BoundProgram.cs) | `BoundFunction` separately carries DoesNotReturn, effective RequiresUnsafeCaller, DeclaredRequiresUnsafeCaller, NativeOutputContracts and logical dependency contracts. Host dependency enum values/source sets are not the shared wire payload. Effective native-role unsafety is not sufficient evidence of a declared Effects `04`. |
+| [`ModuleCompiler.cs`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.cs) | The inspected header reader selects 92; signature writing/reading is shape-only. The writer now refuses signatures with nonempty invocation facts rather than silently dropping them. `Contract`/`AppendTypeName` embed shape identities, while imported ModuleFunctions can have no Function payload. A larger table without references from those expectations would still be lossy. |
 | [`ModuleSets`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.ModuleSets.cs), [`Graph`](../../sources/Terrum.CodeAnalysis/Modules/ModuleCompiler.Graph.cs) | Projection, type-table merging and restoration are separate paths. `RecordedImportPromises` restores selected outer callable flags, not a complete nested pointer contract. |
 | [Source-contract direction](standard-function-pointer-source-contracts.md) | Owns fixed bare-type defaults, complete inferred NativeAddress types, declared/effective unsafety separation and checked directed projection. It explicitly rejects shape-only private persistence. |
 | [Anchor-contract direction](standard-function-pointer-anchor-contracts.md#proposed-normalization-and-equality) | Owns applicable normalized invocation facts and logical-subject rebasing. Target identity, NativeCallable/NativeImport roles and evaluation-form authorization are not structural pointer identity. |

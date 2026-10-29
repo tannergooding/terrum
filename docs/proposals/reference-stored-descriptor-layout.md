@@ -433,7 +433,7 @@ including this target extension when used. Equal version/profile bytes do
 not authorize a decoder or native ABI guess. No released-schema assignment,
 compatibility reader or old-image migration is proposed.
 
-Private semantic persistence is a separate unresolved type/operation codec,
+Private semantic persistence is a separate type/operation codec,
 not a standard-layout question. Its current underlying-T/mode representation
 cannot be relabeled as lossless complete-reference exchange. The smallest
 follow-up is the **shared private recursive complete-reference type encoding**
@@ -441,9 +441,13 @@ already identified by the
 [checked-output proposal](function-pointer-checked-output-parameters.md#private-persistence-owner-and-explicit-next-decision):
 ordinary versus initialization reference, optional nesting and per-node
 authority, consistently used by fields, signatures, bodies and bodyless
-expectations under one exact composed private schema. This proposal assigns
-no private revision, escape or expression tag. A path needing that codec
-stays rejected until its decision and implementation exist.
+expectations under one exact composed private schema. The unapproved
+[private-persistence companion](checked-reference-private-persistence.md)
+now selects that exact candidate-97 type/operation extension. This stored-layout
+proposal assigns no private revision, escape or expression tag. A path needing
+the codec stays rejected until exact selection and implementation; the
+companion does not widen this physical agreement or discharge backing holds,
+RootPin or zero-extent gates.
 
 ### Providers, replacement and remapping
 
@@ -514,7 +518,7 @@ implementation/qualification remain outstanding.
 
 | Route not completed here | Smallest further decision or existing dependency |
 |---|---|
-| Private exchange of these complete types | Select the one recursive private reference/optional type codec and exact composed schema described above; do not invent per-call mode fallbacks. |
+| Private exchange of these complete types | Select and implement the unapproved [shared recursive private companion](checked-reference-private-persistence.md) and its complete amended-97 composition; do not invent per-call mode fallbacks. |
 | Reference to a normal class/box subplace whose backing must survive the last source handle | Select the normal shared-backing support-hold carrier and its Copy/last-dependent release/call handoff. RootPin's two-word envelope does not itself assign that support kind; this address-only subset cannot carry it through opaque storage. |
 | Pin-derived ordinary references or stored rooted locators | Use the separate RootPin profile and its complete runtime/schema support unchanged. Replacing it with this layout would require an explicit amendment, not an implicit dependency on GC for rootless references. |
 | Zero-extent nominal referents | Select a non-null address/anchor and exact-place identity rule without fabricating a payload byte. Void remains nonaddressable under the accepted contract. |

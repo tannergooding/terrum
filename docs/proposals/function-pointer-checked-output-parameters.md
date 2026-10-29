@@ -421,14 +421,17 @@ checked-output rows. Do not use Standard convention bytes, graph rows or host
 legacy passing flags in those fields. Preserve exact selected types/contracts
 in references, native sets/graphs and retained provider expectations.
 
-**Its current private i32 type identities do not supply a selected canonical
-checked-reference type/Body carrier.** Merely allowing nonempty OutputStates or
+**Implemented revision 92's private i32 type identities do not supply a
+canonical checked-reference type/Body carrier.** The unapproved
+[shared private companion](checked-reference-private-persistence.md) now
+selects that exact candidate-97 extension; implementation remains a gate.
+Merely allowing nonempty OutputStates or
 writing payload T into `parameterType` would still lose the formal's identity,
 address and authority. The inspected implemented revision 92 must continue to
 reject facts it cannot transport; neither its legacy tag-21 output expression
 nor NativeOutput tag 41 is the encoding of this proposal.
 
-The explicit next private decision, owned by that candidate-97 amendment, is a
+The private decision, owned by that candidate-97 companion, supplies a
 lossless complete initialization-reference type-use and checked formation/
 reborrow/store representation across:
 
@@ -439,21 +442,19 @@ reborrow/store representation across:
 3. Nested types, bodyless declaration expectations, normal state correlations,
    traversal/remapping, source-free binding and set/graph closure admission.
 
-Recommend extending the shared private complete-type mechanism, not adding
-function-pointer-only IsInit bits or a second native-output tuple. No existing
-private allocation is sufficient to assert that extension, so **this proposal
-assigns no private revision, type code, escape, expression tag or optional
-trailer**. The next decision must select exact bytes and affected occurrences
-as one schema before affected private writing/reading is enabled. If candidate
-97 is amended before use, select exactly that whole amended schema; a revision
-number alone is not agreement. If a distinct schema is selected instead,
-declare it explicitly rather than guessing between two layouts.
+Use the companion's shared private complete-type mechanism, not
+function-pointer-only IsInit bits or a second native-output tuple. **This
+checked-output proposal itself assigns no private revision, type code,
+escape, expression tag or optional trailer**; the companion is their sole
+owner. Select exactly its whole composed amended 97 before affected private
+writing/reading is enabled. A revision number alone is not agreement, and
+earlier-97 drafts are not alternate decoders or aliases.
 
 This is a blocked transport path, not permission to claim lossless private
 support, silently retain only Standard metadata, strip outputs for native
 packages or permanently exclude the source-to-Standard producer. Standard and
 direct bound lowering can follow the concrete contract above; any route that
-requires private persistence remains gated on this decision and implementation.
+requires private persistence remains gated on exact selection and implementation.
 
 ## Verification, provider binding and transformation
 
