@@ -260,4 +260,29 @@ public sealed partial class JitTests
         """)]
     public Task ManagedRootsAndCyclicCollectionAgreeAcrossAotAndJitAsync(string source) =>
         AssertFailFastExecutionAsync(source, 42);
+
+    [Test]
+    public Task WritableReferenceStoreKeepsManagedRootRegisteredAsync() =>
+        AssertFailFastExecutionAsync("""
+            ManagedNode Create(int32 value) {
+                require ManagedNode.TryCreate(value, out var node);
+                return node;
+            }
+            void Replace(write ref<ManagedNode> destination, ManagedNode replacement) {
+                *destination = replacement;
+            }
+            int32 Main() {
+                mut ManagedNode slot = Create(1);
+                mut ManagedNode formalSlot = Create(2);
+                {
+                    write ref<ManagedNode> destination = ref slot;
+                    ManagedNode replacement = Create(42);
+                    *destination = replacement;
+                }
+                Replace(ref formalSlot, Create(43));
+                if (ManagedHeap.Collect() != 2) { return 1; }
+                return slot.Value + formalSlot.Value == 85 ? 42 : 0;
+            }
+            """, 42);
+
 }

@@ -35,8 +35,12 @@ Ordinary methods use readonly loans. A mut method requires a fully
 initialized named mutable owner, an eligible writable field path or
 forwarding through writable this. Its root is reserved before argument
 evaluation, so argument calls cannot move, replace or invalidate it.
-The bounded update surface covers mutable scalar and Copy fields, not
-owning-field replacement.
+This receiver-loan profile does not itself grant ownership replacement.
+Separately, direct assignment and ordinary writable-reference stores support
+live unique-field replacement on structurally tracked local owners when the
+old value's transitive cleanup is proven nonthrowing. Exact-place reference
+aliases remain valid; overlapping references into the retired value reject
+the replacement.
 
 Unique child structs are borrowed through writable paths only after complete
 root initialization. A borrowed child is not moved or separately destroyed;

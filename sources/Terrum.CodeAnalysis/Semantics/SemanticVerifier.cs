@@ -5172,6 +5172,22 @@ public static partial class SemanticVerifier
         {
             var failureState = state.Clone();
             failureState.CancelUninvokedNativeOutputReservations();
+            if (failureState.Dependencies is BackingDependencies dependencies)
+            {
+                // Staged reference arguments expire when the call evaluation unwinds.
+                for (var index = 0; index < dependencies.Staged.Count; index++)
+                {
+                    var staged = dependencies.Staged[index];
+                    if (staged.ReferenceTargets.Count != 0
+                        || staged.ReferenceObligations.Count != 0)
+                    {
+                        dependencies.Staged[index] = staged with {
+                            ReferenceTargets = [],
+                            ReferenceObligations = [],
+                        };
+                    }
+                }
+            }
             if (_state is null)
             {
                 _state = failureState;
@@ -5547,13 +5563,22 @@ public static partial class SemanticVerifier
                 }
                 var writeReference = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(referenceWrite.Descriptor.Type)];
+                var uniqueStore = IsUnique(program, referenceWrite.Value.Type);
                 if (!writeReference.IsWritable || writeReference.IsGarbageCollected
                     || writeReference.IsInitialization || writeReference.IsOptional
                     || writeReference.ReferentType != referenceWrite.Value.Type
-                    || !CheckedReferenceTypeContract.IsSupportedWriteValueType(
-                        referenceWrite.Value.Type, program.Structures, program.EnumDefinitions.Length))
+                    || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                        referenceWrite.Value.Type, program.Structures, program.Classes,
+                        program.EnumDefinitions.Length)
+                    || (uniqueStore
+                        && referenceWrite.Value is not (BoundMove or BoundFieldMove or BoundCall)))
                 {
-                    throw InvalidEffect(referenceWrite.Span, "CheckedReference");
+                    throw InvalidEffect(referenceWrite.Span,
+                        uniqueStore ? "Ownership" : "CheckedReference");
+                }
+                if (uniqueStore && CleanupMayFail(referenceWrite.Value.Type, program))
+                {
+                    throw InvalidEffect(referenceWrite.Span, "Ownership");
                 }
                 if (initialized.Dependencies is not BackingDependencies writeDependencies)
                 {
@@ -5568,58 +5593,131 @@ public static partial class SemanticVerifier
                         writeDependencies, initialized, function, program,
                         referenceWrite.Span, fieldMasks);
                 }
-                var valueCompletes = CanCompleteNormally(referenceWrite.Value,
+                var descriptorCompletes = CanCompleteNormally(referenceWrite.Descriptor,
                     initialized, program, ref remaining, depth + 1);
                 Expression(referenceWrite.Descriptor, initialized, fieldMasks, declarations, function,
                     program, ref remaining, depth + 1, failures);
-                Expression(referenceWrite.Value, initialized, fieldMasks, declarations, function,
-                    program, ref remaining, depth + 1, failures);
-                if (valueCompletes && referenceWrite.Value.Type == PrimitiveType.TokenSpan)
+                if (descriptorCompletes)
                 {
-                    var backingSources = BackingOf(referenceWrite.Value,
-                        writeDependencies, program, ref remaining, depth + 1);
-                    if (backingSources.Count == 0)
-                    {
-                        throw InvalidEffect(referenceWrite.Span, "Ownership");
-                    }
                     foreach (var referenceTarget in referenceWriteTargets)
                     {
                         ValidateReferenceTarget(referenceTarget, writeReference.ReferentType,
                             writeDependencies, initialized, function, program,
                             referenceWrite.Span, fieldMasks);
-                        if (referenceTarget.Kind == ProvenanceAnchorKind.ReferencePlace)
+                    }
+                }
+                var valueCompletes = descriptorCompletes
+                    && CanCompleteNormally(referenceWrite.Value,
+                        initialized, program, ref remaining, depth + 1);
+                Expression(referenceWrite.Value, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
+                if (valueCompletes)
+                {
+                    foreach (var referenceTarget in referenceWriteTargets)
+                    {
+                        ValidateReferenceTarget(referenceTarget, writeReference.ReferentType,
+                            writeDependencies, initialized, function, program,
+                            referenceWrite.Span, fieldMasks);
+                    }
+
+                    if (uniqueStore)
+                    {
+                        foreach (var referenceTarget in referenceWriteTargets)
                         {
+                            if (referenceTarget.Kind != ProvenanceAnchorKind.ReferencePlace)
+                            {
+                                continue;
+                            }
+
                             var projection = referenceTarget.Storage?.Projection
                                 ?? throw Invalid(referenceWrite.Span);
+                            var preservedTargets = new HashSet<ProvenanceAnchor> {
+                                referenceTarget,
+                            };
+                            CheckReferencePlaceInvalidation(referenceTarget.Identity,
+                                projection, initialized, referenceWrite.Span,
+                                preservedTargets);
                             if (projection.Kind == StorageProjectionKind.WholeObject)
                             {
-                                writeDependencies.SetBackingSources(referenceTarget.Identity,
-                                    backingSources);
+                                CheckBackingInvalidation(referenceTarget.Identity,
+                                    initialized, referenceWrite.Span, preservedTargets);
                             }
                             else if (projection.Kind == StorageProjectionKind.InlineFieldPath)
                             {
-                                SetBackingFieldValuesFromExpression(
-                                    referenceTarget.Identity, projection,
-                                    referenceWrite.Value.Type, referenceWrite.Value,
-                                    writeDependencies, function, program,
-                                    ref remaining, depth + 1);
-                                RefreshBackingAggregateProvenance(
-                                    referenceTarget.Identity,
-                                    function.Variables[referenceTarget.Identity].Type,
-                                    writeDependencies, program,
-                                    ref remaining, depth + 1);
+                                CheckBackingFieldInvalidation(referenceTarget.Identity,
+                                    projection, initialized, referenceWrite.Span,
+                                    preservedTargets);
                             }
                             else
                             {
                                 throw InvalidEffect(referenceWrite.Span, "Ownership");
                             }
                         }
-                        else
+                    }
+
+                    if (TokenSpanContract.IsDependent(
+                            writeReference.ReferentType, program.Structures))
+                    {
+                        var backingSources = BackingOf(referenceWrite.Value,
+                            writeDependencies, program, ref remaining, depth + 1);
+                        if (backingSources.Count == 0)
                         {
-                            VerifyReferenceWriteCapture(function, referenceTarget.Identity,
-                                backingSources, referenceWrite.Span);
-                            writeDependencies.SetReferenceBackingSources(
-                                referenceTarget.Identity, backingSources);
+                            throw InvalidEffect(referenceWrite.Span, "Ownership");
+                        }
+                        foreach (var referenceTarget in referenceWriteTargets)
+                        {
+                            if (referenceTarget.Kind == ProvenanceAnchorKind.ReferencePlace)
+                            {
+                                var projection = referenceTarget.Storage?.Projection
+                                    ?? throw Invalid(referenceWrite.Span);
+                                if (projection.Kind == StorageProjectionKind.WholeObject)
+                                {
+                                    writeDependencies.SetBackingSources(
+                                        referenceTarget.Identity, backingSources);
+                                    if (IsInlineStructStorage(
+                                            writeReference.ReferentType, program))
+                                    {
+                                        SetBackingFieldValuesFromExpression(
+                                            referenceTarget.Identity, projection,
+                                            writeReference.ReferentType, referenceWrite.Value,
+                                            writeDependencies, function, program,
+                                            ref remaining, depth + 1);
+                                    }
+                                    RefreshBackingAggregateProvenance(
+                                        referenceTarget.Identity,
+                                        function.Variables[referenceTarget.Identity].Type,
+                                        writeDependencies, program,
+                                        ref remaining, depth + 1);
+                                }
+                                else if (projection.Kind == StorageProjectionKind.InlineFieldPath)
+                                {
+                                    SetBackingFieldValuesFromExpression(
+                                        referenceTarget.Identity, projection,
+                                        writeReference.ReferentType, referenceWrite.Value,
+                                        writeDependencies, function, program,
+                                        ref remaining, depth + 1);
+                                    RefreshBackingAggregateProvenance(
+                                        referenceTarget.Identity,
+                                        function.Variables[referenceTarget.Identity].Type,
+                                        writeDependencies, program,
+                                        ref remaining, depth + 1);
+                                }
+                                else
+                                {
+                                    throw InvalidEffect(referenceWrite.Span, "Ownership");
+                                }
+                            }
+                            else if (referenceTarget.Kind == ProvenanceAnchorKind.IncomingReference)
+                            {
+                                VerifyReferenceWriteCapture(function, referenceTarget.Identity,
+                                    backingSources, referenceWrite.Span);
+                                writeDependencies.SetReferenceBackingSources(
+                                    referenceTarget.Identity, backingSources);
+                            }
+                            else
+                            {
+                                throw InvalidEffect(referenceWrite.Span, "Ownership");
+                            }
                         }
                     }
                 }
@@ -7375,6 +7473,8 @@ public static partial class SemanticVerifier
                             nativePointerResultDependencies, function, program,
                             ref remaining, depth + 1)
                         : null;
+                    ApplyReferenceOwnerStoreCallEffects(call, target, initialized,
+                        fieldMasks, function, program, ref remaining, depth + 1);
                     ApplyCopyOriginCallEffects(call, target, initialized, function,
                         program, ref remaining, depth + 1);
                     ApplyBackingCallEffects(call, target, initialized, function,

@@ -7515,29 +7515,33 @@ public static partial class SemanticVerifier
     }
 
     private static bool IsReferenceAddressableFieldPath(BoundFieldRead field,
-    BoundFunction function, BoundProgram program)
+        BoundFunction function, BoundProgram program, bool isLeaf = true)
     {
-    var receiverIndex = (int)field.Receiver.Type - 100;
-    if (receiverIndex < 0 || receiverIndex >= program.Structures.Length
-        || ManagedClassTypes.IsClass(field.Receiver.Type)
-        || (field.Receiver is not BoundRead
-            && (program.Structures[receiverIndex].IsUnique
-                || program.Structures[receiverIndex].CleanupMethod is not null))
-        || (uint)field.Field >= (uint)program.Structures[receiverIndex].Fields.Length)
-    {
-        return false;
-    }
-    var definition = program.Structures[receiverIndex].Fields[field.Field];
-    return definition.Type == field.Type
-        && CheckedReferenceTypeContract.IsSupportedWriteValueType(
-            field.Type, program.Structures, program.EnumDefinitions.Length)
-        && (field.Receiver is not BoundFieldRead parent
-            || IsReferenceAddressableFieldPath(parent, function, program))
-        && (field.Receiver is not BoundNativeFixedArrayElement element
-            || ((uint)element.Variable < (uint)function.Variables.Length
-                && function.Variables[element.Variable].NativeFixedArrayLayout
-                    is BoundNativeFixedArrayLayout layout
-                && NativeFixedArrayContract.MatchesLayout(layout, program)));
+        var receiverIndex = (int)field.Receiver.Type - 100;
+        if (receiverIndex < 0 || receiverIndex >= program.Structures.Length
+            || ManagedClassTypes.IsClass(field.Receiver.Type)
+            || (field.Receiver is not BoundRead
+                && !program.Structures[receiverIndex].IsUnique
+                && program.Structures[receiverIndex].CleanupMethod is not null)
+            || (uint)field.Field >= (uint)program.Structures[receiverIndex].Fields.Length)
+        {
+            return false;
+        }
+        var definition = program.Structures[receiverIndex].Fields[field.Field];
+        var supportedFieldType = isLeaf
+            ? CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                field.Type, program.Structures, program.Classes,
+                program.EnumDefinitions.Length)
+            : HasFields(program, field.Type) && !ManagedClassTypes.IsClass(field.Type);
+        return definition.Type == field.Type
+            && supportedFieldType
+            && (field.Receiver is not BoundFieldRead parent
+                || IsReferenceAddressableFieldPath(parent, function, program, isLeaf: false))
+            && (field.Receiver is not BoundNativeFixedArrayElement element
+                || ((uint)element.Variable < (uint)function.Variables.Length
+                    && function.Variables[element.Variable].NativeFixedArrayLayout
+                        is BoundNativeFixedArrayLayout layout
+                    && NativeFixedArrayContract.MatchesLayout(layout, program)));
     }
 
     private static bool IsReferenceAddressablePlace(BoundExpression place)
@@ -7547,6 +7551,85 @@ public static partial class SemanticVerifier
             BoundFieldRead field => IsReferenceAddressablePlace(field.Receiver),
             _ => false,
         };
+
+    private static void ApplyReferenceOwnerStoreCallEffects(BoundCall call,
+        BoundFunction callee, InitializationState initialized, uint[] fieldMasks,
+        BoundFunction caller, BoundProgram program, ref int remaining, int depth)
+    {
+        if (initialized.Dependencies is not BackingDependencies facts
+            || callee.IsConstructor || callee.IsClassConstructor)
+        {
+            return;
+        }
+
+        var receiverOffset = callee.DeclaringStruct is not null
+            && !callee.IsStatic ? 1 : 0;
+        var targets = new HashSet<ProvenanceAnchor>();
+        for (var argumentIndex = 0; argumentIndex < call.Arguments.Length; argumentIndex++)
+        {
+            var parameterIndex = call.ParameterIndex(argumentIndex);
+            var parameterSlot = parameterIndex + receiverOffset;
+            if ((uint)parameterSlot >= (uint)callee.Variables.Length
+                || !CheckedReferenceTypeContract.IsValidType(
+                    callee.Variables[parameterSlot].Type, program.CheckedReferenceTypes))
+            {
+                continue;
+            }
+
+            var reference = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(callee.Variables[parameterSlot].Type)];
+            if (!reference.IsWritable || reference.IsGarbageCollected
+                || reference.IsInitialization || reference.IsOptional
+                || !IsUnique(program, reference.ReferentType))
+            {
+                continue;
+            }
+
+            var staged = facts.Staged.LastOrDefault(candidate =>
+                ReferenceEquals(candidate.Call, call)
+                && candidate.ParameterIndex == parameterIndex);
+            if (staged.Call is null || staged.ReferenceTargets.Count == 0)
+            {
+                throw InvalidEffect(call.Span, "CheckedReference");
+            }
+            foreach (var target in staged.ReferenceTargets)
+            {
+                ValidateReferenceTarget(target, reference.ReferentType,
+                    facts, initialized, caller, program, call.Span, fieldMasks);
+                _ = targets.Add(target);
+            }
+        }
+
+        foreach (var target in targets)
+        {
+            if (target.Kind != ProvenanceAnchorKind.ReferencePlace)
+            {
+                continue;
+            }
+
+            var projection = target.Storage?.Projection
+                ?? throw Invalid(call.Span);
+            var preservedTargets = new HashSet<ProvenanceAnchor> { target };
+            if (projection.Kind == StorageProjectionKind.WholeObject)
+            {
+                CheckReferencePlaceInvalidation(target.Identity, projection,
+                    initialized, call.Span, preservedTargets);
+                CheckBackingInvalidation(target.Identity, initialized,
+                    call.Span, preservedTargets);
+            }
+            else if (projection.Kind == StorageProjectionKind.InlineFieldPath)
+            {
+                CheckReferencePlaceInvalidation(target.Identity, projection,
+                    initialized, call.Span, preservedTargets);
+                CheckBackingFieldInvalidation(target.Identity, projection,
+                    initialized, call.Span, preservedTargets);
+            }
+            else
+            {
+                throw InvalidEffect(call.Span, "Ownership");
+            }
+        }
+    }
 
     private static bool IsWritableReferencePlace(BoundExpression place,
         BoundFunction function, BoundProgram program)
@@ -8406,7 +8489,8 @@ public static partial class SemanticVerifier
             nativePointerMayBeUnknown, nativePointerExtent));
     }
 
-    private static void CheckBackingInvalidation(int owner, InitializationState state, TextSpan span)
+    private static void CheckBackingInvalidation(int owner, InitializationState state,
+        TextSpan span, IReadOnlySet<ProvenanceAnchor>? preservedTargets = null)
     {
         if (state.Dependencies is not BackingDependencies facts)
         {
@@ -8420,8 +8504,11 @@ public static partial class SemanticVerifier
                         && facts.BackingBounds[slot] is not { Count: > 0 })
                     || facts.Sources[slot]?.Contains(
                         ProvenanceAnchor.ForBackingSource(owner)) == true
-                    || facts.ReferenceBackingSources[slot]?.Contains(
-                        ProvenanceAnchor.ForBackingSource(owner)) == true)
+                    || (facts.ReferenceBackingSources[slot]?.Contains(
+                            ProvenanceAnchor.ForBackingSource(owner)) == true
+                        && (facts.ReferenceTargets[slot] is not { } targets
+                            || targets.Any(target => preservedTargets is null
+                                || !preservedTargets.Contains(target)))))
                 {
                     throw InvalidEffect(span, "Ownership");
                 }
@@ -8435,7 +8522,8 @@ public static partial class SemanticVerifier
     }
 
     private static void CheckBackingFieldInvalidation(int root,
-        StorageProjection projection, InitializationState state, TextSpan span)
+        StorageProjection projection, InitializationState state, TextSpan span,
+        IReadOnlySet<ProvenanceAnchor>? preservedTargets = null)
     {
         if (state.Dependencies is not BackingDependencies facts)
         {
@@ -8467,7 +8555,9 @@ public static partial class SemanticVerifier
                 && (referenceTargets is null || referenceTargets.Any(target =>
                     target.Kind != ProvenanceAnchorKind.ReferencePlace
                     || target.Identity != root
-                    || ReferenceTargetOverlapsField(root, projection, target, facts))))
+                    || (ReferenceTargetOverlapsField(root, projection, target, facts)
+                        && (preservedTargets is null
+                            || !preservedTargets.Contains(target))))))
             {
                 throw InvalidEffect(span, "Ownership");
             }
@@ -8480,7 +8570,8 @@ public static partial class SemanticVerifier
     }
 
     private static void CheckReferencePlaceInvalidation(int root,
-        StorageProjection projection, InitializationState state, TextSpan span)
+        StorageProjection projection, InitializationState state, TextSpan span,
+        IReadOnlySet<ProvenanceAnchor>? preservedTargets = null)
     {
         if (state.Dependencies is not BackingDependencies facts)
         {
@@ -8503,7 +8594,8 @@ public static partial class SemanticVerifier
             }
             var targets = facts.ReferenceTargets[slot];
             if (targets is not null && targets.Any(target =>
-                ReferenceTargetOverlapsField(root, projection, target, facts)))
+                ReferenceTargetOverlapsField(root, projection, target, facts)
+                && (preservedTargets is null || !preservedTargets.Contains(target))))
             {
                 throw InvalidEffect(span, "CheckedReference");
             }
@@ -8524,7 +8616,8 @@ public static partial class SemanticVerifier
         foreach (var staged in facts.Staged)
         {
             if (staged.ReferenceTargets.Any(target =>
-                    ReferenceTargetOverlapsField(root, projection, target, facts))
+                    ReferenceTargetOverlapsField(root, projection, target, facts)
+                    && (preservedTargets is null || !preservedTargets.Contains(target)))
                 || staged.NativePointerSources.Any(target =>
                     NativePointerTargetOverlapsField(root, projection, target, facts))
                 || (staged.BackingSources.Contains(rootSource)

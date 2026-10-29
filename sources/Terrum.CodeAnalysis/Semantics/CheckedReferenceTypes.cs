@@ -53,6 +53,38 @@ internal static class CheckedReferenceTypeContract
         return IsSupportedWriteValueType(type, structures, enumDefinitionCount, states, 0);
     }
 
+    internal static bool IsSupportedReferenceStoreValueType(
+        PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundClass> classes, int enumDefinitionCount)
+    {
+        if (IsSupportedWriteValueType(type, structures, enumDefinitionCount)
+            || type == PrimitiveType.OwnedInt32Buffer)
+        {
+            return true;
+        }
+
+        var typeValue = (int)type;
+        var structureIndex = typeValue >= 100 ? typeValue - 100 : -1;
+        if (structureIndex >= 0 && structureIndex < structures.Count
+            && structures[structureIndex].IsUnique)
+        {
+            return true;
+        }
+
+        if (type is PrimitiveType.ManagedNode or PrimitiveType.WriteManagedNode
+            or PrimitiveType.OptionalManagedNode or PrimitiveType.OptionalWriteManagedNode)
+        {
+            return true;
+        }
+        if (ManagedClassTypes.IsClass(type) || ManagedClassTypes.IsOptional(type))
+        {
+            var classType = ManagedClassTypes.IsOptional(type)
+                ? ManagedClassTypes.Required(type) : type;
+            return ManagedClassTypes.ClassIndex(classType) < classes.Count;
+        }
+        return false;
+    }
+
     private static bool IsSupportedWriteValueType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, int enumDefinitionCount, byte[] states, int depth)
     {

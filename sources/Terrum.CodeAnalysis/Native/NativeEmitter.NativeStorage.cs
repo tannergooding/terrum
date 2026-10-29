@@ -284,12 +284,67 @@ internal sealed partial class PeCompiler
             throw new InvalidOperationException("The checked-reference store violates its access or value contract.");
         }
 
+        if (IsUnique(write.Value.Type))
+        {
+            EmitCheckedReferenceOwnerWrite(write, spill);
+            return;
+        }
+
         EmitPointerValueWrite(write.Descriptor, write.Value, spill);
     }
 
+    private void EmitCheckedReferenceOwnerWrite(BoundReferenceWrite write, int spill)
+    {
+        var type = write.Value.Type;
+        var replacement = _replacementSlots[_currentFunction];
+        var oldReplacement = _oldReplacementSlots[_currentFunction];
+        if (replacement < 0 || oldReplacement < 0)
+        {
+            throw new InvalidOperationException(
+                "Verified reference owner replacement has no staging storage.");
+        }
+
+        Expression(write.Descriptor, spill + 1);
+        _code.Store64(Spill(spill));
+        Expression(write.Value, spill + 1);
+        StoreValue(replacement, type);
+
+        _code.Load64(Spill(spill));
+        CopyToFrame(oldReplacement, Size(type));
+        EmitDropValue(oldReplacement, type);
+
+        _code.Load64(Spill(spill), destinationRegister: true);
+        LoadValue(replacement, type);
+        if (IsIndirect(type))
+        {
+            _code.CopyMemory(Size(type));
+            return;
+        }
+
+        switch (Size(type))
+        {
+            case 1:
+                _code.Bytes(0x88, 0x02);
+                break;
+            case 2:
+                _code.Bytes(0x66, 0x89, 0x02);
+                break;
+            case 4:
+                _code.Bytes(0x89, 0x02);
+                break;
+            case 8:
+                _code.Bytes(0x48, 0x89, 0x02);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "A checked-reference owner store has an unsupported value width.");
+        }
+    }
+
     private bool IsSupportedCheckedReferenceStoreType(PrimitiveType type) =>
-        CheckedReferenceTypeContract.IsSupportedWriteValueType(
-            type, _program.Structures, _program.EnumDefinitions.Length);
+        CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+            type, _program.Structures, _program.Classes,
+            _program.EnumDefinitions.Length);
 
     private void EmitPointerValueWrite(BoundExpression address, BoundExpression value, int spill)
     {

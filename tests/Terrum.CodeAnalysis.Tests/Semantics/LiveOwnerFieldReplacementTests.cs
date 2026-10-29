@@ -109,6 +109,124 @@ public sealed class LiveOwnerFieldReplacementTests
             int32 Main() { return Replace(false) + Replace(true); }
             """, policy, 84);
 
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public Task ReplacesUniqueFieldThroughWritableReferenceAsync(
+        BoundRuntimePolicy policy) =>
+        RunAsync(Token + """
+            unique struct Owner {
+                public mut Token Current;
+                public Owner(Token current) { Current = move current; }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(1));
+                {
+                    write ref<Token> current = ref owner.Current;
+                    Token replacement = new Token(2);
+                    *current = move replacement;
+                    if (Host.Trace[0] != 1) { return 1; }
+                    Token next = new Token(3);
+                    *current = move next;
+                    if (Host.Trace[0] != 2) { return 1; }
+                }
+                return 42;
+            }
+            """, policy, 42);
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public Task ReplacesWholeOwnerThroughWritableReferenceAsync(
+        BoundRuntimePolicy policy) =>
+        RunAsync(Token + """
+            unique struct Owner {
+                public mut Token Current;
+                public Owner(Token current) { Current = move current; }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(1));
+                {
+                    write ref<Owner> destination = ref owner;
+                    *destination = new Owner(new Token(2));
+                    if (Host.Trace[0] != 1) { return 1; }
+                    *destination = new Owner(new Token(3));
+                    if (Host.Trace[0] != 2) { return 2; }
+                    destination = _;
+                }
+                if (owner.Current.Id != 3) { return 3; }
+                owner = _;
+                return Host.Trace[0] == 3 ? 42 : 0;
+            }
+            """, policy, 42);
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public Task ReplacesUniqueFieldThroughWritableFormalAsync(
+        BoundRuntimePolicy policy) =>
+        RunAsync(Token + """
+            unique struct Owner {
+                public mut Token Current;
+                public Owner(Token current) { Current = move current; }
+            }
+            void Replace(write ref<Token> destination, Token replacement) {
+                *destination = move replacement;
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(1));
+                write ref<Token> currentField = ref owner.Current;
+                Replace(ref owner.Current, new Token(2));
+                if (Host.Trace[0] != 1 || owner.Current.Id != 2) { return 1; }
+                *currentField = new Token(3);
+                if (Host.Trace[0] != 2 || owner.Current.Id != 3) { return 2; }
+                currentField = _;
+                owner = _;
+                return Host.Trace[0] == 3 ? 42 : 0;
+            }
+            """, policy, 42);
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public Task ReplacesLiveFieldThroughReferenceInPartialOwnerAsync(
+        BoundRuntimePolicy policy) =>
+        RunAsync(Token + """
+            unique struct Owner {
+                public mut Token First;
+                public mut Token Second;
+                public Owner(Token first, Token second) {
+                    First = move first;
+                    Second = move second;
+                }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(1), new Token(2));
+                Token extracted = move owner.First;
+                {
+                    write ref<Token> second = ref owner.Second;
+                    *second = new Token(3);
+                    if (Host.Trace[0] != 2 || owner.Second.Id != 3) { return 1; }
+                    second = _;
+                }
+                owner = _;
+                return Host.Trace[0] == 3 ? 42 : 0;
+            }
+            """, policy, 42);
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public Task ReplacesWholeOwnerThroughWritableFormalAsync(
+        BoundRuntimePolicy policy) =>
+        RunAsync(Token + """
+            void Replace(write ref<Token> destination, Token replacement) {
+                *destination = move replacement;
+            }
+            int32 Main() {
+                mut Token owner = new Token(1);
+                Replace(ref owner, new Token(2));
+                if (Host.Trace[0] != 1 || owner.Id != 2) { return 1; }
+                owner = _;
+                return Host.Trace[0] == 2 ? 42 : 0;
+            }
+            """, policy, 42);
+
     [Test]
     public Task RightHandSideFailurePreservesLiveFieldAsync() =>
         RunAsync(Token + Owner + """
@@ -123,6 +241,70 @@ public sealed class LiveOwnerFieldReplacementTests
                         owner.Current = Create(true);
                     } catch {
                         if (owner.Current.Id == 40 && Host.Trace[0] == 0) { return 42; }
+                    }
+                }
+                return 0;
+            }
+            """, BoundRuntimePolicy.CheckedExceptions, 42);
+
+    [Test]
+    public Task RightHandSideFailurePreservesFieldThroughWritableReferenceAsync() =>
+        RunAsync(Token + Owner + """
+            Token Create(bool fail) {
+                if (fail) { require false; }
+                return new Token(42);
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40), int32(7));
+                unsafe {
+                    try {
+                        write ref<Token> current = ref owner.Current;
+                        *current = Create(true);
+                    } catch {
+                        if (owner.Current.Id == 40 && Host.Trace[0] == 0) { return 42; }
+                    }
+                }
+                return 0;
+            }
+            """, BoundRuntimePolicy.CheckedExceptions, 42);
+
+    [Test]
+    public Task ReferenceArgumentFailurePreservesOwnerBeforeStoreAsync() =>
+        RunAsync(Token + Owner + """
+            Token Create(bool fail) {
+                if (fail) { require false; }
+                return new Token(42);
+            }
+            void Replace(write ref<Token> destination, Token replacement) {
+                *destination = move replacement;
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40), int32(7));
+                unsafe {
+                    try {
+                        Replace(ref owner.Current, Create(true));
+                    } catch {
+                        if (owner.Current.Id == 40 && Host.Trace[0] == 0) { return 42; }
+                    }
+                }
+                return 0;
+            }
+            """, BoundRuntimePolicy.CheckedExceptions, 42);
+
+    [Test]
+    public Task FailureAfterReferenceStoreKeepsReplacementLiveAsync() =>
+        RunAsync(Token + Owner + """
+            void ReplaceThenFail(write ref<Token> destination, Token replacement) {
+                *destination = move replacement;
+                require false;
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40), int32(7));
+                unsafe {
+                    try {
+                        ReplaceThenFail(ref owner.Current, new Token(42));
+                    } catch {
+                        if (owner.Current.Id == 42 && Host.Trace[0] == 40) { return 42; }
                     }
                 }
                 return 0;
@@ -180,6 +362,139 @@ public sealed class LiveOwnerFieldReplacementTests
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source),
             [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [TestCase("Token replacement")]
+    [TestCase("move owner.Current")]
+    public void RejectsCopyOrSelfMoveThroughWritableOwnerReference(string value)
+    {
+        var source = Token + """
+            unique struct Owner {
+                public mut Token Current;
+                public Owner(Token current) { Current = move current; }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40));
+                write ref<Token> current = ref owner.Current;
+                Token replacement = new Token(42);
+                *current = VALUE;
+                return 0;
+            }
+            """.Replace("VALUE", value, StringComparison.Ordinal);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void RejectsOwnerStoreWhenOldCleanupMayFail()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [Cleanup] public void Close() { require false; }
+            }
+            unique struct Owner {
+                public mut Token Current;
+                public Owner(Token current) { Current = move current; }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40));
+                write ref<Token> current = ref owner.Current;
+                *current = new Token(42);
+                return 0;
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void RejectsOwnerStoreCallWhileNestedReferenceIsLive()
+    {
+        var source = Token + Owner + """
+            void Replace(write ref<Token> destination, Token replacement) {
+                *destination = move replacement;
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40), int32(7));
+                ref<int32> nested = ref owner.Current.Id;
+                Replace(ref owner.Current, new Token(42));
+                return *nested;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void RejectsOwnerStoreCallWhenAnotherArgumentBorrowsItsNestedValue()
+    {
+        var source = Token + Owner + """
+            void Replace(write ref<Owner> destination,
+                write ref<Token> nested, Owner replacement) {
+                *destination = move replacement;
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(40), int32(7));
+                Replace(ref owner, ref owner.Current, new Owner(new Token(42), int32(8)));
+                return 0;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            [new HostBuffer("Trace", PrimitiveType.Int32, [0, 0], true)]);
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void RejectsReferenceFormationForVacantUniqueField()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Token + """
+            unique struct Owner {
+                public mut Token First;
+                public mut Token Second;
+                public Owner(Token first, Token second) {
+                    First = move first;
+                    Second = move second;
+                }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(1), new Token(2));
+                Token extracted = move owner.First;
+                write ref<Token> vacant = ref owner.First;
+                return 0;
+            }
+            """));
+
+        Assert.That(compilation.HasErrors, Is.True);
+    }
+
+    [Test]
+    public void RejectsWholeOwnerReferenceWhenOwnerIsPartial()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(Token + """
+            unique struct Owner {
+                public mut Token First;
+                public mut Token Second;
+                public Owner(Token first, Token second) {
+                    First = move first;
+                    Second = move second;
+                }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(new Token(1), new Token(2));
+                Token extracted = move owner.First;
+                write ref<Owner> whole = ref owner;
+                return 0;
+            }
+            """));
 
         Assert.That(compilation.HasErrors, Is.True);
     }

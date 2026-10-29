@@ -1358,6 +1358,8 @@ internal sealed partial class PeCompiler
             _returnSlots[i] = at;
             var maximumFieldReplacementSize = 0;
             var hasUniqueFieldReplacement = false;
+            var maximumReferenceReplacementSize = 0;
+            var hasUniqueReferenceReplacement = false;
             var hasOutputParameters = false;
             var parameterOffset = function.IsConstructor ? 1 : 0;
             for (var parameter = parameterOffset;
@@ -1420,6 +1422,20 @@ internal sealed partial class PeCompiler
             {
                 throw new InvalidOperationException("Verified field-assignment traversal is incomplete.");
             }
+            if (function.Body is not null
+                && !BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+                {
+                    if (expression is BoundReferenceWrite write
+                        && IsUnique(write.Value.Type))
+                    {
+                        hasUniqueReferenceReplacement = true;
+                        maximumReferenceReplacementSize = Math.Max(
+                            maximumReferenceReplacementSize, ScratchSize(write.Value.Type));
+                    }
+                }))
+            {
+                throw new InvalidOperationException("Verified reference-store traversal is incomplete.");
+            }
             var hasUnique = false;
             var replacementSize = 8;
             for (var variable = 0; variable < function.Variables.Length; variable++)
@@ -1436,32 +1452,50 @@ internal sealed partial class PeCompiler
                     }
                 }
             }
+            if (hasUniqueReferenceReplacement)
+            {
+                hasUnique = true;
+                replacementSize = Math.Max(replacementSize, maximumReferenceReplacementSize);
+            }
             _liveSlots[i] = live;
             var partialFields = new int[function.Variables.Length][];
+            var partialTrees = new PartialFieldNode?[function.Variables.Length][];
             for (var variable = 0; variable < function.Variables.Length; variable++)
             {
                 partialFields[variable] = [];
+                partialTrees[variable] = [];
                 var type = function.Variables[variable].Type;
                 if (!partialFieldOwners.Contains(variable)
                     || !IsUnique(type) || type == PrimitiveType.OwnedInt32Buffer
-                    || (variable == 0 && function.DeclaringStruct is not null && !function.IsStatic))
+                    || (variable == 0 && function.DeclaringStruct is not null
+                        && !function.IsStatic && !function.IsConstructor))
                 {
                     continue;
                 }
                 var structure = _program.Structures[(int)type - 100];
                 var fieldSlots = new int[structure.Fields.Length];
+                var fieldTrees = new PartialFieldNode?[structure.Fields.Length];
                 Array.Fill(fieldSlots, -1);
                 for (var field = 0; field < structure.Fields.Length; field++)
                 {
                     if (IsUnique(structure.Fields[field].Type))
                     {
-                        fieldSlots[field] = checked((int)required);
-                        required += 8;
+                        var liveSlot = function.IsConstructor && variable == 0
+                            ? -1 : checked((int)required);
+                        if (liveSlot >= 0)
+                        {
+                            required += 8;
+                        }
+                        fieldSlots[field] = liveSlot;
+                        fieldTrees[field] = AllocatePartialFieldNode(
+                            structure.Fields[field].Type, liveSlot, ref required);
                     }
                 }
                 partialFields[variable] = fieldSlots;
+                partialTrees[variable] = fieldTrees;
             }
             _partialFieldSlots[i] = partialFields;
+            _partialFieldTrees[i] = partialTrees;
             var initializationTests = InitializationTestVariables(function);
             var initializationFlags = new int[function.Variables.Length];
             Array.Fill(initializationFlags, -1);
@@ -1493,11 +1527,12 @@ internal sealed partial class PeCompiler
             {
                 required = _replacementSlots[i] + (long)replacementSize;
             }
-            if (hasUniqueFieldReplacement)
+            if (hasUniqueFieldReplacement || hasUniqueReferenceReplacement)
             {
                 required = (required + 15) & ~15L;
                 _oldReplacementSlots[i] = checked((int)required);
-                required += maximumFieldReplacementSize;
+                required += Math.Max(maximumFieldReplacementSize,
+                    maximumReferenceReplacementSize);
             }
             _cleanupArgumentSlots[i] = -1;
             if (maximumIndirectCleanupSize != 0)

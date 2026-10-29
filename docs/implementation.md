@@ -63,6 +63,77 @@ signatures; managed-class dependency closures remain separate. Public generic
 exports and executable TRRM support remain separate. The native backend emits
 Terrum-owned code; CIL is neither a dependency nor the default.
 
+Source reference type identity now carries nested `ref<T>`, outer `write`,
+`gc`, `init`, and optional qualifications through source binding and mandatory
+verification. A bounded ordinary-reference path forms references to direct
+local places, safely reads referents, and supports nested references and
+TokenSpan result-source forwarding. Its ordinary descriptor uses the
+unapproved 8/8 layout proposal provisionally; the candidate is not normative
+and adds no hidden retain, root, pin, or lifetime extension. Scalar/registered-
+enum referent stores, local descriptor-slot rebinding, bounded non-unique
+cleanup-free Copy-aggregate stores, managed-handle slot stores, and unique-owner
+replacement through writable references are implemented in that route. Unique
+stores stage the new value, retire the old value only when transitive cleanup
+is proven nonthrowing, preserve exact-place aliases, and reject overlapping
+references to the replaced value. A failed right-hand side leaves the old
+owner live. The scalar, aggregate, and owner cases have JIT and emitted-image
+coverage. Mutable `Span<Token>` locals can rebind their
+descriptor; `write Span<Token>` element access remains unsupported. A
+`Captures`-declared writable `ref<Span<Token>>` formal can replace a local
+view slot: the verifier checks the body's stored backing against declared
+sources, and callers stage the target identity and conservatively preserve
+old/new backing possibilities. The verifier tracks local reference targets
+and storage generations through formation, copies, rebinding, and conservative
+flow joins, rejecting references that escape a local scope or outlive their
+target. Formation also supports fields in non-unique cleanup-free inline
+structs, scalar/Copy fields of complete unique inline owners, already-live
+fields of a partially initialized constructor receiver, and local fixed-array
+elements. Root generations and field/element projections remain distinct from
+backing. GC roots/pinning, managed/class/box backing retention,
+initialization attenuation, reference-valued aggregate fields, private
+revision-97 checked-reference persistence, and Standard TRRM executable
+support remain incomplete. Direct and nested unique-field moves, vacant-field
+repair, partial cleanup, field-place generations, and live unique-field
+replacement are implemented for structurally tracked local owners with
+eligible mutable paths. Nested moves update every affected ancestor; hierarchical
+liveness flags preserve independently live fields during normal retirement and
+checked repair failure. Checked references to live nested scalar fields survive
+independent moves and repair, while moving their ancestor invalidates them.
+Failed nested construction retires acquired fields without invoking incomplete
+authored Cleanup. The private revision-92 module route provisionally
+round-trips and remaps nested `BoundFieldMove` paths under the unapproved
+[private persistence proposal](proposals/owning-field-move-private-persistence.md);
+this does not establish Standard TRRM support. Replacement stages the new
+value, retires the old value once on live paths, and requires a conservative
+same-program proof of nonthrowing transitive cleanup; unknown or reentrant
+cleanup rejects. This is provisional support under the unapproved
+[replacement-retirement proposal](proposals/live-field-replacement-retirement.md),
+not a normative change or a general no-failure promise. Whole-owner replacement
+invalidates descendant references, while field moves, repair, and live
+replacement preserve unrelated live siblings. Authored Cleanup receivers
+cannot be left partial. Constructor-acquisition unwind combinations beyond
+the checked before/after-acquisition cases, broader proof coverage, checked-reference
+provenance, Standard TRRM, CLI and
+standalone-compiler routes remain unfinished. The Debug fast build and active
+checked-reference, partial-owner lifecycle, nested-owner and private-module
+selection passed 63/63 with zero skips at
+`artifacts\\tst\\Debug\\nested-owner-complete-final-v5\\nested-owner-complete-final-v5.trx`.
+See the
+[stored-layout proposal](proposals/reference-stored-descriptor-layout.md)
+and [private-schema proposal](proposals/checked-reference-private-persistence.md).
+
+Hosted statement switches evaluate the selector once and bind ordered scalar
+constant/wildcard arms, guards, cleanup-aware cross-arm transfers, inferred
+`var`/`mut var` and exact scalar type bindings, and short-circuit
+`not`/`and`/`or` compositions. Pattern bindings are visible to guards and
+bodies, with flow checks for composed alternatives. The parser also accepts
+the shared `is`/switch pattern grammar for null, tuple/grouped,
+typed/reference, generic, qualified union-case, negated, conjunction and
+disjunction forms. Non-scalar typed/reference/generic/tuple/union binding and
+execution, output-lifting patterns, and value-producing switch expressions
+remain unfinished; existing optional-handle `is` forms remain separately
+supported.
+
 Required constants and `[ConstEval]` bodies admit fixed scalar values:
 `bool`, `char8`/`char16`/`char32`/`rune`, signed and unsigned 8/16/32/64/128-bit
 integers, binary16/`bfloat16`/binary32/64/128, and decimal32/64/128. Numeric
