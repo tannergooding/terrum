@@ -139,6 +139,9 @@ internal static class NativeSourceGrantClassifier
                         case BoundFieldRead field:
                             expressions.Push(field.Receiver);
                             break;
+                        case BoundFieldMove move:
+                            expressions.Push(move.Place);
+                            break;
                         case BoundViewRead view:
                             expressions.Push(view.Index);
                             break;
@@ -221,9 +224,11 @@ internal static class NativeSourceGrantClassifier
                         break;
                     case BoundLifetimeEnd end:
                         AddCallIfPresent(end.CleanupFunction);
+                        AddRetirementCalls(function.Variables[end.Variable].Type);
                         break;
                     case BoundDrop drop:
                         AddCallIfPresent(drop.CleanupFunction);
+                        AddRetirementCalls(function.Variables[drop.Variable].Type);
                         break;
                     case BoundDropConstructedFields partial:
                         AddConstructedFieldCleanupCalls(partial);
@@ -272,7 +277,7 @@ internal static class NativeSourceGrantClassifier
 
             void AddCleanupCall(PrimitiveType type)
             {
-                if ((int)type >= 100 && (int)type < ManagedClassTypes.First
+                if ((int)type >= 100 && (int)type < BoundEnumTypes.First
                     && program.Structures[(int)type - 100].CleanupMethod is string cleanup
                     && functionIndices.TryGetValue(cleanup, out var cleanupFunction))
                 {
@@ -280,17 +285,43 @@ internal static class NativeSourceGrantClassifier
                 }
             }
 
+            bool IsUnique(PrimitiveType type)
+            {
+                return type == PrimitiveType.OwnedInt32Buffer
+                    || ((int)type >= 100 && (int)type < program.Structures.Length + 100
+                        && program.Structures[(int)type - 100].IsUnique);
+            }
+
+            void AddRetirementCalls(PrimitiveType type)
+            {
+                if (type == PrimitiveType.OwnedInt32Buffer
+                    || (int)type is < 100 or >= BoundEnumTypes.First
+                    || !IsUnique(type))
+                {
+                    return;
+                }
+
+                AddCleanupCall(type);
+                foreach (var field in program.Structures[(int)type - 100].Fields)
+                {
+                    if (IsUnique(field.Type))
+                    {
+                        AddRetirementCalls(field.Type);
+                    }
+                }
+            }
+
             void AddConstructedFieldCleanupCalls(BoundDropConstructedFields partial)
             {
                 var type = function.ReturnType;
-                if ((int)type is < 100 or >= ManagedClassTypes.First)
+                if ((int)type is < 100 or >= BoundEnumTypes.First)
                 {
                     return;
                 }
                 var structure = program.Structures[(int)type - 100];
                 foreach (var fieldIndex in partial.AcquisitionOrder)
                 {
-                    AddCleanupCall(structure.Fields[fieldIndex].Type);
+                    AddRetirementCalls(structure.Fields[fieldIndex].Type);
                 }
             }
 
@@ -418,6 +449,9 @@ internal static class NativeSourceGrantClassifier
                             || (IsBufferView(read.Type) && IsBufferViewLocal(function, read.Variable)):
                             break;
                         case BoundMove move when move.Type == PrimitiveType.OwnedInt32Buffer:
+                            break;
+                        case BoundFieldMove move when move.Type == PrimitiveType.OwnedInt32Buffer:
+                            expressions.Push(move.Place);
                             break;
                         case BoundReceiverLoan loan when loan.Type == PrimitiveType.OwnedInt32Buffer:
                             break;
@@ -601,9 +635,11 @@ internal static class NativeSourceGrantClassifier
                         throw Unsupported();
                     }
                     if (callee.Variables[parameter].Type == PrimitiveType.OwnedInt32Buffer
-                        && call.Arguments[parameter] is not BoundMove {
+                        && call.Arguments[parameter] is not (BoundMove {
                             Type: PrimitiveType.OwnedInt32Buffer,
-                        })
+                        } or BoundFieldMove {
+                            Type: PrimitiveType.OwnedInt32Buffer,
+                        }))
                     {
                         throw Unsupported();
                     }

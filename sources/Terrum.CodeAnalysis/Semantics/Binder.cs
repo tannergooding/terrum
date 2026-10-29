@@ -6609,9 +6609,12 @@ internal sealed partial class Binder
         }
         var path = fields.ToImmutable();
         var fieldType = GetField(_variables[variable].Type, path[0]).Type;
-        if (IsUnique(fieldType) && (variable != 0 || !_constructor || path.Length != 1))
+        if (IsUnique(fieldType)
+            && (path.Length != 1
+                || !IsUnique(_variables[variable].Type)
+                || (variable == 0 && !_constructor)))
         {
-            Report("TRM3023", "An owning field can only be initialized as a whole in its parent's constructor.", target.Span);
+            Report("TRM3023", "An owning field requires a top-level unique owner place.", target.Span);
         }
         for (var index = 1; index < path.Length; index++)
         {
@@ -7284,9 +7287,23 @@ internal sealed partial class Binder
                     {
                         expression = new BoundMove(owner, _variables[owner].Type, node.Span);
                     }
+                    else if (BindExpression(operandNode, expected: null) is BoundFieldRead {
+                        Receiver: BoundRead root,
+                    } field
+                        && IsUnique(root.Type) && IsUnique(field.Type)
+                        && (uint)root.Variable < (uint)_variables.Count
+                        && ((_constructor && root.Variable == 0)
+                            || (_variables[root.Variable].IsMutable
+                                && GetField(root.Type, field.Field).IsMutable
+                                && CleanupMethod(root.Type) is null)))
+                    {
+                        expression = new BoundFieldMove(field, field.Type, node.Span);
+                    }
                     else
                     {
-                        Report("TRM3023", "Move requires a named unique local; a constructor receiver cannot move.", node.Span);
+                        Report("TRM3023",
+                            "Move requires a named unique local or an eligible unique field place.",
+                            node.Span);
                         expression = ErrorExpression(node.Span);
                     }
                     break;

@@ -829,6 +829,7 @@ internal sealed partial class PeCompiler
     private readonly int[] _returnSlots;
     private readonly int[][] _edgeCopySlots;
     private readonly int[][] _liveSlots;
+    private readonly int[][][] _partialFieldSlots;
     private readonly int[][] _initializationFlags;
     private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
@@ -916,6 +917,7 @@ internal sealed partial class PeCompiler
             _edgeCopySlots[index] = [];
         }
         _liveSlots = new int[program.Functions.Length][];
+        _partialFieldSlots = new int[program.Functions.Length][][];
         _initializationFlags = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
         _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
@@ -1371,6 +1373,19 @@ internal sealed partial class PeCompiler
             }
             var live = new int[function.Variables.Length];
             Array.Fill(live, -1);
+            var partialFieldOwners = new HashSet<int>();
+            if (function.Body is not null
+                && !BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+                {
+                    if (expression is BoundFieldMove move
+                        && move.Place.Receiver is BoundRead root)
+                    {
+                        _ = partialFieldOwners.Add(root.Variable);
+                    }
+                }))
+            {
+                throw new InvalidOperationException("Verified field-move traversal is incomplete.");
+            }
             var hasUnique = false;
             var replacementSize = 8;
             for (var variable = 0; variable < function.Variables.Length; variable++)
@@ -1388,6 +1403,35 @@ internal sealed partial class PeCompiler
                 }
             }
             _liveSlots[i] = live;
+            var partialFields = new int[function.Variables.Length][];
+            for (var variable = 0; variable < function.Variables.Length; variable++)
+            {
+                partialFields[variable] = [];
+                var type = function.Variables[variable].Type;
+                if (!partialFieldOwners.Contains(variable)
+                    || !IsUnique(type) || type == PrimitiveType.OwnedInt32Buffer
+                    || (variable == 0 && function.DeclaringStruct is not null && !function.IsStatic))
+                {
+                    continue;
+                }
+                var structure = _program.Structures[(int)type - 100];
+                if (structure.CleanupMethod is not null)
+                {
+                    continue;
+                }
+                var fieldSlots = new int[structure.Fields.Length];
+                Array.Fill(fieldSlots, -1);
+                for (var field = 0; field < structure.Fields.Length; field++)
+                {
+                    if (IsUnique(structure.Fields[field].Type))
+                    {
+                        fieldSlots[field] = checked((int)required);
+                        required += 8;
+                    }
+                }
+                partialFields[variable] = fieldSlots;
+            }
+            _partialFieldSlots[i] = partialFields;
             var initializationTests = InitializationTestVariables(function);
             var initializationFlags = new int[function.Variables.Length];
             Array.Fill(initializationFlags, -1);
@@ -1488,6 +1532,16 @@ internal sealed partial class PeCompiler
                     _code.Clear(flag);
                 }
             }
+            foreach (var variableFields in _partialFieldSlots[i])
+            {
+                foreach (var field in variableFields)
+                {
+                    if (field >= 0)
+                    {
+                        _code.Clear(field);
+                    }
+                }
+            }
             foreach (var field in _constructedFieldSlots[i])
             {
                 if (field >= 0)
@@ -1570,6 +1624,7 @@ internal sealed partial class PeCompiler
                 if (_liveSlots[i][slot] >= 0 && !function.Variables[slot].IsOut)
                 {
                     _code.Set(_liveSlots[i][slot]);
+                    SetPartialFieldSlots(slot, live: true);
                 }
                 var initializationFlag = _initializationFlags[i][slot];
                 if (initializationFlag >= 0 && !function.Variables[slot].IsOut)
@@ -4351,8 +4406,90 @@ internal sealed partial class PeCompiler
         var vacant = _code.JumpIf(0x84);
         var type = _program.Functions[_currentFunction].Variables[variable].Type;
         _code.Clear(live);
-        EmitDropValue(OwnerPlace(variable), type);
+        var partialFields = _partialFieldSlots[_currentFunction][variable];
+        if (partialFields.Length != 0
+            && type != PrimitiveType.OwnedInt32Buffer
+            && _program.Structures[(int)type - 100].CleanupMethod is null)
+        {
+            var fields = _program.Structures[(int)type - 100].Fields;
+            for (var field = fields.Length - 1; field >= 0; field--)
+            {
+                var fieldLive = partialFields[field];
+                if (fieldLive < 0)
+                {
+                    continue;
+                }
+                _code.Load(fieldLive);
+                _code.Bytes(0x85, 0xC0);
+                var fieldVacant = _code.JumpIf(0x84);
+                _code.Clear(fieldLive);
+                EmitDropValue(OwnerPlace(variable) + fields[field].Offset,
+                    fields[field].Type);
+                _code.PatchRelative(fieldVacant, _code.Position);
+            }
+        }
+        else
+        {
+            EmitDropValue(OwnerPlace(variable), type);
+        }
         _code.PatchRelative(vacant, _code.Position);
+    }
+
+    private void SetPartialFieldSlots(int variable, bool live)
+    {
+        if ((uint)variable >= (uint)_partialFieldSlots[_currentFunction].Length)
+        {
+            throw new InvalidOperationException("Verified partial owner slot is invalid.");
+        }
+        foreach (var field in _partialFieldSlots[_currentFunction][variable])
+        {
+            if (field >= 0)
+            {
+                if (live)
+                {
+                    _code.Set(field);
+                }
+                else
+                {
+                    _code.Clear(field);
+                }
+            }
+        }
+    }
+
+    private int PartialFieldSlot(BoundFieldRead place)
+    {
+        if (place is null || place.Receiver is not BoundRead root
+            || (uint)root.Variable >= (uint)_program.Functions[_currentFunction].Variables.Length)
+        {
+            throw new InvalidOperationException("Verified partial field place is invalid.");
+        }
+        var function = _program.Functions[_currentFunction];
+        if (function.IsConstructor && root.Variable == 0)
+        {
+            var constructed = _constructedFieldSlots[_currentFunction];
+            return (uint)place.Field < (uint)constructed.Length
+                ? constructed[place.Field] : -1;
+        }
+        var slots = _partialFieldSlots[_currentFunction][root.Variable];
+        return (uint)place.Field < (uint)slots.Length ? slots[place.Field] : -1;
+    }
+
+    private void SetPartialFieldSlot(BoundFieldRead place, bool live)
+    {
+        var slot = PartialFieldSlot(place);
+        if (slot < 0)
+        {
+            return;
+        }
+        if (live)
+        {
+            _code.Set(slot);
+        }
+        else
+        {
+            _code.Clear(slot);
+        }
     }
 
     private void EmitBufferIntrinsic(BoundIntrinsic intrinsic)
@@ -5026,6 +5163,7 @@ internal sealed partial class PeCompiler
                 if (IsUnique(local.Initializer.Type))
                 {
                     _code.Set(_liveSlots[_currentFunction][local.Variable]);
+                    SetPartialFieldSlots(local.Variable, live: true);
                 }
                 break;
             case BoundViewScope view:
@@ -5125,6 +5263,7 @@ internal sealed partial class PeCompiler
                     LoadValue(_replacementSlots[_currentFunction], assignment.Value.Type);
                     StoreValue(OwnerPlace(assignment.Variable), assignment.Value.Type);
                     _code.Set(_liveSlots[_currentFunction][assignment.Variable]);
+                    SetPartialFieldSlots(assignment.Variable, live: true);
                     break;
                 }
                 if (_program.Functions[_currentFunction].Variables[assignment.Variable].IsOut)
@@ -5369,6 +5508,17 @@ internal sealed partial class PeCompiler
                     && _constructedFieldSlots[_currentFunction][fieldAssignment.Field] >= 0)
                 {
                     _code.Set(_constructedFieldSlots[_currentFunction][fieldAssignment.Field]);
+                }
+                else if (fieldAssignment.NestedFields.IsEmpty
+                    && IsUnique(field.Type)
+                    && (uint)fieldAssignment.Variable
+                        < (uint)_partialFieldSlots[_currentFunction].Length
+                    && (uint)fieldAssignment.Field
+                        < (uint)_partialFieldSlots[_currentFunction][fieldAssignment.Variable].Length
+                    && _partialFieldSlots[_currentFunction][fieldAssignment.Variable][fieldAssignment.Field] >= 0)
+                {
+                    _code.Set(_partialFieldSlots[_currentFunction]
+                        [fieldAssignment.Variable][fieldAssignment.Field]);
                 }
                 break;
             case BoundBufferAssignment bufferWrite:
@@ -5979,6 +6129,15 @@ internal sealed partial class PeCompiler
             case BoundMove move:
                 LoadValue(OwnerPlace(move.Variable), move.Type);
                 _code.Clear(_liveSlots[_currentFunction][move.Variable]);
+                SetPartialFieldSlots(move.Variable, live: false);
+                break;
+            case BoundFieldMove move:
+                EmitUniqueFieldPlace(move.Place);
+                if (!IsIndirect(move.Type))
+                {
+                    _code.Bytes(0x48, 0x8B, 0x00);
+                }
+                SetPartialFieldSlot(move.Place, live: false);
                 break;
             case BoundReceiverLoan loan:
                 if (loan.Variable == 0 && IsBorrowedReceiver())

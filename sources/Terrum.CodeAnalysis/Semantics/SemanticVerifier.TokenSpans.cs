@@ -2387,6 +2387,28 @@ public static partial class SemanticVerifier
             }
         }
 
+        internal void ClearNativePointerFieldValues(int slot, StorageProjection prefix)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || prefix.Kind is not (StorageProjectionKind.WholeObject
+                    or StorageProjectionKind.InlineFieldPath))
+            {
+                throw Invalid();
+            }
+            if (prefix.Kind == StorageProjectionKind.WholeObject)
+            {
+                ClearNativePointerFieldValues(slot);
+                return;
+            }
+
+            foreach (var key in NativePointerFieldValues.Keys.Where(key =>
+                key.Site == slot
+                && prefix.FieldPath.IsPrefixOf(key.Projection.FieldPath)).ToArray())
+            {
+                _ = NativePointerFieldValues.Remove(key);
+            }
+        }
+
         private bool NativePointerFieldValuesEqualForSlot(
             int slot, BackingDependencies other)
         {
@@ -2909,6 +2931,14 @@ public static partial class SemanticVerifier
                 ValidateNativePointerSourceVariable(move.Variable, move.Type, function);
                 _ = variables.Add(move.Variable);
                 break;
+            case BoundFieldMove move when CarriesNativePointer(move.Type, program):
+                NativePointerAliasVariables(move.Place, function, program,
+                    variables, ref remaining, depth + 1);
+                break;
+            case BoundFieldRead field when CarriesNativePointer(field.Type, program):
+                NativePointerAliasVariables(field.Receiver, function, program,
+                    variables, ref remaining, depth + 1);
+                break;
             case BoundUnsafeExpression unsafeExpression:
                 NativePointerAliasVariables(unsafeExpression.Expression, function, program, variables,
                     ref remaining, depth + 1);
@@ -2931,6 +2961,10 @@ public static partial class SemanticVerifier
                 return NativePointerParameterSource(read.Variable, read.Type, function, parameterSources);
             case BoundMove move when CarriesNativePointer(move.Type, program):
                 return NativePointerParameterSource(move.Variable, move.Type, function, parameterSources);
+            case BoundFieldMove move when CarriesNativePointer(move.Type, program):
+                return NativePointerParameterSources(move.Place, function, program, parameterSources);
+            case BoundFieldRead field when CarriesNativePointer(field.Type, program):
+                return NativePointerParameterSources(field.Receiver, function, program, parameterSources);
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerParameterSources(unsafeExpression.Expression, function, program,
                     parameterSources);
@@ -3453,6 +3487,9 @@ public static partial class SemanticVerifier
                     }
                     AddSnapshotSources(destination, move.Variable, move.Span, depth + 1);
                     break;
+                case BoundFieldMove move when IsTokenSnapshotType(move.Type, program):
+                    Source(destination, move.Place, depth + 1);
+                    break;
                 case BoundReferenceFormation formation:
                     if (!CheckedReferenceTypeContract.IsValidType(
                             formation.Type, program.CheckedReferenceTypes))
@@ -3542,6 +3579,9 @@ public static partial class SemanticVerifier
                         throw Invalid(move.Span);
                     }
                     AddEdge(move.Variable, destination);
+                    break;
+                case BoundFieldMove move:
+                    Source(destination, move.Place, depth + 1);
                     break;
                 case BoundFieldRead field:
                     Source(destination, field.Receiver, depth + 1);
@@ -3642,6 +3682,9 @@ public static partial class SemanticVerifier
                         throw Invalid(move.Span);
                     }
                     AddNativePointerEdge(move.Variable, destination);
+                    break;
+                case BoundFieldMove move when CarriesNativePointer(move.Type, program):
+                    NativePointerSource(destination, move.Place, depth + 1);
                     break;
                 case BoundFieldRead field:
                     NativePointerSource(destination, field.Receiver, depth + 1);
@@ -4375,6 +4418,10 @@ public static partial class SemanticVerifier
                 projection = StorageProjection.WholeObject;
                 return IsInlineStructStorage(move.Type, program);
 
+            case BoundFieldMove move:
+                return TryGetNativePointerFieldPlace(
+                    move.Place, function, program, out variable, out projection);
+
             case BoundReceiverLoan loan:
                 ValidateCopyOriginVariable(loan.Variable, loan.Type, function);
                 variable = loan.Variable;
@@ -4545,6 +4592,9 @@ public static partial class SemanticVerifier
             case BoundCall call when facts.TryGetNativePointerCallResult(call,
                 relativeProjection, out var callSources, out var callMayBeUnknown):
                 return (callSources, callMayBeUnknown);
+            case BoundFieldMove move when facts.TryGetNativePointerCallResult(move,
+                relativeProjection, out var movedSources, out var movedMayBeUnknown):
+                return (movedSources, movedMayBeUnknown);
             case BoundConditional conditional when CarriesNativePointer(valueType, program):
                 var (whenTrueSources, whenTrueMayBeUnknown) = NativePointerValueFactsOfExpression(conditional.WhenTrue,
                     valueType, relativeProjection, facts, function, program,
@@ -4834,6 +4884,8 @@ public static partial class SemanticVerifier
                         readRoot.Project(relativeProjection.FieldPath),
                     _ => CopyOriginFact.Unavailable(),
                 };
+            case BoundFieldMove move when facts.TryGetCopyOriginCallResult(move, out var movedResult):
+                return movedResult.Get(BoundCopyOriginPath(relativeProjection.FieldPath));
             case BoundMove move:
                 ValidateCopyOriginVariable(move.Variable, move.Type, function);
                 if (facts.TryGetCopyOriginCallResult(move, out var moveResult))
@@ -6125,6 +6177,9 @@ public static partial class SemanticVerifier
             case BoundCall call when facts.TryGetBackingCallResult(
                 call, relativeProjection, out var callValue):
                 return callValue;
+            case BoundFieldMove move when facts.TryGetBackingCallResult(
+                move, relativeProjection, out var movedValue):
+                return movedValue;
             case BoundUnsafeExpression unsafeExpression:
                 return BackingFieldValueOfExpression(unsafeExpression.Expression,
                     valueType, relativeProjection, facts, function, program,
@@ -6305,6 +6360,9 @@ public static partial class SemanticVerifier
                 return facts.NativePointerSources[read.Variable] ?? EmptyBackingSources;
             case BoundMove move when (uint)move.Variable < (uint)facts.NativePointerSources.Length:
                 return facts.NativePointerSources[move.Variable] ?? EmptyBackingSources;
+            case BoundFieldMove move when facts.TryGetNativePointerCallResult(
+                move, StorageProjection.WholeObject, out var movedSources, out _):
+                return movedSources;
             case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
                 var readSources = new HashSet<ProvenanceAnchor>();
                 foreach (var target in NativePointerBackingOf(read.Address, facts, program,
@@ -6494,6 +6552,10 @@ public static partial class SemanticVerifier
                         ? [.. moveSources] : [],
                     facts.NativePointerExtentMayBeOpaque[move.Variable],
                     facts.NativePointerExtentUnavailable[move.Variable]);
+            case BoundFieldMove move when CarriesNativePointer(move.Type, program)
+                && facts.TryGetNativePointerCallExtentResult(
+                    move, StorageProjection.WholeObject, out var movedExtent):
+                return movedExtent;
             case BoundUnsafeExpression unsafeExpression:
                 return NativePointerExtentFactsOfExpression(
                     unsafeExpression.Expression, facts, function, program,
@@ -6842,6 +6904,9 @@ public static partial class SemanticVerifier
             case BoundMove move when (uint)move.Variable < (uint)facts.NativePointerMayBeUnknown.Length:
                 return facts.NativePointerMayBeUnknown[move.Variable]
                     || !NativePointerStorageInstancesMatch(move.Variable, facts);
+            case BoundFieldMove move when facts.TryGetNativePointerCallResult(
+                move, StorageProjection.WholeObject, out _, out var movedMayBeUnknown):
+                return movedMayBeUnknown;
             case BoundNativePointerRead read when CarriesNativePointer(read.Type, program):
                 var targets = NativePointerBackingOf(read.Address, facts, program,
                     ref remaining, depth + 1);
@@ -7055,21 +7120,21 @@ public static partial class SemanticVerifier
         }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if ((state.Possibilities(slot) & 2) != 0
+            if ((state.Possibilities(slot) & (2 | 8)) != 0
                 && facts.NativePointerSources[slot]?.Any(
                     source => IsNativeStorageInstance(source, owner, ownerInstances,
                         facts.FunctionActivation)) == true)
             {
                 throw InvalidEffect(span, "NativePointer");
             }
-            if (slot != owner && (state.Possibilities(slot) & 2) != 0
+            if (slot != owner && (state.Possibilities(slot) & (2 | 8)) != 0
                 && facts.ReferenceTargets[slot]?.Any(
                     target => IsReferenceStorageInstance(target, owner, ownerInstances,
                         facts.FunctionActivation)) == true)
             {
                 throw InvalidEffect(span, "CheckedReference");
             }
-            if (slot != owner && (state.Possibilities(slot) & 2) != 0
+            if (slot != owner && (state.Possibilities(slot) & (2 | 8)) != 0
                 && facts.ReferenceObligations[slot]?.Any(
                     obligation => IsReferenceDescriptorInstance(obligation,
                         owner, ownerInstances, facts.FunctionActivation)) == true)
@@ -7118,7 +7183,7 @@ public static partial class SemanticVerifier
             if (slot < function.Variables.Length
                 && (function.Variables[slot].IsOut || function.Variables[slot].IsInit
                     || (function.IsConstructor && slot == 0) || (function.IsClassConstructor && slot == 0))
-                && (state.Possibilities(slot) & 2) != 0
+                && (state.Possibilities(slot) & (2 | 8)) != 0
                 && facts.NativePointerSources[slot] is { Count: > 0 })
             {
                 throw InvalidEffect(span, "NativePointer");
@@ -7334,7 +7399,8 @@ public static partial class SemanticVerifier
         }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if (scopedVariables.Contains(slot) || (state.Possibilities(slot) & 2) == 0)
+            if (scopedVariables.Contains(slot)
+                || (state.Possibilities(slot) & (2 | 8)) == 0)
             {
                 continue;
             }
@@ -8134,6 +8200,9 @@ public static partial class SemanticVerifier
                 return BackingSourcesOf(read.Variable, read.Type, facts, program, read.Span);
             case BoundMove move when (uint)move.Variable < (uint)facts.Sources.Length:
                 return BackingSourcesOf(move.Variable, move.Type, facts, program, move.Span);
+            case BoundFieldMove move when facts.TryGetBackingCallResult(
+                move, StorageProjection.WholeObject, out var movedBacking):
+                return movedBacking.Sources;
             case BoundReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
                 return BackingSourcesOf(loan.Variable, loan.Type, facts, program, loan.Span);
             case BoundMutableReceiverLoan loan when (uint)loan.Variable < (uint)facts.Sources.Length:
@@ -8330,7 +8399,7 @@ public static partial class SemanticVerifier
         }
         for (var slot = 0; slot < state.Length; slot++)
         {
-            if ((state.Possibilities(slot) & 2) != 0)
+            if ((state.Possibilities(slot) & (2 | 8)) != 0)
             {
                 if ((facts.BackingMayBeUnknown[slot]
                         && facts.BackingBounds[slot] is not { Count: > 0 })
@@ -8348,6 +8417,90 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(span, "Ownership");
         }
+    }
+
+    private static void CheckReferencePlaceInvalidation(int root,
+        StorageProjection projection, InitializationState state, TextSpan span)
+    {
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+        if ((uint)root >= (uint)state.Length
+            || projection.Kind != StorageProjectionKind.InlineFieldPath
+            || projection.FieldPath.Segments.IsEmpty)
+        {
+            throw InvalidEffect(span, "CheckedReference");
+        }
+
+        var rootSource = ProvenanceAnchor.ForBackingSource(root);
+        for (var slot = 0; slot < state.Length; slot++)
+        {
+            if ((state.Possibilities(slot) & 2) == 0)
+            {
+                continue;
+            }
+            var targets = facts.ReferenceTargets[slot];
+            if (targets is not null && targets.Any(target =>
+                ReferenceTargetOverlapsField(root, projection, target, facts)))
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+            if (facts.NativePointerSources[slot]?.Any(target =>
+                NativePointerTargetOverlapsField(root, projection, target, facts)) == true)
+            {
+                throw InvalidEffect(span, "NativePointer");
+            }
+            if (facts.ReferenceBackingSources[slot]?.Contains(rootSource) == true
+                && (targets is null || targets.Any(target =>
+                    target.Kind != ProvenanceAnchorKind.ReferencePlace
+                    || target.Identity != root)))
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+        }
+
+        foreach (var staged in facts.Staged)
+        {
+            if (staged.ReferenceTargets.Any(target =>
+                    ReferenceTargetOverlapsField(root, projection, target, facts))
+                || staged.NativePointerSources.Any(target =>
+                    NativePointerTargetOverlapsField(root, projection, target, facts))
+                || (staged.BackingSources.Contains(rootSource)
+                    && staged.ReferenceTargets.Count == 0))
+            {
+                throw InvalidEffect(span, "CheckedReference");
+            }
+        }
+    }
+
+    private static bool NativePointerTargetOverlapsField(int root,
+        StorageProjection projection, ProvenanceAnchor target, BackingDependencies facts)
+        => target.Kind == ProvenanceAnchorKind.NativeStorage
+            && StorageTargetOverlapsField(root, projection, target, facts);
+
+    private static bool ReferenceTargetOverlapsField(int root,
+        StorageProjection projection, ProvenanceAnchor target, BackingDependencies facts)
+        => target.Kind == ProvenanceAnchorKind.ReferencePlace
+            && StorageTargetOverlapsField(root, projection, target, facts);
+
+    private static bool StorageTargetOverlapsField(int root,
+        StorageProjection projection, ProvenanceAnchor target, BackingDependencies facts)
+    {
+        if (target.Identity != root || target.Storage is not StorageKey key
+            || !key.IsKnown || key.Activation != facts.FunctionActivation
+            || key.Site != root
+            || !facts.StorageInstanceSet(root).Contains(key.Instance))
+        {
+            return false;
+        }
+        if (key.Projection.Kind == StorageProjectionKind.WholeObject)
+        {
+            return true;
+        }
+        return key.Projection.Kind != StorageProjectionKind.InlineFieldPath
+            || key.Projection.FieldPath.IsPrefixOf(projection.FieldPath)
+            || projection.FieldPath.IsPrefixOf(key.Projection.FieldPath);
     }
 
     private static bool VerifySpanOperand(BoundExpression view, InitializationState initialized, uint[] masks,

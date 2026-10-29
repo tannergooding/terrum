@@ -863,6 +863,7 @@ public static partial class SemanticVerifier
                 if (initialized[i] && HasFields(program, function.Variables[i].Type))
                 {
                     fieldMasks[i] = FullMask(program, function.Variables[i].Type);
+                    initialized.SetPossibleFieldMask(i, fieldMasks[i]);
                 }
             }
             var declarations = new HashSet<int>();
@@ -1144,6 +1145,9 @@ public static partial class SemanticVerifier
                     break;
                 case BoundFieldRead field:
                     Expression(field.Receiver, scope, depth + 1);
+                    break;
+                case BoundFieldMove move:
+                    Expression(move.Place, scope, depth + 1);
                     break;
                 case BoundFieldLoan loan:
                     Expression(loan.Place, scope, depth + 1);
@@ -1552,6 +1556,14 @@ public static partial class SemanticVerifier
                     if (move.Variable < 0 || move.Variable >= roots.Length
                         || roots[move.Variable] != 0 || exclusive[move.Variable]
                         || move.Type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
+                    {
+                        throw InvalidEffect(move.Span, "Ownership");
+                    }
+                    break;
+                case BoundFieldMove move:
+                    if (move.Place is not BoundFieldRead { Receiver: BoundRead root }
+                        || (uint)root.Variable >= (uint)roots.Length
+                        || roots[root.Variable] != 0 || exclusive[root.Variable])
                     {
                         throw InvalidEffect(move.Span, "Ownership");
                     }
@@ -2511,6 +2523,7 @@ public static partial class SemanticVerifier
                 if (HasFields(program, local.Initializer.Type))
                 {
                     fieldMasks[local.Variable] = FullMask(program, local.Initializer.Type);
+                    initialized.SetPossibleFieldMask(local.Variable, fieldMasks[local.Variable]);
                 }
                 if (local.Initializer is not BoundMove
                     && TokenSpanContract.IsDependent(local.Initializer.Type, program.Structures)
@@ -2591,7 +2604,8 @@ public static partial class SemanticVerifier
             case BoundLifetimeEnd end:
                 if (end.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || end.Variable >= initialized.Length
-                    || !declarations.Contains(end.Variable) || !initialized[end.Variable]
+                    || !declarations.Contains(end.Variable)
+                    || (!initialized[end.Variable] && !initialized.HasPartialValue(end.Variable))
                     || (function.Variables[end.Variable].Type is not (PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView)
                         && !ValidType(function.Variables[end.Variable].Type, allowVoid: false, program)))
@@ -2599,6 +2613,13 @@ public static partial class SemanticVerifier
                     throw Invalid(end.Span);
                 }
                 var endType = function.Variables[end.Variable].Type;
+                if (initialized.HasPartialValue(end.Variable)
+                    && (!IsUnique(program, endType) || endType == PrimitiveType.OwnedInt32Buffer
+                        || ManagedClassTypes.IsClass(endType)
+                        || program.Structures[(int)endType - 100].CleanupMethod is not null))
+                {
+                    throw InvalidEffect(end.Span, "Ownership");
+                }
                 var endMethod = IsUnique(program, endType) && endType != PrimitiveType.OwnedInt32Buffer
                     ? program.Structures[(int)endType - 100].CleanupMethod : null;
                 if (endMethod is null ? end.CleanupFunction != -1
@@ -2618,6 +2639,7 @@ public static partial class SemanticVerifier
                 initialized.Retire(end.Variable, (long)end.Span.Start + 1);
                 initialized.Dependencies?.ClearBackingSources(end.Variable);
                 fieldMasks[end.Variable] = 0;
+                initialized.SetPossibleFieldMask(end.Variable, 0);
                 return false;
             case BoundDrop drop:
                 if (!inCleanup || drop.Variable < 0 || drop.Variable >= initialized.Length
@@ -2653,6 +2675,7 @@ public static partial class SemanticVerifier
                     dropDependencies.ClearNativePointerProvenance(drop.Variable);
                 }
                 fieldMasks[drop.Variable] = 0;
+                initialized.SetPossibleFieldMask(drop.Variable, 0);
                 return false;
             case BoundDropSpan span:
                 if (!inCleanup || span.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -2740,6 +2763,8 @@ public static partial class SemanticVerifier
                 if (HasFields(program, assignment.Value.Type))
                 {
                     fieldMasks[assignment.Variable] = FullMask(program, assignment.Value.Type);
+                    initialized.SetPossibleFieldMask(
+                        assignment.Variable, fieldMasks[assignment.Variable]);
                 }
                 initialized.MarkAssigned(assignment.Variable);
                 initialized.SetNativeOutputResult(assignment.Variable, nativeOutputAssignmentResult);
@@ -2883,6 +2908,7 @@ public static partial class SemanticVerifier
                     || fieldAssignment.Field < 0 || fieldAssignment.Field >= Fields(program, ownerType).Length
                     || !CanAccessField(function, program, ownerType, fieldAssignment.Field)
                     || (!initialized[fieldAssignment.Variable]
+                        && !initialized.HasPartialValue(fieldAssignment.Variable)
                         && (!(function.IsConstructor || function.IsClassConstructor)
                             || fieldAssignment.Variable != 0)))
                 {
@@ -2901,10 +2927,29 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
+                var fieldBit = 1u << fieldAssignment.Field;
+                var isConstructorFieldInitialization =
+                    function.IsConstructor
+                    && fieldAssignment.Variable == 0
+                    && fieldAssignment.NestedFields.IsEmpty
+                    && (fieldMasks[0] & fieldBit) == 0
+                    && (initialized.PossibleFieldMask(0) & fieldBit) == 0;
+                var isPartialFieldRepair = initialized.HasPartialValue(fieldAssignment.Variable)
+                    && !function.IsConstructor && !function.IsClassConstructor
+                    && fieldAssignment.Variable != 0 && fieldAssignment.NestedFields.IsEmpty
+                    && IsUnique(program, ownerType)
+                    && program.Structures[(int)ownerType - 100].CleanupMethod is null
+                    && targetField.IsMutable
+                    && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
+                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) == 0;
+                if (initialized.HasPartialValue(fieldAssignment.Variable)
+                    && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
+                    && !isPartialFieldRepair && !isConstructorFieldInitialization)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
                 if (IsUnique(program, targetField.Type)
-                    && (!function.IsConstructor || fieldAssignment.Variable != 0
-                        || !fieldAssignment.NestedFields.IsEmpty
-                        || (fieldMasks[0] & (1u << fieldAssignment.Field)) != 0))
+                    && !isConstructorFieldInitialization && !isPartialFieldRepair)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
@@ -2956,7 +3001,7 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "UnsafeCaller");
                 }
                 if (IsUnique(program, targetField.Type)
-                    && fieldAssignment.Value is not (BoundMove or BoundCall))
+                    && fieldAssignment.Value is not (BoundMove or BoundFieldMove or BoundCall))
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
@@ -2970,7 +3015,7 @@ public static partial class SemanticVerifier
                     && !ManagedClassTypes.IsClass(ownerType);
                 var fieldValueCouldComplete = CanCompleteNormally(fieldAssignment.Value,
                     initialized, program, ref remaining, depth + 1);
-                if (fieldValueCouldComplete)
+                if (fieldValueCouldComplete && !isPartialFieldRepair)
                 {
                     CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
                 }
@@ -2978,6 +3023,11 @@ public static partial class SemanticVerifier
                     function, program, ref remaining, depth + 1, failures))
                 {
                     return true;
+                }
+                if (isPartialFieldRepair
+                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) != 0)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 if (preserveValueOwner && (!initialized[fieldAssignment.Variable]
                     || fieldMasks[fieldAssignment.Variable] != FullMask(program, ownerType)))
@@ -3049,9 +3099,19 @@ public static partial class SemanticVerifier
                                 ref remaining, depth + 1));
                     }
                 }
-                fieldMasks[fieldAssignment.Variable] |= 1u << fieldAssignment.Field;
-                initialized[fieldAssignment.Variable] = fieldMasks[fieldAssignment.Variable]
-                    == FullMask(program, ownerType);
+                fieldMasks[fieldAssignment.Variable] |= fieldBit;
+                initialized.SetPossibleFieldMask(fieldAssignment.Variable,
+                    initialized.PossibleFieldMask(fieldAssignment.Variable) | fieldBit);
+                if (fieldMasks[fieldAssignment.Variable] == FullMask(program, ownerType))
+                {
+                    initialized[fieldAssignment.Variable] = true;
+                }
+                else if (IsUnique(program, ownerType)
+                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) != 0
+                        || initialized.HasPartialValue(fieldAssignment.Variable)))
+                {
+                    initialized.MarkPartialValue(fieldAssignment.Variable);
+                }
                 return false;
             case BoundBufferAssignment bufferWrite:
                 if (RequiresNoFailureProof(function)
@@ -3197,6 +3257,10 @@ public static partial class SemanticVerifier
                         : (byte)(thenState.Possibilities(i) | elseState.Possibilities(i)));
                     fieldMasks[i] = !thenCompletes ? elseMasks[i]
                         : !elseCompletes ? thenMasks[i] : thenMasks[i] & elseMasks[i];
+                    initialized.SetPossibleFieldMask(i, !thenCompletes
+                        ? elseState.PossibleFieldMask(i)
+                        : !elseCompletes ? thenState.PossibleFieldMask(i)
+                        : thenState.PossibleFieldMask(i) | elseState.PossibleFieldMask(i));
                     if (thenCompletes && elseCompletes)
                     {
                         _ = initialized.CopyProvenanceSlot(i, thenState);
@@ -3958,6 +4022,10 @@ public static partial class SemanticVerifier
             fieldMasks[i] = recoveryBodyReturns && caughtFailures.HasEdges ? catchMasks[i]
                 : !caughtFailures.HasEdges || catchReturns ? fieldMasks[i]
                 : fieldMasks[i] & catchMasks[i];
+            initialized.SetPossibleFieldMask(i, recoveryBodyReturns && caughtFailures.HasEdges
+                ? catchState.PossibleFieldMask(i)
+                : !caughtFailures.HasEdges || catchReturns ? initialized.PossibleFieldMask(i)
+                : initialized.PossibleFieldMask(i) | catchState.PossibleFieldMask(i));
         }
         _ = initialized.MergeNativeOutputState(initialized, !recoveryBodyReturns,
             catchState, caughtFailures.HasEdges && !catchReturns);
@@ -3986,6 +4054,7 @@ public static partial class SemanticVerifier
                 {
                     initialized[index] = false;
                     fieldMasks[index] = 0;
+                    initialized.SetPossibleFieldMask(index, 0);
                 }
             }
         }
@@ -4083,10 +4152,10 @@ public static partial class SemanticVerifier
     private sealed class InitializationState
     {
         private static readonly NativeOutputDestinationState UnknownNativeOutputDestination = new(null);
-        // Joins retain never-published vacancy (1), liveness (2) and retired
-        // vacancy (4). Retiring an immutable value cannot authorize another init
-        // call, but an inline output may still retry before its first publication.
+        // Joins retain never-published vacancy (1), liveness (2), retired
+        // vacancy (4), and partial structural ownership (8).
         private readonly byte[] _possibilities;
+        private readonly uint[] _possibleFieldMasks;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         private readonly Dictionary<BoundExpression, byte> _completionShapeFacts;
@@ -4127,6 +4196,7 @@ public static partial class SemanticVerifier
             HasNativeOutputContracts = hasNativeOutputContracts;
             HasDoesNotReturnFunctions = hasDoesNotReturnFunctions;
             _possibilities = new byte[length];
+            _possibleFieldMasks = new uint[length];
             _canBeFacts = canBeFacts;
             _flowFacts = flowFacts;
             _completionShapeFacts = completionShapeFacts;
@@ -4195,13 +4265,35 @@ public static partial class SemanticVerifier
         }
 
         internal bool IsVacant(int index) =>
-            (_possibilities[index] & 2) == 0 && !IsNativeOutputReserved(index);
+            (_possibilities[index] & (2 | 8)) == 0 && !IsNativeOutputReserved(index);
 
         internal bool IsNativeOutputReserved(int index) =>
             (uint)index < (uint)Length
                 && _nativeOutputDestinations[index] is { IsReserved: true };
 
         internal bool HasRetiredValue(int index) => (_possibilities[index] & 4) != 0;
+        internal bool HasPartialValue(int index) => (_possibilities[index] & 8) != 0;
+
+        internal uint PossibleFieldMask(int index) =>
+            (uint)index < (uint)Length ? _possibleFieldMasks[index] : throw Invalid();
+
+        internal void SetPossibleFieldMask(int index, uint mask)
+        {
+            if ((uint)index >= (uint)Length)
+            {
+                throw Invalid();
+            }
+            _possibleFieldMasks[index] = mask;
+        }
+
+        internal void MarkPartialValue(int index)
+        {
+            if ((uint)index >= (uint)Length)
+            {
+                throw Invalid();
+            }
+            _possibilities[index] = 8;
+        }
 
         internal void ActivateStorage(int index, long generation)
             => Dependencies?.ActivateStorage(index, generation, ScopeActivation);
@@ -4262,6 +4354,7 @@ public static partial class SemanticVerifier
         internal void Retire(int index, long generation)
         {
             _possibilities[index] = 4;
+            _possibleFieldMasks[index] = 0;
             SetNativeOutputState(index, null, null);
             Dependencies?.ClearNativePointerProvenance(index);
             AdvanceStorageGeneration(index, generation);
@@ -4280,6 +4373,7 @@ public static partial class SemanticVerifier
         internal void Merge(int index, InitializationState other)
         {
             _possibilities[index] |= other._possibilities[index];
+            _possibleFieldMasks[index] |= other._possibleFieldMasks[index];
             MergeNativeOutputSlot(index, _nativeOutputDestinations[index], _nativeOutputResults[index],
                 other._nativeOutputDestinations[index], other._nativeOutputResults[index]);
             if (Dependencies is not null && other.Dependencies is not null)
@@ -4330,6 +4424,7 @@ public static partial class SemanticVerifier
             };
             result._activeStorageScopes.AddRange(_activeStorageScopes);
             Array.Copy(_possibilities, result._possibilities, Length);
+            Array.Copy(_possibleFieldMasks, result._possibleFieldMasks, Length);
             Array.Copy(_nativeOutputDestinations, result._nativeOutputDestinations, Length);
             Array.Copy(_nativeOutputResults, result._nativeOutputResults, Length);
             result._nativeOutputStateCount = _nativeOutputStateCount;
@@ -4339,6 +4434,7 @@ public static partial class SemanticVerifier
         internal void CopyTo(InitializationState destination)
         {
             Array.Copy(_possibilities, destination._possibilities, Length);
+            Array.Copy(_possibleFieldMasks, destination._possibleFieldMasks, Length);
             Array.Copy(_nativeOutputDestinations, destination._nativeOutputDestinations, Length);
             Array.Copy(_nativeOutputResults, destination._nativeOutputResults, Length);
             destination._nativeOutputStateCount = _nativeOutputStateCount;
@@ -4635,8 +4731,8 @@ public static partial class SemanticVerifier
             || root.Type != function.Variables[root.Variable].Type
             || !IsUnique(program, root.Type)
             || (!initialized[root.Variable]
-                && !(function.IsConstructor && root.Variable == 0
-                    && (fieldMasks[0] & (1u << place.Field)) != 0)))
+                && (!initialized.HasPartialValue(root.Variable)
+                    || (fieldMasks[root.Variable] & (1u << place.Field)) == 0)))
         {
             throw InvalidEffect(place.Span, "Ownership");
         }
@@ -5281,8 +5377,8 @@ public static partial class SemanticVerifier
                     if (owned.Variable < 0 || owned.Variable >= initialized.Length
                         || owned.Type != function.Variables[owned.Variable].Type
                         || (!initialized[owned.Variable]
-                            && (!function.IsConstructor || owned.Variable != 0
-                                || (fieldMasks[0] & (1u << fieldRead.Field)) == 0)))
+                            && (!initialized.HasPartialValue(owned.Variable)
+                                || (fieldMasks[owned.Variable] & (1u << fieldRead.Field)) == 0)))
                     {
                         throw InvalidEffect(fieldRead.Span, "Ownership");
                     }
@@ -5529,6 +5625,110 @@ public static partial class SemanticVerifier
                 initialized.Retire(move.Variable, (long)move.Span.Start + 1);
                 fieldMasks[move.Variable] = 0;
                 break;
+            case BoundFieldMove move:
+                if (move.Place is not BoundFieldRead fieldPlace
+                    || fieldPlace.Receiver is not BoundRead fieldRoot
+                    || move.Type != fieldPlace.Type
+                    || !IsUnique(program, fieldRoot.Type)
+                    || !IsUnique(program, move.Type)
+                    || (uint)fieldRoot.Variable >= (uint)initialized.Length
+                    || fieldRoot.Type != function.Variables[fieldRoot.Variable].Type)
+                {
+                    throw InvalidEffect(move.Span, "Ownership");
+                }
+                _ = VerifyUniqueFieldPlace(fieldPlace, initialized, fieldMasks,
+                    function, program, ref remaining, depth + 1);
+                var constructorFieldMove = function.IsConstructor && fieldRoot.Variable == 0;
+                var ownerStructure = program.Structures[(int)fieldRoot.Type - 100];
+                var movedField = ownerStructure.Fields[fieldPlace.Field];
+                if (movedField.RequiresUnsafeCaller && !fieldPlace.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(move.Span, "UnsafeCaller");
+                }
+                if (!constructorFieldMove
+                    && ((fieldRoot.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
+                        || !function.Variables[fieldRoot.Variable].IsMutable
+                        || !movedField.IsMutable
+                        || ownerStructure.CleanupMethod is not null))
+                {
+                    throw InvalidEffect(move.Span, "Ownership");
+                }
+                var movedFieldBit = 1u << fieldPlace.Field;
+                var movedFieldProjection = new StorageProjection(
+                    StorageProjectionKind.InlineFieldPath, 0, 0,
+                    new FieldProjectionPath().Append(fieldRoot.Type, fieldPlace.Field));
+                CheckReferencePlaceInvalidation(fieldRoot.Variable,
+                    movedFieldProjection, initialized, move.Span);
+                if (initialized.Dependencies is BackingDependencies fieldMoveDependencies)
+                {
+                    fieldMoveDependencies.ClearBackingCallResult(move);
+                    fieldMoveDependencies.ClearNativePointerCallResult(move);
+                    fieldMoveDependencies.ClearCopyOriginCallResult(move);
+                    if (CarriesCopyOrigin(move.Type, program))
+                    {
+                        fieldMoveDependencies.SetCopyOriginCallResult(move,
+                            CopyOriginValueOfExpression(fieldPlace, move.Type,
+                                fieldMoveDependencies, function, program,
+                                ref remaining, depth + 1));
+                    }
+                    if (TokenSpanContract.IsDependent(move.Type, program.Structures))
+                    {
+                        var backingSources = BackingOf(fieldPlace,
+                            fieldMoveDependencies, program, ref remaining, depth + 1);
+                        var backingValues = BackingFieldValueSnapshotOfExpression(
+                            fieldPlace, move.Type, fieldMoveDependencies, function,
+                            program, ref remaining, depth + 1);
+                        if (backingValues is not null)
+                        {
+                            backingValues[StorageProjection.WholeObject] =
+                                new BackingFieldValue(
+                                    new HashSet<ProvenanceAnchor>(backingSources),
+                                    isAvailable: true);
+                            fieldMoveDependencies.SetBackingCallResult(move, backingValues);
+                        }
+                    }
+                    if (CarriesNativePointer(move.Type, program))
+                    {
+                        var pointerSources = NativePointerBackingOf(fieldPlace,
+                            fieldMoveDependencies, program, ref remaining, depth + 1);
+                        var pointerExtent = NativePointerExtentFactsOfExpression(
+                            fieldPlace, fieldMoveDependencies, function, program,
+                            ref remaining, depth + 1);
+                        var pointerValues = NativePointerFieldValueSnapshotOfExpression(
+                            fieldPlace, move.Type, fieldMoveDependencies, function,
+                            program, ref remaining, depth + 1);
+                        pointerValues[StorageProjection.WholeObject] =
+                            new NativePointerFieldValue(pointerSources,
+                                NativePointerMayBeUnknownOf(fieldPlace,
+                                    fieldMoveDependencies, program,
+                                    ref remaining, depth + 1),
+                                pointerExtent.Sources, pointerExtent.MayBeOpaque,
+                                pointerExtent.IsUnavailable);
+                        fieldMoveDependencies.SetNativePointerCallResult(move, pointerValues);
+                    }
+                    fieldMoveDependencies.InvalidateCopyOriginValue(
+                        fieldRoot.Variable, movedFieldProjection, program,
+                        ref remaining, depth + 1);
+                    fieldMoveDependencies.ClearBackingFieldValues(
+                        fieldRoot.Variable, movedFieldProjection);
+                    fieldMoveDependencies.ClearNativePointerFieldValues(
+                        fieldRoot.Variable, movedFieldProjection);
+                    if (TokenSpanContract.IsDependent(fieldRoot.Type, program.Structures))
+                    {
+                        RefreshBackingAggregateProvenance(fieldRoot.Variable, fieldRoot.Type,
+                            fieldMoveDependencies, program, ref remaining, depth + 1);
+                    }
+                    if (CarriesNativePointer(fieldRoot.Type, program))
+                    {
+                        RefreshNativePointerAggregateProvenance(fieldRoot.Variable, fieldRoot.Type,
+                            fieldMoveDependencies, program, ref remaining, depth + 1);
+                    }
+                }
+                fieldMasks[fieldRoot.Variable] &= ~movedFieldBit;
+                initialized.SetPossibleFieldMask(fieldRoot.Variable,
+                    initialized.PossibleFieldMask(fieldRoot.Variable) & ~movedFieldBit);
+                initialized.MarkPartialValue(fieldRoot.Variable);
+                break;
             case BoundReceiverLoan loan:
                 throw InvalidEffect(loan.Span, "Ownership");
             case BoundMutableReceiverLoan mutableLoan:
@@ -5759,6 +5959,10 @@ public static partial class SemanticVerifier
                                 : (byte)(rightState.Possibilities(i) | skippedState.Possibilities(i)));
                             fieldMasks[i] = !rightCompletes ? skippedMasks[i] : !skips ? rightMasks[i]
                                 : rightMasks[i] & skippedMasks[i];
+                            initialized.SetPossibleFieldMask(i, !rightCompletes
+                                ? skippedState.PossibleFieldMask(i)
+                                : !skips ? rightState.PossibleFieldMask(i)
+                                : rightState.PossibleFieldMask(i) | skippedState.PossibleFieldMask(i));
                         }
                         _ = initialized.MergeNativeOutputState(
                             rightState, rightCompletes, skippedState, skips);
@@ -5884,6 +6088,10 @@ public static partial class SemanticVerifier
                             : (byte)(trueState.Possibilities(i) | falseState.Possibilities(i)));
                         fieldMasks[i] = !trueCompletes ? falseMasks[i] : !falseCompletes ? trueMasks[i]
                             : trueMasks[i] & falseMasks[i];
+                        initialized.SetPossibleFieldMask(i, !trueCompletes
+                            ? falseState.PossibleFieldMask(i)
+                            : !falseCompletes ? trueState.PossibleFieldMask(i)
+                            : trueState.PossibleFieldMask(i) | falseState.PossibleFieldMask(i));
                         if (trueCompletes && falseCompletes)
                         {
                             _ = initialized.CopyProvenanceSlot(i, trueState);
@@ -6186,24 +6394,26 @@ public static partial class SemanticVerifier
                             preMoveBackingSnapshot = null;
                         Dictionary<StorageProjection, NativePointerFieldValue>?
                             preMoveNativePointerSnapshot = null;
-                        if (argumentsComplete && argument is BoundMove
+                        if (argumentsComplete && argument is BoundMove or BoundFieldMove
                             && copyOriginInputViews?.ContainsKey(parameterIndex) == true)
                         {
                             if (initialized.Dependencies is not BackingDependencies copyOriginState)
                             {
                                 throw Invalid(argument.Span);
                             }
-                            preMoveCopyOriginSnapshot = CopyOriginValueOfExpression(argument,
+                            var preMoveValue = argument is BoundFieldMove fieldMoveArgument
+                                ? fieldMoveArgument.Place : argument;
+                            preMoveCopyOriginSnapshot = CopyOriginValueOfExpression(preMoveValue,
                                 argument.Type, copyOriginState, function, program,
                                 ref remaining, depth + 1);
                             preMoveBackingSnapshot =
-                                BackingFieldValueSnapshotOfExpression(argument,
+                                BackingFieldValueSnapshotOfExpression(preMoveValue,
                                     argument.Type, copyOriginState, function, program,
                                     ref remaining, depth + 1);
                             if (CarriesNativePointer(argument.Type, program))
                             {
                                 preMoveNativePointerSnapshot =
-                                    NativePointerFieldValueSnapshotOfExpression(argument,
+                                    NativePointerFieldValueSnapshotOfExpression(preMoveValue,
                                         argument.Type, copyOriginState, function, program,
                                         ref remaining, depth + 1);
                             }
@@ -6266,6 +6476,7 @@ public static partial class SemanticVerifier
                             }
                             initialized[output.Variable] = false;
                             fieldMasks[output.Variable] = 0;
+                            initialized.SetPossibleFieldMask(output.Variable, 0);
                         }
                         else
                         {
@@ -6474,7 +6685,7 @@ public static partial class SemanticVerifier
                                 if (argument is not (BoundNativeStorageAddress or BoundNativeOutputReservation))
                                 {
                                     if (IsUnique(program, argument.Type)
-                                        && argument is not (BoundMove or BoundCall))
+                                        && argument is not (BoundMove or BoundFieldMove or BoundCall))
                                     {
                                         throw InvalidEffect(argument.Span, "Ownership");
                                     }
@@ -6534,6 +6745,7 @@ public static partial class SemanticVerifier
                             _ = declarations.Add(implicitReferenceTemporary);
                             initialized[implicitReferenceTemporary] = true;
                             fieldMasks[implicitReferenceTemporary] = 0;
+                            initialized.SetPossibleFieldMask(implicitReferenceTemporary, 0);
                         }
                         if (argumentsComplete
                             && copyOriginInputViews is not null
@@ -6580,7 +6792,9 @@ public static partial class SemanticVerifier
                         break;
                     }
                     if (loanRoot >= 0 && !initialized[loanRoot]
-                        && !(loanOfInitializedField && function.IsConstructor && loanRoot == 0))
+                        && !(loanOfInitializedField
+                            && (initialized.HasPartialValue(loanRoot)
+                                || (function.IsConstructor && loanRoot == 0))))
                     {
                         throw InvalidEffect(call.Span, "Ownership");
                     }
@@ -6654,6 +6868,7 @@ public static partial class SemanticVerifier
                             if (HasFields(program, outputType))
                             {
                                 fieldMasks[output] = FullMask(program, outputType);
+                                initialized.SetPossibleFieldMask(output, fieldMasks[output]);
                             }
                         }
                     }
@@ -6963,6 +7178,8 @@ public static partial class SemanticVerifier
             BoundUnsafeExpression unsafeExpression => InvalidatesReservedOwner(
                 unsafeExpression.Expression, variable, ref remaining, depth + 1),
             BoundMove move => move.Variable == variable,
+            BoundFieldMove move => move.Place.Receiver is BoundRead root
+                && root.Variable == variable,
             BoundOutArgument output => output.Variable == variable,
             BoundMutableReceiverLoan loan => loan.Variable == variable,
             BoundMutableFieldLoan loan => LoanRoot(loan, ref remaining, depth + 1) == variable,
@@ -7108,6 +7325,7 @@ public static partial class SemanticVerifier
             if (initialized[i] && HasFields(program, type))
             {
                 masks[i] = FullMask(program, type);
+                initialized.SetPossibleFieldMask(i, masks[i]);
             }
         }
     }
@@ -7491,6 +7709,8 @@ public static partial class SemanticVerifier
                 }
                 state.Retire(move.Variable, (long)move.Span.Start + 1);
                 break;
+            case BoundFieldMove:
+                break;
             default:
                 throw Invalid();
         }
@@ -7566,7 +7786,7 @@ public static partial class SemanticVerifier
                 pointerWrite.Value, flowFacts, ref remaining),
             BoundIsSome test => (byte)(OutcomeEffectFact | FlowFacts(test.Value, flowFacts, ref remaining)),
             BoundIsVariablePattern or BoundIsInitialized => AllFlowFacts,
-            BoundOutArgument or BoundMove => OutcomeEffectFact,
+            BoundOutArgument or BoundMove or BoundFieldMove => OutcomeEffectFact,
             BoundFieldRead field => FlowFacts(field.Receiver, flowFacts, ref remaining),
             BoundBufferRead buffer => FlowFacts(buffer.Index, flowFacts, ref remaining),
             BoundViewRead view => FlowFacts(view.Index, flowFacts, ref remaining),

@@ -329,6 +329,9 @@ public sealed class Compilation
                         case BoundFieldRead field:
                             expressions.Push(field.Receiver);
                             break;
+                        case BoundFieldMove move:
+                            expressions.Push(move.Place);
+                            break;
                         case BoundFieldLoan loan:
                             expressions.Push(loan.Place);
                             break;
