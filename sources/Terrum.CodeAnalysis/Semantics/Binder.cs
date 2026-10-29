@@ -6612,7 +6612,7 @@ internal sealed partial class Binder
         if (IsUnique(fieldType)
             && (path.Length != 1
                 || !IsUnique(_variables[variable].Type)
-                || (variable == 0 && !_constructor)))
+                || (_hasReceiver && variable == 0 && !_constructor)))
         {
             Report("TRM3023", "An owning field requires a top-level unique owner place.", target.Span);
         }
@@ -6718,9 +6718,27 @@ internal sealed partial class Binder
                 case BoundFieldAssignment field when field.Variable == 0
                     && field.Field >= 0 && field.Field < _structs[(int)ownerType - 100].Fields.Length
                     && IsUnique(_structs[(int)ownerType - 100].Fields[field.Field].Type):
-                    if (!sequential || !field.NestedFields.IsEmpty || order.Contains(field.Field))
+                    var ownerField = _structs[(int)ownerType - 100].Fields[field.Field];
+                    if (!sequential || !field.NestedFields.IsEmpty)
                     {
                         Report("TRM3023", "Owning fields must be initialized once in sequential constructor flow.", field.Span);
+                    }
+                    var priorAcquisition = -1;
+                    for (var index = 0; index < order.Count; index++)
+                    {
+                        if (order[index] == field.Field)
+                        {
+                            priorAcquisition = index;
+                            break;
+                        }
+                    }
+                    if (priorAcquisition >= 0)
+                    {
+                        if (!ownerField.IsMutable)
+                        {
+                            Report("TRM3023", "A live owning field can be replaced only when it is mutable.", field.Span);
+                        }
+                        order.RemoveAt(priorAcquisition);
                     }
                     order.Add(field.Field);
                     break;

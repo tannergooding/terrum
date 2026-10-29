@@ -833,6 +833,7 @@ internal sealed partial class PeCompiler
     private readonly int[][] _initializationFlags;
     private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
+    private readonly int[] _oldReplacementSlots;
     private readonly int[] _cleanupArgumentSlots;
     private readonly List<(int Offset, int Target)> _calls = new();
     private readonly List<(int Offset, string Function)> _binary128Calls = [];
@@ -927,6 +928,8 @@ internal sealed partial class PeCompiler
         }
         _constructedFieldSlots = new int[program.Functions.Length][];
         _replacementSlots = new int[program.Functions.Length];
+        _oldReplacementSlots = new int[program.Functions.Length];
+        Array.Fill(_oldReplacementSlots, -1);
         _cleanupArgumentSlots = new int[program.Functions.Length];
         _bufferOffsets = sourceDependent is null ? new int[program.Buffers.Length] : [];
         if (sourceDependent is not null)
@@ -1353,6 +1356,8 @@ internal sealed partial class PeCompiler
             _edgeCopySlots[i] = edgeCopySlots;
             at = AlignOffset(at, 16);
             _returnSlots[i] = at;
+            var maximumFieldReplacementSize = 0;
+            var hasUniqueFieldReplacement = false;
             var hasOutputParameters = false;
             var parameterOffset = function.IsConstructor ? 1 : 0;
             for (var parameter = parameterOffset;
@@ -1386,6 +1391,35 @@ internal sealed partial class PeCompiler
             {
                 throw new InvalidOperationException("Verified field-move traversal is incomplete.");
             }
+            if (function.Body is not null
+                && !BoundTreeTraversal.VisitStatements(function.Body, statement =>
+                {
+                    if (statement is BoundFieldAssignment assignment
+                        && assignment.NestedFields.IsEmpty
+                        && (uint)assignment.Variable < (uint)function.Variables.Length
+                        && IsStruct(function.Variables[assignment.Variable].Type))
+                    {
+                        var ownerType = function.Variables[assignment.Variable].Type;
+                        var ownerIndex = (int)ownerType - 100;
+                        if ((uint)ownerIndex < (uint)_program.Structures.Length
+                            && (uint)assignment.Field
+                                < (uint)_program.Structures[ownerIndex].Fields.Length)
+                        {
+                            var fieldType = _program.Structures[ownerIndex]
+                                .Fields[assignment.Field].Type;
+                            if (IsUnique(fieldType))
+                            {
+                                hasUniqueFieldReplacement = true;
+                                maximumFieldReplacementSize = Math.Max(
+                                    maximumFieldReplacementSize, ScratchSize(fieldType));
+                                _ = partialFieldOwners.Add(assignment.Variable);
+                            }
+                        }
+                    }
+                }))
+            {
+                throw new InvalidOperationException("Verified field-assignment traversal is incomplete.");
+            }
             var hasUnique = false;
             var replacementSize = 8;
             for (var variable = 0; variable < function.Variables.Length; variable++)
@@ -1415,10 +1449,6 @@ internal sealed partial class PeCompiler
                     continue;
                 }
                 var structure = _program.Structures[(int)type - 100];
-                if (structure.CleanupMethod is not null)
-                {
-                    continue;
-                }
                 var fieldSlots = new int[structure.Fields.Length];
                 Array.Fill(fieldSlots, -1);
                 for (var field = 0; field < structure.Fields.Length; field++)
@@ -1462,6 +1492,12 @@ internal sealed partial class PeCompiler
             if (hasUnique)
             {
                 required = _replacementSlots[i] + (long)replacementSize;
+            }
+            if (hasUniqueFieldReplacement)
+            {
+                required = (required + 15) & ~15L;
+                _oldReplacementSlots[i] = checked((int)required);
+                required += maximumFieldReplacementSize;
             }
             _cleanupArgumentSlots[i] = -1;
             if (maximumIndirectCleanupSize != 0)
@@ -4475,6 +4511,22 @@ internal sealed partial class PeCompiler
         return (uint)place.Field < (uint)slots.Length ? slots[place.Field] : -1;
     }
 
+    private int PartialFieldSlot(int variable, int field)
+    {
+        if ((uint)variable >= (uint)_program.Functions[_currentFunction].Variables.Length)
+        {
+            throw new InvalidOperationException("Verified partial field owner is invalid.");
+        }
+        var function = _program.Functions[_currentFunction];
+        if (function.IsConstructor && variable == 0)
+        {
+            var constructed = _constructedFieldSlots[_currentFunction];
+            return (uint)field < (uint)constructed.Length ? constructed[field] : -1;
+        }
+        var slots = _partialFieldSlots[_currentFunction][variable];
+        return (uint)field < (uint)slots.Length ? slots[field] : -1;
+    }
+
     private void SetPartialFieldSlot(BoundFieldRead place, bool live)
     {
         var slot = PartialFieldSlot(place);
@@ -4489,6 +4541,21 @@ internal sealed partial class PeCompiler
         else
         {
             _code.Clear(slot);
+        }
+    }
+
+    private void LoadFieldAssignmentAddress(int variable, int destination)
+    {
+        var function = _program.Functions[_currentFunction];
+        if (variable == 0 && function.DeclaringStruct is not null
+            && !function.IsStatic && IsBorrowedReceiver())
+        {
+            _code.Load64(Slot(0));
+            _code.PointerOffset(destination - Slot(0));
+        }
+        else
+        {
+            _code.Address(destination);
         }
     }
 
@@ -5380,6 +5447,90 @@ internal sealed partial class PeCompiler
                     .Fields[fieldAssignment.Field] : _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
                     + field.Offset;
+                if (!classField && IsUnique(field.Type)
+                    && fieldAssignment.NestedFields.IsEmpty)
+                {
+                    var replacement = _replacementSlots[_currentFunction];
+                    var oldReplacement = _oldReplacementSlots[_currentFunction];
+                    var live = PartialFieldSlot(fieldAssignment.Variable,
+                        fieldAssignment.Field);
+                    var borrowedReceiver = fieldAssignment.Variable == 0
+                        && _program.Functions[_currentFunction].DeclaringStruct is not null
+                        && !_program.Functions[_currentFunction].IsStatic
+                        && IsBorrowedReceiver();
+                    if (oldReplacement < 0 || (live < 0 && !borrowedReceiver))
+                    {
+                        throw new InvalidOperationException(
+                            "Verified live field replacement has no staging or liveness storage.");
+                    }
+
+                    Expression(fieldAssignment.Value, 0);
+                    StoreValue(replacement, field.Type);
+                    if (live >= 0)
+                    {
+                        _code.Load(live);
+                        _code.Bytes(0x85, 0xC0);
+                        var vacant = _code.JumpIf(0x84);
+                        _code.Clear(live);
+                        LoadFieldAssignmentAddress(fieldAssignment.Variable, destination);
+                        CopyToFrame(oldReplacement, field.Size);
+                        EmitDropValue(oldReplacement, field.Type);
+                        _code.PatchRelative(vacant, _code.Position);
+                    }
+                    else
+                    {
+                        LoadFieldAssignmentAddress(fieldAssignment.Variable, destination);
+                        CopyToFrame(oldReplacement, field.Size);
+                        EmitDropValue(oldReplacement, field.Type);
+                    }
+
+                    if (borrowedReceiver)
+                    {
+                        LoadFieldAssignmentAddress(fieldAssignment.Variable, destination);
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        LoadValue(replacement, field.Type);
+                        if (IsIndirect(field.Type))
+                        {
+                            _code.Bytes(0x48, 0x89, 0xC8);
+                            _code.CopyMemory(field.Size);
+                        }
+                        else
+                        {
+                            switch (field.Size)
+                            {
+                                case 1:
+                                    _code.Bytes(0x88, 0x02);
+                                    break;
+                                case 2:
+                                    _code.Bytes(0x66, 0x89, 0x02);
+                                    break;
+                                case 4:
+                                    _code.Bytes(0x89, 0x02);
+                                    break;
+                                default:
+                                    _code.Bytes(0x48, 0x89, 0x02);
+                                    break;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        LoadValue(replacement, field.Type);
+                        if (IsIndirect(field.Type))
+                        {
+                            CopyToFrame(destination, field.Size);
+                        }
+                        else
+                        {
+                            _code.StoreField(destination, field.Size);
+                        }
+                    }
+                    if (live >= 0)
+                    {
+                        _code.Set(live);
+                    }
+                    break;
+                }
                 if (classField)
                 {
                     _code.Load64(OwnerPlace(fieldAssignment.Variable));

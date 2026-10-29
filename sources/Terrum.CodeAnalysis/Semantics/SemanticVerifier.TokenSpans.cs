@@ -8434,6 +8434,51 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static void CheckBackingFieldInvalidation(int root,
+        StorageProjection projection, InitializationState state, TextSpan span)
+    {
+        if (state.Dependencies is not BackingDependencies facts)
+        {
+            return;
+        }
+        if ((uint)root >= (uint)state.Length
+            || projection.Kind != StorageProjectionKind.InlineFieldPath
+            || projection.FieldPath.Segments.IsEmpty)
+        {
+            throw InvalidEffect(span, "Ownership");
+        }
+
+        var rootSource = ProvenanceAnchor.ForBackingSource(root);
+        for (var slot = 0; slot < state.Length; slot++)
+        {
+            if ((state.Possibilities(slot) & (2 | 8)) == 0)
+            {
+                continue;
+            }
+            if ((facts.BackingMayBeUnknown[slot]
+                    && facts.BackingBounds[slot] is not { Count: > 0 })
+                || facts.Sources[slot]?.Contains(rootSource) == true)
+            {
+                throw InvalidEffect(span, "Ownership");
+            }
+
+            var referenceTargets = facts.ReferenceTargets[slot];
+            if (facts.ReferenceBackingSources[slot]?.Contains(rootSource) == true
+                && (referenceTargets is null || referenceTargets.Any(target =>
+                    target.Kind != ProvenanceAnchorKind.ReferencePlace
+                    || target.Identity != root
+                    || ReferenceTargetOverlapsField(root, projection, target, facts))))
+            {
+                throw InvalidEffect(span, "Ownership");
+            }
+        }
+
+        if (facts.Staged.Any(staged => staged.BackingSources.Contains(rootSource)))
+        {
+            throw InvalidEffect(span, "Ownership");
+        }
+    }
+
     private static void CheckReferencePlaceInvalidation(int root,
         StorageProjection projection, InitializationState state, TextSpan span)
     {

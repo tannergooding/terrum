@@ -2071,9 +2071,26 @@ public static partial class SemanticVerifier
                 case BoundFieldAssignment assignment when assignment.Variable == 0
                     && assignment.Field >= 0 && assignment.Field < fields.Length
                     && IsUnique(program, fields[assignment.Field].Type):
-                    if (!item.Sequential || !assignment.NestedFields.IsEmpty || order.Contains(assignment.Field))
+                    if (!item.Sequential || !assignment.NestedFields.IsEmpty)
                     {
                         throw InvalidEffect(assignment.Span, "Ownership");
+                    }
+                    var priorAcquisition = -1;
+                    for (var index = 0; index < order.Count; index++)
+                    {
+                        if (order[index] == assignment.Field)
+                        {
+                            priorAcquisition = index;
+                            break;
+                        }
+                    }
+                    if (priorAcquisition >= 0)
+                    {
+                        if (!fields[assignment.Field].IsMutable)
+                        {
+                            throw InvalidEffect(assignment.Span, "Ownership");
+                        }
+                        order.RemoveAt(priorAcquisition);
                     }
                     order.Add(assignment.Field);
                     break;
@@ -2944,13 +2961,13 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var fieldBit = 1u << fieldAssignment.Field;
-                var isConstructorFieldInitialization =
+                var isConstructorFieldInitializationBefore =
                     function.IsConstructor
                     && fieldAssignment.Variable == 0
                     && fieldAssignment.NestedFields.IsEmpty
                     && (fieldMasks[0] & fieldBit) == 0
                     && (initialized.PossibleFieldMask(0) & fieldBit) == 0;
-                var isPartialFieldRepair = initialized.HasPartialValue(fieldAssignment.Variable)
+                var isPartialFieldRepairBefore = initialized.HasPartialValue(fieldAssignment.Variable)
                     && !function.IsConstructor && !function.IsClassConstructor
                     && fieldAssignment.Variable != 0 && fieldAssignment.NestedFields.IsEmpty
                     && IsUnique(program, ownerType)
@@ -2958,14 +2975,26 @@ public static partial class SemanticVerifier
                     && targetField.IsMutable
                     && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
                     && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) == 0;
+                var fieldMayBeLiveBefore =
+                    ((fieldMasks[fieldAssignment.Variable]
+                        | initialized.PossibleFieldMask(fieldAssignment.Variable)) & fieldBit) != 0;
+                var isLiveFieldReplacementCandidate = IsUnique(program, ownerType)
+                    && IsUnique(program, targetField.Type)
+                    && fieldAssignment.NestedFields.IsEmpty
+                    && targetField.IsMutable
+                    && fieldMayBeLiveBefore
+                    && !isConstructorFieldInitializationBefore
+                    && !isPartialFieldRepairBefore;
                 if (initialized.HasPartialValue(fieldAssignment.Variable)
                     && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
-                    && !isPartialFieldRepair && !isConstructorFieldInitialization)
+                    && !isPartialFieldRepairBefore && !isConstructorFieldInitializationBefore
+                    && !isLiveFieldReplacementCandidate)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 if (IsUnique(program, targetField.Type)
-                    && !isConstructorFieldInitialization && !isPartialFieldRepair)
+                    && !isConstructorFieldInitializationBefore
+                    && !isPartialFieldRepairBefore && !isLiveFieldReplacementCandidate)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
@@ -3042,12 +3071,13 @@ public static partial class SemanticVerifier
                 }
                 var fieldPlaceProjection = new StorageProjection(
                     StorageProjectionKind.InlineFieldPath, 0, 0, fieldProjectionPath);
-                if (fieldValueCouldComplete && isPartialFieldRepair)
+                if (fieldValueCouldComplete && isPartialFieldRepairBefore)
                 {
                     CheckReferencePlaceInvalidation(fieldAssignment.Variable,
                         fieldPlaceProjection, initialized, fieldAssignment.Span);
                 }
-                if (fieldValueCouldComplete && !isPartialFieldRepair)
+                if (fieldValueCouldComplete && !isPartialFieldRepairBefore
+                    && !isLiveFieldReplacementCandidate)
                 {
                     CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
                 }
@@ -3056,17 +3086,58 @@ public static partial class SemanticVerifier
                 {
                     return true;
                 }
-                if (isPartialFieldRepair
-                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) != 0)
+                var isConstructorFieldInitialization =
+                    function.IsConstructor
+                    && fieldAssignment.Variable == 0
+                    && fieldAssignment.NestedFields.IsEmpty
+                    && (fieldMasks[0] & fieldBit) == 0
+                    && (initialized.PossibleFieldMask(0) & fieldBit) == 0;
+                var isPartialFieldRepair = initialized.HasPartialValue(fieldAssignment.Variable)
+                    && !function.IsConstructor && !function.IsClassConstructor
+                    && fieldAssignment.Variable != 0 && fieldAssignment.NestedFields.IsEmpty
+                    && IsUnique(program, ownerType)
+                    && program.Structures[(int)ownerType - 100].CleanupMethod is null
+                    && targetField.IsMutable
+                    && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
+                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) == 0;
+                var fieldMayBeLiveAfter =
+                    ((fieldMasks[fieldAssignment.Variable]
+                        | initialized.PossibleFieldMask(fieldAssignment.Variable)) & fieldBit) != 0;
+                var isLiveFieldReplacement = IsUnique(program, ownerType)
+                    && IsUnique(program, targetField.Type)
+                    && fieldAssignment.NestedFields.IsEmpty
+                    && targetField.IsMutable
+                    && fieldMayBeLiveAfter
+                    && !isConstructorFieldInitialization
+                    && !isPartialFieldRepair;
+                if (IsUnique(program, targetField.Type)
+                    && !isConstructorFieldInitialization && !isPartialFieldRepair
+                    && !isLiveFieldReplacement)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                if (isLiveFieldReplacement)
+                {
+                    if (CleanupMayFail(targetField.Type, program))
+                    {
+                        throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                    }
+                    CheckReferencePlaceInvalidation(fieldAssignment.Variable,
+                        fieldPlaceProjection, initialized, fieldAssignment.Span);
+                    CheckBackingFieldInvalidation(fieldAssignment.Variable,
+                        fieldPlaceProjection, initialized, fieldAssignment.Span);
+                }
+                else if (isPartialFieldRepair)
+                {
+                    CheckReferencePlaceInvalidation(fieldAssignment.Variable,
+                        fieldPlaceProjection, initialized, fieldAssignment.Span);
                 }
                 if (preserveValueOwner && (!initialized[fieldAssignment.Variable]
                     || fieldMasks[fieldAssignment.Variable] != FullMask(program, ownerType)))
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
-                if (isPartialFieldRepair)
+                if (isPartialFieldRepair || isLiveFieldReplacement)
                 {
                     initialized.AdvanceFieldPlaceGeneration(fieldAssignment.Variable,
                         fieldPlaceProjection, fieldAssignment.Span);
@@ -4169,7 +4240,25 @@ public static partial class SemanticVerifier
             var structure = program.Structures[structureIndex];
             if (structure.CleanupMethod is not null)
             {
-                return true;
+                BoundFunction? cleanupFunction = null;
+                foreach (var function in program.Functions)
+                {
+                    if (function.Name != structure.CleanupMethod)
+                    {
+                        continue;
+                    }
+                    if (cleanupFunction is not null)
+                    {
+                        return true;
+                    }
+                    cleanupFunction = function;
+                }
+                if (cleanupFunction is null
+                    || !CleanupBodyCanBeProvenNonThrowing(
+                        cleanupFunction, current, program))
+                {
+                    return true;
+                }
             }
             foreach (var field in structure.Fields)
             {
@@ -4180,6 +4269,162 @@ public static partial class SemanticVerifier
             }
         }
         return false;
+    }
+
+    private static bool CleanupBodyCanBeProvenNonThrowing(
+        BoundFunction cleanup, PrimitiveType ownerType, BoundProgram program)
+    {
+        if (cleanup.IsExternal || cleanup.Intrinsic != BoundIntrinsic.None
+            || cleanup.IndexedBody is not null || !cleanup.IsCleanup
+            || cleanup.IsConstructor || cleanup.IsClassConstructor || cleanup.IsStatic
+            || cleanup.DeclaringStruct is null || cleanup.DirectNativeImport is not null
+            || cleanup.NativeVTableMethod is not null
+            || cleanup.NativeFunctionPointerType is not null
+            || cleanup.DoesNotReturn || cleanup.RequiresUnsafeCaller
+            || cleanup.ReturnType != PrimitiveType.Void || cleanup.ParameterCount != 1
+            || cleanup.Variables.Length == 0
+            || cleanup.Variables[0].Type != ownerType
+            || cleanup.Variables[0].IsMutable || cleanup.Variables[0].IsOut
+            || cleanup.Variables[0].IsInit)
+        {
+            return false;
+        }
+
+        var remaining = MaximumAnalysisVisits;
+        return CleanupStatementCanBeProvenNonThrowing(
+            cleanup.Body, cleanup, program, ref remaining, 0);
+    }
+
+    private static bool CleanupStatementCanBeProvenNonThrowing(
+        BoundStatement statement, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (statement is null || depth > MaximumDepth || --remaining < 0)
+        {
+            return false;
+        }
+
+        switch (statement)
+        {
+            case BoundBlock block:
+                foreach (var child in block.Statements)
+                {
+                    if (!CleanupStatementCanBeProvenNonThrowing(
+                        child, function, program, ref remaining, depth + 1))
+                    {
+                        return false;
+                    }
+                }
+                return true;
+            case BoundReturn result:
+                return result.Value is null
+                    && function.ReturnType == PrimitiveType.Void;
+            case BoundIf conditional:
+                return CleanupExpressionCanBeProvenNonThrowing(
+                        conditional.Condition, function, program, ref remaining, depth + 1)
+                    && CleanupStatementCanBeProvenNonThrowing(
+                        conditional.Then, function, program, ref remaining, depth + 1)
+                    && (conditional.Else is null
+                        || CleanupStatementCanBeProvenNonThrowing(
+                            conditional.Else, function, program, ref remaining, depth + 1));
+            case BoundTryFinally cleanup:
+                return CleanupStatementCanBeProvenNonThrowing(
+                        cleanup.Body, function, program, ref remaining, depth + 1)
+                    && CleanupStatementCanBeProvenNonThrowing(
+                        cleanup.Finally, function, program, ref remaining, depth + 1);
+            case BoundTryCatch recovery:
+                return CleanupStatementCanBeProvenNonThrowing(
+                        recovery.Body, function, program, ref remaining, depth + 1)
+                    && CleanupStatementCanBeProvenNonThrowing(
+                        recovery.Catch, function, program, ref remaining, depth + 1)
+                    && (recovery.Finally is null
+                        || CleanupStatementCanBeProvenNonThrowing(
+                            recovery.Finally, function, program, ref remaining, depth + 1));
+            case BoundLocal local:
+                return (uint)local.Variable < (uint)function.Variables.Length
+                    && !IsUnique(program, function.Variables[local.Variable].Type)
+                    && CleanupExpressionCanBeProvenNonThrowing(
+                        local.Initializer, function, program, ref remaining, depth + 1);
+            case BoundAssignment assignment:
+                return (uint)assignment.Variable < (uint)function.Variables.Length
+                    && !IsUnique(program, function.Variables[assignment.Variable].Type)
+                    && CleanupExpressionCanBeProvenNonThrowing(
+                        assignment.Value, function, program, ref remaining, depth + 1);
+            case BoundFieldAssignment field:
+                return field.NestedFields.IsEmpty
+                    && (uint)field.Variable < (uint)function.Variables.Length
+                    && HasFields(program, function.Variables[field.Variable].Type)
+                    && !ManagedClassTypes.IsClass(function.Variables[field.Variable].Type)
+                    && (uint)field.Field < (uint)Fields(program,
+                        function.Variables[field.Variable].Type).Length
+                    && !IsUnique(program, Fields(program,
+                        function.Variables[field.Variable].Type)[field.Field].Type)
+                    && CleanupExpressionCanBeProvenNonThrowing(
+                        field.Value, function, program, ref remaining, depth + 1);
+            case BoundExpressionStatement expression:
+                return CleanupExpressionCanBeProvenNonThrowing(
+                    expression.Expression, function, program, ref remaining, depth + 1);
+            case BoundBufferAssignment write:
+                return !write.IsEndRelativeOffset
+                    && IsProvenBufferIndex(write.Buffer, write.Index, program)
+                    && CleanupExpressionCanBeProvenNonThrowing(
+                        write.Value, function, program, ref remaining, depth + 1);
+            case BoundRequire { Condition: BoundConstant constant }:
+                return constant.Type == PrimitiveType.Bool
+                    && constant.TryGetLegacyValue(out var value) && value != 0;
+            default:
+                return false;
+        }
+    }
+
+    private static bool CleanupExpressionCanBeProvenNonThrowing(
+        BoundExpression expression, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        if (expression is null || depth > MaximumDepth || --remaining < 0)
+        {
+            return false;
+        }
+
+        return expression switch {
+            BoundConstant or BoundNull => true,
+            BoundRead read => (uint)read.Variable < (uint)function.Variables.Length
+                && function.Variables[read.Variable].Type == read.Type,
+            BoundFieldRead field => HasFields(program, field.Receiver.Type)
+                && !ManagedClassTypes.IsClass(field.Receiver.Type)
+                && (uint)field.Field < (uint)Fields(program, field.Receiver.Type).Length
+                && Fields(program, field.Receiver.Type)[field.Field].Type == field.Type
+                && CleanupExpressionCanBeProvenNonThrowing(
+                    field.Receiver, function, program, ref remaining, depth + 1),
+            BoundBufferRead read => !read.IsEndRelativeOffset
+                && IsProvenBufferIndex(read.Buffer, read.Index, program)
+                && CleanupExpressionCanBeProvenNonThrowing(
+                    read.Index, function, program, ref remaining, depth + 1),
+            BoundBufferLength length => (uint)length.Buffer < (uint)program.Buffers.Length,
+            BoundUnary unary when unary.Operator == TokenKind.Bang
+                && unary.Type == PrimitiveType.Bool && unary.Operand.Type == PrimitiveType.Bool =>
+                    CleanupExpressionCanBeProvenNonThrowing(
+                        unary.Operand, function, program, ref remaining, depth + 1),
+            BoundBinary binary when binary.Operator is TokenKind.EqualsEquals
+                or TokenKind.BangEquals or TokenKind.Less or TokenKind.LessEquals
+                or TokenKind.Greater or TokenKind.GreaterEquals or TokenKind.Ampersand
+                or TokenKind.Pipe or TokenKind.Caret or TokenKind.AmpersandAmpersand
+                or TokenKind.PipePipe =>
+                    CleanupExpressionCanBeProvenNonThrowing(
+                            binary.Left, function, program, ref remaining, depth + 1)
+                        && CleanupExpressionCanBeProvenNonThrowing(
+                            binary.Right, function, program, ref remaining, depth + 1),
+            BoundConditional conditional =>
+                CleanupExpressionCanBeProvenNonThrowing(
+                        conditional.Condition, function, program, ref remaining, depth + 1)
+                    && CleanupExpressionCanBeProvenNonThrowing(
+                        conditional.WhenTrue, function, program, ref remaining, depth + 1)
+                    && CleanupExpressionCanBeProvenNonThrowing(
+                        conditional.WhenFalse, function, program, ref remaining, depth + 1),
+            BoundIsNull test => CleanupExpressionCanBeProvenNonThrowing(
+                test.Value, function, program, ref remaining, depth + 1),
+            _ => false,
+        };
     }
 
     private static void AddCleanupFailure(FailureEdges? failures, InitializationState initialized,
