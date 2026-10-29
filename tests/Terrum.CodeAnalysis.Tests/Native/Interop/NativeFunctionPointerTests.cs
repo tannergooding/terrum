@@ -806,6 +806,54 @@ public sealed class NativeFunctionPointerTests
             Does.Contain("Overwrite").And.Contain("Observe"));
     }
 
+    [TestCase("if (overwrite(&pointer) != 0) { status = 1; }", "", false)]
+    [TestCase("if (overwrite(&pointer) != 0) { status = 1; }",
+        "pointer = &values[0];", true)]
+    [TestCase("if (overwrite(&pointer) != 0 && true) { status = 1; }", "", false)]
+    [TestCase("status = (overwrite(&pointer) != 0) ? 1 : 0;", "", false)]
+    public void IndirectNativeParameterWriteInConditionInvalidatesPointerExtentUntilReassigned(
+        string condition, string reassignment, bool shouldCompile)
+    {
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern unsafe int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern unsafe int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    var overwrite = &Overwrite;
+                    mut ptr<uint32> pointer = &values[0];
+                    mut int32 status = 0;
+                    {{condition}}
+                    {{reassignment}}
+                    return Observe(pointer) + status;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), reference);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
     [Test]
     public void SemanticVerifierRejectsTypedNullForPositiveIndirectNativeParameterExtent()
     {

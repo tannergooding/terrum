@@ -450,6 +450,67 @@ public static partial class SemanticVerifier
         return hasEffect;
     }
 
+    private static bool HasNativePointerExtentFlowEffect(
+        BoundExpression expression, InitializationState initialized, ref int remaining)
+    {
+        Count(ref remaining, 0);
+        if (initialized.Dependencies is null)
+        {
+            return false;
+        }
+
+        var program = initialized.Program;
+        var hasEffect = false;
+        if (expression is BoundCall call
+            && (uint)call.Function < (uint)program.Functions.Length)
+        {
+            var target = program.Functions[call.Function];
+            for (var index = 0; index < call.Arguments.Length; index++)
+            {
+                var parameter = DirectNativeImportContract.ParameterForParameter(
+                    target, call.ParameterIndex(index))
+                    ?? NativeVTableCallContract.ParameterForParameter(
+                        target, call.ParameterIndex(index));
+                if (parameter is not null
+                    && parameter.Access is NativeParameterAccess.Write
+                        or NativeParameterAccess.ReadWrite
+                    && CarriesNativePointer(parameter.PointeeType, program))
+                {
+                    hasEffect = true;
+                    break;
+                }
+            }
+
+            if (!hasEffect
+                && initialized.NativePointerCaptureEffects is { } captureEffects
+                && (uint)call.Function < (uint)captureEffects.Length)
+            {
+                hasEffect = captureEffects[call.Function].Count != 0;
+            }
+        }
+        else if (expression is BoundIndirectCall { Target: { } target } indirectCall
+            && NativeFunctionPointerTypes.IsType(target.Type)
+            && (uint)NativeFunctionPointerTypes.Index(target.Type)
+                < (uint)program.NativeFunctionPointerSignatures.Length)
+        {
+            hasEffect = MayWriteNativePointerStorage(indirectCall, program);
+        }
+
+        if (!hasEffect)
+        {
+            foreach (var nested in expression.NestedExpressions)
+            {
+                if (HasNativePointerExtentFlowEffect(nested, initialized, ref remaining))
+                {
+                    hasEffect = true;
+                    break;
+                }
+            }
+        }
+
+        return hasEffect;
+    }
+
     private static void ApplyNativeOutputCondition(BoundExpression expression,
         InitializationState initialized,
         Dictionary<BoundExpression, NativeOutputCallFact> callFacts,

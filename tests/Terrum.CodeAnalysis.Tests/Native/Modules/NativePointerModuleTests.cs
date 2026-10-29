@@ -580,6 +580,51 @@ public sealed class NativePointerModuleTests
             compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
 
+    [TestCase("if (Overwrite(&pointer) != 0) { status = 1; }", "", false)]
+    [TestCase("if (Overwrite(&pointer) != 0) { status = 1; }",
+        "pointer = &values[0];", true)]
+    [TestCase("if (Overwrite(&pointer) != 0 && true) { status = 1; }", "", false)]
+    [TestCase("status = (Overwrite(&pointer) != 0) ? 1 : 0;", "", false)]
+    public void NativeParameterWriteInConditionInvalidatesPointerExtentUntilReassigned(
+        string condition, string reassignment, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                InlineArray<uint32, 2> values = [42, 42];
+                unsafe {
+                    mut ptr<uint32> pointer = &values[0];
+                    mut int32 status = 0;
+                    {{condition}}
+                    {{reassignment}}
+                    return Observe(pointer) + status;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
     [Test]
     public void NativeParameterExtentUsesStagedPointerBeforeLaterWriteArgument()
     {

@@ -6878,7 +6878,9 @@ public static partial class SemanticVerifier
         var hasOutcomeEffects = HasOutcomeEffects(expression, initialized.FlowFacts, ref remaining);
         var hasNativeOutputEffect = initialized.HasNativeOutputContracts
             && HasNativeOutputFlowEffect(expression, initialized, ref remaining);
-        if (!hasOutcomeEffects && !hasNativeOutputEffect)
+        var hasNativePointerExtentEffect =
+            HasNativePointerExtentFlowEffect(expression, initialized, ref remaining);
+        if (!hasOutcomeEffects && !hasNativeOutputEffect && !hasNativePointerExtentEffect)
         {
             return initialized.Clone();
         }
@@ -6965,7 +6967,7 @@ public static partial class SemanticVerifier
         var state = initialized.Clone();
         var nativeOutputCalls = new Dictionary<BoundExpression, NativeOutputCallFact>(
             ReferenceEqualityComparer.Instance);
-        if (hasNativeOutputEffect)
+        if (hasNativeOutputEffect || hasNativePointerExtentEffect)
         {
             ApplyNativeOutputCalls(expression, state, nativeOutputCalls, ref remaining, 1);
         }
