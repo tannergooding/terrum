@@ -1009,6 +1009,14 @@ public static class TrRmStructuralMetadataValidator
                 : new TrRmFieldPathTableReader(fieldPathBytes, fieldPathCount,
                     typeSpecs, fields, imports);
         }
+        else if (importCount != 0)
+        {
+            imports = new TrRmImportTableReader(importBytes, importCount,
+                strings, moduleRefs, types, methods, properties, interfaces,
+                associatedTypeDefs, fields, features, modules, index.Schema,
+                associatedConstDefs, staticFields, staticFieldContracts,
+                intrinsicRegistrations);
+        }
         if (copyOriginDraft)
         {
             TrRmCopyOriginContractValidator.Validate(contracts, types, fields,
