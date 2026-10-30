@@ -83,6 +83,57 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void EmitsParameterizedScalarNativeAddressSignature()
+    {
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern uint32 Observe(uint32 value);
+
+            internal void Form() {
+                unsafe { _ = &Observe; }
+            }
+            """), core);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler
+            .EmitForeignInvocationDraftNativeAddressLibrary(
+                compilation.Program!, "native-address-parameterized");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var target = 0;
+        var caller = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            var name = tables.Methods.GetName(row);
+            target = name == "Observe" ? row : target;
+            caller = name == "Form" ? row : caller;
+        }
+
+        Assert.That(target, Is.GreaterThan(0));
+        Assert.That(caller, Is.GreaterThan(0));
+        var signature = tables.Methods.GetSignature(target);
+        var (parameterStart, parameterCount)
+            = tables.Signatures.GetParamRange(signature);
+        var resultType = tables.Signatures.GetResultTypeSpec(signature);
+
+        Assert.That(tables.Signatures.ParamCount, Is.EqualTo(1));
+        Assert.That(parameterCount, Is.EqualTo(1));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+            resultType, tables.Parameters.GetTypeSpec(parameterStart)), Is.True);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(resultType).Form,
+            Is.EqualTo(0x01));
+        Assert.That(tables.Methods.GetSignature(caller),
+            Is.Not.EqualTo(signature));
+        tables.ValidateRegisterBodyMapsForMethod(caller);
+    }
+
+    [Test]
     public void NativeParameterIndirectCallBindsThroughAnInferredAddress()
     {
         var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,

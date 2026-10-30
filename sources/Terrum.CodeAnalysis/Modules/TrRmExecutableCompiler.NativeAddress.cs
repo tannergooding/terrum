@@ -83,8 +83,7 @@ public static partial class TrRmExecutableCompiler
             || !import.Outputs.IsEmpty || !import.Parameters.IsEmpty
             || import.CallingConvention is < NativeCallingConvention.Unmanaged
                 or > NativeCallingConvention.Vectorcall
-            || target.DoesNotReturn || target.ReturnType != PrimitiveType.Void
-            || target.ParameterCount != 0
+            || target.DoesNotReturn
             || caller.IsExternal || caller.DirectNativeImport is not null
             || caller.ReturnType != PrimitiveType.Void || caller.ParameterCount != 0
             || caller.DoesNotReturn || caller.RequiresUnsafeCaller
@@ -98,12 +97,12 @@ public static partial class TrRmExecutableCompiler
         var signatureIndex = NativeFunctionPointerTypes.Index(selectedAddress.Type);
         var signature = program.NativeFunctionPointerSignatures[signatureIndex];
         if (signature.CallingConvention != import.CallingConvention
-            || signature.ReturnType != PrimitiveType.Void
-            || !signature.ParameterTypes.IsEmpty || signature.EffectsMask != 0
+            || signature.EffectsMask != 0
             || !signature.Selectors.IsEmpty || !signature.OutputStates.IsEmpty
             || !signature.Dependencies.IsEmpty || !signature.NativeParameters.IsEmpty)
         {
-            throw Unsupported("The selected pointer signature exceeds the NativeAddress producer subset.");
+            throw Unsupported(
+                "The selected NativeAddress signature exceeds the scalar NativeImport subset.");
         }
         if (!NativeFunctionPointerContract.TryCreateNativeImportSignature(target,
             program.NativeFunctionPointerSignatures, out var actualSignature)
@@ -124,6 +123,55 @@ public static partial class TrRmExecutableCompiler
         var targetMethodRow = targetIndex + 1;
         var callerMethodRow = callerIndex + 1;
         var anchorMethodRow = program.Functions.Length + 1;
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>
+        {
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(
+                (byte)signature.CallingConvention, checked((uint)anchorMethodRow)),
+        };
+        var scalarTypeSpecRefs = new Dictionary<PrimitiveType, uint>();
+        uint GetScalarTypeSpecRef(PrimitiveType type)
+        {
+            if (type == PrimitiveType.Void)
+            {
+                return 0xF200_0000;
+            }
+
+            var scalarIndex = Array.IndexOf(s_types, type);
+            if (scalarIndex <= 0 || !DirectNativeImportContract.IsScalar(type))
+            {
+                throw Unsupported(
+                    $"The NativeAddress producer does not support signature type {type}.");
+            }
+
+            if (!scalarTypeSpecRefs.TryGetValue(type, out var typeSpecRef))
+            {
+                typeSpecRef = checked((uint)typeSpecRows.Count + 1);
+                typeSpecRows.Add(new ReadOnlyMemory<byte>(
+                    TrRmTypeSpecTableWriter.Builtin(s_codes[scalarIndex])));
+                scalarTypeSpecRefs.Add(type, typeSpecRef);
+            }
+
+            return typeSpecRef;
+        }
+
+        var parameterTypeSpecRefs
+            = signature.ParameterTypes.Select(GetScalarTypeSpecRef).ToArray();
+        const int nativeSignatureRow = 2;
+        var parameterRows = new List<TrRmParamRow>(
+            parameterTypeSpecRefs.Length);
+        for (var ordinal = 0; ordinal < parameterTypeSpecRefs.Length; ordinal++)
+        {
+            parameterRows.Add(new TrRmParamRow(nativeSignatureRow, ordinal,
+                parameterTypeSpecRefs[ordinal], 0));
+        }
+
+        var signatureRows = new[]
+        {
+            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
+            new TrRmMethodSigRow(GetScalarTypeSpecRef(signature.ReturnType), 0,
+                parameterRows.Count == 0 ? 0 : 1,
+                parameterRows.Count, 0, 0),
+        };
         var featureRows = new[] { new TrRmFeatureRow(4, 1) };
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows,
             TrRmArtifactSchema.ForeignInvocationDraft);
@@ -153,23 +201,26 @@ public static partial class TrRmExecutableCompiler
         ], strings, 0, 0, program.Functions.Length + 1, 0, featureRows.Length);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             0, 0, program.Functions.Length + 1, 0, featureRows.Length);
-        var typeSpecRows = new ReadOnlyMemory<byte>[]
-        {
-            TrRmTypeSpecTableWriter.NativeFunctionPointer(
-                (byte)signature.CallingConvention, checked((uint)anchorMethodRow)),
-        };
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             0, 0, 0, 0, TrRmArtifactSchema.ForeignInvocationDraft,
             methodDefCount: program.Functions.Length + 1);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeSpecRows.Length, 0, 0, 0, 0,
+            typeSpecRows.Count, 0, 0, 0, 0,
             TrRmArtifactSchema.ForeignInvocationDraft,
             methodDefCount: program.Functions.Length + 1);
-        var signatureBytes = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
-        ], typeSpecs, 0, 0);
-        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
-            typeSpecs, 0, 0);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
+            typeSpecs, parameterRows.Count, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes,
+            signatureRows.Length, typeSpecs, parameterRows.Count, 0);
+        var paramBytes = parameterRows.Count == 0
+            ? []
+            : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs,
+                TrRmArtifactSchema.ForeignInvocationDraft);
+        var parameters = parameterRows.Count == 0
+            ? default
+            : new TrRmParamTableReader(paramBytes, parameterRows.Count,
+                signatures, typeSpecs,
+                TrRmArtifactSchema.ForeignInvocationDraft);
         var contractPayload = new byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(contractPayload, 4);
         var contractRows = new[]
@@ -188,7 +239,8 @@ public static partial class TrRmExecutableCompiler
             var visibility = function.IsPrivate ? 0u : function.IsInternal ? 1u : 2u;
             var isTarget = index == targetIndex;
             var isCaller = index == callerIndex;
-            methodRows.Add(new TrRmMethodDefRow(0, methodNameRows[index], 1,
+            methodRows.Add(new TrRmMethodDefRow(0, methodNameRows[index],
+                isCaller ? 1 : nativeSignatureRow,
                 visibility, isTarget ? 1 : 0, isTarget ? 1 : 0,
                 isCaller ? 1 : 0));
             if (visibility == 2 && function.ModuleImport is null)
@@ -197,17 +249,18 @@ public static partial class TrRmExecutableCompiler
                     0x1600_0000u | (uint)methodRow, methodNameRows[index]));
             }
         }
-        methodRows.Add(new TrRmMethodDefRow(0, anchorNameRow, 1, 0, 0, 0, 0));
+        methodRows.Add(new TrRmMethodDefRow(0, anchorNameRow,
+            nativeSignatureRow, 0, 0, 0, 0));
         var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
             modules, typeDefs, signatures, contractRows.Length, 1);
         var methods = new TrRmMethodDefTableReader(methodBytes,
             methodRows.Count, strings, modules, typeDefs, signatures,
             contractRows.Length, 1);
         var contractBytes = TrRmContractTableWriter.EncodeForeignInvocationDraft(
-            contractRows, typeDefs, methods, signatures, default, typeSpecs,
+            contractRows, typeDefs, methods, signatures, parameters, typeSpecs,
             featureReader, modules, predicateGraphCount: 0);
         var contracts = new TrRmContractTableReader(contractBytes,
-            contractRows.Length, typeDefs, methods, signatures, default,
+            contractRows.Length, typeDefs, methods, signatures, parameters,
             typeSpecs, 0, featureReader, modules,
             TrRmArtifactSchema.ForeignInvocationDraft);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
@@ -217,7 +270,7 @@ public static partial class TrRmExecutableCompiler
                 (byte)import.ResolutionPolicy, (byte)import.CallingConvention,
                 targetMethodRow, libraryNameRow, exportNameRow),
         ], strings, methods, default, typeDefs, default, modules,
-            signatures, default, typeSpecs, contracts, layouts);
+            signatures, parameters, typeSpecs, contracts, layouts);
         var maps = TrRmRegisterBodyMapBuilder.Create(
             [0x1100_0001], [0x1600_0000u | (uint)targetMethodRow]);
         var entryState = new byte[8];
@@ -229,17 +282,23 @@ public static partial class TrRmExecutableCompiler
         var body = TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
-            [entryState, nativeAddress], code, contractRows.Length);
+            [entryState, nativeAddress], code, contractRows.Length,
+            TrRmArtifactSchema.ForeignInvocationDraft);
         var sections = new List<TrRmSection>
         {
             new(0x0001, 0, 1, moduleBytes),
             new(0x0002, 0, (uint)stringRows.Count, stringsBytes),
             new(0x0004, 0, (uint)featureRows.Length, featureBytes),
-            new(0x0011, 0, (uint)typeSpecRows.Length, typeSpecBytes),
+            new(0x0011, 0, (uint)typeSpecRows.Count, typeSpecBytes),
             new(0x0016, 0, (uint)methodRows.Count, methodBytes),
-            new(0x0017, 0, 1, signatureBytes),
+            new(0x0017, 0, (uint)signatureRows.Length, signatureBytes),
             new(0x001B, 0, (uint)contractRows.Length, contractBytes),
         };
+        if (parameterRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0,
+                (uint)parameterRows.Count, paramBytes));
+        }
         if (exportRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x001D, 0, (uint)exportRows.Count,
@@ -251,6 +310,8 @@ public static partial class TrRmExecutableCompiler
         sections.Add(new TrRmSection(0x0020, 0, 1,
             TrRmVariableTableWriter.EncodeBodies([body])));
         sections.Add(new TrRmSection(0x0021, 0, 1, nativeImportBytes));
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
 
         var artifact = TrRmArtifactWriter.Encode(sections,
             TrRmArtifactSchema.ForeignInvocationDraft);
