@@ -16,13 +16,16 @@ public sealed class TrRmRegisterBodyNativeAddressTests
     {
         _ = new TrRmRegisterBodyReader(CreateBody(
             [0x0D, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
-            [0xE9, 0, 1, 0, 0x17, 0]));
+            [0xE9, 0, 1, 0, 0x17, 0]),
+            schema: TrRmArtifactSchema.ForeignInvocationDraft);
         _ = new TrRmRegisterBodyReader(CreateBody(
             [0x0D, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0],
-            [0xE9, 0, 1, 0, 0x17, 0], mapMask: 0x07));
+            [0xE9, 0, 1, 0, 0x17, 0], mapMask: 0x07),
+            schema: TrRmArtifactSchema.ForeignInvocationDraft);
         _ = new TrRmRegisterBodyReader(CreateBody(
             [0x0D, 0, 0, 0, 1, 0, 15, 0, 0, 0, 0, 0],
-            [0xE9, 0, 1, 0, 0x17, 0]));
+            [0xE9, 0, 1, 0, 0x17, 0]),
+            schema: TrRmArtifactSchema.ForeignInvocationDraft);
     }
 
     [Test]
@@ -65,6 +68,18 @@ public sealed class TrRmRegisterBodyNativeAddressTests
         unassignedRecord[0] = 0x0C;
         AssertInvalid(CreateBody(unassignedRecord, [0xE9, 0, 1, 0, 0x17, 0]));
         AssertInvalid(CreateBody(validRecord[..^1], [0xE9, 0, 1, 0, 0x17, 0]));
+    }
+
+    [Test]
+    public void NativeAddressRecordRequiresTheForeignInvocationProfile()
+    {
+        var body = CreateBody(
+            [0x0D, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0],
+            [0xE9, 0, 1, 0, 0x17, 0]);
+
+        Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(body));
+        Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(
+            body, schema: TrRmArtifactSchema.RootPinRuntimeDraft));
     }
 
     private static byte[] CreateBody(byte[] addressRecord, byte[] code,
@@ -114,7 +129,8 @@ public sealed class TrRmRegisterBodyNativeAddressTests
     }
 
     private static void AssertInvalid(byte[] body)
-        => Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(body));
+        => Assert.Throws<InvalidDataException>(() => _ = new TrRmRegisterBodyReader(
+            body, schema: TrRmArtifactSchema.ForeignInvocationDraft));
 
     private static void WriteUInt16(List<byte> bytes, ushort value)
     {
@@ -124,9 +140,9 @@ public sealed class TrRmRegisterBodyNativeAddressTests
 
     private static void WriteUInt32(List<byte> bytes, uint value)
     {
-        bytes.Add((byte)value);
-        bytes.Add((byte)(value >> 8));
-        bytes.Add((byte)(value >> 16));
-        bytes.Add((byte)(value >> 24));
+        bytes.Add(unchecked((byte)value));
+        bytes.Add(unchecked((byte)(value >> 8)));
+        bytes.Add(unchecked((byte)(value >> 16)));
+        bytes.Add(unchecked((byte)(value >> 24)));
     }
 }

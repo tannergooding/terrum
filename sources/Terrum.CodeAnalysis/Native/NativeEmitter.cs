@@ -90,6 +90,11 @@ public static class NativeEmitter
             {
                 continue;
             }
+            if (function.IsModuleReference || function.ModuleImport is not null)
+            {
+                throw new NotSupportedException(
+                    "Provider-bound module imports require explicit native module binding.");
+            }
             if (function.DirectNativeImport is DirectNativeImport directImport)
             {
                 if (!DirectNativeImportContract.IsValid(function, program.Structures,
@@ -534,6 +539,11 @@ public static class NativeEmitter
                         nameof(program));
                 }
                 continue;
+            }
+            if (function.IsModuleReference || function.ModuleImport is not null)
+            {
+                throw new NotSupportedException(
+                    "Provider-bound module imports require explicit native module binding.");
             }
             if (function.DirectNativeImport is not DirectNativeImport import
                 || !DirectNativeImportContract.IsValid(function, program.Structures,

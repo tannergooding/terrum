@@ -230,6 +230,16 @@ public static unsafe partial class NativeJit
 
         var (code, imports) = NativeEmitter.EmitCodeWithDirectNativeImports(program, runtimePolicy);
         ValidateBufferMetadata(program, code);
+        var (modules, distinctImports)
+            = CreateSystem32ImportModules(imports);
+        return (code, modules, distinctImports);
+    }
+
+    private static (NativeJitModule[] Modules,
+        ImmutableArray<NativeImportBinding> Imports)
+        CreateSystem32ImportModules(
+            ImmutableArray<NativeImportBinding> imports)
+    {
         var exportsByDll = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var distinctImports = ImmutableArray.CreateBuilder<NativeImportBinding>();
         var importTargets = new HashSet<(string Dll, string Export)>();
@@ -256,7 +266,7 @@ public static unsafe partial class NativeJit
             modules[moduleIndex++] = new NativeJitModule(dllName,
                 NativeEmitter.System32ImportPath(dllName), exports);
         }
-        return (code, modules, distinctImports.ToImmutable());
+        return (modules, distinctImports.ToImmutable());
     }
 
     private static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy,

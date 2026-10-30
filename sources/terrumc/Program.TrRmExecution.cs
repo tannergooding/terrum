@@ -28,13 +28,18 @@ internal static partial class Program
         }
         string? output = null;
         string? identity = null;
+        string? schemaIdentity = null;
+        string? moduleIdentity = null;
         var library = false;
         var runtime = false;
         var hasArithmeticProfile = false;
         var sourceArithmeticProfile = SourceArithmeticProfile.Development;
         var paths = new List<string> { args[1] };
         var exports = new List<string>();
+        var providers = new List<(string SchemaIdentity, string Path)>();
         var uniqueExports = new HashSet<string>(StringComparer.Ordinal);
+        var isArtifactCommand = command is "run-trrm" or "build-trrm"
+            or "build-trrm-library";
         try
         {
             for (var i = 2; i < count;)
@@ -45,7 +50,23 @@ internal static partial class Program
                     i++;
                     continue;
                 }
-                if (i + 1 == count)
+                if (args[i] == "--trrm-provider")
+                {
+                    if (!isArtifactCommand || i + 2 >= count
+                        || args[i + 1].Length == 0
+                        || args[i + 2].Length == 0 || args[i + 2] == "-")
+                    {
+                        WriteInputError(json, "TRM2000", Usage);
+                        return 2;
+                    }
+
+                    providers.Add((args[i + 1], args[i + 2]));
+                    i += 3;
+                    continue;
+                }
+                if (i + 1 == count
+                    || (args[i] is "--trrm-schema" or "--trrm-module")
+                        && args[i + 1].StartsWith("-", StringComparison.Ordinal))
                 {
                     WriteInputError(json, "TRM2000", Usage);
                     return 2;
@@ -58,6 +79,15 @@ internal static partial class Program
                         break;
                     case "--identity" when command == "compile-trrm" && identity is null && value.Length > 0:
                         identity = value;
+                        break;
+                    case "--trrm-schema" when (command == "compile-trrm"
+                        || isArtifactCommand)
+                        && schemaIdentity is null && value.Length > 0:
+                        schemaIdentity = value;
+                        break;
+                    case "--trrm-module" when isArtifactCommand
+                        && moduleIdentity is null && value.Length > 0:
+                        moduleIdentity = value;
                         break;
                     case "--source" when command == "compile-trrm" && paths.Count < 256
                         && !paths.Contains(value, StringComparer.OrdinalIgnoreCase):
@@ -84,6 +114,24 @@ internal static partial class Program
                 }
                 i += 2;
             }
+            if (command == "compile-trrm"
+                && (moduleIdentity is not null || providers.Count != 0)
+                || isArtifactCommand
+                    && ((schemaIdentity is null) != (moduleIdentity is null)
+                        || schemaIdentity is null && providers.Count != 0))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (isArtifactCommand && schemaIdentity is not null
+                && (schemaIdentity != "trrm/1-draft-foreign-invocation-contracts-1"
+                    || providers.Exists(static provider =>
+                        provider.SchemaIdentity
+                            != "trrm/1-draft-foreign-invocation-contracts-1")))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
             if (!runtime || command == "compile-trrm" && identity is null
                 || command is "build-trrm" or "build-trrm-library" && args[1] == "-"
                 || command == "run-trrm" && (output is not null || args[1] == "-")
@@ -97,9 +145,15 @@ internal static partial class Program
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
             }
+            if (output is not null && providers.Any(provider =>
+                    Path.GetFullPath(provider.Path).Equals(output,
+                        StringComparison.OrdinalIgnoreCase)))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
 
             byte[] artifact;
-            BoundProgram program;
             if (command == "compile-trrm")
             {
                 var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
@@ -123,10 +177,29 @@ internal static partial class Program
                         false, null, null, json);
                     return 1;
                 }
-                program = compilation.Program
+                var program = compilation.Program
                     ?? throw new InvalidOperationException("A successful compilation must contain a bound program.");
-                artifact = TrRmExecutableCompiler.Emit(program,
-                    identity ?? throw new InvalidOperationException("Missing module identity."));
+                var sourceModuleIdentity = identity
+                    ?? throw new InvalidOperationException("Missing module identity.");
+                if (schemaIdentity is null)
+                {
+                    artifact = TrRmExecutableCompiler.Emit(program,
+                        sourceModuleIdentity);
+                }
+                else
+                {
+                    try
+                    {
+                        artifact = TrRmExecutableCompiler.EmitStandard(program,
+                            sourceModuleIdentity, schemaIdentity, 1);
+                    }
+                    catch (ArgumentException exception)
+                        when (exception.ParamName == "schemaIdentity")
+                    {
+                        WriteInputError(json, "TRM2000", exception.Message);
+                        return 2;
+                    }
+                }
                 var artifactPath = output ?? throw new InvalidOperationException("Missing artifact output path.");
                 WriteArtifact(artifactPath, artifact);
                 WriteTrRmSuccess(command, artifactPath, artifact.Length, json);
@@ -134,31 +207,72 @@ internal static partial class Program
             }
 
             artifact = File.ReadAllBytes(args[1]);
-            program = TrRmExecutableCompiler.Load(artifact);
-            if (command == "run-trrm")
-            {
-                if (program.EntryPoint < 0)
-                {
-                    throw new InvalidDataException("A library TRRM artifact has no executable entry.");
-                }
-                return NativeJit.Execute(program, NativeRuntimePolicy.FailFast, GraphJitRegistrarAssemblyPath());
-            }
             byte[] image;
-            if (command == "build-trrm-library")
+            if (schemaIdentity is null)
             {
-                if (program.EntryPoint >= 0)
+                var program = TrRmExecutableCompiler.Load(artifact);
+                if (command == "run-trrm")
                 {
-                    throw new InvalidDataException("Library emission requires a no-entry TRRM module.");
+                    if (program.EntryPoint < 0)
+                    {
+                        throw new InvalidDataException("A library TRRM artifact has no executable entry.");
+                    }
+                    return NativeJit.Execute(program, NativeRuntimePolicy.FailFast,
+                        GraphJitRegistrarAssemblyPath());
                 }
-                image = NativeEmitter.EmitLibrary(program, exports, NativeRuntimePolicy.FailFast);
+
+                if (command == "build-trrm-library")
+                {
+                    if (program.EntryPoint >= 0)
+                    {
+                        throw new InvalidDataException("Library emission requires a no-entry TRRM module.");
+                    }
+                    image = NativeEmitter.EmitLibrary(program, exports,
+                        NativeRuntimePolicy.FailFast);
+                }
+                else
+                {
+                    if (program.EntryPoint < 0)
+                    {
+                        throw new InvalidDataException("An executable TRRM artifact requires an entry.");
+                    }
+                    image = NativeEmitter.Emit(program,
+                        NativeRuntimePolicy.FailFast);
+                }
             }
             else
             {
-                if (program.EntryPoint < 0)
+                var providerInputs
+                    = new List<TrRmStandardArtifactInput>(providers.Count);
+                foreach (var provider in providers)
                 {
-                    throw new InvalidDataException("An executable TRRM artifact requires an entry.");
+                    providerInputs.Add(new TrRmStandardArtifactInput(
+                        provider.SchemaIdentity,
+                        File.ReadAllBytes(provider.Path)));
                 }
-                image = NativeEmitter.Emit(program, NativeRuntimePolicy.FailFast);
+
+                var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+                    artifact);
+                if (command == "run-trrm")
+                {
+                    return NativeModuleCompiler.ExecuteStandard(rootInput,
+                        moduleIdentity!, providerInputs,
+                        NativeRuntimePolicy.FailFast,
+                        GraphJitRegistrarAssemblyPath());
+                }
+
+                if (command == "build-trrm-library")
+                {
+                    image = NativeModuleCompiler.EmitStandardLibrary(rootInput,
+                        moduleIdentity!, providerInputs, exports,
+                        NativeRuntimePolicy.FailFast);
+                }
+                else
+                {
+                    image = NativeModuleCompiler.EmitStandardExecutable(
+                        rootInput, moduleIdentity!, providerInputs,
+                        NativeRuntimePolicy.FailFast);
+                }
             }
             var imagePath = output ?? throw new InvalidOperationException("Missing native output path.");
             WriteArtifact(imagePath, image);

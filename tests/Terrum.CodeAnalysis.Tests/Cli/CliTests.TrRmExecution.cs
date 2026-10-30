@@ -9,10 +9,13 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using NUnit.Framework;
-
+using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
+using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
-
 using Terrum.CodeAnalysis.Tests.Modules.TrRm;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
@@ -23,6 +26,146 @@ public sealed partial class CliTests
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate long TrRmIdentity(long value);
+
+    [Test]
+    public async Task CompileTrRmSelectsTheExactNominalEnumsSchemaAsync()
+    {
+        const string source = "public int32 GetValue() { return 42; }";
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-schema-selection-{Guid.NewGuid():N}.trrm");
+        try
+        {
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes(source), "compile-trrm", "-",
+                "--identity", "scalar-module",
+                "--trrm-schema", "trrm/1-draft-nominal-enums-1",
+                "--library", "-o", artifact, "--runtime", "fail-fast",
+                "--json");
+            Assert.That(exit, Is.Zero, $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForNominalEnumsDraft(
+                        await File.ReadAllBytesAsync(artifact).ConfigureAwait(true)));
+            Assert.That(tables.EnumDefs.Count, Is.Zero);
+            Assert.That(tables.Features.Count, Is.EqualTo(1));
+            Assert.That(tables.Features.GetFeature(1),
+                Is.EqualTo(TrRmFeatureRow.TypedFrozenValues));
+            var loaded = TrRmExecutableCompiler
+                .LoadNominalEnumsDraftScalarReturns(
+                    await File.ReadAllBytesAsync(artifact).ConfigureAwait(true));
+            var result = (BoundConstant)((BoundReturn)
+                loaded.Functions[0].Body.Statements[0]).Value!;
+            Assert.That(loaded.EnumDefinitions, Is.Empty);
+            Assert.That(result.Bits.Low, Is.EqualTo(42UL));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmRejectsInvalidSchemaSelectionWithoutReplacingOutputAsync()
+    {
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-schema-selection-invalid-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xAA, 0x55];
+        await File.WriteAllBytesAsync(artifact, retained).ConfigureAwait(true);
+        try
+        {
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("public int32 GetValue() { return 42; }"),
+                "compile-trrm", "-", "--identity", "scalar-module",
+                "--trrm-schema", "TRRM/1-draft-nominal-enums-1",
+                "--library", "-o", artifact, "--runtime", "fail-fast",
+                "--json");
+            Assert.That(exit, Is.EqualTo(2), $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task CompileTrRmSchemaOptionRejectsMalformedAndWrongCommandUseAsync()
+    {
+        async Task AssertUsageAsync(params string[] arguments)
+        {
+            var (exit, output, error) = await RunAsync([], arguments)
+                .ConfigureAwait(true);
+            Assert.That(exit, Is.EqualTo(2), $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+        }
+
+        await AssertUsageAsync("compile-trrm", "-", "--identity", "module",
+            "--trrm-schema", "--library", "-o", "unused.trrm", "--runtime",
+            "fail-fast", "--json");
+        await AssertUsageAsync("compile-trrm", "-", "--identity", "module",
+            "--trrm-schema", "", "-o", "unused.trrm", "--runtime",
+            "fail-fast", "--json");
+        await AssertUsageAsync("compile-trrm", "-", "--identity", "module",
+            "--trrm-schema", "trrm/1-draft-layout-queries-1",
+            "--trrm-schema", "trrm/1-draft-nominal-enums-1", "--library",
+            "-o", "unused.trrm", "--runtime", "fail-fast", "--json");
+        await AssertUsageAsync("build-trrm", "unused.trrm",
+            "--trrm-schema", "trrm/1-draft-nominal-enums-1", "-o",
+            "unused.exe", "--runtime", "fail-fast", "--json");
+    }
+
+    [Test]
+    public async Task TrRmStandardSelectionPreflightsOptionsBeforeReadingAsync()
+    {
+        async Task AssertUsageAsync(params string[] arguments)
+        {
+            var (exit, output, error) = await RunAsync([], arguments)
+                .ConfigureAwait(true);
+            Assert.That(exit, Is.EqualTo(2),
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+        }
+
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-schema",
+            "TRRM/1-draft-foreign-invocation-contracts-1", "--trrm-module",
+            "root", "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-module", "root", "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-provider",
+            "trrm/1-draft-foreign-invocation-contracts-1", "missing-provider.trrm",
+            "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-schema",
+            "trrm/1-draft-foreign-invocation-contracts-1", "--trrm-module",
+            "root", "--trrm-provider", "unsupported-schema",
+            "missing-provider.trrm", "--json");
+
+        var collidingPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-provider-output-{Guid.NewGuid():N}.trrm");
+        await AssertUsageAsync("build-trrm", "missing.trrm", "-o",
+            collidingPath, "--runtime", "fail-fast", "--trrm-schema",
+            "trrm/1-draft-foreign-invocation-contracts-1", "--trrm-module",
+            "root", "--trrm-provider",
+            "trrm/1-draft-foreign-invocation-contracts-1", collidingPath,
+            "--json");
+    }
 
     [Test]
     public async Task PersistedTrRmRunsAndBuildsWithoutProducerSourceAsync()
@@ -56,6 +199,353 @@ public sealed partial class CliTests
         {
             File.Delete(artifact);
             await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task SelectedFProfileRunsBuildsAndEmitsLibraryWithDirectNativeImportAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "cli-standard-native-address";
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetCurrentProcessId",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern int32 GetCurrentProcessId();
+
+            int32 Main() {
+                unsafe {
+                    var callback = &GetCurrentProcessId;
+                    return callback();
+                }
+            }
+            """), core);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-profile-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        var libraryPrefix = prefix + "-library";
+        var libraryArtifact = libraryPrefix + ".trrm";
+        var library = libraryPrefix + ".dll";
+        try
+        {
+            await File.WriteAllBytesAsync(artifact,
+                TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                    moduleIdentity, schemaIdentity, 1)).ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                artifact, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", moduleIdentity, "--json");
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", artifact, "-o", executable, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", moduleIdentity, "--json");
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            using var document = JsonDocument.Parse(buildOutput);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.True);
+            Assert.That(await ExecuteTrRmImageAsync(executable),
+                Is.GreaterThan(0));
+
+            var libraryCompilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse("""
+                    [Terrum.Interop.NativeImport(
+                        "kernel32.dll",
+                        "GetCurrentProcessId",
+                        CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                    internal extern int32 GetCurrentProcessId();
+
+                    public int32 ReadProcessId() {
+                        unsafe {
+                            var callback = &GetCurrentProcessId;
+                            return callback();
+                        }
+                    }
+                    """), core);
+            Assert.That(libraryCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    libraryCompilation.Diagnostics));
+            await File.WriteAllBytesAsync(libraryArtifact,
+                TrRmExecutableCompiler.EmitStandard(
+                    libraryCompilation.Program!,
+                    "cli-standard-native-address-library",
+                    schemaIdentity, 1)).ConfigureAwait(true);
+            var (libraryBuilt, libraryOutput, libraryError) = await RunAsync(
+                [], "build-trrm-library", libraryArtifact, "--export",
+                "ReadProcessId", "-o", library, "--runtime", "fail-fast",
+                "--trrm-schema", schemaIdentity, "--trrm-module",
+                "cli-standard-native-address-library", "--json");
+            Assert.That(libraryBuilt, Is.Zero,
+                $"{libraryOutput}{Environment.NewLine}{libraryError}");
+            Assert.That(libraryError, Is.Empty);
+            Assert.That(Encoding.ASCII.GetString(
+                await File.ReadAllBytesAsync(library).ConfigureAwait(true)),
+                Does.Contain("GetCurrentProcessId")
+                    .And.Contain("KERNEL32.dll"));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(libraryArtifact);
+            await TestFileCleanup.DeleteWithRetryAsync(executable)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(library)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task SelectedFProviderRunsBuildsAndEmitsLibraryAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string providerIdentity = "cli-selected-native-provider";
+        const string consumerIdentity = "cli-selected-native-consumer";
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        const string providerSource = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetCurrentProcessId",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            public extern int32 GetCurrentProcessId();
+
+            internal int32 ProviderBody() {
+                unsafe {
+                    var callback = &GetCurrentProcessId;
+                    return callback();
+                }
+            }
+            """;
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), core);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerBytes = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerBytes);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, []);
+
+        var executableCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    var callback = &GetCurrentProcessId;
+                    return callback();
+                }
+            }
+            """), providerReference);
+        Assert.That(executableCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                executableCompilation.Diagnostics));
+        var executableBytes = TrRmExecutableCompiler.EmitStandard(
+            executableCompilation.Program!, consumerIdentity,
+            schemaIdentity, 1);
+
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                public int32 ReadProcessId() {
+                    unsafe {
+                        var callback = &GetCurrentProcessId;
+                        return callback();
+                    }
+                }
+                """), providerReference);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, libraryCompilation.Diagnostics));
+        var libraryBytes = TrRmExecutableCompiler.EmitStandard(
+            libraryCompilation.Program!, "cli-selected-native-library",
+            schemaIdentity, 1);
+        Assert.Throws<ArgumentException>(() =>
+            NativeModuleCompiler.EmitStandardLibrary(
+                new TrRmStandardArtifactInput(schemaIdentity, libraryBytes),
+                "cli-selected-native-library", [providerInput],
+                ["GetCurrentProcessId"], NativeRuntimePolicy.FailFast));
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-provider-{Guid.NewGuid():N}");
+        var providerPath = prefix + "-provider.trrm";
+        var executablePath = prefix + ".trrm";
+        var imagePath = prefix + ".exe";
+        var libraryPath = prefix + "-library.trrm";
+        var libraryImagePath = prefix + ".dll";
+        var incompatibleProviderPath = prefix + "-incompatible-provider.trrm";
+        var retainedOutputPath = prefix + "-retained.exe";
+        byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+        try
+        {
+            await File.WriteAllBytesAsync(providerPath, providerBytes)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(executablePath, executableBytes)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(libraryPath, libraryBytes)
+                .ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                executablePath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", consumerIdentity,
+                "--trrm-provider", schemaIdentity, providerPath, "--json");
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", executablePath, "-o", imagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                schemaIdentity, providerPath, "--json");
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(imagePath),
+                Is.GreaterThan(0));
+
+            var (libraryBuilt, libraryOutput, libraryError) = await RunAsync(
+                [], "build-trrm-library", libraryPath, "--export",
+                "ReadProcessId", "-o", libraryImagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", "cli-selected-native-library",
+                "--trrm-provider", schemaIdentity, providerPath, "--json");
+            Assert.That(libraryBuilt, Is.Zero,
+                $"{libraryOutput}{Environment.NewLine}{libraryError}");
+            Assert.That(libraryError, Is.Empty);
+            Assert.That(Encoding.ASCII.GetString(
+                await File.ReadAllBytesAsync(libraryImagePath)
+                    .ConfigureAwait(true)),
+                Does.Contain("GetCurrentProcessId")
+                    .And.Contain("KERNEL32.dll"));
+
+            var incompatibleProviderCompilation
+                = Compilation.CreateLibrary(SyntaxTree.Parse(
+                    providerSource.Replace("kernel32.dll", "user32.dll",
+                        StringComparison.Ordinal)), core);
+            Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    incompatibleProviderCompilation.Diagnostics));
+            await File.WriteAllBytesAsync(incompatibleProviderPath,
+                TrRmExecutableCompiler.EmitStandard(
+                    incompatibleProviderCompilation.Program!,
+                    providerIdentity, schemaIdentity, 1))
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
+                .ConfigureAwait(true);
+            var (rejected, rejectionOutput, rejectionError) = await RunAsync(
+                [], "build-trrm", executablePath, "-o", retainedOutputPath,
+                "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", consumerIdentity, "--trrm-provider",
+                schemaIdentity, incompatibleProviderPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(rejected, Is.EqualTo(1),
+                $"{rejectionOutput}{Environment.NewLine}{rejectionError}");
+            Assert.That(rejectionError, Is.Empty);
+            using var rejectionDocument = JsonDocument.Parse(rejectionOutput);
+            Assert.That(rejectionDocument.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            Assert.That(await File.ReadAllBytesAsync(retainedOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+        }
+        finally
+        {
+            File.Delete(providerPath);
+            File.Delete(executablePath);
+            File.Delete(libraryPath);
+            File.Delete(incompatibleProviderPath);
+            File.Delete(retainedOutputPath);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryImagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task SelectedFCoLocatedProviderRunsAndBuildsAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string providerIdentity = "cli-co-located-native-provider";
+        const string consumerIdentity = "cli-co-located-native-consumer";
+        var providerCompilation
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateCurrentProcessIdCompilation();
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, providerArtifact),
+            providerIdentity, []);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    var callback = &GetCurrentProcessId;
+                    return callback();
+                }
+            }
+            """), providerReference);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, consumerIdentity, schemaIdentity, 1);
+        var artifactBytes
+            = TrRmForeignInvocationAddressEmitterTests
+                .CombinePopulatedNativeAddressModules(
+                    consumerArtifact, providerArtifact);
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-colocated-provider-{Guid.NewGuid():N}");
+        var artifactPath = prefix + ".trrm";
+        var imagePath = prefix + ".exe";
+        try
+        {
+            await File.WriteAllBytesAsync(artifactPath, artifactBytes)
+                .ConfigureAwait(true);
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                artifactPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", consumerIdentity, "--json")
+                .ConfigureAwait(true);
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", artifactPath, "-o", imagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", consumerIdentity, "--json")
+                .ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(imagePath)
+                .ConfigureAwait(true), Is.GreaterThan(0));
+        }
+        finally
+        {
+            File.Delete(artifactPath);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
         }
     }
 
@@ -574,9 +1064,9 @@ public sealed partial class CliTests
     public async Task PersistedNoThrowAndDoesNotReturnEffectsAreAuditedAsync()
     {
         const string source = """
-            [NoThrow] int32 Identity(int32 value) { return value; }
-            [NoThrow][DoesNotReturn] void Never() { while (true) {} }
-            [NoThrow][DoesNotReturn] void Stop() { Never(); }
+             int32 Identity(int32 value) { return value; }
+            [DoesNotReturn] void Never() { while (true) {} }
+            [DoesNotReturn] void Stop() { Never(); }
             int32 Main() { return Identity(42); }
             """;
         var artifact = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-effects-{Guid.NewGuid():N}.trrm");
@@ -822,7 +1312,26 @@ public sealed partial class CliTests
         }) ?? throw new InvalidOperationException("Executable was not started.");
         var stdout = process.StandardOutput.ReadToEndAsync();
         var stderr = process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10))
+                .ConfigureAwait(true);
+        }
+        catch (TimeoutException exception)
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+                await process.WaitForExitAsync().ConfigureAwait(true);
+            }
+
+            var output = await stdout.ConfigureAwait(true);
+            var error = await stderr.ConfigureAwait(true);
+            throw new TimeoutException(
+                $"TRRM executable exceeded its 10-second deadline. {output}{Environment.NewLine}{error}",
+                exception);
+        }
+
         Assert.That(await stdout, Is.Empty);
         Assert.That(await stderr, Is.Empty);
         return process.ExitCode;
