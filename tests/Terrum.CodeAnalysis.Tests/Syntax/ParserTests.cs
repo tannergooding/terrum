@@ -48,6 +48,67 @@ public sealed class ParserTests
     }
 
     [Test]
+    public void ParsesNativeCallConvAsAFunctionPointerTypeUseAttribute()
+    {
+        const string Source = """
+            using Terrum.Interop;
+            public struct CallbackHolder {
+                public [NativeCallConv(NativeCallingConvention.Cdecl)] fnptr<int32> Callback;
+            }
+            void Invoke([Terrum.Interop.NativeCallConv(
+                Terrum.Interop.NativeCallingConvention.Stdcall)] fnptr<int32> callback) {}
+            void Main() {
+                [Terrum.Interop.NativeCallConv(
+                    Terrum.Interop.NativeCallingConvention.Vectorcall)] fnptr<int32> callback = null;
+            }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        var attributedTypes = tree.Root.DescendantNodes()
+            .Where(static node => node.Kind == SyntaxKind.AttributedTypeName).ToArray();
+        Assert.That(attributedTypes, Has.Length.EqualTo(3));
+        Assert.That(attributedTypes.Select(static node => ((SyntaxNode)node.Children[1]).Kind),
+            Is.All.EqualTo(SyntaxKind.TypeName));
+        AssertLossless(tree);
+    }
+
+    [TestCase("ref<int32>", 1)]
+    [TestCase("write ref<init int32>", 1)]
+    [TestCase("gc ref<int32>", 1)]
+    [TestCase("write gc ref<int32>?", 1)]
+    [TestCase("ref<ref<int32>>", 2)]
+    public void ParsesCheckedReferenceTypeForms(string type, int referenceCount)
+    {
+        var tree = SyntaxTree.Parse($"void Accept({type} value) {{}}");
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.ReferenceTypeName), Is.EqualTo(referenceCount));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesNativeDeclarationCallConvNamedArguments()
+    {
+        const string Source = """
+            [Terrum.Interop.NativeImport(
+                "probe", "Read",
+                CallConv: Terrum.Interop.NativeCallingConvention.Cdecl)]
+            extern int32 Read(int32 token);
+            [Terrum.Interop.NativeCallable(
+                CallConv: Terrum.Interop.NativeCallingConvention.Stdcall)]
+            int32 Invoke(int32 token) { return token; }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes().Count(static node =>
+            node.Kind == SyntaxKind.Attribute), Is.EqualTo(2));
+        AssertLossless(tree);
+    }
+
+    [Test]
     public void ParsesCollectionSpreadElementsLosslessly()
     {
         const string Source = "int32 Main() { var items = [First(), ..Source(), Last()]; return 0; }";
@@ -127,6 +188,123 @@ public sealed class ParserTests
                 new[] { SyntaxKind.TypeParameterList, SyntaxKind.ConstraintClause },
                 new[] { SyntaxKind.TypeParameterList, SyntaxKind.ConformanceList, SyntaxKind.ConstraintClause },
             }.ToArray()));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesConstantArgumentsOnNominalInterfaceTypes()
+    {
+        const string Source = """
+            interface ICount<this T, const int32 Size = 2> {}
+            interface IWrapper<this T> : ICount<T, 4> {}
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        var argument = tree.Root.DescendantNodes()
+            .Single(static node => node.Kind == SyntaxKind.ConstantGenericArgument);
+        Assert.That(argument.Children.OfType<SyntaxNode>().Single().Kind,
+            Is.EqualTo(SyntaxKind.LiteralExpression));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesRelationalExpressionsInGenericFormalDefaults()
+    {
+        const string Source = """
+            interface IChecks<
+                const bool Greater = 2 > 1,
+                const bool Less = 1 < 2,
+                const bool Conditional = true ? 3 > 2 : false
+            > {}
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.DescendantNodes()
+            .Count(static node => node.Kind == SyntaxKind.BinaryExpression), Is.EqualTo(3));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesGenericInterfaceRequirementsAndPropertiesLosslessly()
+    {
+        const string Source = """
+            public interface IValue<this T, const int32 Size = 2, U = int32> where T : [Copy] {
+                T Read<const int32 Count = 2, TArg>(TArg value)
+                    where TArg : [Copy] require true ensure true;
+                async Task<T> ReadAsync();
+                static T operator +(T left, T right);
+                T Value { get; set; }
+                T this[int32 index] { get; init; }
+                type Item = T;
+                const int32 Limit = 4;
+            }
+            """;
+
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        var declaration = tree.Root.DescendantNodes()
+            .Single(static node => node.Kind == SyntaxKind.InterfaceDeclaration);
+        Assert.That(declaration.Children.OfType<SyntaxNode>()
+                .Where(static node => node.Kind is SyntaxKind.FunctionDeclaration
+                    or SyntaxKind.OperatorDeclaration or SyntaxKind.PropertyDeclaration
+                    or SyntaxKind.IndexerDeclaration or SyntaxKind.AssociatedTypeRequirement
+                    or SyntaxKind.InterfaceConstantDeclaration)
+                .Select(static node => node.Kind),
+            Is.EqualTo(new[] {
+                SyntaxKind.FunctionDeclaration,
+                SyntaxKind.FunctionDeclaration,
+                SyntaxKind.OperatorDeclaration,
+                SyntaxKind.PropertyDeclaration,
+                SyntaxKind.IndexerDeclaration,
+                SyntaxKind.AssociatedTypeRequirement,
+                SyntaxKind.InterfaceConstantDeclaration,
+            }));
+        Assert.That(declaration.DescendantNodes().Count(static node => node.Kind == SyntaxKind.ContractClause),
+            Is.EqualTo(2));
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void RecoversFromInterfaceIndexerWithoutGetter()
+    {
+        const string Source = "interface I { int32 this[int32 index] { set; } }";
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM1002"), Is.True);
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void RejectsNestedNominalTypesInInterface()
+    {
+        const string Source = "interface I { struct Nested { } }";
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.True);
+        Assert.That(tree.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM1002"), Is.True);
+        AssertLossless(tree);
+    }
+
+    [Test]
+    public void ParsesInterfacePartialAndFriendVisibilityPrefixes()
+    {
+        const string Source = """
+            file partial interface IValue<T> { }
+            friend<Example.Owner> interface IOther<T> { }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        Assert.That(tree.Root.ToFullString(), Is.EqualTo(Source));
+        Assert.That(tree.Root.DescendantNodes().Count(static node => node.Kind == SyntaxKind.FriendVisibility),
+            Is.EqualTo(1));
+        Assert.That(tree.Root.DescendantNodes().Count(static node => node.Kind == SyntaxKind.FriendTarget),
+            Is.EqualTo(1));
         AssertLossless(tree);
     }
 

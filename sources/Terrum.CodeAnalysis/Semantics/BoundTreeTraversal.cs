@@ -11,6 +11,37 @@ internal static class BoundTreeTraversal
     internal static bool IsWithinLimits(BoundBlock body)
         => VisitExpressionsCore(body, static _ => { }, requireComplete: true);
 
+    internal static bool VisitGenericNominalTypeArguments(
+        BoundProgram program, Action<PrimitiveType> visitor)
+    {
+        if (program.GenericNominalTypeInstances.IsDefault)
+        {
+            return false;
+        }
+
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        foreach (var instance in program.GenericNominalTypeInstances)
+        {
+            if (instance is null || instance.Arguments.IsDefault)
+            {
+                return false;
+            }
+            foreach (var argument in instance.Arguments)
+            {
+                if (argument is null || --remaining < 0)
+                {
+                    return false;
+                }
+                if (argument.Kind == BoundGenericArgumentKind.Type)
+                {
+                    visitor(argument.Type);
+                }
+            }
+        }
+
+        return true;
+    }
+
     internal static bool VisitExpressions(BoundBlock body, Action<BoundExpression> visitor)
         => VisitExpressionsCore(body, visitor, requireComplete: false);
 
@@ -274,6 +305,219 @@ internal static class BoundTreeTraversal
     internal static BoundFunction RewriteExpressions(BoundFunction function,
         Func<BoundExpression, BoundExpression> rewrite) =>
         function with { Body = (BoundBlock)RewriteExpressions(function.Body, rewrite) };
+
+    internal static BoundStruct RewriteTypes(BoundStruct structure,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        structure with {
+            Fields = [.. structure.Fields.Select(field => field with {
+                Type = rewriteType(field.Type),
+            })],
+        };
+
+    internal static CheckedReferenceTypeDefinition RewriteTypes(
+        CheckedReferenceTypeDefinition referenceType,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        referenceType with { ReferentType = rewriteType(referenceType.ReferentType) };
+
+    internal static BoundInterfaceType RewriteTypes(
+        BoundInterfaceType type,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        type with {
+            PrimitiveType = type.Kind == BoundInterfaceTypeKind.Primitive
+                ? rewriteType(type.PrimitiveType) : type.PrimitiveType,
+            TypeArguments = [.. type.TypeArguments.Select(argument =>
+                RewriteTypes(argument, rewriteType))],
+        };
+
+    internal static BoundInterfaceTypeArgument RewriteTypes(
+        BoundInterfaceTypeArgument argument,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        argument with {
+            Type = argument.Type is BoundInterfaceType type
+                ? RewriteTypes(type, rewriteType) : null,
+            ConstantType = argument.ConstantType is BoundInterfaceType constantType
+                ? RewriteTypes(constantType, rewriteType) : null,
+            ConstantValue = argument.ConstantValue is BoundConstant constant
+                ? new BoundConstant(constant.Bits, rewriteType(constant.Type), constant.Span)
+                : null,
+        };
+
+    internal static BoundInterfaceFormal RewriteTypes(
+        BoundInterfaceFormal formal,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        formal with {
+            ConstantType = formal.ConstantType is BoundInterfaceType constantType
+                ? RewriteTypes(constantType, rewriteType) : null,
+            TypeDefault = formal.TypeDefault is BoundInterfaceType typeDefault
+                ? RewriteTypes(typeDefault, rewriteType) : null,
+            ConstantDefault = formal.ConstantDefault is BoundConstant constant
+                ? new BoundConstant(constant.Bits, rewriteType(constant.Type), constant.Span) : null,
+        };
+
+    internal static BoundInterfaceConstraint RewriteTypes(
+        BoundInterfaceConstraint constraint,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        constraint with {
+            Type = constraint.Type is BoundInterfaceType type
+                ? RewriteTypes(type, rewriteType) : null,
+        };
+
+    internal static BoundInterfaceMemberDefinition RewriteTypes(
+        BoundInterfaceMemberDefinition member,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        member with {
+            ResultType = member.ResultType is BoundInterfaceType resultType
+                ? RewriteTypes(resultType, rewriteType) : null,
+            TypeParameters = [.. member.TypeParameters.Select(formal =>
+                RewriteTypes(formal, rewriteType))],
+            Constraints = [.. member.Constraints.Select(constraint =>
+                RewriteTypes(constraint, rewriteType))],
+            Parameters = [.. member.Parameters.Select(parameter => parameter with {
+                Type = RewriteTypes(parameter.Type, rewriteType),
+            })],
+            AssociatedDefaultType = member.AssociatedDefaultType is BoundInterfaceType associatedDefault
+                ? RewriteTypes(associatedDefault, rewriteType) : null,
+            AssociatedConstantType = member.AssociatedConstantType is BoundInterfaceType associatedConstantType
+                ? RewriteTypes(associatedConstantType, rewriteType) : null,
+            AssociatedConstantDefault = member.AssociatedConstantDefault is BoundConstant associatedConstant
+                ? new BoundConstant(associatedConstant.Bits, rewriteType(associatedConstant.Type),
+                    associatedConstant.Span) : null,
+        };
+
+    internal static BoundInterfaceDefinition RewriteTypes(
+        BoundInterfaceDefinition @interface,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        @interface with {
+            Formals = [.. @interface.Formals.Select(formal => RewriteTypes(formal, rewriteType))],
+            Bases = [.. @interface.Bases.Select(baseType => RewriteTypes(baseType, rewriteType))],
+            Constraints = [.. @interface.Constraints.Select(constraint =>
+                RewriteTypes(constraint, rewriteType))],
+            Members = [.. @interface.Members.Select(member => RewriteTypes(member, rewriteType))],
+        };
+
+    internal static BoundClass RewriteTypes(BoundClass @class,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        @class with {
+            Fields = [.. @class.Fields.Select(field => field with {
+                Type = rewriteType(field.Type),
+            })],
+        };
+
+    internal static BoundGenericNominalTypeDefault RewriteTypes(
+        BoundGenericNominalTypeDefault defaultValue,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        defaultValue.DecodedType is PrimitiveType decodedType
+            ? defaultValue with { DecodedType = rewriteType(decodedType) }
+            : defaultValue;
+
+    internal static BoundGenericNominalTypeFormal RewriteTypes(
+        BoundGenericNominalTypeFormal formal,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        formal with {
+            Default = formal.Default is BoundGenericNominalTypeDefault defaultValue
+                ? RewriteTypes(defaultValue, rewriteType) : null,
+        };
+
+    internal static BoundGenericNominalTypeDefinition RewriteTypes(
+        BoundGenericNominalTypeDefinition definition,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        definition with {
+            Formals = [.. definition.Formals.Select(formal =>
+                RewriteTypes(formal, rewriteType))],
+        };
+
+    internal static BoundGenericNominalTypeArgument RewriteTypes(
+        BoundGenericNominalTypeArgument argument,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        argument.Kind == BoundGenericArgumentKind.Type
+            ? argument with { Type = rewriteType(argument.Type) }
+            : argument;
+
+    internal static BoundGenericNominalTypeInstance RewriteTypes(
+        BoundGenericNominalTypeInstance instance,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        instance with {
+            Arguments = [.. instance.Arguments.Select(argument =>
+                RewriteTypes(argument, rewriteType))],
+        };
+
+    internal static BoundFunction RewriteTypes(BoundFunction function,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        var remapped = RewriteExpressions(function,
+            expression => RewriteExpressionTypes(expression, rewriteType));
+        return remapped with {
+            ReturnType = rewriteType(function.ReturnType),
+            NativeFunctionPointerType = function.NativeFunctionPointerType is PrimitiveType functionPointerType
+                ? rewriteType(functionPointerType) : null,
+            NativeOutputContracts = [.. function.NativeOutputContracts.Select(output => output with {
+                PointeeType = rewriteType(output.PointeeType),
+            })],
+            DirectNativeImport = function.DirectNativeImport is DirectNativeImport import
+                ? import with {
+                    Outputs = [.. import.Outputs.Select(output => output with {
+                        PointeeType = rewriteType(output.PointeeType),
+                    })],
+                    Parameters = [.. import.Parameters.Select(parameter => parameter with {
+                        PointeeType = rewriteType(parameter.PointeeType),
+                    })],
+                }
+                : null,
+            NativeVTableMethod = function.NativeVTableMethod is NativeVTableMethodDefinition vtableMethod
+                ? vtableMethod with {
+                    Parameters = [.. vtableMethod.Parameters.Select(parameter => parameter with {
+                        PointeeType = rewriteType(parameter.PointeeType),
+                    })],
+                    Outputs = [.. vtableMethod.Outputs.Select(output => output with {
+                        PointeeType = rewriteType(output.PointeeType),
+                    })],
+                }
+                : null,
+            Variables = [.. function.Variables.Select(variable => variable with {
+                Type = rewriteType(variable.Type),
+                NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
+                    ? RewriteLayout(layout, rewriteType) : null,
+            })],
+        };
+    }
+
+    private static BoundExpression RewriteExpressionTypes(BoundExpression expression,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        var type = rewriteType(expression.Type);
+        return expression switch {
+            BoundNativeStorageAddress address => address with {
+                Type = type,
+                CarrierType = rewriteType(address.CarrierType),
+                ElementType = rewriteType(address.ElementType),
+                AddressType = rewriteType(address.AddressType),
+            },
+            BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
+                Type = type,
+                Layout = RewriteLayout(fixedArray.Layout, rewriteType),
+            },
+            BoundNativeFixedArrayElement fixedArrayElement => fixedArrayElement with {
+                Type = type,
+                Layout = RewriteLayout(fixedArrayElement.Layout, rewriteType),
+            },
+            BoundNativeFixedArrayPointerAddress pointerAddress => pointerAddress with {
+                Type = type,
+                Layout = RewriteLayout(pointerAddress.Layout, rewriteType),
+            },
+            BoundNativeFixedArrayWrite fixedArrayWrite => fixedArrayWrite with {
+                Type = type,
+                Layout = RewriteLayout(fixedArrayWrite.Layout, rewriteType),
+            },
+            _ => expression with { Type = type },
+        };
+    }
+
+    private static BoundNativeFixedArrayLayout RewriteLayout(
+        BoundNativeFixedArrayLayout layout, Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        layout with {
+            CarrierType = rewriteType(layout.CarrierType),
+            ElementType = rewriteType(layout.ElementType),
+        };
 
     private static BoundStatement RewriteExpressions(BoundStatement statement,
         Func<BoundExpression, BoundExpression> rewrite) =>

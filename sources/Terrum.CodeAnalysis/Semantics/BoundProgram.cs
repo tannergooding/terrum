@@ -271,6 +271,194 @@ public enum BoundRuntimePolicy
     CheckedExceptions,
 }
 
+internal enum BoundInterfaceTypeKind : byte
+{
+    Primitive = 1,
+    TypeParameter = 2,
+    Nominal = 3,
+    CheckedReference = 4,
+}
+
+internal enum BoundInterfaceTypeParameterScope : byte
+{
+    None = 0,
+    Interface = 1,
+    Member = 2,
+}
+
+internal enum BoundInterfaceTypeArgumentKind : byte
+{
+    Type = 1,
+    Constant = 2,
+}
+
+internal sealed record BoundInterfaceTypeArgument(
+    BoundInterfaceTypeArgumentKind Kind,
+    BoundInterfaceType? Type,
+    BoundInterfaceType? ConstantType,
+    BoundConstant? ConstantValue,
+    BoundInterfaceTypeParameterScope ConstantParameterScope,
+    int ConstantParameterOrdinal)
+{
+    internal static BoundInterfaceTypeArgument ForType(BoundInterfaceType type) =>
+        new(BoundInterfaceTypeArgumentKind.Type, type, null, null,
+            BoundInterfaceTypeParameterScope.None, -1);
+
+    internal static BoundInterfaceTypeArgument ForConstant(
+        BoundInterfaceType type, BoundConstant value) =>
+        new(BoundInterfaceTypeArgumentKind.Constant, null, type, value,
+            BoundInterfaceTypeParameterScope.None, -1);
+
+    internal static BoundInterfaceTypeArgument ForConstantParameter(
+        BoundInterfaceType type, BoundInterfaceTypeParameterScope scope,
+        int ordinal) =>
+        new(BoundInterfaceTypeArgumentKind.Constant, null, type, null,
+            scope, ordinal);
+}
+
+internal sealed record BoundInterfaceType(
+    BoundInterfaceTypeKind Kind,
+    PrimitiveType PrimitiveType,
+    string? NominalName,
+    int TypeParameterOrdinal,
+    ImmutableArray<BoundInterfaceTypeArgument> TypeArguments,
+    bool IsWritable,
+    bool IsOptional,
+    bool IsGarbageCollected,
+    bool IsInitialization)
+{
+    internal BoundInterfaceTypeParameterScope TypeParameterScope { get; init; }
+    internal BoundModuleImport? ModuleImport { get; init; }
+}
+
+internal enum BoundInterfaceFormalKind : byte
+{
+    Type = 1,
+    Constant = 2,
+}
+
+internal sealed record BoundInterfaceFormal(
+    int Ordinal,
+    string Name,
+    BoundInterfaceFormalKind Kind,
+    bool IsSelf,
+    ImmutableArray<string> Attributes,
+    ImmutableArray<string> AttributeTokens,
+    BoundInterfaceType? ConstantType,
+    BoundInterfaceType? TypeDefault,
+    BoundConstant? ConstantDefault);
+
+internal enum BoundInterfaceConstraintKind : byte
+{
+    Type = 1,
+    Attribute = 2,
+}
+
+internal sealed record BoundInterfaceConstraint(
+    int FormalOrdinal,
+    BoundInterfaceConstraintKind Kind,
+    BoundInterfaceType? Type,
+    string? AttributeName)
+{
+    internal BoundInterfaceTypeParameterScope FormalScope { get; init; }
+        = BoundInterfaceTypeParameterScope.Interface;
+}
+
+internal sealed record BoundInterfaceDefinition(
+    string QualifiedName,
+    bool IsPublic,
+    bool IsPartial,
+    ImmutableArray<BoundInterfaceFormal> Formals,
+    ImmutableArray<BoundInterfaceType> Bases,
+    ImmutableArray<BoundInterfaceConstraint> Constraints,
+    ImmutableArray<BoundInterfaceMemberDefinition> Members)
+{
+    internal BoundInterfaceAccessibility Accessibility { get; init; }
+    internal ImmutableArray<string> AttributeTokens { get; init; } = [];
+    internal BoundModuleImport? ModuleImport { get; init; }
+}
+
+internal enum BoundInterfaceAccessibility : byte
+{
+    Default = 0,
+    Public = 1,
+    Internal = 2,
+    File = 3,
+    Friend = 4,
+    Private = 5,
+}
+
+internal enum BoundInterfaceMemberKind : byte
+{
+    Callable = 1,
+    Operator = 2,
+    Property = 3,
+    Indexer = 4,
+    AssociatedType = 5,
+    Constant = 6,
+}
+
+internal enum BoundInterfaceParameterMode : byte
+{
+    Value = 0,
+    Out = 1,
+    Init = 2,
+    ImplicitRef = 3,
+}
+
+internal enum BoundInterfaceAccessorKind : byte
+{
+    Get = 1,
+    Set = 2,
+    Init = 3,
+}
+
+internal sealed record BoundInterfaceParameter(
+    string Name,
+    BoundInterfaceType Type,
+    BoundInterfaceParameterMode Mode,
+    ImmutableArray<string> Attributes,
+    ImmutableArray<string> AttributeTokens);
+
+internal sealed record BoundInterfaceAccessor(
+    BoundInterfaceAccessorKind Kind,
+    BoundInterfaceAccessibility Accessibility,
+    bool IsMutable,
+    bool RequiresUnsafeCaller,
+    bool DoesNotReturn,
+    bool HasBody,
+    ImmutableArray<string> Attributes,
+    ImmutableArray<string> AttributeTokens,
+    ImmutableArray<BoundDependencyContract> Dependencies,
+    ImmutableArray<string> ContractTokens);
+
+internal sealed record BoundInterfaceMemberDefinition(
+    int Ordinal,
+    string Name,
+    string DeclarationKey,
+    BoundInterfaceMemberKind Kind,
+    BoundInterfaceAccessibility Accessibility,
+    bool IsStatic,
+    bool IsExternal,
+    bool IsPartial,
+    bool RequiresUnsafeCaller,
+    bool DoesNotReturn,
+    bool IsAsync,
+    bool HasBody,
+    ImmutableArray<string> Attributes,
+    ImmutableArray<string> AttributeTokens,
+    ImmutableArray<string> ContractTokens,
+    TokenKind Operator,
+    BoundInterfaceType? ResultType,
+    ImmutableArray<BoundInterfaceFormal> TypeParameters,
+    ImmutableArray<BoundInterfaceConstraint> Constraints,
+    ImmutableArray<BoundInterfaceParameter> Parameters,
+    ImmutableArray<BoundDependencyContract> Dependencies,
+    ImmutableArray<BoundInterfaceAccessor> Accessors,
+    BoundInterfaceType? AssociatedDefaultType,
+    BoundInterfaceType? AssociatedConstantType,
+    BoundConstant? AssociatedConstantDefault);
+
 /// <summary>The resolved overflow behavior of a source integer operation.</summary>
 internal enum BoundIntegerOverflowBehavior
 {
@@ -288,9 +476,24 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
 
+    internal NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
+
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
+
+    internal ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes { get; init; } = [];
+
+    internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; init; } = [];
+
+    /// <summary>Exact provider and TypeDef identities for imported nominal declarations.</summary>
+    public ImmutableArray<BoundGenericNominalTypeDefinition> GenericNominalTypeDefinitions { get; init; } = [];
+
+    /// <summary>Ordered nominal TypeDef substitutions used by this program's type identities.</summary>
+    public ImmutableArray<BoundGenericNominalTypeInstance> GenericNominalTypeInstances { get; init; } = [];
+
+    /// <summary>The host-selected exact Core Task definition, without enabling Task runtime behavior.</summary>
+    public CoreTaskTypeIdentity? CoreTaskType { get; init; }
 
     /// <summary>Source-defined managed layouts; handles have type identifiers starting at <see cref="ManagedClassTypes.First"/>.</summary>
     public ImmutableArray<BoundClass> Classes { get; init; } = [];
@@ -907,6 +1110,47 @@ public sealed record BoundNativePointerRead(BoundExpression Address, PrimitiveTy
     internal override ImmutableArray<BoundExpression> NestedExpressions => [Address];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with { Address = rewrite(Address) };
+}
+
+/// <summary>Forms a checked non-owning reference to an addressable local place.</summary>
+public sealed record BoundReferenceFormation(BoundExpression Place, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Place];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Place = rewrite(Place) };
+}
+
+/// <summary>Reborrows the exact referent of an existing ordinary checked reference.</summary>
+public sealed record BoundReferenceReborrow(
+    BoundExpression Descriptor, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Descriptor];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite)
+        => this with { Descriptor = rewrite(Descriptor) };
+}
+
+/// <summary>Reads the initialized referent value through a checked ordinary reference.</summary>
+public sealed record BoundReferenceRead(BoundExpression Descriptor, PrimitiveType Type, TextSpan Span)
+    : BoundExpression(Type, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Descriptor];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with { Descriptor = rewrite(Descriptor) };
+}
+
+/// <summary>Writes an exact value through a checked writable reference.</summary>
+public sealed record BoundReferenceWrite(BoundExpression Descriptor, BoundExpression Value, TextSpan Span)
+    : BoundExpression(PrimitiveType.Void, Span)
+{
+    internal override ImmutableArray<BoundExpression> NestedExpressions => [Descriptor, Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            Descriptor = rewrite(Descriptor),
+            Value = rewrite(Value),
+        };
 }
 
 /// <summary>Writes a value through an explicitly unsafe writable native pointer.</summary>

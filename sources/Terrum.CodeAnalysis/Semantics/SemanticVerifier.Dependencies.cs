@@ -128,6 +128,10 @@ public static partial class SemanticVerifier
             BoundDependencyDestination.RetainedFormal
                 => IsRetainedFormalDestination(contract.DestinationOrdinal,
                     function, explicitParameterCount, receiverOffset, program),
+            BoundDependencyDestination.Operation
+                => contract.DestinationOrdinal is null
+                    && BoundGenericNominalTypeContract.IsCoreTaskType(
+                        function.ReturnType, program),
             _ => false,
         };
         if (!validShape)
@@ -150,12 +154,14 @@ public static partial class SemanticVerifier
                 => contract.Destination is BoundDependencyDestination.Result
                     or BoundDependencyDestination.Receiver
                     or BoundDependencyDestination.InitializedOutput
-                    or BoundDependencyDestination.RetainedFormal,
+                    or BoundDependencyDestination.RetainedFormal
+                    or BoundDependencyDestination.Operation,
             BoundDependencyRelation.ForwardsBacking
                 => contract.Destination is BoundDependencyDestination.Result
                     or BoundDependencyDestination.Receiver
                     or BoundDependencyDestination.InitializedOutput
-                    or BoundDependencyDestination.RetainedFormal,
+                    or BoundDependencyDestination.RetainedFormal
+                    or BoundDependencyDestination.Operation,
             _ => false,
         };
     }
@@ -222,10 +228,7 @@ public static partial class SemanticVerifier
                 && !reference.IsGarbageCollected
                 && !reference.IsInitialization
                 && !reference.IsOptional
-                && (IsUnique(program, reference.ReferentType)
-                    || ManagedClassTypes.IsManaged(reference.ReferentType)
-                    || TokenSpanContract.IsDependent(
-                        reference.ReferentType, program.Structures));
+                && IsRetainedDependencyValue(reference.ReferentType, program);
         }
         return formal.IsOut || formal.IsImplicitRef
             || ManagedClassTypes.IsManaged(formal.Type)
@@ -235,5 +238,33 @@ public static partial class SemanticVerifier
 
     private static bool IsRetainedDependencyValue(PrimitiveType type,
         BoundProgram program)
-        => ManagedClassTypes.IsManaged(type) || IsUnique(program, type);
+    {
+        var pending = new Stack<(PrimitiveType Type, int Depth)>();
+        var visited = new HashSet<PrimitiveType>();
+        var remaining = MaximumAnalysisVisits;
+        pending.Push((type, 0));
+        while (pending.TryPop(out var item))
+        {
+            Count(ref remaining, item.Depth);
+            if (ManagedClassTypes.IsManaged(item.Type)
+                || IsUnique(program, item.Type)
+                || TokenSpanContract.IsDependent(item.Type, program.Structures)
+                || IsOrdinaryStoredReferenceType(item.Type, program))
+            {
+                return true;
+            }
+            if (!IsInlineStructStorage(item.Type, program)
+                || !visited.Add(item.Type))
+            {
+                continue;
+            }
+
+            var structureIndex = (int)item.Type - 100;
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                pending.Push((field.Type, item.Depth + 1));
+            }
+        }
+        return false;
+    }
 }

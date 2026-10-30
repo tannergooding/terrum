@@ -32,6 +32,9 @@ public static partial class ModuleCompiler
         }
         var typeCount = 0;
         var functionCount = 0;
+        var coreTaskType = default(CoreTaskTypeIdentity?);
+        var genericNominalDefinitions = ImmutableArray.CreateBuilder<BoundGenericNominalTypeDefinition>();
+        var genericNominalDefinitionIdentities = new HashSet<BoundGenericNominalTypeIdentity>();
         foreach (var reference in references)
         {
             if (reference.RequiresSourceGrant)
@@ -44,6 +47,25 @@ public static partial class ModuleCompiler
             }
             typeCount = checked(typeCount + reference.Structures.Length);
             functionCount = checked(functionCount + reference.Functions.Length);
+            foreach (var definition in reference.GenericNominalTypeDefinitions)
+            {
+                if (!genericNominalDefinitionIdentities.Add(definition.Identity))
+                {
+                    throw new ModuleContractException(
+                        $"Ambiguous generic nominal identity '{definition.Identity}'.");
+                }
+                genericNominalDefinitions.Add(definition);
+            }
+            if (reference.CoreTaskType is CoreTaskTypeIdentity selectedCoreTask)
+            {
+                if (coreTaskType is CoreTaskTypeIdentity existingCoreTask
+                    && existingCoreTask != selectedCoreTask)
+                {
+                    throw new ModuleContractException(
+                        "A module set cannot select conflicting Core Task definitions.");
+                }
+                coreTaskType = selectedCoreTask;
+            }
         }
         var nativeFunctionPointerSignatures =
             MergeNativeFunctionPointerSignatures(references, out var functionPointerMappings,
@@ -77,6 +99,24 @@ public static partial class ModuleCompiler
             }
         }
         var allTypes = types.MoveToImmutable();
+        var allGenericNominalDefinitions = genericNominalDefinitions.ToImmutable();
+        var allGenericNominalInstances =
+            ImmutableArray.CreateBuilder<BoundGenericNominalTypeInstance>();
+        var genericNominalTypeMappings = new int[references.Count][];
+        var genericNominalTypeStates = new byte[references.Count][];
+        var genericNominalTypeIndexes =
+            new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
+        for (var referenceIndex = 0; referenceIndex < references.Count; referenceIndex++)
+        {
+            var sourceInstances = references[referenceIndex].GenericNominalTypeInstances;
+            genericNominalTypeMappings[referenceIndex] = new int[sourceInstances.Length];
+            Array.Fill(genericNominalTypeMappings[referenceIndex], -1);
+            genericNominalTypeStates[referenceIndex] = new byte[sourceInstances.Length];
+            for (var instanceIndex = 0; instanceIndex < sourceInstances.Length; instanceIndex++)
+            {
+                _ = MapGenericNominalTypeInstance(referenceIndex, instanceIndex);
+            }
+        }
         for (var referenceIndex = 0; referenceIndex < references.Count; referenceIndex++)
         {
             var reference = references[referenceIndex];
@@ -86,18 +126,96 @@ public static partial class ModuleCompiler
                 {
                     throw new ModuleContractException($"Ambiguous provider export '{function.Name}'.");
                 }
-                functions.Add(RemapNativeFunctionPointerTypes(
+                var remappedFunction = RemapNativeFunctionPointerTypes(
                     RemapNativePointerTypes(
                         RemapFunction(function, reference.Structures, allTypes, destinationTypes: destinationTypes),
                         nativePointerMappings[referenceIndex]),
-                    functionPointerMappings[referenceIndex]));
+                    functionPointerMappings[referenceIndex]);
+                functions.Add(BoundTreeTraversal.RewriteTypes(remappedFunction,
+                    type => RemapGenericNominalType(referenceIndex, type)));
             }
         }
         var nativePointerTypes = MergeNativePointerTypeDefinitions(references, allTypes,
             nativePointerMappings, functionPointerMappings);
         return new CompilationReference(allTypes, functions.MoveToImmutable(), references[0].RuntimePolicy,
             nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
-            nativePointerTypes: nativePointerTypes);
+            nativePointerTypes: nativePointerTypes,
+            genericNominalTypeDefinitions: allGenericNominalDefinitions,
+            genericNominalTypeInstances: allGenericNominalInstances.ToImmutable(),
+            coreTaskType: coreTaskType);
+
+        int MapGenericNominalTypeInstance(int referenceIndex, int instanceIndex)
+        {
+            var sourceInstances = references[referenceIndex].GenericNominalTypeInstances;
+            if ((uint)instanceIndex >= (uint)sourceInstances.Length)
+            {
+                throw new ModuleContractException(
+                    "A generic nominal type reference has an invalid source instance index.");
+            }
+            if (genericNominalTypeStates[referenceIndex][instanceIndex] == 1)
+            {
+                throw new ModuleContractException("Generic nominal type substitutions are cyclic.");
+            }
+            if (genericNominalTypeStates[referenceIndex][instanceIndex] == 2)
+            {
+                return genericNominalTypeMappings[referenceIndex][instanceIndex];
+            }
+
+            genericNominalTypeStates[referenceIndex][instanceIndex] = 1;
+            var sourceInstance = sourceInstances[instanceIndex];
+            var remappedInstance = BoundTreeTraversal.RewriteTypes(sourceInstance,
+                type => RemapGenericNominalTypeArgument(referenceIndex, type));
+            var key = BoundGenericNominalTypeContract.CreateUseKey(
+                remappedInstance.Definition, remappedInstance.Arguments,
+                remappedInstance.Qualifiers, remappedInstance.TypeSpecForm);
+            if (!genericNominalTypeIndexes.TryGetValue(key, out var type))
+            {
+                if (allGenericNominalInstances.Count
+                    >= BoundGenericNominalTypeTypes.MaximumCount)
+                {
+                    throw new ModuleContractException(
+                        "The merged generic nominal type instance limit was exceeded.");
+                }
+                type = BoundGenericNominalTypeTypes.Type(
+                    allGenericNominalInstances.Count);
+                allGenericNominalInstances.Add(remappedInstance);
+                genericNominalTypeIndexes.Add(key, type);
+            }
+
+            var mappedIndex = BoundGenericNominalTypeTypes.Index(type);
+            genericNominalTypeMappings[referenceIndex][instanceIndex] = mappedIndex;
+            genericNominalTypeStates[referenceIndex][instanceIndex] = 2;
+            return mappedIndex;
+        }
+
+        PrimitiveType RemapGenericNominalType(int referenceIndex, PrimitiveType type)
+        {
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                var mappedIndex = MapGenericNominalTypeInstance(
+                    referenceIndex, BoundGenericNominalTypeTypes.Index(type));
+                return BoundGenericNominalTypeTypes.Type(mappedIndex);
+            }
+
+            return type;
+        }
+
+        PrimitiveType RemapGenericNominalTypeArgument(
+            int referenceIndex, PrimitiveType type)
+        {
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                return RemapGenericNominalType(referenceIndex, type);
+            }
+
+            var reference = references[referenceIndex];
+            var mapped = RemapType(type, reference.Structures, allTypes,
+                destinationTypes: destinationTypes);
+            mapped = RemapNativePointerType(mapped,
+                nativePointerMappings[referenceIndex]);
+            return RemapNativeFunctionPointerType(mapped,
+                functionPointerMappings[referenceIndex]);
+        }
     }
     private static CompilationReference SetReference(Module module)
     {
@@ -193,9 +311,9 @@ public static partial class ModuleCompiler
         {
             if (function.IsExternal)
             {
-                if (function.DirectNativeImport is not null)
+                if (function.DirectNativeImport is not null && !function.IsModuleReference)
                 {
-                    if (!DirectNativeImportContract.IsValid(function, program.Structures,
+                    if (!DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
                         program.NativeFunctionPointerSignatures, program.NativePointerTypes)
                         || reference.Functions.Any(export => export.Name == function.Name))
                     {
@@ -230,7 +348,9 @@ public static partial class ModuleCompiler
                         reference.NativePointerTypes))
                     || !SameNativeOutputContracts(function.NativeOutputRole,
                         function.NativeOutputContracts, export.NativeOutputRole,
-                        export.NativeOutputContracts, program.Structures, reference.Structures)
+                        export.NativeOutputContracts, program.Structures, reference.Structures,
+                        program.NativeFunctionPointerSignatures, program.NativePointerTypes,
+                        reference.NativeFunctionPointerSignatures, reference.NativePointerTypes)
                     || !CompatibleImportedNativeVTableMethod(
                         function.ModuleImport is null ? null : function.NativeVTableMethod,
                         export.NativeVTableMethod))
@@ -364,11 +484,15 @@ public static partial class ModuleCompiler
                 ? ImmutableDictionary<string, BoundFunction>.Empty
                 : reference.Functions.ToDictionary(static function => function.Name, StringComparer.Ordinal);
             if (!exports.TryGetValue(imported.Name, out var actual)
+                || (actual.DirectNativeImport is not null
+                    && !imported.Contract.Contains("|DirectNativeImport:", StringComparison.Ordinal))
                 || !CompatibleContract(imported.Contract, Contract(actual, reference.Structures,
                     reference.NativeFunctionPointerSignatures, reference.NativePointerTypes))
                 || !SameNativeOutputContracts(imported.NativeOutputRole,
                     imported.NativeOutputContracts, actual.NativeOutputRole,
-                    actual.NativeOutputContracts, consumer.Structures, reference.Structures)
+                    actual.NativeOutputContracts, consumer.Structures, reference.Structures,
+                    consumer.NativeFunctionPointerSignatures, consumer.NativePointerTypes,
+                    reference.NativeFunctionPointerSignatures, reference.NativePointerTypes)
                 || !CompatibleImportedNativeVTableMethod(imported.ImportedNativeVTableMethod,
                     actual.NativeVTableMethod)
                 || imported.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, reference.Structures))

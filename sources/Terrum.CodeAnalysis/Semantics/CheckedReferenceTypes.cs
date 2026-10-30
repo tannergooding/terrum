@@ -13,7 +13,8 @@ internal sealed record CheckedReferenceTypeDefinition(
 
 internal static class CheckedReferenceTypes
 {
-    internal static bool IsType(PrimitiveType type) => (int)type is < 0 and not int.MinValue;
+    internal static bool IsType(PrimitiveType type) =>
+        (int)type is < 0 and >= -SemanticVerifier.MaximumAnalysisVisits;
 
     internal static int Index(PrimitiveType type) => checked(-(int)type - 1);
 
@@ -49,15 +50,26 @@ internal static class CheckedReferenceTypeContract
     internal static bool IsSupportedWriteValueType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures, int enumDefinitionCount)
     {
+        return IsSupportedWriteValueType(type, structures, enumDefinitionCount,
+            []);
+    }
+
+    private static bool IsSupportedWriteValueType(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures, int enumDefinitionCount,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
+    {
         var states = new byte[structures.Count];
-        return IsSupportedWriteValueType(type, structures, enumDefinitionCount, states, 0);
+        return IsSupportedWriteValueType(type, structures, enumDefinitionCount,
+            referenceTypes, states, 0);
     }
 
     internal static bool IsSupportedReferenceStoreValueType(
         PrimitiveType type, IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<BoundClass> classes, int enumDefinitionCount)
+        IReadOnlyList<BoundClass> classes, int enumDefinitionCount,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes)
     {
-        if (IsSupportedWriteValueType(type, structures, enumDefinitionCount)
+        if (IsSupportedWriteValueType(type, structures, enumDefinitionCount,
+                referenceTypes)
             || type == PrimitiveType.OwnedInt32Buffer)
         {
             return true;
@@ -86,11 +98,17 @@ internal static class CheckedReferenceTypeContract
     }
 
     private static bool IsSupportedWriteValueType(PrimitiveType type,
-        IReadOnlyList<BoundStruct> structures, int enumDefinitionCount, byte[] states, int depth)
+        IReadOnlyList<BoundStruct> structures, int enumDefinitionCount,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        byte[] states, int depth)
     {
         if (type == PrimitiveType.TokenSpan)
         {
             return true;
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return IsSupportedReferenceDescriptorType(type, referenceTypes, depth);
         }
         if (BoundEnumTypes.IsType(type))
         {
@@ -123,13 +141,32 @@ internal static class CheckedReferenceTypeContract
         foreach (var field in structure.Fields)
         {
             if (!IsSupportedWriteValueType(field.Type, structures, enumDefinitionCount,
-                states, depth + 1))
+                referenceTypes, states, depth + 1))
             {
                 return false;
             }
         }
         states[index] = 2;
         return true;
+    }
+
+    private static bool IsSupportedReferenceDescriptorType(
+        PrimitiveType type,
+        ImmutableArray<CheckedReferenceTypeDefinition> referenceTypes,
+        int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth
+            || !IsValidType(type, referenceTypes))
+        {
+            return false;
+        }
+
+        var reference = referenceTypes[CheckedReferenceTypes.Index(type)];
+        return !reference.IsGarbageCollected && !reference.IsInitialization
+            && !reference.IsOptional
+            && (!CheckedReferenceTypes.IsType(reference.ReferentType)
+                || IsSupportedReferenceDescriptorType(
+                    reference.ReferentType, referenceTypes, depth + 1));
     }
 
     private static bool IsValidReference(

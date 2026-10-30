@@ -108,6 +108,16 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (!BoundGenericNominalTypeContract.IsValidDefinitionTable(
+                program.GenericNominalTypeDefinitions)
+            || !BoundGenericNominalTypeContract.IsValidCoreTaskSelection(
+                program.CoreTaskType, program.GenericNominalTypeDefinitions)
+            || !BoundGenericNominalTypeContract.IsValidInstanceTable(
+                program.GenericNominalTypeInstances,
+                program.GenericNominalTypeDefinitions))
+        {
+            throw InvalidEffect(default, "GenericNominalType");
+        }
         if (program.NativeCoreRegistration is NativeCoreRegistrationSet coreRegistration
             && !BoundEnumTypes.ContainsRegistration(program.EnumDefinitions, coreRegistration))
         {
@@ -219,6 +229,11 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
+        if (!BoundInterfaceContract.IsValidTable(program.Interfaces,
+            type => ValidType(type, false, program)))
+        {
+            throw Invalid();
+        }
         if (program.Buffers.IsDefault || program.Buffers.Length > MaximumVariables)
         {
             throw Invalid();
@@ -290,7 +305,8 @@ public static partial class SemanticVerifier
             var fieldNames = new HashSet<string>(@class.Fields.Length, StringComparer.Ordinal);
             foreach (var field in @class.Fields)
             {
-                if (field is null || !ValidType(field.Type, allowVoid: false, program)
+                if (field is null || BoundGenericNominalTypeTypes.IsType(field.Type)
+                    || !ValidType(field.Type, allowVoid: false, program)
                     || field.Type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                         or PrimitiveType.MutableInt32BufferView
@@ -321,6 +337,10 @@ public static partial class SemanticVerifier
             {
                 throw Invalid();
             }
+        }
+        if (!BoundGenericNominalTypeContract.IsValidArgumentTypes(program))
+        {
+            throw InvalidEffect(default, "GenericNominalType");
         }
 
         void VerifyLayout(int index, int depth)
@@ -355,7 +375,8 @@ public static partial class SemanticVerifier
             var fieldNames = new HashSet<string>(structure.Fields.Length, StringComparer.Ordinal);
             foreach (var field in structure.Fields)
             {
-                if (field is null || !ValidType(field.Type, allowVoid: false, program)
+                if (field is null || BoundGenericNominalTypeTypes.IsType(field.Type)
+                    || !ValidType(field.Type, allowVoid: false, program)
                     || NativeFixedArrayContract.IsCarrier(field.Type))
                 {
                     throw Invalid();
@@ -385,7 +406,8 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var width = ValueLayout.Size(field.Type, program.Structures);
+                var width = ValueLayout.Size(field.Type, program.Structures,
+                    program.CheckedReferenceTypes);
                 var fieldAlignment = nested >= 0 ? alignments[nested]
                     : field.Type == PrimitiveType.TokenSpan ? 8 : width;
                 var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
@@ -458,6 +480,8 @@ public static partial class SemanticVerifier
                 || function.ReturnType == PrimitiveType.NativeStorageAddress
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
                 || !ValidType(function.ReturnType, allowVoid: true, program)
+                || (BoundGenericNominalTypeTypes.IsType(function.ReturnType)
+                    && !function.IsExternal)
                 || function.Variables.IsDefault
                 || function.ParameterCount < 0 || function.ParameterCount > function.Variables.Length
                 || function.Body is null)
@@ -501,7 +525,9 @@ public static partial class SemanticVerifier
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
                                 || variable.IsOut || function.IsExternal
-                            : !ValidType(variable.Type, allowVoid: false, program)))
+                            : !ValidType(variable.Type, allowVoid: false, program)
+                                || (BoundGenericNominalTypeTypes.IsType(variable.Type)
+                                    && !function.IsExternal)))
                     {
                         throw Invalid();
                     }
@@ -538,6 +564,17 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
+                }
+            }
+            if (!function.Body.Statements.IsEmpty)
+            {
+                var hasGenericNominalExpression = false;
+                if (!BoundTreeTraversal.VisitExpressions(function.Body,
+                    expression => hasGenericNominalExpression
+                        |= BoundGenericNominalTypeTypes.IsType(expression.Type))
+                    || hasGenericNominalExpression)
+                {
+                    throw InvalidEffect(function.Span, "GenericNominalType");
                 }
             }
             function.IndexedBody?.Verify(program, function, ref remaining);
@@ -1561,9 +1598,10 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundFieldMove move:
-                    if (move.Place is not BoundFieldRead { Receiver: BoundRead root }
-                        || (uint)root.Variable >= (uint)roots.Length
-                        || roots[root.Variable] != 0 || exclusive[root.Variable])
+                    if (move.Place is not BoundFieldRead place
+                        || !TryGetFieldRootVariable(place, out var rootVariable)
+                        || (uint)rootVariable >= (uint)roots.Length
+                        || roots[rootVariable] != 0 || exclusive[rootVariable])
                     {
                         throw InvalidEffect(move.Span, "Ownership");
                     }
@@ -2594,6 +2632,16 @@ public static partial class SemanticVerifier
                         local.Initializer, localCopyOriginDependencies, function,
                         program, ref remaining, depth + 1);
                 }
+                if (local.Initializer is not BoundMove
+                    && IsInlineStructStorage(local.Initializer.Type, program)
+                    && initialized.Dependencies is BackingDependencies localReferenceFieldDependencies)
+                {
+                    SetReferenceFieldValuesFromExpression(local.Variable,
+                        StorageProjection.WholeObject, local.Initializer.Type,
+                        local.Initializer, localReferenceFieldDependencies,
+                        initialized, function, program, ref remaining, depth + 1,
+                        fieldMasks);
+                }
                 return false;
             case BoundVacantLocal vacant:
                 if (vacant.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
@@ -2785,6 +2833,7 @@ public static partial class SemanticVerifier
                 {
                     return true;
                 }
+                initialized.ResetNestedOwnerStates(assignment.Variable);
                 if (IsUnique(program, assignment.Value.Type)
                     && HasFields(program, assignment.Value.Type))
                 {
@@ -2868,6 +2917,16 @@ public static partial class SemanticVerifier
                         StorageProjection.WholeObject, assignment.Value.Type,
                         assignment.Value, assignmentCopyOriginDependencies, function,
                         program, ref remaining, depth + 1);
+                }
+                if (assignment.Value is not BoundMove
+                    && IsInlineStructStorage(assignment.Value.Type, program)
+                    && initialized.Dependencies is BackingDependencies assignmentReferenceFieldDependencies)
+                {
+                    SetReferenceFieldValuesFromExpression(assignment.Variable,
+                        StorageProjection.WholeObject, assignment.Value.Type,
+                        assignment.Value, assignmentReferenceFieldDependencies,
+                        initialized, function, program, ref remaining, depth + 1,
+                        fieldMasks);
                 }
                 return false;
             case BoundOptionalAssignment optionalAssignment:
@@ -2960,56 +3019,7 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var fieldBit = 1u << fieldAssignment.Field;
-                var isConstructorFieldInitializationBefore =
-                    function.IsConstructor
-                    && fieldAssignment.Variable == 0
-                    && fieldAssignment.NestedFields.IsEmpty
-                    && (fieldMasks[0] & fieldBit) == 0
-                    && (initialized.PossibleFieldMask(0) & fieldBit) == 0;
-                var isPartialFieldRepairBefore = initialized.HasPartialValue(fieldAssignment.Variable)
-                    && !function.IsConstructor && !function.IsClassConstructor
-                    && fieldAssignment.Variable != 0 && fieldAssignment.NestedFields.IsEmpty
-                    && IsUnique(program, ownerType)
-                    && program.Structures[(int)ownerType - 100].CleanupMethod is null
-                    && targetField.IsMutable
-                    && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
-                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) == 0;
-                var fieldMayBeLiveBefore =
-                    ((fieldMasks[fieldAssignment.Variable]
-                        | initialized.PossibleFieldMask(fieldAssignment.Variable)) & fieldBit) != 0;
-                var isLiveFieldReplacementCandidate = IsUnique(program, ownerType)
-                    && IsUnique(program, targetField.Type)
-                    && fieldAssignment.NestedFields.IsEmpty
-                    && targetField.IsMutable
-                    && fieldMayBeLiveBefore
-                    && !isConstructorFieldInitializationBefore
-                    && !isPartialFieldRepairBefore;
-                if (initialized.HasPartialValue(fieldAssignment.Variable)
-                    && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
-                    && !isPartialFieldRepairBefore && !isConstructorFieldInitializationBefore
-                    && !isLiveFieldReplacementCandidate)
-                {
-                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
-                }
-                if (IsUnique(program, targetField.Type)
-                    && !isConstructorFieldInitializationBefore
-                    && !isPartialFieldRepairBefore && !isLiveFieldReplacementCandidate)
-                {
-                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
-                }
-                if (!targetField.IsMutable
-                    && (!ManagedClassTypes.IsClass(ownerType) || fieldAssignment.NestedFields.IsEmpty
-                        || !ManagedClassTypes.IsClass(targetField.Type))
-                    && !((function.IsConstructor || function.IsClassConstructor) && fieldAssignment.Variable == 0))
-                {
-                    throw Invalid();
-                }
-                var nestedWrite = !fieldAssignment.NestedFields.IsEmpty;
-                if (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0)
-                {
-                    throw Invalid();
-                }
+                var rootFieldBit = 1u << fieldAssignment.Field;
                 for (var index = 0; index < fieldAssignment.NestedFields.Length; index++)
                 {
                     Count(ref remaining, depth + index + 1);
@@ -3029,7 +3039,8 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (IsUnique(program, nestedType))
+                    if (IsUnique(program, nestedType)
+                        && !IsUnique(program, ownerType))
                     {
                         throw InvalidEffect(fieldAssignment.Span, "Ownership");
                     }
@@ -3041,25 +3052,15 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                 }
-                if (requiresUnsafeCaller && !fieldAssignment.IsUnsafeAuthorized)
-                {
-                    throw InvalidEffect(fieldAssignment.Span, "UnsafeCaller");
-                }
-                if (IsUnique(program, targetField.Type)
-                    && fieldAssignment.Value is not (BoundMove or BoundFieldMove or BoundCall))
-                {
-                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
-                }
-                if (fieldAssignment.Value.Type != targetField.Type
-                    || (nestedWrite && (fieldMasks[fieldAssignment.Variable] & (1u << fieldAssignment.Field)) == 0))
+                if (!targetField.IsMutable
+                    && (!ManagedClassTypes.IsClass(ownerType)
+                        || fieldAssignment.NestedFields.IsEmpty
+                        || !ManagedClassTypes.IsClass(targetField.Type))
+                    && !((function.IsConstructor || function.IsClassConstructor)
+                        && fieldAssignment.Variable == 0))
                 {
                     throw Invalid();
                 }
-                // A nested value place remains usable only while its live owner remains complete.
-                var preserveValueOwner = initialized[fieldAssignment.Variable]
-                    && !ManagedClassTypes.IsClass(ownerType);
-                var fieldValueCouldComplete = CanCompleteNormally(fieldAssignment.Value,
-                    initialized, program, ref remaining, depth + 1);
                 var fieldProjectionPath = new FieldProjectionPath()
                     .Append(ownerType, fieldAssignment.Field);
                 var projectionOwnerType = Fields(program, ownerType)[fieldAssignment.Field].Type;
@@ -3071,6 +3072,97 @@ public static partial class SemanticVerifier
                 }
                 var fieldPlaceProjection = new StorageProjection(
                     StorageProjectionKind.InlineFieldPath, 0, 0, fieldProjectionPath);
+                var fieldSegments = fieldProjectionPath.Segments;
+                var fieldOwnerPath = FieldPathPrefix(fieldProjectionPath,
+                    fieldSegments.Length - 1);
+                var fieldOwnerType = fieldSegments[^1].OwnerType;
+                var (fieldOwnerDefinite, fieldOwnerPossible) = FieldPathOwnerMasks(
+                    fieldAssignment.Variable, fieldOwnerPath, fieldOwnerType,
+                    initialized, fieldMasks, program);
+                var leafFieldBit = 1u << fieldSegments[^1].Field;
+                var fieldMayBeLiveBefore =
+                    ((fieldOwnerDefinite | fieldOwnerPossible) & leafFieldBit) != 0;
+                var fieldIsDefinitelyVacantBefore = !fieldMayBeLiveBefore;
+                var fieldPathIsUnique = IsUnique(program, ownerType);
+                var pathOwnerType = ownerType;
+                foreach (var segment in fieldSegments)
+                {
+                    fieldPathIsUnique &= segment.OwnerType == pathOwnerType
+                        && IsUnique(program, pathOwnerType);
+                    pathOwnerType = Fields(program, pathOwnerType)[segment.Field].Type;
+                }
+                var isConstructorFieldInitializationBefore =
+                    function.IsConstructor
+                    && fieldAssignment.Variable == 0
+                    && fieldSegments.Length == 1
+                    && fieldIsDefinitelyVacantBefore;
+                var ownerPathCanBePartial = fieldPathIsUnique
+                    && ((function.IsConstructor && fieldAssignment.Variable == 0)
+                        || (!function.IsConstructor && !function.IsClassConstructor
+                            && !(fieldAssignment.Variable == 0
+                                && function.DeclaringStruct is not null && !function.IsStatic)
+                            && fieldSegments.All(segment =>
+                                program.Structures[(int)segment.OwnerType - 100].CleanupMethod is null)));
+                var ownerPlaceIsPartial = fieldOwnerPath.Segments.IsEmpty
+                    ? initialized.HasPartialValue(fieldAssignment.Variable)
+                    : fieldOwnerDefinite != FullMask(program, fieldOwnerType);
+                var isPartialFieldRepairBefore =
+                    IsUnique(program, targetField.Type)
+                    && targetField.IsMutable
+                    && ownerPlaceIsPartial
+                    && fieldIsDefinitelyVacantBefore
+                    && ownerPathCanBePartial
+                    && (fieldSegments.Length > 1 || fieldAssignment.Variable != 0);
+                var isLiveFieldReplacementCandidate =
+                    fieldPathIsUnique
+                    && IsUnique(program, targetField.Type)
+                    && targetField.IsMutable
+                    && fieldMayBeLiveBefore
+                    && !isConstructorFieldInitializationBefore
+                    && !isPartialFieldRepairBefore;
+                if (fieldAssignment.NestedFields.IsEmpty == false)
+                {
+                    for (var index = 0; index < fieldSegments.Length - 1; index++)
+                    {
+                        var segment = fieldSegments[index];
+                        var ownerPath = FieldPathPrefix(fieldProjectionPath, index);
+                        var (_, ownerPossible) = FieldPathOwnerMasks(fieldAssignment.Variable,
+                            ownerPath, segment.OwnerType, initialized, fieldMasks, program);
+                        if ((ownerPossible & (1u << segment.Field)) == 0)
+                        {
+                            throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                        }
+                    }
+                    if (!fieldPathIsUnique
+                        && (fieldMasks[fieldAssignment.Variable] & rootFieldBit) == 0)
+                    {
+                        throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                    }
+                }
+                if (initialized.HasPartialValue(fieldAssignment.Variable)
+                    && fieldIsDefinitelyVacantBefore
+                    && !isPartialFieldRepairBefore && !isConstructorFieldInitializationBefore)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                if (requiresUnsafeCaller && !fieldAssignment.IsUnsafeAuthorized)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "UnsafeCaller");
+                }
+                if (IsUnique(program, targetField.Type)
+                    && fieldAssignment.Value is not (BoundMove or BoundFieldMove or BoundCall))
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                if (fieldAssignment.Value.Type != targetField.Type)
+                {
+                    throw Invalid();
+                }
+                // A nested value place remains usable only while its live owner remains complete.
+                var preserveValueOwner = initialized[fieldAssignment.Variable]
+                    && !ManagedClassTypes.IsClass(ownerType);
+                var fieldValueCouldComplete = CanCompleteNormally(fieldAssignment.Value,
+                    initialized, program, ref remaining, depth + 1);
                 if (fieldValueCouldComplete && isPartialFieldRepairBefore)
                 {
                     CheckReferencePlaceInvalidation(fieldAssignment.Variable,
@@ -3086,26 +3178,40 @@ public static partial class SemanticVerifier
                 {
                     return true;
                 }
+                if (fieldValueCouldComplete
+                    && (IsOrdinaryStoredReferenceType(targetField.Type, program)
+                        || (IsInlineStructStorage(targetField.Type, program)
+                            && ReferenceFieldLeaves(targetField.Type, program,
+                                ref remaining, depth + 1).Count != 0)))
+                {
+                    CheckReferenceDescriptorInvalidation(fieldAssignment.Variable,
+                        fieldPlaceProjection, initialized, fieldAssignment.Span);
+                }
+                var (fieldOwnerDefiniteAfter, fieldOwnerPossibleAfter) = FieldPathOwnerMasks(
+                    fieldAssignment.Variable, fieldOwnerPath, fieldOwnerType,
+                    initialized, fieldMasks, program);
+                var fieldMayBeLiveAfter =
+                    ((fieldOwnerDefiniteAfter | fieldOwnerPossibleAfter)
+                        & leafFieldBit) != 0;
+                var fieldIsDefinitelyVacantAfter = !fieldMayBeLiveAfter;
                 var isConstructorFieldInitialization =
                     function.IsConstructor
                     && fieldAssignment.Variable == 0
-                    && fieldAssignment.NestedFields.IsEmpty
-                    && (fieldMasks[0] & fieldBit) == 0
-                    && (initialized.PossibleFieldMask(0) & fieldBit) == 0;
+                    && fieldSegments.Length == 1
+                    && fieldIsDefinitelyVacantAfter;
+                var ownerPlaceIsPartialAfter = fieldOwnerPath.Segments.IsEmpty
+                    ? initialized.HasPartialValue(fieldAssignment.Variable)
+                    : fieldOwnerDefiniteAfter != FullMask(program, fieldOwnerType);
                 var isPartialFieldRepair = initialized.HasPartialValue(fieldAssignment.Variable)
-                    && !function.IsConstructor && !function.IsClassConstructor
-                    && fieldAssignment.Variable != 0 && fieldAssignment.NestedFields.IsEmpty
-                    && IsUnique(program, ownerType)
-                    && program.Structures[(int)ownerType - 100].CleanupMethod is null
+                    && ownerPlaceIsPartialAfter
                     && targetField.IsMutable
-                    && (fieldMasks[fieldAssignment.Variable] & fieldBit) == 0
-                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) & fieldBit) == 0;
-                var fieldMayBeLiveAfter =
-                    ((fieldMasks[fieldAssignment.Variable]
-                        | initialized.PossibleFieldMask(fieldAssignment.Variable)) & fieldBit) != 0;
-                var isLiveFieldReplacement = IsUnique(program, ownerType)
+                    && fieldIsDefinitelyVacantAfter
+                    && ownerPathCanBePartial
+                    && (fieldSegments.Length > 1
+                        || (!function.IsConstructor && !function.IsClassConstructor
+                            && fieldAssignment.Variable != 0));
+                var isLiveFieldReplacement = fieldPathIsUnique
                     && IsUnique(program, targetField.Type)
-                    && fieldAssignment.NestedFields.IsEmpty
                     && targetField.IsMutable
                     && fieldMayBeLiveAfter
                     && !isConstructorFieldInitialization
@@ -3207,18 +3313,41 @@ public static partial class SemanticVerifier
                                 ref remaining, depth + 1));
                     }
                 }
-                fieldMasks[fieldAssignment.Variable] |= fieldBit;
-                initialized.SetPossibleFieldMask(fieldAssignment.Variable,
-                    initialized.PossibleFieldMask(fieldAssignment.Variable) | fieldBit);
-                if (fieldMasks[fieldAssignment.Variable] == FullMask(program, ownerType))
+                if (fieldSegments.Length == 1)
                 {
-                    initialized[fieldAssignment.Variable] = true;
+                    initialized.ResetNestedOwnerSubtree(fieldAssignment.Variable,
+                        fieldProjectionPath);
+                    fieldMasks[fieldAssignment.Variable] |= rootFieldBit;
+                    initialized.SetPossibleFieldMask(fieldAssignment.Variable,
+                        initialized.PossibleFieldMask(fieldAssignment.Variable) | rootFieldBit);
+                    if (fieldMasks[fieldAssignment.Variable] == FullMask(program, ownerType))
+                    {
+                        initialized[fieldAssignment.Variable] = true;
+                    }
+                    else if (IsUnique(program, ownerType)
+                        && (initialized.PossibleFieldMask(fieldAssignment.Variable) != 0
+                            || initialized.HasPartialValue(fieldAssignment.Variable)))
+                    {
+                        initialized.MarkPartialValue(fieldAssignment.Variable);
+                    }
                 }
-                else if (IsUnique(program, ownerType)
-                    && (initialized.PossibleFieldMask(fieldAssignment.Variable) != 0
-                        || initialized.HasPartialValue(fieldAssignment.Variable)))
+                else if (fieldPathIsUnique && IsUnique(program, targetField.Type))
                 {
-                    initialized.MarkPartialValue(fieldAssignment.Variable);
+                    initialized.ResetNestedOwnerSubtree(fieldAssignment.Variable,
+                        fieldProjectionPath);
+                    SetNestedFieldLiveness(fieldAssignment.Variable,
+                        fieldProjectionPath, live: true, initialized, fieldMasks,
+                        function, program, fieldAssignment.Span);
+                }
+                if (IsInlineStructStorage(ownerType, program)
+                    && (IsOrdinaryStoredReferenceType(targetField.Type, program)
+                        || IsInlineStructStorage(targetField.Type, program))
+                    && initialized.Dependencies is BackingDependencies fieldReferenceDependencies)
+                {
+                    SetReferenceFieldValuesFromExpression(fieldAssignment.Variable,
+                        fieldPlaceProjection, targetField.Type, fieldAssignment.Value,
+                        fieldReferenceDependencies, initialized, function, program,
+                        ref remaining, depth + 1, fieldMasks);
                 }
                 return false;
             case BoundBufferAssignment bufferWrite:
@@ -3372,14 +3501,17 @@ public static partial class SemanticVerifier
                     if (thenCompletes && elseCompletes)
                     {
                         _ = initialized.MergeFieldPlaceGenerations(i, thenState, elseState);
+                        _ = initialized.MergeNestedOwnerStates(i, thenState, elseState);
                     }
                     else if (thenCompletes)
                     {
                         _ = initialized.CopyFieldPlaceGenerations(i, thenState);
+                        _ = initialized.CopyNestedOwnerStates(i, thenState);
                     }
                     else if (elseCompletes)
                     {
                         _ = initialized.CopyFieldPlaceGenerations(i, elseState);
+                        _ = initialized.CopyNestedOwnerStates(i, elseState);
                     }
                     if (thenCompletes && elseCompletes)
                     {
@@ -3600,6 +3732,9 @@ public static partial class SemanticVerifier
                         changed |= backState is not null && !localToIteration
                             ? headState.MergeFieldPlaceGenerations(i, entryState, backState)
                             : headState.CopyFieldPlaceGenerations(i, entryState);
+                        changed |= backState is not null && !localToIteration
+                            ? headState.MergeNestedOwnerStates(i, entryState, backState)
+                            : headState.CopyNestedOwnerStates(i, entryState);
                         changed |= backState is not null && !localToIteration
                             ? headState.MergeProvenanceSlot(i, backState)
                             : headState.CopyProvenanceSlot(i, entryState);
@@ -3960,7 +4095,8 @@ public static partial class SemanticVerifier
                             }
                             dependencies.Staged.Add(new StagedDependencySource(
                                 null, -1, [.. forwardedBacking], EmptyBackingSources,
-                                EmptyBackingSources, EmptyBackingSources, false,
+                                EmptyBackingSources, EmptyReferenceFieldValues,
+                                EmptyBackingSources, false,
                                 new NativePointerExtentFact([], MayBeOpaque: false,
                                     IsUnavailable: false)));
                         }
@@ -4152,10 +4288,12 @@ public static partial class SemanticVerifier
             if (recoveryBodyReturns && caughtFailures.HasEdges)
             {
                 _ = initialized.CopyFieldPlaceGenerations(i, catchState);
+                _ = initialized.CopyNestedOwnerStates(i, catchState);
             }
             else if (caughtFailures.HasEdges && !catchReturns)
             {
                 _ = initialized.MergeFieldPlaceGenerations(i, initialized, catchState);
+                _ = initialized.MergeNestedOwnerStates(i, initialized, catchState);
             }
         }
         _ = initialized.MergeNativeOutputState(initialized, !recoveryBodyReturns,
@@ -4450,6 +4588,15 @@ public static partial class SemanticVerifier
     private readonly record struct FieldGenerationEvent(
         int Variable, StorageProjection Projection, int Activation, int Start, int Length);
 
+    private readonly record struct NestedOwnerStateKey(
+        int Variable, FieldProjectionPath OwnerPath);
+
+    private readonly record struct NestedOwnerFieldState(
+        PrimitiveType Type, uint FullMask, uint DefiniteMask, uint PossibleMask)
+    {
+        internal bool IsComplete => DefiniteMask == FullMask && PossibleMask == FullMask;
+    }
+
     private sealed class FieldGenerationContext
     {
         private readonly Dictionary<FieldGenerationEvent, long> _generations = [];
@@ -4495,6 +4642,7 @@ public static partial class SemanticVerifier
         private readonly uint[] _possibleFieldMasks;
         private FieldGenerationContext _fieldGenerationContext;
         private Dictionary<FieldGenerationKey, long> _fieldPlaceGenerations;
+        private Dictionary<NestedOwnerStateKey, NestedOwnerFieldState> _nestedOwnerStates;
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         private readonly Dictionary<BoundExpression, byte> _completionShapeFacts;
@@ -4521,7 +4669,8 @@ public static partial class SemanticVerifier
                 new Dictionary<BoundExpression, bool>(ReferenceEqualityComparer.Instance),
                 new Dictionary<BoundExpression, byte>(ReferenceEqualityComparer.Instance),
                 hasNativeOutputContracts, hasDoesNotReturnFunctions,
-                new FieldGenerationContext(), new Dictionary<FieldGenerationKey, long>())
+                new FieldGenerationContext(), new Dictionary<FieldGenerationKey, long>(),
+                new Dictionary<NestedOwnerStateKey, NestedOwnerFieldState>())
         {
         }
 
@@ -4532,7 +4681,8 @@ public static partial class SemanticVerifier
             Dictionary<BoundExpression, byte> nativeOutputFlowFacts,
             bool hasNativeOutputContracts, bool hasDoesNotReturnFunctions,
             FieldGenerationContext fieldGenerationContext,
-            Dictionary<FieldGenerationKey, long> fieldPlaceGenerations)
+            Dictionary<FieldGenerationKey, long> fieldPlaceGenerations,
+            Dictionary<NestedOwnerStateKey, NestedOwnerFieldState> nestedOwnerStates)
         {
             Program = program;
             HasNativeOutputContracts = hasNativeOutputContracts;
@@ -4541,6 +4691,7 @@ public static partial class SemanticVerifier
             _possibleFieldMasks = new uint[length];
             _fieldGenerationContext = fieldGenerationContext;
             _fieldPlaceGenerations = fieldPlaceGenerations;
+            _nestedOwnerStates = nestedOwnerStates;
             _canBeFacts = canBeFacts;
             _flowFacts = flowFacts;
             _completionShapeFacts = completionShapeFacts;
@@ -4785,6 +4936,162 @@ public static partial class SemanticVerifier
                 && mutation.FieldPath.IsPrefixOf(place.FieldPath);
         }
 
+        internal NestedOwnerFieldState NestedOwnerFields(
+            int variable, FieldProjectionPath ownerPath, PrimitiveType type)
+        {
+            if ((uint)variable >= (uint)Length
+                || ownerPath.Segments.IsEmpty
+                || !IsUnique(Program, type)
+                || !HasFields(Program, type))
+            {
+                throw Invalid();
+            }
+
+            var fullMask = FullMask(Program, type);
+            var key = new NestedOwnerStateKey(variable, ownerPath);
+            if (!_nestedOwnerStates.TryGetValue(key, out var fields))
+            {
+                return new NestedOwnerFieldState(type, fullMask, fullMask, fullMask);
+            }
+            if (fields.Type != type || fields.FullMask != fullMask
+                || (fields.DefiniteMask & ~fields.PossibleMask) != 0
+                || (fields.DefiniteMask & ~fullMask) != 0
+                || (fields.PossibleMask & ~fullMask) != 0)
+            {
+                throw Invalid();
+            }
+            return fields;
+        }
+
+        internal void SetNestedOwnerFields(
+            int variable, FieldProjectionPath ownerPath, NestedOwnerFieldState fields)
+        {
+            if ((uint)variable >= (uint)Length || ownerPath.Segments.IsEmpty
+                || !IsUnique(Program, fields.Type) || !HasFields(Program, fields.Type)
+                || fields.FullMask != FullMask(Program, fields.Type)
+                || (fields.DefiniteMask & ~fields.PossibleMask) != 0
+                || (fields.DefiniteMask & ~fields.FullMask) != 0
+                || (fields.PossibleMask & ~fields.FullMask) != 0)
+            {
+                throw Invalid();
+            }
+
+            var key = new NestedOwnerStateKey(variable, ownerPath);
+            if (fields.IsComplete)
+            {
+                _ = _nestedOwnerStates.Remove(key);
+            }
+            else
+            {
+                _nestedOwnerStates[key] = fields;
+            }
+        }
+
+        internal void ResetNestedOwnerStates(int variable)
+        {
+            foreach (var key in _nestedOwnerStates.Keys
+                .Where(key => key.Variable == variable).ToArray())
+            {
+                _ = _nestedOwnerStates.Remove(key);
+            }
+        }
+
+        internal void ResetNestedOwnerSubtree(
+            int variable, FieldProjectionPath ownerPath)
+        {
+            if ((uint)variable >= (uint)Length || ownerPath.Segments.IsEmpty)
+            {
+                throw Invalid();
+            }
+            foreach (var key in _nestedOwnerStates.Keys.Where(key =>
+                key.Variable == variable && ownerPath.IsPrefixOf(key.OwnerPath)).ToArray())
+            {
+                _ = _nestedOwnerStates.Remove(key);
+            }
+        }
+
+        internal bool CopyNestedOwnerStates(int variable, InitializationState other)
+        {
+            if (ReferenceEquals(this, other))
+            {
+                return false;
+            }
+            var previous = _nestedOwnerStates
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var next = other._nestedOwnerStates
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            ResetNestedOwnerStates(variable);
+            foreach (var (key, fields) in next)
+            {
+                _nestedOwnerStates.Add(key, fields);
+            }
+            return !NestedOwnerMapsEqual(previous, next);
+        }
+
+        internal bool MergeNestedOwnerStates(int variable, InitializationState other)
+            => MergeNestedOwnerStates(variable, this, other);
+
+        internal bool MergeNestedOwnerStates(
+            int variable, InitializationState first, InitializationState second)
+        {
+            var firstValues = first._nestedOwnerStates
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var secondValues = second._nestedOwnerStates
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var keys = new HashSet<NestedOwnerStateKey>(firstValues.Keys);
+            keys.UnionWith(secondValues.Keys);
+            var previous = _nestedOwnerStates
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value);
+            var next = new Dictionary<NestedOwnerStateKey, NestedOwnerFieldState>(keys.Count);
+            ResetNestedOwnerStates(variable);
+            foreach (var key in keys)
+            {
+                var hasFirst = firstValues.TryGetValue(key, out var firstState);
+                var hasSecond = secondValues.TryGetValue(key, out var secondState);
+                var template = hasFirst ? firstState : secondState;
+                var firstFields = hasFirst ? firstState : template with {
+                    DefiniteMask = template.FullMask,
+                    PossibleMask = template.FullMask,
+                };
+                var secondFields = hasSecond ? secondState : template with {
+                    DefiniteMask = template.FullMask,
+                    PossibleMask = template.FullMask,
+                };
+                if (firstFields.Type != secondFields.Type
+                    || firstFields.FullMask != secondFields.FullMask)
+                {
+                    throw Invalid();
+                }
+                var fields = new NestedOwnerFieldState(firstFields.Type,
+                    firstFields.FullMask,
+                    firstFields.DefiniteMask & secondFields.DefiniteMask,
+                    firstFields.PossibleMask | secondFields.PossibleMask);
+                if (!fields.IsComplete)
+                {
+                    next.Add(key, fields);
+                }
+            }
+            foreach (var (key, fields) in next)
+            {
+                _nestedOwnerStates.Add(key, fields);
+            }
+            return !NestedOwnerMapsEqual(previous, next);
+        }
+
+        private static bool NestedOwnerMapsEqual(
+            Dictionary<NestedOwnerStateKey, NestedOwnerFieldState> left,
+            Dictionary<NestedOwnerStateKey, NestedOwnerFieldState> right)
+        {
+            return left.Count == right.Count
+                && left.All(pair => right.TryGetValue(pair.Key, out var fields)
+                    && fields == pair.Value);
+        }
+
         internal void SetPossibleFieldMask(int index, uint mask)
         {
             if ((uint)index >= (uint)Length)
@@ -4806,11 +5113,16 @@ public static partial class SemanticVerifier
         internal void ActivateStorage(int index, long generation)
         {
             ResetFieldPlaceGenerations(index);
+            ResetNestedOwnerStates(index);
             Dependencies?.ActivateStorage(index, generation, ScopeActivation);
         }
 
         internal int EnterBlockActivation(TextSpan span) =>
             Dependencies?.EnterBlockActivation(ScopeActivation, span) ?? ScopeActivation;
+
+        internal bool IsStorageScopeActive(int activation)
+            => activation == BackingDependencies.RootScopeActivation
+                || _activeStorageScopes.Any(scope => scope.Activation == activation);
 
         internal int EnterLoopActivation(TextSpan span, bool isReentry) =>
             Dependencies?.EnterLoopActivation(ScopeActivation, span, isReentry) ?? ScopeActivation;
@@ -4862,6 +5174,7 @@ public static partial class SemanticVerifier
         internal void AdvanceStorageGeneration(int index, long generation)
         {
             ResetFieldPlaceGenerations(index);
+            ResetNestedOwnerStates(index);
             Dependencies?.RetireStorage(index, generation);
         }
 
@@ -4889,6 +5202,7 @@ public static partial class SemanticVerifier
             _possibilities[index] |= other._possibilities[index];
             _possibleFieldMasks[index] |= other._possibleFieldMasks[index];
             _ = MergeFieldPlaceGenerations(index, other);
+            _ = MergeNestedOwnerStates(index, other);
             MergeNativeOutputSlot(index, _nativeOutputDestinations[index], _nativeOutputResults[index],
                 other._nativeOutputDestinations[index], other._nativeOutputResults[index]);
             if (Dependencies is not null && other.Dependencies is not null)
@@ -4933,7 +5247,8 @@ public static partial class SemanticVerifier
                 _completionShapeFacts, _completionFacts, _nativeOutputFlowFacts,
                 HasNativeOutputContracts, HasDoesNotReturnFunctions,
                 _fieldGenerationContext,
-                new Dictionary<FieldGenerationKey, long>(_fieldPlaceGenerations)) {
+                new Dictionary<FieldGenerationKey, long>(_fieldPlaceGenerations),
+                new Dictionary<NestedOwnerStateKey, NestedOwnerFieldState>(_nestedOwnerStates)) {
                 StatementInputs = StatementInputs,
                 Dependencies = Dependencies?.Clone(),
                 NativePointerCaptureEffects = NativePointerCaptureEffects,
@@ -4957,6 +5272,8 @@ public static partial class SemanticVerifier
             destination._fieldGenerationContext = _fieldGenerationContext;
             destination._fieldPlaceGenerations = new Dictionary<FieldGenerationKey, long>(
                 _fieldPlaceGenerations);
+            destination._nestedOwnerStates =
+                new Dictionary<NestedOwnerStateKey, NestedOwnerFieldState>(_nestedOwnerStates);
             destination._nativeOutputStateCount = _nativeOutputStateCount;
             destination.ScopeActivation = ScopeActivation;
             destination._activeStorageScopes.Clear();
@@ -5179,11 +5496,13 @@ public static partial class SemanticVerifier
                 {
                     var staged = dependencies.Staged[index];
                     if (staged.ReferenceTargets.Count != 0
-                        || staged.ReferenceObligations.Count != 0)
+                        || staged.ReferenceObligations.Count != 0
+                        || staged.ReferenceFieldValues.Count != 0)
                     {
                         dependencies.Staged[index] = staged with {
                             ReferenceTargets = [],
                             ReferenceObligations = [],
+                            ReferenceFieldValues = [],
                         };
                     }
                 }
@@ -5244,35 +5563,292 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
-        if (place is null || place.Receiver is null)
+        if (place is null
+            || !TryGetFieldProjectionPath(place, function, program,
+                out var rootVariable, out var fieldPath)
+            || !IsUnique(program, function.Variables[rootVariable].Type))
+        {
+            throw InvalidEffect(place?.Span ?? default, "Ownership");
+        }
+
+        var ownerType = function.Variables[rootVariable].Type;
+        foreach (var segment in fieldPath.Segments)
+        {
+            Count(ref remaining, depth + 1);
+            if (segment.OwnerType != ownerType || !IsUnique(program, ownerType)
+                || !HasFields(program, ownerType)
+                || (uint)segment.Field >= (uint)Fields(program, ownerType).Length
+                || !IsUnique(program, Fields(program, ownerType)[segment.Field].Type)
+                || !CanAccessField(function, program, ownerType, segment.Field))
+            {
+                throw InvalidEffect(place.Span, "Ownership");
+            }
+            ownerType = Fields(program, ownerType)[segment.Field].Type;
+        }
+        if (ownerType != place.Type
+            || !VerifyFieldPathLeafLive(place, initialized, fieldMasks,
+                function, program, ref remaining, depth + 1)
+            || (IsUnique(program, place.Type) && HasFields(program, place.Type)
+                && !initialized.NestedOwnerFields(rootVariable, fieldPath,
+                    place.Type).IsComplete))
+        {
+            throw InvalidEffect(place.Span, "Ownership");
+        }
+        return rootVariable;
+    }
+
+    private static void ExpressionReferencePlace(
+        BoundExpression place, InitializationState initialized, uint[] fieldMasks,
+        HashSet<int> declarations, BoundFunction function, BoundProgram program,
+        ref int remaining, int depth, FailureEdges? failures)
+    {
+        Count(ref remaining, depth);
+        if (place is BoundFieldRead field)
+        {
+            var ownerType = field.Receiver.Type;
+            if (!HasFields(program, ownerType)
+                || (uint)field.Field >= (uint)Fields(program, ownerType).Length
+                || !CanAccessField(function, program, ownerType, field.Field)
+                || field.Type != Fields(program, ownerType)[field.Field].Type)
+            {
+                throw Invalid(field.Span);
+            }
+            if (Fields(program, ownerType)[field.Field].RequiresUnsafeCaller
+                && !field.IsUnsafeAuthorized)
+            {
+                throw InvalidEffect(field.Span, "UnsafeCaller");
+            }
+            ExpressionReferencePlace(field.Receiver, initialized, fieldMasks,
+                declarations, function, program, ref remaining, depth + 1,
+                failures);
+            return;
+        }
+
+        if (place is BoundRead read && IsUnique(program, read.Type))
+        {
+            if ((uint)read.Variable >= (uint)initialized.Length
+                || function.Variables[read.Variable].Type != read.Type
+                || (!initialized[read.Variable]
+                    && !initialized.HasPartialValue(read.Variable)))
+            {
+                throw InvalidEffect(read.Span, "Ownership");
+            }
+            return;
+        }
+
+        Expression(place, initialized, fieldMasks, declarations, function,
+            program, ref remaining, depth + 1, failures);
+    }
+
+    private static bool TryGetFieldProjectionPath(
+        BoundFieldRead place, BoundFunction function, BoundProgram program,
+        out int rootVariable, out FieldProjectionPath fieldPath)
+    {
+        rootVariable = -1;
+        fieldPath = default;
+        if (place is null)
+        {
+            return false;
+        }
+
+        var fields = new Stack<BoundFieldRead>();
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            fields.Push(field);
+            receiver = field.Receiver;
+        }
+        if (receiver is not BoundRead root
+            || (uint)root.Variable >= (uint)function.Variables.Length
+            || root.Type != function.Variables[root.Variable].Type)
+        {
+            return false;
+        }
+
+        rootVariable = root.Variable;
+        var ownerType = root.Type;
+        while (fields.TryPop(out var field))
+        {
+            if (field.Receiver.Type != ownerType || !HasFields(program, ownerType)
+                || (uint)field.Field >= (uint)Fields(program, ownerType).Length
+                || field.Type != Fields(program, ownerType)[field.Field].Type
+                || !CanAccessField(function, program, ownerType, field.Field))
+            {
+                rootVariable = -1;
+                fieldPath = default;
+                return false;
+            }
+            if (Fields(program, ownerType)[field.Field].RequiresUnsafeCaller
+                && !field.IsUnsafeAuthorized)
+            {
+                throw InvalidEffect(field.Span, "UnsafeCaller");
+            }
+            fieldPath = fieldPath.Append(ownerType, field.Field);
+            ownerType = field.Type;
+        }
+        return !fieldPath.Segments.IsEmpty;
+    }
+
+    private static bool TryGetFieldRootVariable(
+        BoundFieldRead place, out int rootVariable)
+    {
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            receiver = field.Receiver;
+        }
+        if (receiver is BoundRead root)
+        {
+            rootVariable = root.Variable;
+            return true;
+        }
+        rootVariable = -1;
+        return false;
+    }
+
+    private static FieldProjectionPath FieldPathPrefix(FieldProjectionPath path, int length)
+    {
+        if (length < 0 || length > path.Segments.Length)
         {
             throw Invalid();
         }
-        var owner = (int)place.Receiver.Type - 100;
-        if (owner < 0 || owner >= program.Structures.Length
-            || place.Field < 0 || place.Field >= program.Structures[owner].Fields.Length
-            || !program.Structures[owner].IsUnique || !IsUnique(program, place.Type)
-            || place.Type != program.Structures[owner].Fields[place.Field].Type
-            || !CanAccessField(function, program.Structures[owner], place.Field))
+
+        var prefix = default(FieldProjectionPath);
+        for (var index = 0; index < length; index++)
         {
-            throw InvalidEffect(place.Span, "Ownership");
+            var segment = path.Segments[index];
+            prefix = prefix.Append(segment.OwnerType, segment.Field);
         }
-        if (place.Receiver is BoundFieldRead parent)
+        return prefix;
+    }
+
+    private static (uint Definite, uint Possible) FieldPathOwnerMasks(
+        int rootVariable, FieldProjectionPath ownerPath, PrimitiveType ownerType,
+        InitializationState initialized, uint[] fieldMasks, BoundProgram program)
+    {
+        if (ownerPath.Segments.IsEmpty)
         {
-            return VerifyUniqueFieldPlace(parent, initialized, fieldMasks, function, program,
-                ref remaining, depth + 1);
+            return (fieldMasks[rootVariable], initialized.PossibleFieldMask(rootVariable));
         }
-        if (place.Receiver is not BoundRead root || root.Variable < 0
-            || root.Variable >= initialized.Length
-            || root.Type != function.Variables[root.Variable].Type
-            || !IsUnique(program, root.Type)
-            || (!initialized[root.Variable]
-                && (!initialized.HasPartialValue(root.Variable)
-                    || (fieldMasks[root.Variable] & (1u << place.Field)) == 0)))
+        if (IsUnique(program, ownerType) && HasFields(program, ownerType))
         {
-            throw InvalidEffect(place.Span, "Ownership");
+            var fields = initialized.NestedOwnerFields(rootVariable, ownerPath, ownerType);
+            return (fields.DefiniteMask, fields.PossibleMask);
         }
-        return root.Variable;
+        var fullMask = FullMask(program, ownerType);
+        return (fullMask, fullMask);
+    }
+
+    private static bool VerifyFieldPathLeafLive(
+        BoundFieldRead place, InitializationState initialized, uint[] fieldMasks,
+        BoundFunction function, BoundProgram program, ref int remaining, int depth)
+    {
+        Count(ref remaining, depth);
+        if (!TryGetFieldProjectionPath(place, function, program,
+                out var rootVariable, out var fieldPath)
+            || !IsUnique(program, function.Variables[rootVariable].Type)
+            || (!initialized[rootVariable] && !initialized.HasPartialValue(rootVariable)))
+        {
+            throw InvalidEffect(place?.Span ?? default, "Ownership");
+        }
+
+        var segments = fieldPath.Segments;
+        for (var index = 0; index < segments.Length; index++)
+        {
+            Count(ref remaining, depth + index + 1);
+            var segment = segments[index];
+            var ownerPath = FieldPathPrefix(fieldPath, index);
+            var (definite, possible) = FieldPathOwnerMasks(
+                rootVariable, ownerPath, segment.OwnerType,
+                initialized, fieldMasks, program);
+            var bit = 1u << segment.Field;
+            var isLeaf = index == segments.Length - 1;
+            if (isLeaf ? (definite & bit) == 0 : (possible & bit) == 0)
+            {
+                throw InvalidEffect(place.Span, "Ownership");
+            }
+        }
+        return true;
+    }
+
+    private static void SetNestedFieldLiveness(
+        int rootVariable, FieldProjectionPath fieldPath, bool live,
+        InitializationState initialized, uint[] fieldMasks,
+        BoundFunction function, BoundProgram program, TextSpan span)
+    {
+        var segments = fieldPath.Segments;
+        if (segments.Length < 2)
+        {
+            throw Invalid(span);
+        }
+
+        var leaf = segments[^1];
+        var ownerPath = FieldPathPrefix(fieldPath, segments.Length - 1);
+        var ownerState = initialized.NestedOwnerFields(
+            rootVariable, ownerPath, leaf.OwnerType);
+        var fieldBit = 1u << leaf.Field;
+        var definite = live
+            ? ownerState.DefiniteMask | fieldBit
+            : ownerState.DefiniteMask & ~fieldBit;
+        var possible = live
+            ? ownerState.PossibleMask | fieldBit
+            : ownerState.PossibleMask & ~fieldBit;
+        initialized.SetNestedOwnerFields(rootVariable, ownerPath,
+            ownerState with { DefiniteMask = definite, PossibleMask = possible });
+        PropagateNestedOwnerCompleteness(rootVariable, ownerPath, leaf.OwnerType,
+            initialized, fieldMasks, function, program, span);
+    }
+
+    private static void PropagateNestedOwnerCompleteness(
+        int rootVariable, FieldProjectionPath ownerPath, PrimitiveType ownerType,
+        InitializationState initialized, uint[] fieldMasks,
+        BoundFunction function, BoundProgram program, TextSpan span)
+    {
+        while (!ownerPath.Segments.IsEmpty)
+        {
+            var ownerState = initialized.NestedOwnerFields(
+                rootVariable, ownerPath, ownerType);
+            var ownerIsComplete = ownerState.IsComplete;
+            var ownerSegment = ownerPath.Segments[^1];
+            var parentPath = FieldPathPrefix(ownerPath, ownerPath.Segments.Length - 1);
+            var fieldBit = 1u << ownerSegment.Field;
+            if (parentPath.Segments.IsEmpty)
+            {
+                fieldMasks[rootVariable] = ownerIsComplete
+                    ? fieldMasks[rootVariable] | fieldBit
+                    : fieldMasks[rootVariable] & ~fieldBit;
+                initialized.SetPossibleFieldMask(rootVariable,
+                    initialized.PossibleFieldMask(rootVariable) | fieldBit);
+                var rootType = function.Variables[rootVariable].Type;
+                if (fieldMasks[rootVariable] == FullMask(program, rootType))
+                {
+                    initialized[rootVariable] = true;
+                }
+                else if (IsUnique(program, rootType))
+                {
+                    initialized.MarkPartialValue(rootVariable);
+                }
+                return;
+            }
+
+            var parentType = ownerSegment.OwnerType;
+            if (!IsUnique(program, parentType) || !HasFields(program, parentType))
+            {
+                throw Invalid(span);
+            }
+            var parentState = initialized.NestedOwnerFields(
+                rootVariable, parentPath, parentType);
+            var parentDefinite = ownerIsComplete
+                ? parentState.DefiniteMask | fieldBit
+                : parentState.DefiniteMask & ~fieldBit;
+            initialized.SetNestedOwnerFields(rootVariable, parentPath,
+                parentState with {
+                    DefiniteMask = parentDefinite,
+                    PossibleMask = parentState.PossibleMask | fieldBit,
+                });
+            ownerPath = parentPath;
+            ownerType = parentType;
+        }
     }
 
     private static int VerifyMutableFieldPlace(BoundFieldRead place, InitializationState initialized,
@@ -5480,13 +6056,21 @@ public static partial class SemanticVerifier
                 }
                 var formedReference = program.CheckedReferenceTypes[
                     CheckedReferenceTypes.Index(formation.Type)];
+                var incomingWritable = false;
+                var hasIncomingPlace = TryGetIncomingReferencePlace(
+                    formation.Place, function, program, ref remaining,
+                    depth + 1, out _, out incomingWritable);
+                var hasLocalPlace = !hasIncomingPlace
+                    && TryGetReferencePlaceStorage(
+                        formation.Place, function, program, out _, out _);
+                var placeWritable = hasLocalPlace
+                    ? IsWritableReferencePlace(formation.Place, function, program)
+                    : incomingWritable;
                 if (formedReference.IsGarbageCollected || formedReference.IsInitialization
                     || formedReference.IsOptional
                     || formation.Place.Type != formedReference.ReferentType
-                    || !TryGetReferencePlaceStorage(formation.Place, function,
-                        program, out _, out _)
-                    || (formedReference.IsWritable && !IsWritableReferencePlace(
-                        formation.Place, function, program)))
+                    || (!hasLocalPlace && !hasIncomingPlace)
+                    || (formedReference.IsWritable && !placeWritable))
                 {
                     throw InvalidEffect(formation.Span, "CheckedReference");
                 }
@@ -5497,8 +6081,9 @@ public static partial class SemanticVerifier
                 _ = ReferenceTargetsOfExpression(formation, formationDependencies,
                     initialized, function, program, ref remaining, depth + 1,
                     fieldMasks);
-                Expression(formation.Place, initialized, fieldMasks, declarations, function,
-                    program, ref remaining, depth + 1, failures);
+                ExpressionReferencePlace(formation.Place, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth + 1,
+                    failures);
                 break;
             case BoundReferenceReborrow reborrow:
                 if (!CheckedReferenceTypeContract.IsValidType(
@@ -5521,11 +6106,11 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(reborrow.Span, "CheckedReference");
                 }
+                Expression(reborrow.Descriptor, initialized, fieldMasks, declarations, function,
+                    program, ref remaining, depth + 1, failures);
                 _ = ReferenceTargetsOfExpression(reborrow, reborrowDependencies,
                     initialized, function, program, ref remaining, depth + 1,
                     fieldMasks);
-                Expression(reborrow.Descriptor, initialized, fieldMasks, declarations, function,
-                    program, ref remaining, depth + 1, failures);
                 break;
             case BoundReferenceRead referenceRead:
                 if (!CheckedReferenceTypeContract.IsValidType(
@@ -5544,16 +6129,22 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(referenceRead.Span, "CheckedReference");
                 }
-                foreach (var referenceTarget in ReferenceTargetsOfExpression(
-                    referenceRead.Descriptor, readDependencies, initialized,
-                    function, program, ref remaining, depth + 1, fieldMasks))
-                {
-                    ValidateReferenceTarget(referenceTarget, readReference.ReferentType,
-                        readDependencies, initialized, function, program,
-                        referenceRead.Span, fieldMasks);
-                }
+                var referenceReadCompletes = CanCompleteNormally(
+                    referenceRead.Descriptor, initialized, program,
+                    ref remaining, depth + 1);
                 Expression(referenceRead.Descriptor, initialized, fieldMasks, declarations, function,
                     program, ref remaining, depth + 1, failures);
+                if (referenceReadCompletes)
+                {
+                    foreach (var referenceTarget in ReferenceTargetsOfExpression(
+                        referenceRead.Descriptor, readDependencies, initialized,
+                        function, program, ref remaining, depth + 1, fieldMasks))
+                    {
+                        ValidateReferenceTarget(referenceTarget, readReference.ReferentType,
+                            readDependencies, initialized, function, program,
+                            referenceRead.Span, fieldMasks);
+                    }
+                }
                 break;
             case BoundReferenceWrite referenceWrite:
                 if (!CheckedReferenceTypeContract.IsValidType(
@@ -5569,7 +6160,7 @@ public static partial class SemanticVerifier
                     || writeReference.ReferentType != referenceWrite.Value.Type
                     || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
                         referenceWrite.Value.Type, program.Structures, program.Classes,
-                        program.EnumDefinitions.Length)
+                        program.EnumDefinitions.Length, program.CheckedReferenceTypes)
                     || (uniqueStore
                         && referenceWrite.Value is not (BoundMove or BoundFieldMove or BoundCall)))
                 {
@@ -5584,20 +6175,16 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(referenceWrite.Span, "CheckedReference");
                 }
-                var referenceWriteTargets = ReferenceTargetsOfExpression(
-                    referenceWrite.Descriptor, writeDependencies, initialized,
-                    function, program, ref remaining, depth + 1, fieldMasks);
-                foreach (var referenceTarget in referenceWriteTargets)
-                {
-                    ValidateReferenceTarget(referenceTarget, writeReference.ReferentType,
-                        writeDependencies, initialized, function, program,
-                        referenceWrite.Span, fieldMasks);
-                }
-                var descriptorCompletes = CanCompleteNormally(referenceWrite.Descriptor,
+                var referenceWriteDescriptorCompletes = CanCompleteNormally(referenceWrite.Descriptor,
                     initialized, program, ref remaining, depth + 1);
                 Expression(referenceWrite.Descriptor, initialized, fieldMasks, declarations, function,
                     program, ref remaining, depth + 1, failures);
-                if (descriptorCompletes)
+                var referenceWriteTargets = referenceWriteDescriptorCompletes
+                    ? ReferenceTargetsOfExpression(referenceWrite.Descriptor,
+                        writeDependencies, initialized, function, program,
+                        ref remaining, depth + 1, fieldMasks)
+                    : new HashSet<ProvenanceAnchor>();
+                if (referenceWriteDescriptorCompletes)
                 {
                     foreach (var referenceTarget in referenceWriteTargets)
                     {
@@ -5606,7 +6193,7 @@ public static partial class SemanticVerifier
                             referenceWrite.Span, fieldMasks);
                     }
                 }
-                var valueCompletes = descriptorCompletes
+                var valueCompletes = referenceWriteDescriptorCompletes
                     && CanCompleteNormally(referenceWrite.Value,
                         initialized, program, ref remaining, depth + 1);
                 Expression(referenceWrite.Value, initialized, fieldMasks, declarations, function,
@@ -5717,6 +6304,318 @@ public static partial class SemanticVerifier
                             else
                             {
                                 throw InvalidEffect(referenceWrite.Span, "Ownership");
+                            }
+                        }
+                    }
+                    else if (IsOrdinaryStoredReferenceType(
+                        writeReference.ReferentType, program))
+                    {
+                        var storedReference = ReferenceFieldValueOfDescriptorExpression(
+                            referenceWrite.Value, writeDependencies, initialized,
+                            function, program, ref remaining, depth + 1,
+                            fieldMasks);
+                        if (!storedReference.IsAvailable
+                            || storedReference.Targets.Count == 0)
+                        {
+                            throw InvalidEffect(referenceWrite.Span,
+                                "CheckedReference");
+                        }
+                        var captureSources = ReferenceCaptureSourcesOfValue(
+                            storedReference, referenceWrite.Span);
+                        var retainedSources = new HashSet<ProvenanceAnchor>(
+                            storedReference.Targets);
+                        retainedSources.UnionWith(storedReference.Obligations);
+                        retainedSources.UnionWith(storedReference.BackingSources);
+                        foreach (var referenceTarget in referenceWriteTargets)
+                        {
+                            if (referenceTarget.Kind == ProvenanceAnchorKind.ReferencePlace)
+                            {
+                                var projection = referenceTarget.Storage?.Projection
+                                    ?? throw Invalid(referenceWrite.Span);
+                                if (projection.Kind == StorageProjectionKind.WholeObject)
+                                {
+                                    writeDependencies.SetReferenceTargets(
+                                        referenceTarget.Identity,
+                                        storedReference.Targets);
+                                    writeDependencies.SetReferenceObligations(
+                                        referenceTarget.Identity,
+                                        storedReference.Obligations);
+                                    writeDependencies.SetReferenceBackingSources(
+                                        referenceTarget.Identity,
+                                        storedReference.BackingSources);
+                                }
+                                else if (projection.Kind
+                                    == StorageProjectionKind.InlineFieldPath)
+                                {
+                                    writeDependencies.SetReferenceFieldValue(
+                                        referenceTarget.Identity, projection,
+                                        storedReference);
+                                }
+                                else
+                                {
+                                    throw InvalidEffect(referenceWrite.Span,
+                                        "Ownership");
+                                }
+                            }
+                            else if (referenceTarget.Kind is
+                                ProvenanceAnchorKind.IncomingReference
+                                    or ProvenanceAnchorKind.IncomingReferenceContents
+                                    or ProvenanceAnchorKind.IncomingReferenceField
+                                    or ProvenanceAnchorKind.IncomingReferencePlace)
+                            {
+                                if (storedReference.Targets.Any(target =>
+                                    target.Kind is ProvenanceAnchorKind.IncomingReference
+                                        or ProvenanceAnchorKind.IncomingReferenceContents
+                                        or ProvenanceAnchorKind.IncomingReferenceField
+                                        or ProvenanceAnchorKind.IncomingReferencePlace
+                                    && IsForwardedCaptureSource(function,
+                                        referenceTarget.Identity, target.Identity)))
+                                {
+                                    throw InvalidEffect(referenceWrite.Span,
+                                        "CheckedReference");
+                                }
+                                VerifyReferenceWriteCapture(function,
+                                    referenceTarget.Identity, captureSources,
+                                    referenceWrite.Span);
+                                if (referenceTarget.Kind
+                                    == ProvenanceAnchorKind.IncomingReferencePlace)
+                                {
+                                    var targetProjection =
+                                        referenceTarget.IncomingProjection
+                                        ?? throw Invalid(referenceWrite.Span);
+                                    if (referenceTarget.IncomingReferenceDepth == 0)
+                                    {
+                                        if (referenceWriteTargets.Count == 1)
+                                        {
+                                            writeDependencies.SetReferenceFieldValue(
+                                                referenceTarget.Identity,
+                                                targetProjection, storedReference);
+                                        }
+                                        else
+                                        {
+                                            _ = writeDependencies
+                                                .TryGetReferenceFieldValue(
+                                                    referenceTarget.Identity,
+                                                    targetProjection,
+                                                    out var previousValue);
+                                            _ = previousValue.Merge(storedReference);
+                                            writeDependencies.SetReferenceFieldValue(
+                                                referenceTarget.Identity,
+                                                targetProjection, previousValue);
+                                        }
+                                    }
+                                    else if (referenceWriteTargets.Count == 1)
+                                    {
+                                        writeDependencies.SetIncomingReferenceFieldValue(
+                                            referenceTarget, storedReference);
+                                    }
+                                    else
+                                    {
+                                        _ = writeDependencies
+                                            .TryGetIncomingReferenceFieldValue(
+                                                referenceTarget, out var previousValue);
+                                        _ = previousValue.Merge(storedReference);
+                                        writeDependencies.SetIncomingReferenceFieldValue(
+                                            referenceTarget, previousValue);
+                                    }
+                                }
+                                writeDependencies.AddReferenceBackingSources(
+                                    referenceTarget.Identity, retainedSources);
+                            }
+                            else
+                            {
+                                throw InvalidEffect(referenceWrite.Span,
+                                    "CheckedReference");
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var referenceLeaves = ReferenceFieldLeaves(
+                            writeReference.ReferentType, program,
+                            ref remaining, depth + 1);
+                        if (referenceLeaves.Count != 0)
+                        {
+                            var storedReferences = ReferenceFieldValuesOfExpression(
+                                referenceWrite.Value, writeReference.ReferentType,
+                                writeDependencies, initialized, function, program,
+                                ref remaining, depth + 1, fieldMasks);
+                            foreach (var (fieldProjection, _) in referenceLeaves)
+                            {
+                                if (!storedReferences.TryGetValue(
+                                        fieldProjection, out var storedReference)
+                                    || !storedReference.IsAvailable
+                                    || storedReference.Targets.Count == 0)
+                                {
+                                    throw InvalidEffect(referenceWrite.Span,
+                                        "CheckedReference");
+                                }
+
+                                foreach (var referenceTarget in referenceWriteTargets)
+                                {
+                                    if (referenceTarget.Kind
+                                        == ProvenanceAnchorKind.ReferencePlace)
+                                    {
+                                        var destinationProjection =
+                                            referenceTarget.Storage?.Projection
+                                            ?? throw Invalid(referenceWrite.Span);
+                                        if (destinationProjection.Kind is not (
+                                                StorageProjectionKind.WholeObject
+                                                or StorageProjectionKind.InlineFieldPath))
+                                        {
+                                            throw InvalidEffect(referenceWrite.Span,
+                                                "Ownership");
+                                        }
+                                        if (referenceWriteTargets.Count == 1)
+                                        {
+                                            var destinationFieldProjection =
+                                                StorageProjection.Combine(
+                                                    destinationProjection,
+                                                    fieldProjection);
+                                            if (destinationFieldProjection.Kind
+                                                != StorageProjectionKind.InlineFieldPath)
+                                            {
+                                                throw InvalidEffect(referenceWrite.Span,
+                                                    "Ownership");
+                                            }
+                                            writeDependencies.SetReferenceFieldValue(
+                                                referenceTarget.Identity,
+                                                destinationFieldProjection,
+                                                storedReference);
+                                        }
+                                        else
+                                        {
+                                            var destinationFieldProjection =
+                                                StorageProjection.Combine(
+                                                    destinationProjection,
+                                                    fieldProjection);
+                                            if (destinationFieldProjection.Kind
+                                                != StorageProjectionKind.InlineFieldPath)
+                                            {
+                                                throw InvalidEffect(referenceWrite.Span,
+                                                    "Ownership");
+                                            }
+                                            _ = writeDependencies.TryGetReferenceFieldValue(
+                                                referenceTarget.Identity,
+                                                destinationFieldProjection,
+                                                out var previousValue);
+                                            _ = previousValue.Merge(storedReference);
+                                            writeDependencies.SetReferenceFieldValue(
+                                                referenceTarget.Identity,
+                                                destinationFieldProjection,
+                                                previousValue);
+                                        }
+                                    }
+                                    else if (referenceTarget.Kind is
+                                        ProvenanceAnchorKind.IncomingReference
+                                            or ProvenanceAnchorKind.IncomingReferenceContents
+                                            or ProvenanceAnchorKind.IncomingReferenceField
+                                            or ProvenanceAnchorKind.IncomingReferencePlace)
+                                    {
+                                        if (storedReference.Targets.Any(target =>
+                                                target.Kind is
+                                                    ProvenanceAnchorKind.IncomingReference
+                                                    or ProvenanceAnchorKind.IncomingReferenceContents
+                                                    or ProvenanceAnchorKind.IncomingReferenceField
+                                                    or ProvenanceAnchorKind.IncomingReferencePlace
+                                                && IsForwardedCaptureSource(function,
+                                                    referenceTarget.Identity,
+                                                    target.Identity)))
+                                        {
+                                            throw InvalidEffect(referenceWrite.Span,
+                                                "CheckedReference");
+                                        }
+                                        VerifyReferenceWriteCapture(function,
+                                            referenceTarget.Identity,
+                                            ReferenceCaptureSourcesOfValue(
+                                                storedReference, referenceWrite.Span),
+                                            referenceWrite.Span);
+                                        if (referenceTarget.Kind
+                                            == ProvenanceAnchorKind.IncomingReferencePlace
+                                            && referenceTarget.IncomingProjection
+                                                is StorageProjection destinationPrefix)
+                                        {
+                                            var destinationProjection =
+                                                StorageProjection.Combine(
+                                                    destinationPrefix,
+                                                    fieldProjection);
+                                            if (destinationProjection.Kind
+                                                != StorageProjectionKind.InlineFieldPath)
+                                            {
+                                                throw InvalidEffect(
+                                                    referenceWrite.Span,
+                                                    "Ownership");
+                                            }
+                                            var destination = ProvenanceAnchor
+                                                .ForIncomingReferencePlace(
+                                                    referenceTarget.Identity,
+                                                    destinationProjection,
+                                                    referenceTarget
+                                                        .IncomingReferenceDepth);
+                                            if (referenceTarget.IncomingReferenceDepth == 0)
+                                            {
+                                                if (referenceWriteTargets.Count == 1)
+                                                {
+                                                    writeDependencies
+                                                        .SetReferenceFieldValue(
+                                                            referenceTarget.Identity,
+                                                            destinationProjection,
+                                                            storedReference);
+                                                }
+                                                else
+                                                {
+                                                    _ = writeDependencies
+                                                        .TryGetReferenceFieldValue(
+                                                            referenceTarget.Identity,
+                                                            destinationProjection,
+                                                            out var previousValue);
+                                                    _ = previousValue.Merge(
+                                                        storedReference);
+                                                    writeDependencies
+                                                        .SetReferenceFieldValue(
+                                                            referenceTarget.Identity,
+                                                            destinationProjection,
+                                                            previousValue);
+                                                }
+                                            }
+                                            else if (referenceWriteTargets.Count == 1)
+                                            {
+                                                writeDependencies
+                                                    .SetIncomingReferenceFieldValue(
+                                                        destination,
+                                                        storedReference);
+                                            }
+                                            else
+                                            {
+                                                _ = writeDependencies
+                                                    .TryGetIncomingReferenceFieldValue(
+                                                        destination,
+                                                        out var previousValue);
+                                                _ = previousValue.Merge(
+                                                    storedReference);
+                                                writeDependencies
+                                                    .SetIncomingReferenceFieldValue(
+                                                        destination,
+                                                        previousValue);
+                                            }
+                                        }
+                                        var retainedSources =
+                                            new HashSet<ProvenanceAnchor>(
+                                                storedReference.Targets);
+                                        retainedSources.UnionWith(
+                                            storedReference.Obligations);
+                                        retainedSources.UnionWith(
+                                            storedReference.BackingSources);
+                                        writeDependencies.AddReferenceBackingSources(
+                                            referenceTarget.Identity,
+                                            retainedSources);
+                                    }
+                                    else
+                                    {
+                                        throw InvalidEffect(referenceWrite.Span,
+                                            "CheckedReference");
+                                    }
+                                }
                             }
                         }
                     }
@@ -5983,23 +6882,13 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(fieldRead.Span, "UnsafeCaller");
                 }
-                if (IsUnique(program, readType) && fieldRead.Receiver is not BoundRead)
+                var hasUniqueRootPath = TryGetFieldProjectionPath(fieldRead,
+                    function, program, out var fieldRootVariable, out _)
+                    && IsUnique(program, function.Variables[fieldRootVariable].Type);
+                if (hasUniqueRootPath)
                 {
-                    if (fieldRead.Receiver is not BoundFieldRead candidate || !IsUnique(program, candidate.Type))
-                    {
-                        throw InvalidEffect(fieldRead.Span, "Ownership");
-                    }
-                }
-                if (fieldRead.Receiver is BoundRead owned && IsUnique(program, owned.Type))
-                {
-                    if (owned.Variable < 0 || owned.Variable >= initialized.Length
-                        || owned.Type != function.Variables[owned.Variable].Type
-                        || (!initialized[owned.Variable]
-                            && (!initialized.HasPartialValue(owned.Variable)
-                                || (fieldMasks[owned.Variable] & (1u << fieldRead.Field)) == 0)))
-                    {
-                        throw InvalidEffect(fieldRead.Span, "Ownership");
-                    }
+                    _ = VerifyFieldPathLeafLive(fieldRead, initialized, fieldMasks,
+                        function, program, ref remaining, depth + 1);
                 }
                 else if (fieldRead.Receiver is BoundFieldRead nested && IsUnique(program, nested.Type))
                 {
@@ -6078,7 +6967,8 @@ public static partial class SemanticVerifier
                 var readBacking = BackingOf(spanRead.View, initialized.Dependencies, program, ref remaining, depth + 1);
                 initialized.Dependencies?.Staged.Add(new StagedDependencySource(
                     null, -1, [.. readBacking], EmptyBackingSources,
-                    EmptyBackingSources, EmptyBackingSources, false,
+                    EmptyBackingSources, EmptyReferenceFieldValues,
+                    EmptyBackingSources, false,
                     new NativePointerExtentFact([], MayBeOpaque: false,
                         IsUnavailable: false)));
                 try
@@ -6241,45 +7131,47 @@ public static partial class SemanticVerifier
                             CopyOriginValueOfExpression(move, move.Type, moveDependencies,
                                 function, program, ref remaining, depth + 1));
                     }
+                    moveDependencies.ClearReferenceFieldCallResult(move);
+                    if (ReferenceFieldLeaves(move.Type, program,
+                        ref remaining, depth + 1).Count != 0)
+                    {
+                        moveDependencies.SetReferenceFieldCallResult(move,
+                            ReferenceFieldValuesOfExpression(move, move.Type,
+                                moveDependencies, initialized, function, program,
+                                ref remaining, depth + 1, fieldMasks));
+                    }
                 }
                 initialized.Retire(move.Variable, (long)move.Span.Start + 1);
                 fieldMasks[move.Variable] = 0;
                 break;
             case BoundFieldMove move:
                 if (move.Place is not BoundFieldRead fieldPlace
-                    || fieldPlace.Receiver is not BoundRead fieldRoot
                     || move.Type != fieldPlace.Type
-                    || !IsUnique(program, fieldRoot.Type)
                     || !IsUnique(program, move.Type)
-                    || (uint)fieldRoot.Variable >= (uint)initialized.Length
-                    || fieldRoot.Type != function.Variables[fieldRoot.Variable].Type)
+                    || !TryGetFieldProjectionPath(fieldPlace, function, program,
+                        out var moveRootVariable, out var movedFieldPath)
+                    || !IsUnique(program, function.Variables[moveRootVariable].Type))
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
                 _ = VerifyUniqueFieldPlace(fieldPlace, initialized, fieldMasks,
                     function, program, ref remaining, depth + 1);
-                var constructorFieldMove = function.IsConstructor && fieldRoot.Variable == 0;
-                var ownerStructure = program.Structures[(int)fieldRoot.Type - 100];
-                var movedField = ownerStructure.Fields[fieldPlace.Field];
-                if (movedField.RequiresUnsafeCaller && !fieldPlace.IsUnsafeAuthorized)
-                {
-                    throw InvalidEffect(move.Span, "UnsafeCaller");
-                }
+                var constructorFieldMove = function.IsConstructor && moveRootVariable == 0;
+                var movedFieldSegment = movedFieldPath.Segments[^1];
                 if (!constructorFieldMove
-                    && ((fieldRoot.Variable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
-                        || !function.Variables[fieldRoot.Variable].IsMutable
-                        || !movedField.IsMutable
-                        || ownerStructure.CleanupMethod is not null))
+                    && ((moveRootVariable == 0 && function.DeclaringStruct is not null && !function.IsStatic)
+                        || !function.Variables[moveRootVariable].IsMutable
+                        || movedFieldPath.Segments.Any(segment =>
+                            !Fields(program, segment.OwnerType)[segment.Field].IsMutable
+                            || program.Structures[(int)segment.OwnerType - 100].CleanupMethod is not null)))
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
-                var movedFieldBit = 1u << fieldPlace.Field;
                 var movedFieldProjection = new StorageProjection(
-                    StorageProjectionKind.InlineFieldPath, 0, 0,
-                    new FieldProjectionPath().Append(fieldRoot.Type, fieldPlace.Field));
-                CheckReferencePlaceInvalidation(fieldRoot.Variable,
+                    StorageProjectionKind.InlineFieldPath, 0, 0, movedFieldPath);
+                CheckReferencePlaceInvalidation(moveRootVariable,
                     movedFieldProjection, initialized, move.Span);
-                initialized.AdvanceFieldPlaceGeneration(fieldRoot.Variable,
+                initialized.AdvanceFieldPlaceGeneration(moveRootVariable,
                     movedFieldProjection, move.Span);
                 if (initialized.Dependencies is BackingDependencies fieldMoveDependencies)
                 {
@@ -6292,6 +7184,16 @@ public static partial class SemanticVerifier
                             CopyOriginValueOfExpression(fieldPlace, move.Type,
                                 fieldMoveDependencies, function, program,
                                 ref remaining, depth + 1));
+                    }
+                    fieldMoveDependencies.ClearReferenceFieldCallResult(move);
+                    if (ReferenceFieldLeaves(move.Type, program,
+                        ref remaining, depth + 1).Count != 0)
+                    {
+                        fieldMoveDependencies.SetReferenceFieldCallResult(move,
+                            ReferenceFieldValuesOfExpression(fieldPlace,
+                                move.Type, fieldMoveDependencies, initialized,
+                                function, program, ref remaining, depth + 1,
+                                fieldMasks));
                     }
                     if (TokenSpanContract.IsDependent(move.Type, program.Structures))
                     {
@@ -6329,27 +7231,43 @@ public static partial class SemanticVerifier
                         fieldMoveDependencies.SetNativePointerCallResult(move, pointerValues);
                     }
                     fieldMoveDependencies.InvalidateCopyOriginValue(
-                        fieldRoot.Variable, movedFieldProjection, program,
+                        moveRootVariable, movedFieldProjection, program,
                         ref remaining, depth + 1);
                     fieldMoveDependencies.ClearBackingFieldValues(
-                        fieldRoot.Variable, movedFieldProjection);
+                        moveRootVariable, movedFieldProjection);
+                    fieldMoveDependencies.ClearReferenceFieldValues(
+                        moveRootVariable, movedFieldProjection);
                     fieldMoveDependencies.ClearNativePointerFieldValues(
-                        fieldRoot.Variable, movedFieldProjection);
-                    if (TokenSpanContract.IsDependent(fieldRoot.Type, program.Structures))
+                        moveRootVariable, movedFieldProjection);
+                    var rootType = function.Variables[moveRootVariable].Type;
+                    if (TokenSpanContract.IsDependent(rootType, program.Structures))
                     {
-                        RefreshBackingAggregateProvenance(fieldRoot.Variable, fieldRoot.Type,
+                        RefreshBackingAggregateProvenance(moveRootVariable, rootType,
                             fieldMoveDependencies, program, ref remaining, depth + 1);
                     }
-                    if (CarriesNativePointer(fieldRoot.Type, program))
+                    if (CarriesNativePointer(rootType, program))
                     {
-                        RefreshNativePointerAggregateProvenance(fieldRoot.Variable, fieldRoot.Type,
+                        RefreshNativePointerAggregateProvenance(moveRootVariable, rootType,
                             fieldMoveDependencies, program, ref remaining, depth + 1);
                     }
                 }
-                fieldMasks[fieldRoot.Variable] &= ~movedFieldBit;
-                initialized.SetPossibleFieldMask(fieldRoot.Variable,
-                    initialized.PossibleFieldMask(fieldRoot.Variable) & ~movedFieldBit);
-                initialized.MarkPartialValue(fieldRoot.Variable);
+                if (movedFieldPath.Segments.Length == 1)
+                {
+                    var movedFieldBit = 1u << movedFieldSegment.Field;
+                    fieldMasks[moveRootVariable] &= ~movedFieldBit;
+                    initialized.SetPossibleFieldMask(moveRootVariable,
+                        initialized.PossibleFieldMask(moveRootVariable) & ~movedFieldBit);
+                    initialized.ResetNestedOwnerSubtree(moveRootVariable,
+                        movedFieldPath);
+                    initialized.MarkPartialValue(moveRootVariable);
+                }
+                else
+                {
+                    initialized.ResetNestedOwnerSubtree(moveRootVariable,
+                        movedFieldPath);
+                    SetNestedFieldLiveness(moveRootVariable, movedFieldPath, live: false,
+                        initialized, fieldMasks, function, program, move.Span);
+                }
                 break;
             case BoundReceiverLoan loan:
                 throw InvalidEffect(loan.Span, "Ownership");
@@ -6589,14 +7507,18 @@ public static partial class SemanticVerifier
                             {
                                 _ = initialized.MergeFieldPlaceGenerations(i,
                                     rightState, skippedState);
+                                _ = initialized.MergeNestedOwnerStates(i,
+                                    rightState, skippedState);
                             }
                             else if (rightCompletes)
                             {
                                 _ = initialized.CopyFieldPlaceGenerations(i, rightState);
+                                _ = initialized.CopyNestedOwnerStates(i, rightState);
                             }
                             else if (skips)
                             {
                                 _ = initialized.CopyFieldPlaceGenerations(i, skippedState);
+                                _ = initialized.CopyNestedOwnerStates(i, skippedState);
                             }
                         }
                         _ = initialized.MergeNativeOutputState(
@@ -6731,14 +7653,18 @@ public static partial class SemanticVerifier
                         {
                             _ = initialized.MergeFieldPlaceGenerations(i,
                                 trueState, falseState);
+                            _ = initialized.MergeNestedOwnerStates(i,
+                                trueState, falseState);
                         }
                         else if (trueCompletes)
                         {
                             _ = initialized.CopyFieldPlaceGenerations(i, trueState);
+                            _ = initialized.CopyNestedOwnerStates(i, trueState);
                         }
                         else if (falseCompletes)
                         {
                             _ = initialized.CopyFieldPlaceGenerations(i, falseState);
+                            _ = initialized.CopyNestedOwnerStates(i, falseState);
                         }
                         if (trueCompletes && falseCompletes)
                         {
@@ -6916,6 +7842,7 @@ public static partial class SemanticVerifier
                 {
                     copyOriginDependencies.ClearCopyOriginCallResult(call);
                     copyOriginDependencies.ClearBackingCallResult(call);
+                    copyOriginDependencies.ClearReferenceFieldCallResult(call);
                     copyOriginDependencies.ClearNativePointerCallResult(call);
                 }
                 if (target.IsCleanup || target.IsClassConstructor)
@@ -7042,6 +7969,8 @@ public static partial class SemanticVerifier
                             preMoveBackingSnapshot = null;
                         Dictionary<StorageProjection, NativePointerFieldValue>?
                             preMoveNativePointerSnapshot = null;
+                        Dictionary<StorageProjection, ReferenceFieldValue>?
+                            preMoveReferenceSnapshot = null;
                         if (argumentsComplete && argument is BoundMove or BoundFieldMove
                             && copyOriginInputViews?.ContainsKey(parameterIndex) == true)
                         {
@@ -7058,6 +7987,11 @@ public static partial class SemanticVerifier
                                 BackingFieldValueSnapshotOfExpression(preMoveValue,
                                     argument.Type, copyOriginState, function, program,
                                     ref remaining, depth + 1);
+                            preMoveReferenceSnapshot =
+                                ReferenceFieldValuesOfExpression(preMoveValue,
+                                    argument.Type, copyOriginState, initialized,
+                                    function, program, ref remaining, depth + 1,
+                                    fieldMasks);
                             if (CarriesNativePointer(argument.Type, program))
                             {
                                 preMoveNativePointerSnapshot =
@@ -7424,9 +8358,17 @@ public static partial class SemanticVerifier
                                             argument, argument.Type, copyOriginState,
                                             function, program, ref remaining, depth + 1)
                                     : null;
+                            var referenceSnapshot = snapshotEntryValue
+                                ? preMoveReferenceSnapshot
+                                    ?? ReferenceFieldValuesOfExpression(argument,
+                                        argument.Type, copyOriginState, initialized,
+                                        function, program, ref remaining, depth + 1,
+                                        fieldMasks)
+                                : null;
                             if (!stagedCopyOriginInputs.TryAdd(parameterIndex,
                                 new StagedCopyOriginInput(sourceView, argument, snapshot,
-                                    backingSnapshot, nativePointerSnapshot)))
+                                    backingSnapshot, nativePointerSnapshot,
+                                    referenceSnapshot)))
                             {
                                 throw Invalid(argument.Span);
                             }
@@ -7473,6 +8415,32 @@ public static partial class SemanticVerifier
                             nativePointerResultDependencies, function, program,
                             ref remaining, depth + 1)
                         : null;
+                    var referenceFieldCallResult =
+                        initialized.Dependencies is BackingDependencies
+                            referenceFieldResultDependencies
+                        ? CreateReferenceFieldCallResult(call, target,
+                            copyOriginSummary, stagedCopyOriginInputs,
+                            referenceFieldResultDependencies, initialized,
+                            fieldMasks, function, program, ref remaining,
+                            depth + 1)
+                        : null;
+                    var referenceCallResult =
+                        CheckedReferenceTypeContract.IsValidType(
+                            call.Type, program.CheckedReferenceTypes)
+                        && initialized.Dependencies is BackingDependencies
+                            referenceCallResultDependencies
+                        ? CreateReferenceCallResult(call, target,
+                            referenceCallResultDependencies, initialized,
+                            fieldMasks, function, program, ref remaining,
+                            depth + 1)
+                        : null;
+                    if (referenceFieldCallResult is not null
+                        && initialized.Dependencies is BackingDependencies
+                            referenceFieldCallDependencies)
+                    {
+                        referenceFieldCallDependencies.SetReferenceFieldCallResult(
+                            call, referenceFieldCallResult);
+                    }
                     ApplyReferenceOwnerStoreCallEffects(call, target, initialized,
                         fieldMasks, function, program, ref remaining, depth + 1);
                     ApplyCopyOriginCallEffects(call, target, initialized, function,
@@ -7504,6 +8472,15 @@ public static partial class SemanticVerifier
                     {
                         pointerResultDependencies.SetNativePointerCallResult(call,
                             nativePointerCallResult);
+                    }
+                    if (referenceCallResult is not null
+                        && initialized.Dependencies is BackingDependencies
+                            referenceCallDependencies)
+                    {
+                        referenceCallDependencies.SetReferenceFieldCallResult(call,
+                            new Dictionary<StorageProjection, ReferenceFieldValue> {
+                                [StorageProjection.WholeObject] = referenceCallResult,
+                            });
                     }
                     foreach (var output in outTargets)
                     {
@@ -7727,6 +8704,7 @@ public static partial class SemanticVerifier
             || BoundEnumTypes.IsValidType(type, program.EnumDefinitions)
             || NativePointerTypeContract.IsValidType(type, program.NativePointerTypes)
             || NativeFunctionPointerContract.IsValidType(type, program.NativeFunctionPointerSignatures)
+            || BoundGenericNominalTypeContract.IsValidType(type, program)
             || CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes)
             || (ManagedClassTypes.IsManaged(type) && (ManagedClassTypes.Readonly(type) is
                 PrimitiveType.ManagedNode or PrimitiveType.OptionalManagedNode))
@@ -7735,6 +8713,9 @@ public static partial class SemanticVerifier
                 && ManagedClassTypes.ClassIndex(type) < program.Classes.Length
                 && (!ManagedClassTypes.IsWritable(type)
                     || program.Classes[ManagedClassTypes.ClassIndex(type)].IsMutable));
+
+    internal static bool IsValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
+        ValidType(type, allowVoid, program);
 
     internal static bool IsClassArgumentType(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         int enumDefinitionCount = 0) =>
@@ -7753,6 +8734,7 @@ public static partial class SemanticVerifier
 
     private static bool IsUnique(BoundProgram program, PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
+            || BoundGenericNominalTypeContract.IsCoreTaskType(type, program)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
                 && program.Structures[(int)type - 100].IsUnique);
 
@@ -7828,8 +8810,8 @@ public static partial class SemanticVerifier
             BoundUnsafeExpression unsafeExpression => InvalidatesReservedOwner(
                 unsafeExpression.Expression, variable, ref remaining, depth + 1),
             BoundMove move => move.Variable == variable,
-            BoundFieldMove move => move.Place.Receiver is BoundRead root
-                && root.Variable == variable,
+            BoundFieldMove move => TryGetFieldRootVariable(move.Place, out var rootVariable)
+                && rootVariable == variable,
             BoundOutArgument output => output.Variable == variable,
             BoundMutableReceiverLoan loan => loan.Variable == variable,
             BoundMutableFieldLoan loan => LoanRoot(loan, ref remaining, depth + 1) == variable,

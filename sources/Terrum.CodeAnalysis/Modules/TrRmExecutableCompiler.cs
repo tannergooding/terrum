@@ -50,6 +50,11 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (BoundGenericNominalTypeContract.UsesAny(program))
+        {
+            throw Unsupported(
+                "The executable TRRM profile has no generic nominal signature or body lowering.");
+        }
         if (program.Functions.Any(static function =>
             function.IsExternal && function.DirectNativeImport is null
                 && (function.NativeFunctionPointerType is null || function.ModuleImport is null)))
@@ -1556,6 +1561,38 @@ public static partial class TrRmExecutableCompiler
     public static CompilationReference CreateReference(byte[] providerArtifact)
         => CreateReference(providerArtifact, TrRmArtifactSchema.Development);
 
+    /// <summary>Reads nominal TypeDef identities and supported signatures from a checked Standard TRRM provider.</summary>
+    /// <param name="providerArtifact">The Standard TRRM provider artifact.</param>
+    /// <returns>A source reference carrying the provider's exported nominal declarations.</returns>
+    /// <exception cref="NotSupportedException">
+    /// The artifact contains no generic nominal definitions, multiple logical Modules, or unsupported generic signature contracts.
+    /// </exception>
+    /// <exception cref="InvalidDataException">The provider artifact is structurally invalid.</exception>
+    public static CompilationReference CreateGenericNominalTypeReference(
+        byte[] providerArtifact)
+    {
+        ArgumentNullException.ThrowIfNull(providerArtifact);
+        var index = new TrRmArtifactIndex(providerArtifact);
+        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(index);
+        if (tables.Modules.Count != 1)
+        {
+            throw Unsupported(
+                "A generic nominal source reference requires one logical provider Module.");
+        }
+
+        var providerIdentity = tables.Modules.GetIdentity(1);
+        var (targetRequirement, runtimePolicy) = tables.Modules.GetRequirements(1);
+        var definitions = CreateGenericNominalTypeDefinitions(tables, providerIdentity);
+        if (!definitions.Any(static definition => !definition.Formals.IsEmpty))
+        {
+            throw Unsupported(
+                "A generic nominal source reference requires at least one exported generic TypeDef.");
+        }
+
+        return CreateGenericNominalTypeReference(tables, definitions,
+            providerIdentity, targetRequirement, runtimePolicy);
+    }
+
     internal static CompilationReference
         CreateDevelopmentFunctionPointerEffectsDraftReference(byte[] providerArtifact)
         => CreateReference(providerArtifact,
@@ -1565,7 +1602,6 @@ public static partial class TrRmExecutableCompiler
         TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(providerArtifact);
-        var program = LoadDevelopment(providerArtifact, schema);
         var artifactIndex = new TrRmArtifactIndex(providerArtifact, schema);
         var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
             ? TrRmStructuralMetadataValidator
@@ -1575,6 +1611,29 @@ public static partial class TrRmExecutableCompiler
                 .ValidateDevelopmentAndGetExecutionTables(artifactIndex);
         var providerIdentity = validatedTables.Modules.GetIdentity(1);
         var (targetRequirement, runtimePolicy) = validatedTables.Modules.GetRequirements(1);
+        var genericNominalTypeDefinitions = CreateGenericNominalTypeDefinitions(
+            validatedTables, providerIdentity);
+        if (genericNominalTypeDefinitions.Any(static definition =>
+                !definition.Formals.IsEmpty)
+            && (validatedTables.Methods.Count == 0
+                || ContainsConstructedGenericNominalTypeUse(validatedTables)))
+        {
+            return CreateGenericNominalTypeReference(validatedTables,
+                genericNominalTypeDefinitions, providerIdentity,
+                targetRequirement, runtimePolicy);
+        }
+        if (validatedTables.Methods.Count == 0)
+        {
+            if (genericNominalTypeDefinitions.IsEmpty)
+            {
+                throw Unsupported("A TRRM reference requires public declarations.");
+            }
+
+            return new CompilationReference([], [], (BoundRuntimePolicy)runtimePolicy,
+                genericNominalTypeDefinitions: genericNominalTypeDefinitions);
+        }
+
+        var program = LoadDevelopment(providerArtifact, schema);
         if (program.EntryPoint != -1
             || !program.Classes.IsEmpty || !program.Buffers.IsEmpty
             || program.Functions.Any(static function =>
@@ -1646,14 +1705,577 @@ public static partial class TrRmExecutableCompiler
                 }
                 : function)
             .ToImmutableArray();
-        if (functions.IsEmpty)
+        if (functions.IsEmpty && genericNominalTypeDefinitions.IsEmpty)
         {
             throw Unsupported("A TRRM reference requires at least one public declaration.");
         }
 
         return new CompilationReference(structures.ToImmutable(), functions, program.RuntimePolicy,
             nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
-            nativePointerTypes: nativePointerTypes.MoveToImmutable());
+            nativePointerTypes: nativePointerTypes.MoveToImmutable(),
+            genericNominalTypeDefinitions: genericNominalTypeDefinitions);
+    }
+
+    private static bool ContainsConstructedGenericNominalTypeUse(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            var signature = tables.Methods.GetSignature(method);
+            if (ContainsConstructedGenericNominalTypeSpec(
+                tables.Signatures.GetResultTypeSpec(signature), tables.TypeSpecs, 0))
+            {
+                return true;
+            }
+
+            var (first, count) = tables.Signatures.GetParamRange(signature);
+            for (var parameter = 0; parameter < count; parameter++)
+            {
+                if (ContainsConstructedGenericNominalTypeSpec(
+                    tables.Parameters.GetTypeSpec(first + parameter),
+                    tables.TypeSpecs, 0))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private static bool ContainsConstructedGenericNominalTypeSpec(
+        uint typeSpecRef, TrRmTypeSpecTableReader typeSpecs, int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw Invalid("A method signature TypeSpec exceeds the nesting limit.");
+        }
+
+        var typeSpec = typeSpecs.GetTypeSpecRef(typeSpecRef,
+            allowInitQualifier: true);
+        if (!typeSpec.IsRow)
+        {
+            return false;
+        }
+        if (typeSpec.Form == 0x05)
+        {
+            return true;
+        }
+
+        var row = typeSpecs.GetRow(typeSpec.Row);
+        if (typeSpec.Form is (>= 0x06 and <= 0x0B) or 0x0E)
+        {
+            return ContainsConstructedGenericNominalTypeSpec(
+                BinaryPrimitives.ReadUInt32LittleEndian(row[2..]),
+                typeSpecs, depth + 1);
+        }
+        if (typeSpec.Form == 0x0C)
+        {
+            return ContainsConstructedGenericNominalTypeSpec(
+                BinaryPrimitives.ReadUInt32LittleEndian(row[3..]),
+                typeSpecs, depth + 1);
+        }
+
+        return false;
+    }
+
+    private static CompilationReference CreateGenericNominalTypeReference(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        ImmutableArray<BoundGenericNominalTypeDefinition> definitions,
+        string providerIdentity, uint targetRequirement, uint runtimePolicy)
+    {
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>();
+        var instances = ImmutableArray.CreateBuilder<BoundGenericNominalTypeInstance>();
+        var instanceByKey = new Dictionary<string, PrimitiveType>(StringComparer.Ordinal);
+        var nativePointerTypes =
+            ImmutableArray.CreateBuilder<NativePointerTypeDefinition>();
+        var nativePointerTypeIndexes =
+            new Dictionary<(PrimitiveType PointeeType, bool IsWritable), PrimitiveType>();
+        var exports = tables.Exports;
+        var signatures = tables.Signatures;
+        var methods = tables.Methods;
+        var parameters = tables.Parameters;
+        for (var methodRow = 1; methodRow <= methods.Count; methodRow++)
+        {
+            var definitionId = 0x1600_0000u | (uint)methodRow;
+            if (methods.GetOwnerModule(methodRow) != 1
+                || methods.GetOwnerType(methodRow) != 0
+                || (methods.GetFlags(methodRow) & 3) != 2
+                || !exports.TryGetExportKeyForDefinition(1, definitionId,
+                    out var exportKey))
+            {
+                continue;
+            }
+            if (methods.GetContractRange(methodRow).Count != 0
+                || signatures.GetGenericCount(methods.GetSignature(methodRow)) != 0
+                || signatures.GetReceiverTypeSpec(methods.GetSignature(methodRow)) != 0
+                || (tables.NativeImports.Count != 0
+                    && tables.NativeImports.HasImportForMethod(methodRow))
+                || (tables.NativeCallables.Count != 0
+                    && tables.NativeCallables.HasCallableForMethod(methodRow))
+                || (tables.NativeVTables.Count != 0
+                    && tables.NativeVTables.HasVTableForMethod(methodRow))
+                || (tables.NativeFunctionPointerSignatures.Count != 0
+                    && tables.NativeFunctionPointerSignatures.HasSignatureForMethod(methodRow)))
+            {
+                throw Unsupported(
+                    "The generic nominal source-reference path requires top-level methods without additional contracts.");
+            }
+            if (functions.Count >= SemanticVerifier.MaximumFunctions)
+            {
+                throw Unsupported("The generic nominal source-reference function limit was exceeded.");
+            }
+
+            var signatureRow = methods.GetSignature(methodRow);
+            var returnType = ReadGenericNominalTypeSpec(
+                signatures.GetResultTypeSpec(signatureRow), tables, definitions,
+                providerIdentity, instances, instanceByKey, nativePointerTypes,
+                nativePointerTypeIndexes, 0);
+            var (firstParameter, parameterCount) =
+                signatures.GetParamRange(signatureRow);
+            if (parameterCount > SemanticVerifier.MaximumArguments)
+            {
+                throw Unsupported("A generic nominal source-reference signature exceeds the parameter limit.");
+            }
+
+            var variables = ImmutableArray.CreateBuilder<BoundVariable>(parameterCount);
+            for (var parameter = 0; parameter < parameterCount; parameter++)
+            {
+                var parameterRow = firstParameter + parameter;
+                if (parameters.GetMode(parameterRow) != 0)
+                {
+                    throw Unsupported(
+                        "The generic nominal source-reference path supports only by-value parameters.");
+                }
+
+                var parameterType = ReadGenericNominalTypeSpec(
+                    parameters.GetTypeSpec(parameterRow), tables, definitions,
+                    providerIdentity, instances, instanceByKey, nativePointerTypes,
+                    nativePointerTypeIndexes, 0);
+                if (parameterType == PrimitiveType.Void)
+                {
+                    throw new InvalidDataException(
+                        "A generic nominal source-reference parameter has void type.");
+                }
+                variables.Add(new BoundVariable($"arg{parameter}", parameterType,
+                    false, default));
+            }
+
+            functions.Add(new BoundFunction(exportKey, returnType,
+                variables.MoveToImmutable(), parameterCount,
+                new BoundBlock([], default), default)
+            {
+                IsExternal = true,
+                IsModuleReference = true,
+                ModuleImport = new BoundModuleImport(providerIdentity, exportKey,
+                    targetRequirement, runtimePolicy),
+            });
+        }
+
+        return new CompilationReference([], functions.ToImmutable(),
+            (BoundRuntimePolicy)runtimePolicy,
+            genericNominalTypeDefinitions: definitions,
+            genericNominalTypeInstances: instances.ToImmutable(),
+            nativePointerTypes: nativePointerTypes.ToImmutable());
+    }
+
+    private static PrimitiveType ReadGenericNominalTypeSpec(
+        uint typeSpecRef,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        ImmutableArray<BoundGenericNominalTypeDefinition> definitions,
+        string providerIdentity,
+        ImmutableArray<BoundGenericNominalTypeInstance>.Builder instances,
+        Dictionary<string, PrimitiveType> instanceByKey,
+        ImmutableArray<NativePointerTypeDefinition>.Builder nativePointerTypes,
+        Dictionary<(PrimitiveType PointeeType, bool IsWritable), PrimitiveType>
+            nativePointerTypeIndexes,
+        int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw Unsupported("A generic nominal TypeSpec exceeds the type nesting limit.");
+        }
+
+        var typeSpec = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (typeSpec.Form != 0x05 || !typeSpec.IsRow)
+        {
+            var argument = ReadGenericNominalTypeArgument(typeSpecRef, tables,
+                definitions, providerIdentity, instances, instanceByKey,
+                nativePointerTypes, nativePointerTypeIndexes, depth + 1);
+            if (argument.NominalTypeIdentity is null)
+            {
+                if (argument.TypeSpecForm != 0)
+                {
+                    throw Unsupported(
+                        "The generic nominal source-reference path cannot represent this complete signature TypeSpec.");
+                }
+                return argument.Type;
+            }
+
+            if (definitions.FirstOrDefault(definition =>
+                definition.Identity == argument.NominalTypeIdentity.Value) is not
+                { Formals.IsEmpty: true })
+            {
+                throw new InvalidDataException(
+                    "A complete TypeSpec cannot refer to an open generic nominal definition.");
+            }
+
+            return AddGenericNominalTypeInstance(argument.NominalTypeIdentity.Value,
+                [], typeSpec.Qualifiers, typeSpecRef, providerIdentity, 0,
+                instances, instanceByKey);
+        }
+
+        var constructed = tables.TypeSpecs.GetRow(typeSpec.Row);
+        var genericTypeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+            constructed[2..]);
+        var genericTypeSpec = tables.TypeSpecs.GetTypeSpecRef(genericTypeSpecRef);
+        if (!genericTypeSpec.IsRow || genericTypeSpec.Form != 0x02)
+        {
+            throw Unsupported(
+                "The generic nominal source-reference path requires a local TypeDef generic identity.");
+        }
+
+        var typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+            tables.TypeSpecs.GetRow(genericTypeSpec.Row)[2..]));
+        var identity = new BoundGenericNominalTypeIdentity(providerIdentity,
+            tables.Modules.GetIdentity(tables.TypeDefs.GetOwnerModule(typeDefRow)),
+            0x1300_0000u | (uint)typeDefRow);
+        var nominalDefinition = definitions.FirstOrDefault(definition =>
+            definition.Identity == identity);
+        if (nominalDefinition is null
+            || nominalDefinition.Formals.Length
+                != tables.TypeSpecs.GetConstructedArgumentCount(typeSpec.Row))
+        {
+            throw new InvalidDataException(
+                "A constructed TypeSpec does not match an imported generic nominal definition.");
+        }
+
+        var arguments = ImmutableArray.CreateBuilder<BoundGenericNominalTypeArgument>(
+            nominalDefinition.Formals.Length);
+        for (var ordinal = 0; ordinal < nominalDefinition.Formals.Length; ordinal++)
+        {
+            var formal = nominalDefinition.Formals[ordinal];
+            var argumentRef = tables.TypeSpecs.GetConstructedArgument(typeSpec.Row, ordinal);
+            if (formal.Kind == BoundGenericArgumentKind.Type)
+            {
+                arguments.Add(ReadGenericNominalTypeArgument(argumentRef, tables,
+                    definitions, providerIdentity, instances, instanceByKey,
+                    nativePointerTypes, nativePointerTypeIndexes, depth + 1));
+            }
+            else
+            {
+                arguments.Add(BoundGenericNominalTypeArgument.ForConstantSource(
+                    providerIdentity, argumentRef));
+            }
+        }
+
+        return AddGenericNominalTypeInstance(identity, arguments.MoveToImmutable(),
+            typeSpec.Qualifiers, typeSpecRef, providerIdentity, 0,
+            instances, instanceByKey);
+    }
+
+    private static BoundGenericNominalTypeArgument ReadGenericNominalTypeArgument(
+        uint typeSpecRef,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        ImmutableArray<BoundGenericNominalTypeDefinition> definitions,
+        string providerIdentity,
+        ImmutableArray<BoundGenericNominalTypeInstance>.Builder instances,
+        Dictionary<string, PrimitiveType> instanceByKey,
+        ImmutableArray<NativePointerTypeDefinition>.Builder nativePointerTypes,
+        Dictionary<(PrimitiveType PointeeType, bool IsWritable), PrimitiveType>
+            nativePointerTypeIndexes,
+        int depth)
+    {
+        var typeSpec = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (typeSpec.Form == 0x05)
+        {
+            var constructedType = ReadGenericNominalTypeSpec(typeSpecRef, tables,
+                definitions, providerIdentity, instances, instanceByKey,
+                nativePointerTypes, nativePointerTypeIndexes, depth + 1);
+            return BoundGenericNominalTypeArgument.ForMetadataType(
+                constructedType, typeSpec.Qualifiers, typeSpecRef, providerIdentity);
+        }
+
+        var bytes = tables.TypeSpecs.GetTypeSpecBytes(typeSpecRef);
+        if (typeSpec.Form == 0x02 && typeSpec.IsRow)
+        {
+            var typeDefRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                bytes[2..]));
+            var identity = new BoundGenericNominalTypeIdentity(providerIdentity,
+                tables.Modules.GetIdentity(tables.TypeDefs.GetOwnerModule(typeDefRow)),
+                0x1300_0000u | (uint)typeDefRow);
+            if (!definitions.Any(definition => definition.Identity == identity))
+            {
+                throw Unsupported(
+                    "A generic nominal payload refers to a TypeDef outside the selected source reference.");
+            }
+            if (definitions.First(definition => definition.Identity == identity).Formals.Length != 0)
+            {
+                throw new InvalidDataException(
+                    "A generic nominal payload cannot refer to an open generic TypeDef.");
+            }
+
+            return BoundGenericNominalTypeArgument.ForNominalType(identity,
+                typeSpecForm: 0x02, qualifiers: typeSpec.Qualifiers,
+                typeSpecReference: typeSpecRef,
+                typeSpecProviderIdentity: providerIdentity);
+        }
+
+        if (typeSpec.Form == 0x01)
+        {
+            if (typeSpec.TypeCode == 0x8C)
+            {
+                if (!TryGetGenericNominalPointerPointee(
+                    typeSpec.ArgumentCode, out var pointeeType))
+                {
+                    throw Unsupported(
+                        "A generic nominal pointer argument has an unsupported pointee type.");
+                }
+
+                var pointerType = GetGenericNominalPointerType(pointeeType,
+                    (typeSpec.Qualifiers & 0x01) != 0,
+                    nativePointerTypes, nativePointerTypeIndexes);
+                return BoundGenericNominalTypeArgument.ForMetadataType(
+                    pointerType, 0, typeSpecRef, providerIdentity);
+            }
+
+            if (!TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                typeSpec.TypeCode, out var scalarType))
+            {
+                return BoundGenericNominalTypeArgument.ForMetadataType(
+                    PrimitiveType.Void, typeSpec.Qualifiers,
+                    typeSpecRef, providerIdentity, 0x01,
+                    typeSpec.TypeCode, typeSpec.ArgumentCode);
+            }
+
+            return BoundGenericNominalTypeArgument.ForMetadataType(scalarType,
+                typeSpec.Qualifiers, typeSpecRef, providerIdentity);
+        }
+
+        if (typeSpec.Form is (>= 0x06 and <= 0x0B) or 0x0E)
+        {
+            var innerReference = BinaryPrimitives.ReadUInt32LittleEndian(bytes[2..]);
+            var inner = ReadGenericNominalTypeArgument(innerReference, tables,
+                definitions, providerIdentity, instances, instanceByKey,
+                nativePointerTypes, nativePointerTypeIndexes, depth + 1);
+            return inner with {
+                Qualifiers = typeSpec.Qualifiers,
+                TypeSpecForm = typeSpec.Form,
+                TypeSpecReference = typeSpecRef,
+                TypeSpecProviderIdentity = providerIdentity,
+            };
+        }
+
+        if (typeSpec.Form == 0x0C)
+        {
+            var innerReference = BinaryPrimitives.ReadUInt32LittleEndian(bytes[3..]);
+            var inner = ReadGenericNominalTypeArgument(innerReference, tables,
+                definitions, providerIdentity, instances, instanceByKey,
+                nativePointerTypes, nativePointerTypeIndexes, depth + 1);
+            if (bytes[2] == 0x8C)
+            {
+                if (inner.NominalTypeIdentity is not null)
+                {
+                    throw Unsupported(
+                        "A generic nominal pointer payload requires an admitted local pointee representation.");
+                }
+                var pointerType = GetGenericNominalPointerType(inner.Type,
+                    (typeSpec.Qualifiers & 0x01) != 0,
+                    nativePointerTypes, nativePointerTypeIndexes);
+                return BoundGenericNominalTypeArgument.ForMetadataType(
+                    pointerType, 0, typeSpecRef, providerIdentity);
+            }
+            return inner with {
+                Qualifiers = typeSpec.Qualifiers,
+                TypeSpecForm = typeSpec.Form,
+                TypeCode = bytes[2],
+                TypeSpecReference = typeSpecRef,
+                TypeSpecProviderIdentity = providerIdentity,
+            };
+        }
+
+        if (typeSpec.Form == 0x0F)
+        {
+            return BoundGenericNominalTypeArgument.ForMetadataType(
+                PrimitiveType.Void, 0, typeSpecRef, providerIdentity,
+                typeSpecForm: 0x0F);
+        }
+
+        throw Unsupported(
+            "The generic nominal source-reference path encountered an unsupported TypeSpec form.");
+    }
+
+    private static bool TryGetGenericNominalPointerPointee(
+        byte argumentCode, out PrimitiveType pointeeType)
+    {
+        if (argumentCode == 0)
+        {
+            pointeeType = PrimitiveType.Void;
+            return true;
+        }
+
+        return TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+            argumentCode, out pointeeType);
+    }
+
+    private static PrimitiveType GetGenericNominalPointerType(
+        PrimitiveType pointeeType, bool isWritable,
+        ImmutableArray<NativePointerTypeDefinition>.Builder pointerTypes,
+        Dictionary<(PrimitiveType PointeeType, bool IsWritable), PrimitiveType> indexes)
+    {
+        var key = (pointeeType, isWritable);
+        if (indexes.TryGetValue(key, out var type))
+        {
+            return type;
+        }
+
+        if (pointerTypes.Count >= SemanticVerifier.MaximumAnalysisVisits)
+        {
+            throw Unsupported("The generic nominal pointer type limit was exceeded.");
+        }
+
+        type = NativePointerTypes.Type(pointerTypes.Count);
+        pointerTypes.Add(new NativePointerTypeDefinition(pointeeType, isWritable));
+        indexes.Add(key, type);
+        return type;
+    }
+
+    private static PrimitiveType AddGenericNominalTypeInstance(
+        BoundGenericNominalTypeIdentity identity,
+        ImmutableArray<BoundGenericNominalTypeArgument> arguments,
+        byte qualifiers, uint typeSpecReference, string providerIdentity,
+        byte typeSpecForm,
+        ImmutableArray<BoundGenericNominalTypeInstance>.Builder instances,
+        Dictionary<string, PrimitiveType> instanceByKey)
+    {
+        var key = BoundGenericNominalTypeContract.CreateUseKey(
+            identity, arguments, qualifiers, typeSpecForm);
+        if (instanceByKey.TryGetValue(key, out var existing))
+        {
+            return existing;
+        }
+        if (instances.Count >= BoundGenericNominalTypeTypes.MaximumCount)
+        {
+            throw Unsupported("The generic nominal type instance limit was exceeded.");
+        }
+
+        var type = BoundGenericNominalTypeTypes.Type(instances.Count);
+        instances.Add(new BoundGenericNominalTypeInstance(identity, arguments,
+            qualifiers, typeSpecReference, providerIdentity, typeSpecForm));
+        instanceByKey.Add(key, type);
+        return type;
+    }
+
+    private static ImmutableArray<BoundGenericNominalTypeDefinition>
+        CreateGenericNominalTypeDefinitions(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            string providerIdentity)
+    {
+        var typeDefs = tables.TypeDefs;
+        var genericParams = tables.GenericParams;
+        var constraints = tables.Constraints;
+        var typeSpecs = tables.TypeSpecs;
+        var definitions = ImmutableArray.CreateBuilder<BoundGenericNominalTypeDefinition>();
+        long metadataRows = 0;
+        for (var typeDefRow = 1; typeDefRow <= typeDefs.Count; typeDefRow++)
+        {
+            if (typeDefs.GetOwnerModule(typeDefRow) != 1
+                || (typeDefs.GetFlags(typeDefRow) & 3) != 2
+                || !tables.Exports.TryGetExportKeyForDefinition(
+                    1, 0x1300_0000u | (uint)typeDefRow, out _))
+            {
+                continue;
+            }
+
+            var (firstFormal, formalCount) = typeDefs.GetGenericRange(typeDefRow);
+            if (formalCount > SemanticVerifier.MaximumAnalysisVisits
+                || definitions.Count >= BoundGenericNominalTypeTypes.MaximumCount)
+            {
+                throw Unsupported("The generic nominal definition or formal limit was exceeded.");
+            }
+            metadataRows += formalCount;
+            if (metadataRows > SemanticVerifier.MaximumAnalysisVisits)
+            {
+                throw Unsupported("The generic nominal metadata traversal limit was exceeded.");
+            }
+            var moduleIdentity = tables.Modules.GetIdentity(1);
+            var identity = new BoundGenericNominalTypeIdentity(
+                providerIdentity, moduleIdentity, 0x1300_0000u | (uint)typeDefRow);
+            var formals = ImmutableArray.CreateBuilder<BoundGenericNominalTypeFormal>(formalCount);
+            for (var ordinal = 0; ordinal < formalCount; ordinal++)
+            {
+                var row = firstFormal + ordinal;
+                var formalKind = genericParams.GetFormalKind(row) switch
+                {
+                    1 => BoundGenericArgumentKind.Type,
+                    2 => BoundGenericArgumentKind.Constant,
+                    _ => throw new InvalidDataException("Invalid TRRM generic nominal formal."),
+                };
+                var defaultReference = genericParams.GetDefaultArgumentRef(row);
+                var defaultValue = defaultReference == 0 ? null
+                    : CreateGenericNominalTypeDefault(formalKind, defaultReference,
+                        providerIdentity, typeSpecs);
+                var (firstConstraint, constraintCount) =
+                    genericParams.GetConstraintRange(row);
+                metadataRows += constraintCount;
+                if (metadataRows > SemanticVerifier.MaximumAnalysisVisits)
+                {
+                    throw Unsupported("The generic nominal constraint limit was exceeded.");
+                }
+                var formalConstraints =
+                    ImmutableArray.CreateBuilder<BoundGenericNominalTypeConstraint>(
+                        constraintCount);
+                for (var constraintRow = firstConstraint;
+                    constraintRow < firstConstraint + constraintCount;
+                    constraintRow++)
+                {
+                    formalConstraints.Add(new BoundGenericNominalTypeConstraint(
+                        constraints.GetKind(constraintRow),
+                        constraints.GetPayload(constraintRow)));
+                }
+
+                formals.Add(new BoundGenericNominalTypeFormal(
+                    genericParams.GetOwnerDefId(row),
+                    genericParams.GetOrdinal(row),
+                    tables.Strings.DecodeName(genericParams.GetNameStringRow(row)),
+                    formalKind,
+                    genericParams.GetOwnershipDomain(row),
+                    genericParams.GetNullabilityDomain(row),
+                    genericParams.GetConstantTypeSpecRef(row),
+                    defaultValue,
+                    formalConstraints.MoveToImmutable()));
+            }
+
+            definitions.Add(new BoundGenericNominalTypeDefinition(identity,
+                typeDefs.GetNamespace(typeDefRow), typeDefs.GetName(typeDefRow),
+                typeDefs.GetKind(typeDefRow), formals.MoveToImmutable(),
+                tables.TypeSpecs.Count, tables.ConstantSources.Count,
+                tables.Constraints.Count, tables.AssociatedRelations.Count));
+        }
+
+        return definitions.ToImmutable();
+    }
+
+    private static BoundGenericNominalTypeDefault CreateGenericNominalTypeDefault(
+        BoundGenericArgumentKind kind, uint reference, string providerIdentity,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        PrimitiveType? decodedType = null;
+        byte qualifiers = 0;
+        if (kind == BoundGenericArgumentKind.Type)
+        {
+            var typeSpec = typeSpecs.GetTypeSpecRef(reference);
+            qualifiers = typeSpec.Qualifiers;
+            if (typeSpec.Form == 0x01 && typeSpec.Qualifiers == 0
+                && TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                    typeSpec.TypeCode, out var primitiveType))
+            {
+                decodedType = primitiveType;
+            }
+        }
+
+        return new BoundGenericNominalTypeDefault(
+            kind, reference, providerIdentity, decodedType, qualifiers);
     }
 
     private static BoundFunction RemapNativeImportStructureTypes(BoundFunction function,

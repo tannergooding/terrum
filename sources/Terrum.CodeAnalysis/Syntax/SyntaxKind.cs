@@ -27,6 +27,10 @@ public enum SyntaxKind
     GetAccessor,
     /// <summary>A type name.</summary>
     TypeName,
+    /// <summary>A checked-reference type constructor.</summary>
+    ReferenceTypeName,
+    /// <summary>A type-use attribute applied to a nested type name.</summary>
+    AttributedTypeName,
     /// <summary>The local fixed-array type name <c>InlineArray&lt;T, N&gt;</c>.</summary>
     InlineArrayTypeName,
     /// <summary>A function or constructor parameter list.</summary>
@@ -71,6 +75,8 @@ public enum SyntaxKind
     VoidExpression,
     /// <summary>A unary operator expression.</summary>
     UnaryExpression,
+    /// <summary>A checked-reference formation expression.</summary>
+    ReferenceExpression,
     /// <summary>An explicit cast.</summary>
     CastExpression,
     /// <summary>A binary operator expression.</summary>
@@ -211,4 +217,24 @@ public enum SyntaxKind
     InterpolationHole,
     /// <summary>A format specifier within an interpolation hole.</summary>
     InterpolationFormatSpecifier,
+    /// <summary>A nominal interface associated-type requirement.</summary>
+    AssociatedTypeRequirement,
+    /// <summary>A nominal interface compile-time constant declaration.</summary>
+    InterfaceConstantDeclaration,
+    /// <summary>A nominal interface indexer requirement.</summary>
+    IndexerDeclaration,
+    /// <summary>An interface property setter accessor.</summary>
+    SetAccessor,
+    /// <summary>An interface property initializer accessor.</summary>
+    InitAccessor,
+    /// <summary>An interface callable contract clause.</summary>
+    ContractClause,
+    /// <summary>An indexer parameter list.</summary>
+    IndexerParameterList,
+    /// <summary>A friend visibility principal list.</summary>
+    FriendVisibility,
+    /// <summary>A friend visibility principal.</summary>
+    FriendTarget,
+    /// <summary>A constant literal used as a type argument.</summary>
+    ConstantGenericArgument,
 }

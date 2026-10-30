@@ -136,12 +136,21 @@ ConstantMap TypeSpecRef/ConstantSource row bounds. Map-reachable TypeSpec
 references are traversed under the selected Module, including constructed
 type arguments, MethodSig result/receiver/parameter types, FieldDef types and
 FieldPath roots/steps.
+The active reader tests also consume a hand-encoded kind-01 Body vector with a
+selected TypeMap token; mutating its local selector out of range rejects
+through selected Body validation. Broader registry-linked Body vectors remain
+part of the integration gate.
 Receiver and formal HomeMap types are compared with their MethodSig types
 across direct/Import TypeDefs, TypeSpec rows, F2/F3 spellings, and indexed
-family terms; qualification and unrelated type forms do not match. Exact
-normalized equality through nested constructed arguments and generic
-substitution, callee/provider contract equality and ConstantMap source/value
-type equality remain incomplete. Full record and instruction semantics,
+family terms; nested wrappers and form-0x05 type arguments are compared
+recursively while preserving exact TypeDef, Import and GenericParam identities.
+Owner-argument substitution and callee/provider contract equality remain
+incomplete. Selected ConstantMap entries, Body TypeMap arguments and
+constructed constant arguments reached through declaration-owned TypeSpecRefs
+currently require exact scalar type/value binding under provisional Feature
+11/1; ownerless contexts and other ConstantSource tags remain unsupported.
+Selected E1 MethodMap calls also allow an R15 result only for an exact unit
+target. Full record and instruction semantics,
 descriptor eligibility, canonical writing, remapping, re-emission and
 execution remain unfinished. The selected Body reader now validates short
 control-flow targets and selected conditional-edge, switch, requirement and
@@ -161,11 +170,15 @@ unverified. Long
 selected record kinds, reserved controls and query-kind routing. `B4`/`E8`
 bind Throw record kind `09`; `B6`/`EA` remain rejected without the unassigned
 region carrier.
-The reader also rejects R14 in explicit destination roles, restricts
-place/window registers to R0..R13, and bounds paired-formal windows; per-
-operation source roles and R15 discard eligibility remain unverified.
-Register/type/effect semantics and remaining instruction-record relationships
-are not established.
+The reader checks the fixed fields for short Return, UnitReturn and PlaceRetire
+and now applies the assigned D0..D3 conversion control order: low-nibble source,
+high-nibble destination. R14/R15 remain structurally available as source
+constants, and R14 is rejected as the destination. Other per-operation source
+roles remain incomplete. E1 bound calls now permit R15 only for an exact unit
+result; other per-operation R15 discard eligibility remains unverified.
+Place/window registers are restricted to R0..R13 and paired-formal windows
+are bounded. Register/type/effect semantics and remaining instruction-record
+relationships are not established.
 
 Artifact framing now takes an explicit standard or internal development
 schema before table indexing and writing. Standard `TrRmArtifactIndex` uses
@@ -187,10 +200,17 @@ Standard UnionCaseDef/UnionCaseField rows now validate their TypeDef and case
 owners, exclusive payload-field ranges, ordered payload ordinals and complete
 UnionCaseField TypeSpecRefs. Feature 9 remains registration-pending, so these
 structural checks do not establish nominal-union source or runtime support.
-PredicateGraph and PredicateCapture readers validate required node/footprint
-row bounds, graph-local contiguous capture ordinals, role-specific flags and
-complete captured TypeSpecRefs. Predicate nodes, footprints, operands, edges
-and evaluation remain incomplete.
+PredicateGraph rows validate required node/footprint row bounds, and
+PredicateReadFootprint rows validate empty/nonempty range shape, target bounds
+and exclusive nonoverlap across footprints. PredicateCapture rows validate
+graph-local contiguous ordinals, role-specific flags and complete captured
+TypeSpecRefs. PredicateChildEdge rows validate typed references, graph-local
+tree ownership, contiguous child ordinals independently of physical row order,
+and arbitrary node/edge row permutations; the writer sorts edges canonically.
+The general-predicate candidate also validates direct captured-TypeSpec scope
+and requires each capture to have one positive defining pattern site. Other
+root/dependency semantics, complete node typing/calls, canonical graph
+identity ordering/remapping, and predicate evaluation remain incomplete.
 
 **Routes/gate:** migrate the complete producer/reader/rewriter and executable
 consumer set to the accepted register Body: implementation kinds `01..05`,
@@ -259,6 +279,12 @@ whole-source DependsOn/Captures bounds. Source summary candidates now use a
 callee-first mandatory verification pass; each body is checked before its
 summary can be consumed. If summary inference exceeds its supported budget,
 ordinary full verification remains available with source summaries unavailable.
+The [unapproved candidate-95 amendment](../proposals/reference-unique-constructor-field-provenance.md)
+now provisionally extends fresh construction to unique inline roots while
+keeping each mapped subtree Copy.
+The source/JIT regression exercises that narrow direction; unique normal
+results, private candidate-95 transport and Standard TRRM support remain
+separate implementation gaps.
 The current codecs do not persist summaries; bodyless providers and standard
 transport remain unsupported under the unapproved
 [field-provenance proposal](../proposals/reference-field-value-provenance.md).
@@ -327,7 +353,22 @@ physical contracts and capability closure are assigned and implemented.
 the complete accepted typed-handler, filter, ParentException and output/
 ownership contract.
 The current prototype still exposes a `checked-exceptions` runtime-policy
-switch and source/private `NoThrow` declarations. The standard Effects
+switch and private `NoThrow` facts. Source `NoThrow` uses are now rejected
+provisionally. The structured semantic-module reader/writer now selects only
+provisional revision 92, which omits the general NoThrow field/tokens and
+persists direct-import aggregate outputs with their supported output-specific
+dependency rows. It rejects unsupported general Dependency contracts rather
+than dropping them; candidate revision 93 remains required for general
+Captures/provenance persistence. Native graph recorded-import promises still
+retain a separate private NoThrow dimension. The unapproved
+[direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md)
+is provisionally implemented with version-3 TNPK/TNSP/TNGP expectation tables
+and provider-owned leaf thunks; package, set and graph AOT plus root-only graph
+JIT exercise selected-provider output binding and foreign-descriptor
+replacement rejection. These slices do not complete general revision-93
+dependencies, standard register-Body output persistence, field projections or
+the broader NoThrow migration.
+The standard Effects
 reader/writer now rejects retired bit `0x01`, and standard Cleanup no longer
 depends on that bit. The unapproved
 [`no-throw-retirement-and-proof-boundaries.md`](../proposals/no-throw-retirement-and-proof-boundaries.md)
@@ -482,6 +523,13 @@ default TypeSpecRefs. InterfaceBase/InterfaceMethod ownership, ordinals,
 complete base TypeSpecRefs and direct instance MethodDef ownership are now
 checked; InterfaceConstDef/AssociatedConstDef ownership, names, complete type
 references and bounded ConstantSource row references are also checked.
+The hosted source declaration binder represents generic interface arguments
+as an ordered type/constant union, applies trailing defaults, substitutes
+earlier type formals into constant domains, preserves forwarded interface and
+member constant-formal identities, and remaps values and domains together.
+Active regressions cover literal, default, forwarded and incompatible-domain
+arguments; this is not witness conformance or Standard interface-member
+provider/consumer support.
 InterfaceWitness/WitnessMember rows now validate complete type references,
 exclusive member/associated ranges and direct MethodDef bounds. A provisional
 WitnessAssociatedType reader/writer now validates 20-byte extents, witness
@@ -500,11 +548,36 @@ TypeSpecRefs and direct AssociatedTypeDef or Import references expected to
 denote that definition kind; the declaring-interface reference must be a
 TypeSpec row, not an inline F2/F3 form. Constraint kind-3 still accepts only a
 nonzero payload; the candidate row bound, owning-formal domain and exact
-relation binding remain unfinished. Base-instance binding, ConstantSource
-payload/value semantics,
-provider/default comparison, relation/witness binding and execution remain
-incomplete. AssociatedTypeDef Import/Export identity is implemented only as
-the unapproved provisional candidate. The focused
+relation binding remain unfinished. Base-instance binding, other non-Body
+ConstantSource consumers, provider/default comparison, relation/witness
+binding and execution remain incomplete. The provisional 24-scalar
+FrozenValueNode reader/writer validates fixed row references and selected
+kind-1 payload widths, unit, Boolean, rune and raw-bit rules. Selected
+register-Body ConstantMap use now requires Feature 11/1 and binds tag-1
+ConstantSource to kind-1 FrozenValueNode with exact unqualified scalar type
+identity and Blob payload validation. Initialized InterfaceConstDef tag-1
+values use the same checks with Feature 11/1 from the owning Module. This path
+also binds GenericParam constant defaults through their owning TypeDef or
+MethodDef Module, and selected Body TypeMap form-0x05 constant arguments bind
+against their constant formal. Declaration-owned TypeSpecRefs now traverse
+nested constant arguments for method signatures/parameters, fields, generic
+defaults and constant types, kind-1 constraints, interface bases/constants,
+associated-type defaults, union fields, builder registrations and text
+targets/captures under their owning Module. Ownerless witness, predicate and
+query contexts remain unresolved. The Windows x64 materializer now maps all 24
+provisional fixed-scalar carriers with exact extents, alignment and raw bits;
+wide values use a two-word BoundConstant payload, and legacy 64-bit access
+rejects values that would truncate. The hosted emitter supports joint
+nonforeign identity/copy calls for the eight wider carriers under the selected
+Windows x64 call profile, while direct foreign signatures remain rejected.
+Source-free materialization and native call tests cover the wider payloads,
+including distinct high words. Standard register-Body execution remains a
+single int32 ConstantMap return; wider standard CallSite execution, other
+non-Body consumers, generic substitution, producer/interning/remapping and
+general execution remain unfinished. The proposal remains unapproved and does
+not change normative registration.
+AssociatedTypeDef Import/Export identity is implemented only as the unapproved
+provisional candidate.
 [associated-relation payload proposal](../proposals/constraint-associated-relation-payload.md)
 is unapproved, provisionally guides implementation only under explicit user
 authorization, and does not itself approve or implement the separate
@@ -691,21 +764,97 @@ separate frozen value. The approved
 24-byte `FrozenValueNode` and 12-byte
 child row retain typed tree structure, including nominal union case identity.
 Predicate occurrences form ordered trees, and dependency families remain
-separate with their own owners. Canonical duplicate-free flat footprint ranges
-and recursive dependency validation are approved; 16-byte PredicateNode and
-8-byte operand-row shapes and exclusive operand-range ownership are approved;
-node/operand-kind values, typed target schemas and per-kind operand roles and
-arities, remaining PredicateNode operand target identities and operation
-identity encoding, resource-recipe schema and complete Feature registration
-remain gates.
-Optional attributes and names are not a fallback.
+separate with their own owners. Canonical duplicate-free flat footprint ranges,
+16-byte PredicateNode and 8-byte operand-row shapes, and exclusive operand
+ownership are integrated. The unapproved `general-predicate-graph-schema`
+proposal is provisionally implemented through an internal
+`GeneralPredicateGraphsDraft` profile: Feature 17/1 and its 10/11/12 closure,
+candidate 004D-0052 table codecs, TypeSpec form 10, ReadRoot kind 8, 000A
+EvaluationForm clauses/read bounds, ordinary row-order-independent edge
+validation, one-positive-binding-site capture validation, and a source-free
+phase-1 TypeIdentityEqual consumer path. The focused graph/contract/codec
+selection, including ImmutableData row decoding and Feature-19 checks for
+actual/allowed roots and associated-constant identity/Import/Export cases,
+passes 123/123 with zero skips at
+`artifacts\\tst\\Debug\\predicate-immutable-associated-integration-final15\\tagoo_GOODING-ZEN4_2026-10-28_12_09_14_net11.0.trx`.
+Standard remains unchanged and phase-3 selector-only. Complete node type/
+operation/call/witness/failure checks, exact ImmutableData value/witness/
+provider binding, constructed declaring-interface closure/origin and
+expected-binding, complete ConstantExecution source/value binding, source
+binding, proof/ConstEval, canonical graph rewriting/remapping and ordinary
+lowering remain unfinished. Candidate ConstantExecution/LogicalInputView
+structural codecs now check retained dependency-kind-6 and backing-kind-2
+Feature-19 requirements through explicit using contexts in the selected
+GeneralPredicateGraphsDraft profile. The closure now also follows retained
+ConstantSource references embedded in PredicateCall owner/type actuals,
+PredicateTypeUse operands and type patterns. Exact cross-Module context
+reconstruction, provider replacement, other retained contexts and remapping
+remain; see the focused evidence below.
+The proposal remains unapproved and no normative
+registry/specification owner changed. Optional attributes and names are not
+a fallback.
+
+The separate unapproved `immutable-data-feature-admission` candidate now
+registers Feature 19/1 only in `GeneralPredicateGraphsDraft`, with no
+prerequisites. Its isolated `{19/1}` closure, independent of Features 10/11/17,
+is covered by that combined selection. The candidate reader checks 0041's closed kind, target family/bounds and
+complete owner TypeSpecRef, and graph actual/allowed root-6 reads require 19
+in the using Module. Owner checks require zero exactly for nongeneric target
+owners and the corresponding nominal definition/formal shape otherwise;
+generic WAC-backed owner TypeSpecs match the selected witness implementer.
+The associated-constant candidate adds DefId `0x25`
+Import/Export resolution and a `0033` reader/writer accepting direct or
+Import-form declarations, validating witness-range ownership and the
+definition-level inherited-interface closure. A Feature-19 root-6 case now
+selects such a WAC row and rejects a missing using-module feature. Exact
+constructed declaration-instance, value/witness/provider binding, other
+retained execution contexts and remapping remain incomplete; Standard and
+normative registries are unchanged.
+Separate unapproved proposals now recommend `0x25=AssociatedConstDef` with a
+direct/Import reference for witness requirements, and static sections
+`0055..005C`/clauses `0013/0014` with a whole-inline publication carrier.
+New unapproved proposals provisionally select `005D`/DefId `26` for
+IntrinsicRegistration identity and `005E` for ConstantExecution's ordered
+substitution range; the mixed-substitution proposal recommends replacing the
+four-byte TypeSpecRef-only candidate with eight-byte tagged type/constant slots
+for checked-Body formals. The provisional candidate profile now uses that
+eight-byte row shape and checks TypeSpecRef/ConstantSource namespaces, formal
+kind/order, exclusive ranges and direct constant-source request cycles.
+Exact source value/domain and dependent-type binding remain incomplete; none
+of these proposals changes the normative registry.
+Candidate `005D/26` role-2 Imports now have a cross-artifact validator that
+selects the exact provider Module/export key, checks target/runtime
+requirements and requires exact registrationId/ruleRevision identity.
+Mismatches, missing exports and ambiguous providers reject; this is identity
+binding only, not intrinsic catalog admission, packaging/rewrite integration
+or runtime execution.
+These are provisional design directions, not normative changes. The static
+proposal now has candidate-profile structural readers/writers, DefId `24`
+Import/Export resolution, StaticDependency, StaticAccess, publication and
+ImmutableData owner checks, and MethodDef initialization-role/demand
+validation. The focused Debug build and related TRRM, import/export,
+ImmutableData, static-table, Contract and intrinsic provider-binding selection
+passed 75/75 with zero
+skips at
+`artifacts\\tst\\Debug\\constant-execution-provider-binding-final\\tagoo_GOODING-ZEN4_2026-10-28_14_38_53_net11.0.trx`.
+That candidate selection exercises request-owned ConstantExecution ranges,
+the provisional 005D registration/Import identity, 005E tagged
+TypeSpecRef/ConstantSource slots and checked-Body mixed-formal matching,
+direct nested-request cycle rejection, Feature 19 for dependency kind 6 and an
+ImmutableData-backed input view,
+missing-feature rejection through predicate TypeUse/type-pattern ConstantSource
+references, exact 005D/26 provider identity success/failure, and an
+unreferenced-view case that does not activate 19. This is structural candidate
+evidence only; exact substituted actual/value/provider binding, all retained
+using-context sources, type-dependent ConstantSource cycles, packaging/
+re-encoding, Body/runtime,
+witness-origin, richer access and indirect-backing gates remain open.
 
 <a id="cg-008"></a>
 ## CG-008: Static initialization
 
-**Accepted logical behavior and assigned shared proof/value sections are
-integrated; static-storage metadata and runtime integration remain blocked on
-their exact row schemas, typed references and runtime ABI.**
+**Accepted logical behavior is distinct from the provisional static-storage
+candidate; source production and runtime integration remain incomplete.**
 [Static source rules](../specs/grammar-spec.md#31-source-file-structure-and-declarations)
 and the [logical records](../specs/representation/logical-records.md)
 govern storage and initialization. The
@@ -727,19 +876,33 @@ and underlying values alone do not select behavior. Static section/DefId/
 Contract-clause assignments, remaining row schemas, manifest closure,
 compatibility checks, remapping and runtime ABI remain gates.
 Method-owned initialization roles and demands use the existing `Contract`
-ranges. The approved `InitializationRole` candidate is one 20-byte clause
+ranges. The selected logical `InitializationRole` contract is one 20-byte clause
 with tags `1=eager initializer`, `2=lazy initializer`,
 `3=authored static constructor`, `4=eager-phase helper`,
-`5=lazy-phase helper`; each method has at most one role. The approved
-16-byte `InitializationDemand` clause carries one closed eager-group
+`5=lazy-phase helper`; each method has at most one role. The selected logical
+16-byte `InitializationDemand` contract carries one closed eager-group
 demand, with at most one per resolved group. Approved candidate records also
 include `StaticField` flags `0=not writable after initialization`,
 `1=writable after initialization`, a 12-byte `StaticAccess` with target tags
 `1=local StaticField`, `2=imported StaticDependency` and authority tags
 `1=ordinary completion demand`, `2=initialization-phase authority`. Exact
 physical row schemas, section/DefId/Contract clause IDs, reference encodings
-and remapping remain open; in particular, the superseded 8-byte
-`StaticDependency` candidate is not an assigned schema.
+and remapping remain unassigned in the accepted registry; in particular, the
+superseded 8-byte `StaticDependency` candidate is not an assigned schema. A
+separate unapproved [static persistence proposal](../proposals/immutable-static-field-persistence.md)
+recommends sections `0055..005C`, clauses `0013/0014` and one whole-inline
+publication carrier. This does not change normative assignments or establish
+static compiler/runtime support. Its candidate-profile structural
+implementation currently validates StaticField/Contract, EagerGroup,
+EagerInitializer, LazyUnit, StaticAccess, StaticDependency and publication
+rows; it resolves candidate DefId `24` through role-checked Imports/Exports,
+checks method-owned initialization clauses against initializer/constructor/
+lazy identities, and requires a matching publication/dependency for retained
+ImmutableData kind 2. The focused Debug selection passed 68/68 with zero skips
+at `artifacts\\tst\\Debug\\static-contract-clause-integration-final7\\tagoo_GOODING-ZEN4_2026-10-28_12_58_52_net11.0.trx`.
+It does not establish exact provider replacement, source-authored output,
+Body StaticPlace/recovery, runtime state/failure/cleanup, AOT/JIT execution or
+final immutable-value truth.
 Unsafe single-unit recovery uses one registered runtime-owned call, not a
 dedicated Body operation. Its logical operand is a closed tagged exact-unit
 reference distinguishing eager groups from lazy fields; exact callable and
@@ -776,25 +939,69 @@ not part of the accepted design.
 <a id="cg-009"></a>
 ## CG-009: Owning fields and partial retirement
 
-**Ready; wider coverage must be established.**
+**Bounded implementation; remaining evidence and coverage required.**
 [Owning-field contracts](../specs/language/ownership-and-cleanup.md) distinguish
 complete values, structural partial move/repair, authored cleanup and
 reverse-declaration versus reverse-acquisition retirement.
 
-**Current/evidence:** [native support](native.md), [owner/view support](view-and-owner-profiles.md),
-[OwnershipTests](../../tests/Terrum.CodeAnalysis.Tests/Semantics/OwnershipTests.cs)
-and [native origin cases](../../tests/Terrum.CodeAnalysis.Tests/Native/Graphs/NativeGraphOriginTests.cs)
-cover bounded owners/cleanup/origin. They do not by themselves establish all
-accepted partial-field, failure and crossing combinations; no new universal
-runtime defect is asserted.
+**Current/evidence:** source binding, mandatory verification and Windows x64
+lowering now support direct top-level field moves and vacant-field repair for
+structurally tracked unique local owners. Per-field runtime flags skip moved
+children during partial retirement and whole-owner replacement; constructor
+acquisition flags remain distinct. The focused JIT/emitted-image selection
+passed 102/102 with zero skips at
+`artifacts\\tst\\Debug\\partial-owner-field-move-final-v5\\partial-owner-field-move-final-v5.trx`.
+Direct top-level live unique-field replacement is also provisionally
+implemented for derived and authored-cleanup parents, including constructors
+and maybe-live field states. It stages the replacement before cleanup and
+requires a closed same-program proof of nonthrowing transitive retirement;
+unknown, fallible, external or reentrant Cleanup is rejected. This proof is a
+conservative implementation subset, does not rely on a general NoThrow
+declaration, and is authorized only by the still-unapproved
+[replacement-retirement proposal](../proposals/live-field-replacement-retirement.md).
+The Debug fast build passed and the active checked-reference, partial-owner
+lifecycle and live-replacement selection passed 42/42 with zero skips at
+`artifacts\\tst\\Debug\\partial-owner-live-replacement-final-v2\\partial-owner-live-replacement-final-v2.trx`.
+Nested unique-field moves, vacant repair, maybe-live replacement and
+hierarchical partial-retirement flags are now implemented for structurally
+tracked local owners with eligible mutable ancestor paths. The selected private
+revision-92 module route provisionally persists and remaps `BoundFieldMove`
+using tag 42 under the unapproved
+[private-persistence proposal](../proposals/owning-field-move-private-persistence.md);
+it does not add Standard TRRM support.
 
-**Routes/gate:** audit and preserve exact live fields, original responsibility,
-repair/retirement order and complete-receiver restrictions in binding, shared
-rewrites, verification and lowering. Test failed construction at every
-acquisition, moved children, guarded joins, replacement failure and cleanup
-that diverges. Never invoke incomplete-parent authored Cleanup, replay a
-retired child, or pass partial T as a whole value. Independent publication
-depends on CG-002/003 and complete ownership/property codecs.
+**Routes/gate:** per-field generations are carried through local state copies,
+conditional/recovery joins, and loop fixed points. Whole-owner replacement
+invalidates descendant generations; a direct field move and vacant-field
+repair advance only that field subtree. A sibling checked reference remains
+valid across a conditional partial move. The Debug fast build passed, and the
+active checked-reference plus partial-owner lifecycle selection passed 29/29
+with zero skips at
+`artifacts\\tst\\Debug\\field-generation-final\\field-generation-final.trx`.
+The analyzer-enabled Debug build remains blocked by 721 repository-wide source
+analyzer/style errors (1,442 repeated diagnostic lines); it did not reach test
+project compilation. There are no diagnostics in the changed nested-owner
+verifier, binder, emitter or module-codec ranges after local style fixes.
+
+The current tests exercise both runtime policies, branch-joined nested
+replacement, checked repair failure, a repairing loop, sibling-reference
+survival and ancestor invalidation, nested construction failure without
+incomplete Cleanup, checked failure with a live nested owner field,
+nested partial retirement in reverse field order, constructor failures before,
+during and after field acquisition, malformed private field-move records,
+provider replacement, and native graph/set exchange with a remapped consumer
+type table. The Debug fast build and combined active selection passed 63/63
+with zero skips at
+`artifacts\\tst\\Debug\\nested-owner-complete-final-v5\\nested-owner-complete-final-v5.trx`.
+Other acquisition layouts and all remaining unwind joins remain unfinished.
+The current route does not establish Standard TRRM, CLI or standalone-compiler
+support, generalized checked-reference provenance or proofs for called
+Cleanup bodies. Preserve exact live fields, original responsibility,
+repair/retirement order and complete-receiver restrictions through binding,
+traversal/remapping, verification, persistence and lowering. Never invoke
+incomplete-parent authored Cleanup, replay a retired child, or pass partial T
+as a whole value. Independent publication depends on CG-002/003 and complete
+ownership/property codecs.
 
 <a id="cg-010"></a>
 ## CG-010: Portable proof and constant-evaluation floor
@@ -826,19 +1033,15 @@ recipe only for an opaque bulk intrinsic without an eligible checked Body.
 Keep the materialized result separate. `FrozenValueNode`
 and its child row have approved 24-byte and
 12-byte candidate shapes; values are strict typed trees, including nominal
-union-case identities. Node/operand-kind values, typed target schemas and
-per-kind operand roles/arities, remaining PredicateNode operand target
-schemas/identities,
-PredicateCapture row fields, tag values, exact typed-fact references and any
-role-specific field schemas remain gates; graph-local capture ordinals, the
-PredicateCapture family, separation of capture identity from typed facts, and
-the value, checked-reference and generic-type-argument capture roles are
-approved. Canonical capture-row ordering by owning graph identity and capture
-ordinal is approved; re-sort after remapping. Reuse existing typed records
-when they fully represent required facts; encode only a missing role-specific
-fact in role-selected PredicateCapture row fields, without a separate
-capture-payload record family or duplicate semantic payloads. Exact
-typed-reference remapping details remain gates.
+union-case identities. The internal predicate candidate now structurally
+validates graph/node/operand ownership, the assigned pattern/call/helper row
+extents, phase-specific node families and direct footprint references.
+Complete per-kind type/policy and selected call/provider semantics, typed
+capture evidence, immutable-data identity, and replacement/remapping remain
+gates. Graph-local capture ordinals and value, checked-reference and generic-
+type-argument roles remain distinct; capture-dependent TypeSpec form 10 is
+profile-scoped and does not permit a source/body type escape. Rewriters must
+preserve graph/capture identity rather than substitute matching row bytes.
 Predicate literal operands reuse the existing `FrozenValueNode` root and its
 typed-value/Blob contracts; exact operand-kind assignments and the remaining
 PredicateNode target schemas and operation identity encoding remain gates.
@@ -876,9 +1079,12 @@ the absence of serialized sort-key fields are approved.
 limits and admits the returnable fixed scalar set except `nint`/`nuint`; wide
 integer source operators now bind, verify, fold and execute through Windows
 x64 JIT/AOT, and hosted floating/BID operations fold in their target formats.
-Native float128/BID operator execution remains
-incomplete. `ConstEvalTests`, `WideScalarLiteralTests`, and supervised wide
-integer/literal PE/JIT coverage exercise the current boundaries. The
+Native BID decimal32/64/128 operators now execute through PE and CLI JIT under
+both runtime policies; native float128 operator execution remains incomplete.
+`ConstEvalTests`, `WideScalarLiteralTests`,
+`JitTests.BidDecimalOperatorsExecuteAcrossAotAndJitUnderBothRuntimePoliciesAsync`,
+and supervised wide integer/literal PE/JIT coverage exercise the current
+boundaries. The
 [implementation inventory](../implementation.md) explicitly does not claim
 the complete portable floor.
 
@@ -1037,7 +1243,7 @@ only one literal or route.
 <a id="cg-015"></a>
 ## CG-015: Scalar frontend record migration
 
-**Blocked: prototype limits and projected records are not the selected
+**In progress: prototype limits and projected records are not the selected
 compiler architecture.** The current C#-hosted `ScalarFrontendHost` and
 Terrum-authored producer use fixed v87/v88 buffers, a 16,384-unit prototype
 grant bound, 32-function/64-node banks, and packed call metadata. The
@@ -1056,13 +1262,17 @@ ceilings. These are not source, ABI, or adopted profile limits. The C#
 shares one 100,000-visit counter across functions, unlike the selected
 per-function verifier budget. None of these values is an accepted source
 limit. The Terrum-authored source parser/emitter remains a bounded
-implementation slice; the general C# process fallback is not yet
-demonstrated by this component.
+implementation slice. `frontend-build`, `frontend-build-library`, and
+`frontend-run` now invoke the C# compiler process on original source for every
+input. Only the explicit `frontend-component` test command retains the
+projection path; those buffers are not consumed by executable build/library/
+run.
 
-**Routes/gate:** replace fixed v87/v88 projection banks with the selected
-count-sized representation or remove the projection path; preserve direct
-argument identities, source ordering, initialization/effects, cleanup and
-whole-source fallback. Move verifier budgets to cached per-function work
+**Routes/gate:** keep fixed v87/v88 projection buffers confined to the
+test-only `frontend-component` command or replace them with the selected
+count-sized representation; never route build/library/run through them.
+Preserve direct argument identities, source ordering, initialization/effects,
+cleanup and whole-source process compilation. Move verifier budgets to cached per-function work
 using published callee contracts; keep module-level facts transient and
 separate from those budgets. Measure or remove fixed verifier ceilings;
 retained safeguards must be justified resource budgets, not language or
@@ -1084,19 +1294,26 @@ semantic projection to the C# compiler. This fallback is transitional; the
 long-term goal is a self-sustaining Terrum compiler, with the C# compiler
 removed after GA.
 
-**Current/evidence:** the current scalar frontend prototype emits v87/v88
-projections that the C# host audits/verifies/emits; that path is not the
-selected inter-compiler contract. The direct-source bootstrap tests are a
-bounded Terrum-authored implementation slice, not evidence that a general
-Terrum compiler or process fallback exists.
+**Current/evidence:** `frontend-build`, `frontend-build-library`, and
+`frontend-run` start the C# compiler as a separate process for every input,
+send original source text on stdin, preserve source identity and runtime/
+arithmetic options, and do not pass v87/v88 records. Library compilation
+selects all public top-level functions. Focused CLI coverage checks executable
+build, JIT, library parity, diagnostics and output preservation. The
+projection-based success path remains only in the explicit test-only
+`frontend-component` command. The Terrum-authored implementation remains
+bounded and is not yet a self-sustaining compiler. Direct-source bootstrap
+tests are implementation evidence, not proof of a general Terrum compiler.
 
-**Routes/gate:** implement source-level subprocess fallback without sharing
-compiler-internal ASTs; keep observable language support in sync across both
-implementations; test feature misses as a whole-source C# invocation, not a
-partial handoff. Keep the direct-source prototype's limitations out of
-language/spec support claims. Use a previous stable compiler to bootstrap
-future Terrum-only features after the implementation reaches the required
-milestones.
+**Routes/gate:** keep `frontend-build`, `frontend-build-library`, and
+`frontend-run` on the original-source process boundary until the Terrum
+compiler can compile those inputs independently. Keep the projection-based
+component command test-only; do not use its result as a build artifact or
+handoff to the C# compiler. Keep observable language support in sync across
+both implementations and the direct-source prototype's limitations out of
+language/spec support claims.
+Use a previous stable compiler to bootstrap future Terrum-only features after
+the implementation reaches the required milestones.
 
 <a id="cg-017"></a>
 ## CG-017: Direct token spans and deferred returned views
@@ -1105,45 +1322,82 @@ milestones.
 `Span<Token>` directly over a validated in-memory snapshot with `nint`
 length/index semantics and full bounds checks. The user declined a
 `TokenCursor` wrapper, a separate 64-token fast profile, and private
-`.trm` Span<Token> persistence. Returned-view forwarding remains deferred
-until a concrete same-compilation consumer exists.
+`.trm` Span<Token> persistence. Same-compilation returned-view forwarding
+has a bounded TokenSpan prototype; it does not establish standard metadata,
+general dependency proof, or persisted view support.
 
-**Current/evidence:** the repository still contains `TokenCursor` and private
-`ModuleCompiler.TokenSpans` prototypes/tests. They are implementation evidence
-only, not selected APIs or persistence schemas. No standard `.trrm`, public
-span ABI, persisted capture or returned-span contract follows.
+**Current/evidence:** `TokenCursor` remains a component prototype. The private
+module writer now rejects compilation-local span roles, types and operations;
+the reader rejects span payloads in retained revisions and refuses revisions
+77/81 before decoding. Source binding now resolves flat `DependsOn`,
+`Captures` and `ForwardsBacking` recipes into normalized in-memory
+receiver/formal and destination identities, including getter and initialized
+output targets; it distinguishes direct `this` from `nameof(@this)`/literal
+`"this"`, accepts explicit empty sets, and rejects malformed, unknown,
+duplicate and incompatible recipes. Explicit `ForwardsBacking` sources are
+checked against a matching explicit dependency/capture set. The focused
+source-recipe selection also confirms a valid strict subset and rejects extra
+or unrelated sources; 32 tests passed with zero skips. The legacy
+TokenSpan call/capture flow now consumes normalized source contracts, and the
+legacy projection is checked for consistency. This remains compilation-local
+and uses live slot identities. In the TokenSnapshot/TokenSpan profile, per-state
+backing maps remap across owner transfer, keep a later reuse of the old slot
+distinct, union conditional sources, and retire descriptors before owner
+cleanup. Active coverage exercises transfer, retirement, reinitialization,
+conditional-source union, loop-scope cleanup and staged call arguments.
+TokenSpan result defaults now consider only TokenSpan formals and
+TokenSpan/TokenCursor/validated TokenSnapshot receivers; unrelated owners and
+receivers do not widen the inferred source set.
+Separately, a bounded source-verifier slice admits `Captures` on writable
+pointer holders whose pointee carries pointer provenance. The body must satisfy
+the declared capture set; call sites use the published declaration, stage
+actual source origins, and preserve unknown writable effects as unknown. The
+Release fast output/provenance/register-map selection passed 531 tests with no
+skips. General `Captures` persistence is not yet implemented: private revision
+92 now rejects a NativeCallable capture as unrepresented rather than dropping
+its Dependency declaration; candidate revision 93 must carry and revalidate it.
+General aliasable-reference generations, owner/guard/root/pin obligations,
+inherited/provider binding, body verification, private dependency
+persistence/remapping and general lowering remain incomplete. No standard
+`.trrm`, public span ABI or persisted span capture follows from this slice.
 
 **Routes/gate:** keep span backing, access, owner/guard, and retirement facts
-through direct calls, copies, joins and cleanup. Remove or isolate the
-unselected cursor/persistence prototypes. Reopen returned-view work only for
-a concrete consumer, preserving ordinary dependency and ownership contracts.
+through direct calls, copies, joins and cleanup. Keep the cursor prototype
+test-only and never reintroduce private or standard span persistence without a
+new contract and concrete consumer. Continue the accepted general dependency
+contract work through defaults, body verification, provenance, persistence,
+remapping and lowering; do not treat the bounded returned-view prototype as
+completion of those obligations.
 
 <a id="cg-018"></a>
 ## CG-018: Unselected source-grant prototypes
 
 **Selected boundary:** compiler frontends consume original source text at the
 compiler input boundary; JIT consumes semantic metadata. A source-file buffer
-is not a runtime capability of persisted semantic modules. Isolated AST/CST
-testing APIs do not imply a private semantic-type format or a source grant.
+is not a selected runtime capability of persisted semantic modules. Isolated
+AST/CST testing APIs do not imply a private semantic-type format or a source grant.
 Compile-time text capture, if separately designed, produces a string value;
 it does not retain a reference to the original source file. No `Host.Source`
 semantic-module requirement, persisted scanner/frontend invocation profile,
 native source-grant ABI, or standard `.trrm` source-grant record is selected.
 
 **Current/evidence:** `NativeJit.ExecuteWithSourceGrant`,
-`ExecuteWithScannerProfile` and `ExecuteWithScalarFrontendProfile` remain
-private prototype paths. Their tests and current code are implementation
-evidence only, not compiler input/JIT contracts. The scalar projection is not
-the C# fallback; that fallback invokes the C# compiler process on original
-source. `NativeSourceGrantLibrary` remains experimental and adds no native
-calling convention.
+`ExecuteWithScannerProfile` and `ExecuteWithScalarFrontendProfile` are
+explicitly documented test-only prototypes. The private semantic-module
+writer may retain only the existing tagged source-grant profiles used by
+those tests; native-module packages and standard TRRM reject them. The
+ordinary JIT entry point rejects unbound source grants. `frontend-build`,
+`frontend-build-library` and `frontend-run` always invoke the C# compiler
+process on original source; `frontend-component` alone retains a test-only
+projection. `NativeSourceGrantLibrary` is test-only and adds no native calling
+convention.
 
-**Disposition:** these profiles are superseded by the standalone compiler
-boundary and are not conformance requirements. Keep any retained implementation
-clearly isolated as prototype/test support; do not expose or infer a whole-source
-runtime reference, hidden native parameter, source-dependent package, or
-persisted-AOT feature. Any distinct future need requires a new concrete
-consumer and contract review rather than promotion of these profiles.
+**Disposition:** these profiles are not selected compiler/JIT contracts or
+conformance requirements. Keep retained implementations explicitly
+test-only; do not infer a whole-source runtime reference, hidden native
+parameter, source-dependent native package, or persisted-AOT feature. Any
+distinct future need requires a new concrete consumer and contract review
+rather than promotion of these profiles.
 
 <a id="cg-020"></a>
 ## CG-020: CAS and concurrent execution
@@ -1186,6 +1440,13 @@ contract.
 do not establish complete compiler/runtime or persistent task/frame/
 phase/loan support. A candidate `Faulted(Error)`/Canceled catalog is not a
 replacement for selected events, causes, reservations and responsibility.
+The checked Standard TRRM source-reference route now retains generic nominal
+TypeDef/provider identity and exact selected Core Task<T> signature identity;
+selected Task-returning declarations bind the operation-capture default
+separately from completed-payload dependencies. Private semantic/native
+persistence still rejects those nominal carriers; task source defaults do not
+yet flow through call-result provenance or provider replacement. This source
+binding does not admit Task values in bodies or execute consuming await.
 
 **Routes/gate:** first map actual support, then preserve complete nominal
 roles, creation/invocation/completion/observation identities, actual
@@ -1214,6 +1475,11 @@ preserve actual root, authority, allocator, code and runtime-domain lifetimes.
 [native support](native.md) describe bounded private heaps, roots, unwind/
 registration and provider origins. They do not certify arbitrary shared
 managed/view/task crossings or actual Terrum failure-packet transport.
+An internal, unapproved `RootPinRuntimeDraft` now structurally isolates
+candidate Feature 14/1, TargetProfile 2/1 and Body F0/record-0D from the
+foreign-invocation schemas. It does not bind source operations, provide the
+runtime DLL, implement relocation/pinning in JIT/AOT, or support private and
+Development inputs; this is not runtime evidence.
 The [bridge cases](../specs/conformance/target-windows-x64-failure-bridge.md)
 explicitly separate native wire fixtures from Terrum execution.
 
@@ -1330,6 +1596,18 @@ experimental authoring. The [scanner](../scanner.md) and
 [frontend inventory](bootstrap-frontend-composition.md) describe narrower
 component protocols, not complete source conformance. This is a coverage
 handoff, not a claim that every rule below currently fails.
+The hosted lexer/decoder now covers noninterpolated raw-text fence selection,
+single-line and framed forms, indentation, newline directives and Unicode
+scalars; source binding consumes decoded ASCII through `utf8z`. Interpolated
+raw text now tokenizes and parses raw segments, nested ordinary expression
+holes, alignment, and static/quoted/raw/parenthesized formats; typed formatter
+construction, literal-segment framing/newline decoding, and runtime
+qualification remain open. Constant generic-argument binding also remains
+open. The switch parser accepts the shared pattern grammar, while hosted switch
+execution currently covers scalar constants, wildcard/inferred/exact-type
+bindings and short-circuit scalar `not`/`and`/`or` composition. Non-scalar
+pattern binding, the broader `is` expression forms and switch expressions
+remain open.
 
 **Routes/gate:** map accepted positive/negative cases to actual lexer, parser,
 binder and public compiler entry points after CG-023 establishes exact source
@@ -1365,15 +1643,55 @@ x64 stable-cell runtime, Feature 14/1, TargetProfile 2/1, F0 and Body record
 The separate unapproved loaded-type proposal specifies same-provider
 descriptor admission and retained layout/code/Cleanup origins. Its
 supplementary native admission export now validates and interns typed
-descriptor graphs transactionally under a test-only domain path. It is not
-wired to a complete runtime table, object registration, RootPin operations,
-relocation or JIT/AOT loading. This is not normative adoption or runtime
-execution support. A second unapproved amendment adds fixed arrays to that
-descriptor handoff and selects its V2/96-byte-node form. The standalone native
-admission implementation and supervised test now use that V2 shape, including
-checked count/stride, nested arrays, packed placement and zero/unit cases.
-This remains test-only descriptor admission, not rooted element operations or
-runtime execution. Canonical source contracts are in
+descriptor graphs transactionally under a test-only domain path. The provider
+now exports the exact 104-byte V1 operation table inside the 112-byte
+`RootPinRuntimeInfoV1`, with the same-provider V2 loaded-type admission
+and V1 loaded-method admission exports. Method admission validates
+same-domain types, support-bearing receiver/formal slot maps and origin
+closures, interns exact maps, rejects conflicts, and publishes method
+descriptors and new origin holds transactionally. Its probe exercises
+profile/map rejection, canonical origin ordering/kinds, duplicate slots,
+duplicate identity, distinct keys for equivalent maps, borrowed receiver
+mapping and origin-retain rollback. The same supervised test builds a
+production-mode provider without test hooks and checks exact info/table sizes,
+readable info/domain storage, executable table/export pointers in the same
+mapped image, and the V2/V1 admission exports. AOT provider resolution and
+complete end-to-end consumer checks remain open. The JIT consumer
+now resolves internal RootPin runtime fixups through the selected absolute path,
+validates the exact ABI, provider-image pointers, immutable info/domain and
+mapped-file identity, then pins and retains the process provider. A supervised
+synthetic JIT import passes with the production DLL and rejects a second path;
+source/compiler-produced fixups, failure/concurrency qualification and AOT
+resolution remain open. A second unapproved deployment proposal now recommends
+one host-selected absolute ASCII path P embedded in affected AOT PE imports and
+reused unchanged by JIT; it remains unapproved and has no AOT consumer
+implementation evidence. A separate unapproved
+fixed-array amendment extends that descriptor handoff and selects its
+V2/96-byte-node form. The standalone native admission implementation and
+supervised test use that V2 shape, including checked count/stride, nested
+arrays, packed placement and zero/unit cases. A test-only provider path now
+registers host-owned initialized objects and exercises opaque ObjectCell,
+RootCell and PinCell identities, exact field/array roots, stable resolution,
+pin overlap/retirement and acquisition rollback. It also traverses copied
+support through fields, optionals and fixed arrays; registers frame slots;
+transfers staged call holds into parameters and results; and marks test-host
+object/support cycles without treating descriptor holds as global roots.
+Retain-before-release replacement, exceptional handoff cleanup and invalid
+support-cell fast-fail are covered; support release does not invoke the GC
+retirement thunk, and type/code/cleanup origins remain retained by the domain.
+The test-only provider now registers per-thread frame chains, cooperatively
+parks mutators at `Poll`, and traces frames from multiple parked threads.
+Its separate test relocation path copies reachable host-registered payloads
+from typed parked mutator frames when unpinned, preserves ObjectCell/RootCell
+identity and offsets, skips active pins, and discards every staged copy when
+an injected destination allocation fails.
+The bounded native probe covers support cycles, repeated moves, overlapping
+and final-pin behavior, concurrent polling and allocation rollback. The older
+payload-substitution helper remains only a test address-change probe. This
+does not establish source operations, JIT/AOT provider resolution or
+execution. It is provisional test evidence, not normative adoption or
+complete runtime support.
+Canonical source contracts are in
 [language](../specs/language.md),
 [complete types](../specs/language/types-and-normalization.md),
 [references](../specs/language/references.md), [lifetimes](../specs/lifetimes.md),
@@ -1393,9 +1711,15 @@ compiler-owned `TryCreate` factories, while `new C(...)` remains unsupported.
 The existing Cleanup prototype is for unique values and does not implement
 GC-triggered object Cleanup. The internal RootPin draft selection now checks
 Feature 14/1, TargetProfile 2/1 and the F0/record-0D schema boundary, including
-the distinct foreign-invocation NativeAddress record. It does not bind source
-operations, implement the provider, relocate objects or lower a root/pin.
-These are scoped implementation facts, not a reason to weaken the accepted
+the distinct foreign-invocation NativeAddress record. The test-only native
+probe exercises typed support-cell holds, per-thread frame registration,
+cooperative `Poll`, cross-thread frame tracing, call/result transfer, exception
+rollback, typed object-graph tracing and transactional test-only payload
+relocation. The provider ABI is exported and probe-tested, but JIT/AOT provider
+resolution, identity validation and lifetime retention remain open. Source
+operations, standard producer/consumer execution, production collector
+integration, compiler lowering and complete qualification remain open. These
+are scoped implementation facts, not a reason to weaken the accepted
 contracts or infer conformance from the private collector.
 
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
@@ -1413,10 +1737,16 @@ with thread-neutral/transferable transitive obligations.
 
 The former `pin` TypeSpec qualifier bit is retired/reserved and must not be
 reused for GC. The unapproved proposal supplies provisional type/runtime
-carriers and the RootPin draft profile supplies exact schema dispatch; source
-binding, producer/consumer execution, collector/provider implementation and
+carriers and the RootPin draft profile supplies exact schema dispatch. The
+test-only provider now covers stable cells, typed support residences,
+cooperative mutator rendezvous, cross-thread object-graph marking and
+transactional payload relocation, and exports the exact candidate provider
+ABI. The synthetic JIT runtime-import path is partially implemented and
+qualified, but source binding, independent producer/consumer execution, AOT
+provider resolution, production collector integration, lowering and complete
 qualification remain open. Never infer support from private formats or equal
-version bytes. Use unrelated synthetic classes/boxes and root/pin operations,
+version bytes.
+Use unrelated synthetic classes/boxes and root/pin operations,
 including bounded references that outlive a handle local but not a slot or
 owner/guard endpoint, optional-root presence checks, failed acquisition with
 no published root, early-release cleanup boundaries, and negative
@@ -1426,3 +1756,35 @@ weak handles, ownership domains and any joint collection policy remain
 separate design work. Verify exact source and metadata identities through
 separate compilation and both JIT/AOT paths; distinguish source binding,
 emission, runtime behavior and profile admission.
+
+<a id="cg-028"></a>
+## CG-028: Nominal enum values and persistence
+
+**Unapproved candidate; structural Standard support only.**
+[Nominal enum persistence](../proposals/nominal-enum-persistence.md)
+provisionally selects an exact `NominalEnumsDraft` profile with TypeDef kind
+4, required `EnumDef`/`EnumMemberDef` sections `0053/0054`, Feature 18/1
+closure over the scalar 11/1 carrier, int32 value bits and the existing
+target-specific Layout commitment. It does not change default Standard or
+normative registry owners.
+
+**Current/evidence:** structural row codecs enforce complete TypeDef/member
+ownership, ordered member snapshots, public access, base/Flags shape, default
+Auto Layout and the exact supported Blittable target. A source-free provider
+validator binds an imported enum TypeDef to its selected Export and compares
+the exact enum/member snapshot and target Layout facts; missing providers,
+changed names/keys/values/Flags, target mismatches and ambiguity reject. The
+focused enum metadata/provider selection passed 73/73 with zero skips at
+`artifacts\\tst\\Debug\\nominal-enum-provider-binding-final\\tagoo_GOODING-ZEN4_2026-10-28_15_00_08_net11.0.trx`.
+This validates a bounded artifact path, not source enum parsing, Standard
+producer emission, frozen enum value materialization, replacement/packing,
+private-semantic revision 97, or ABI execution.
+
+**Routes/gate:** carry `(complete enum identity, int32 value)` through
+ConstantSource/FrozenValueNode, ConstantMap and TypeSpec use without
+materializing the underlying int32 and retagging it. Preserve member
+declaration keys and every Module's original provider expectation through
+Standard imports, private P+E, sets/graphs, replacement and decoded
+remapping. Qualify target representation and native calls separately from
+table validation or PE emission. No member DefId, source annotation schema,
+private revision fallback or runtime ABI is implied.

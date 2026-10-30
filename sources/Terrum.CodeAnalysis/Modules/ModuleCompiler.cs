@@ -950,6 +950,11 @@ public static partial class ModuleCompiler
     {
         ArgumentNullException.ThrowIfNull(exports);
         ArgumentNullException.ThrowIfNull(program);
+        if (BoundGenericNominalTypeContract.UsesAny(program))
+        {
+            throw new ModuleContractException(
+                "The private semantic module format has no generic nominal type identity codec.");
+        }
         SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
             allowDirectNativeImports: true);
         RejectCompilationLocalSpans(program);
@@ -1175,6 +1180,11 @@ public static partial class ModuleCompiler
     public static byte[] CreateConsumer(BoundProgram program, byte[] referenceProducer)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (BoundGenericNominalTypeContract.UsesAny(program))
+        {
+            throw new ModuleContractException(
+                "The private semantic module format has no generic nominal type identity codec.");
+        }
         SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
             allowDirectNativeImports: true);
         RejectCompilationLocalSpans(program);
@@ -1930,6 +1940,9 @@ public static partial class ModuleCompiler
                     break;
                 case BoundFieldRead field:
                     VisitExpression(field.Receiver);
+                    break;
+                case BoundFieldMove move:
+                    VisitExpression(move.Place);
                     break;
                 case BoundFieldLoan loan:
                     visitFieldLoan?.Invoke(loan);
@@ -3213,6 +3226,38 @@ public static partial class ModuleCompiler
                     .Append(parameter.Extent);
             }
         }
+        if (function.DirectNativeImport is DirectNativeImport directImport)
+        {
+            _ = result.Append("|DirectNativeImport:")
+                .Append(Convert.ToHexString(Encoding.UTF8.GetBytes(
+                    directImport.LibraryName.ToUpperInvariant())))
+                .Append(':')
+                .Append(Convert.ToHexString(Encoding.UTF8.GetBytes(directImport.ExportName)))
+                .Append(':').Append((byte)directImport.CallingConvention)
+                .Append(':').Append((byte)directImport.ResolutionMode)
+                .Append(':').Append((byte)directImport.ResolutionPolicy);
+            foreach (var parameter in directImport.Parameters.OrderBy(
+                static parameter => parameter.ParameterIndex))
+            {
+                _ = result.Append("|DirectNativeParameter:")
+                    .Append(parameter.ParameterIndex).Append(':')
+                    .Append(ContractType(parameter.PointeeType, structures,
+                        functionPointerSignatures, nativePointerTypes)).Append(':')
+                    .Append((byte)parameter.Access).Append(':')
+                    .Append((byte)parameter.Retention).Append(':')
+                    .Append(parameter.Extent);
+            }
+            foreach (var output in directImport.Outputs.OrderBy(
+                static output => output.ParameterIndex))
+            {
+                _ = result.Append("|DirectNativeOutput:")
+                    .Append(output.ParameterIndex).Append(':')
+                    .Append(ContractType(output.PointeeType, structures,
+                        functionPointerSignatures, nativePointerTypes)).Append(':')
+                    .Append(output.ResultCondition).Append(':')
+                    .Append(output.FailureDisposition);
+            }
+        }
         _ = result.Append(function.DoesNotReturn ? "|DoesNotReturn" : "|MayReturn");
         if (function.RequiresUnsafeCaller)
         {
@@ -4257,6 +4302,11 @@ public static partial class ModuleCompiler
             BoundConstant constant => constant with { Type = RemapType(constant.Type, source, destination, classOffset, destinationTypes) },
             BoundRead read => read with { Type = RemapType(read.Type, source, destination, classOffset, destinationTypes) },
             BoundMove move => move with { Type = RemapType(move.Type, source, destination, classOffset, destinationTypes) },
+            BoundFieldMove move => move with {
+                Type = RemapType(move.Type, source, destination, classOffset, destinationTypes),
+                Place = (BoundFieldRead)RemapExpression(
+                    move.Place, source, destination, classOffset, destinationTypes),
+            },
             BoundReceiverLoan loan => loan with { Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes) },
             BoundFieldLoan loan => loan with {
                 Type = RemapType(loan.Type, source, destination, classOffset, destinationTypes),
@@ -6355,6 +6405,7 @@ public static partial class ModuleCompiler
             BoundNativePointerRead => (byte)39,
             BoundNativePointerWrite => (byte)40,
             BoundNativeOutputReservation => (byte)41,
+            BoundFieldMove => (byte)42,
             BoundNativeFixedArrayInitialization or BoundNativeFixedArrayElement
                 or BoundNativeFixedArrayPointerAddress or BoundNativeFixedArrayWrite =>
                     throw new ModuleContractException(
@@ -6373,6 +6424,9 @@ public static partial class ModuleCompiler
                 break;
             case BoundMove move:
                 writer.Write(move.Variable);
+                break;
+            case BoundFieldMove move:
+                PutExpression(writer, move.Place, names, ref remaining, depth + 1, inUnsafe);
                 break;
             case BoundReceiverLoan loan:
                 writer.Write(loan.Variable);
@@ -6724,6 +6778,11 @@ public static partial class ModuleCompiler
                 return new BoundOutArgument(reader.ReadInt32(), GetBool(reader), type, span) { IsInit = true };
             case 9:
                 return new BoundMove(reader.ReadInt32(), type, span);
+            case 42:
+                return new BoundFieldMove(
+                    GetExpression(reader, ref remaining, depth + 1) as BoundFieldRead
+                        ?? throw new ModuleFormatException("Expected owning field place."),
+                    type, span);
             case 10:
                 return new BoundReceiverLoan(reader.ReadInt32(), type, span);
             case 11:
@@ -7097,6 +7156,10 @@ public static partial class ModuleCompiler
             },
             BoundIsVariablePattern pattern => pattern with {
                 Value = ResolveExpression(pattern.Value, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
+            },
+            BoundFieldMove move => move with {
+                Place = (BoundFieldRead)ResolveExpression(
+                    move.Place, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
             BoundFieldRead field => ResolveFieldRead(
                 field, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),

@@ -13,7 +13,12 @@ public sealed class CompilationReference
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
         NativeCoreRegistrationSet? nativeCoreRegistration = null,
-        ImmutableArray<BoundEnumDefinition> enumDefinitions = default)
+        ImmutableArray<BoundEnumDefinition> enumDefinitions = default,
+        ImmutableArray<CheckedReferenceTypeDefinition> checkedReferenceTypes = default,
+        ImmutableArray<BoundInterfaceDefinition> interfaces = default,
+        ImmutableArray<BoundGenericNominalTypeDefinition> genericNominalTypeDefinitions = default,
+        ImmutableArray<BoundGenericNominalTypeInstance> genericNominalTypeInstances = default,
+        CoreTaskTypeIdentity? coreTaskType = null)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
@@ -24,6 +29,41 @@ public sealed class CompilationReference
         {
             throw new ArgumentException("The selected nominal enum declarations are invalid.",
                 nameof(enumDefinitions));
+        }
+        if (!checkedReferenceTypes.IsDefault
+            && !CheckedReferenceTypeContract.IsValidTable(checkedReferenceTypes))
+        {
+            throw new ArgumentException("The selected checked-reference types are invalid.",
+                nameof(checkedReferenceTypes));
+        }
+        if (!interfaces.IsDefault && !BoundInterfaceContract.IsValidTable(interfaces,
+            static _ => true))
+        {
+            throw new ArgumentException("The selected interface declarations are invalid.",
+                nameof(interfaces));
+        }
+        if (!genericNominalTypeDefinitions.IsDefault
+            && !BoundGenericNominalTypeContract.IsValidDefinitionTable(
+                genericNominalTypeDefinitions))
+        {
+            throw new ArgumentException("The selected generic nominal declarations are invalid.",
+                nameof(genericNominalTypeDefinitions));
+        }
+        if (!genericNominalTypeInstances.IsDefault
+            && !BoundGenericNominalTypeContract.IsValidInstanceTable(
+                genericNominalTypeInstances,
+                genericNominalTypeDefinitions.IsDefault
+                    ? [] : genericNominalTypeDefinitions))
+        {
+            throw new ArgumentException("The selected generic nominal instances are invalid.",
+                nameof(genericNominalTypeInstances));
+        }
+        if (!BoundGenericNominalTypeContract.IsValidCoreTaskSelection(
+            coreTaskType, genericNominalTypeDefinitions.IsDefault
+                ? [] : genericNominalTypeDefinitions))
+        {
+            throw new ArgumentException("The selected Core Task identity is invalid.",
+                nameof(coreTaskType));
         }
 
         Structures = structures;
@@ -36,6 +76,13 @@ public sealed class CompilationReference
         NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
         NativeCoreRegistration = nativeCoreRegistration;
         EnumDefinitions = enumDefinitions.IsDefault ? [] : enumDefinitions;
+        CheckedReferenceTypes = checkedReferenceTypes.IsDefault ? [] : checkedReferenceTypes;
+        Interfaces = interfaces.IsDefault ? [] : interfaces;
+        GenericNominalTypeDefinitions = genericNominalTypeDefinitions.IsDefault
+            ? [] : genericNominalTypeDefinitions;
+        GenericNominalTypeInstances = genericNominalTypeInstances.IsDefault
+            ? [] : genericNominalTypeInstances;
+        CoreTaskType = coreTaskType;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -61,4 +108,42 @@ public sealed class CompilationReference
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; }
 
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; }
+
+    internal ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes { get; }
+
+    internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; }
+
+    /// <summary>The exact nominal TypeDefs selected from checked providers.</summary>
+    public ImmutableArray<BoundGenericNominalTypeDefinition> GenericNominalTypeDefinitions { get; }
+
+    /// <summary>Nominal TypeDef uses retained by an imported declaration set.</summary>
+    public ImmutableArray<BoundGenericNominalTypeInstance> GenericNominalTypeInstances { get; }
+
+    /// <summary>The host-selected exact Core Task declaration, if one was selected for this provider set.</summary>
+    public CoreTaskTypeIdentity? CoreTaskType { get; }
+
+    /// <summary>Returns a reference that explicitly selects one checked provider definition as Core Task.</summary>
+    public CompilationReference SelectCoreTaskType(BoundGenericNominalTypeIdentity identity)
+    {
+        var selection = new CoreTaskTypeIdentity(identity);
+        if (!BoundGenericNominalTypeContract.IsValidCoreTaskSelection(
+            selection, GenericNominalTypeDefinitions))
+        {
+            throw new ArgumentException(
+                "The selected identity does not name a checked Terrum.Threading.Tasks.Task<T = void> definition.",
+                nameof(identity));
+        }
+
+        if (CoreTaskType is not null)
+        {
+            throw new InvalidOperationException("A Core Task identity is already selected.");
+        }
+
+        return new CompilationReference(Structures, Functions, RuntimePolicy,
+            RequiresSourceGrant, InvocationProfileId,
+            NativeFunctionPointerSignatures, NativePointerTypes,
+            NativeCoreRegistration, EnumDefinitions, CheckedReferenceTypes,
+            Interfaces, GenericNominalTypeDefinitions, GenericNominalTypeInstances,
+            selection);
+    }
 }

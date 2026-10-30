@@ -36,6 +36,9 @@ internal sealed partial class Binder
         _pendingNativeCallConvExpressions = [];
     private readonly List<BoundEnumDefinition> _enumDefinitions = [];
     private readonly Dictionary<string, PrimitiveType> _enumNames = new(StringComparer.Ordinal);
+    private readonly List<BoundGenericNominalTypeDefinition> _genericNominalTypeDefinitions = [];
+    private readonly List<BoundGenericNominalTypeInstance> _genericNominalTypeInstances = [];
+    private readonly Dictionary<string, PrimitiveType> _genericNominalTypeUses = new(StringComparer.Ordinal);
     private readonly HashSet<BoundLocal> _constRequired = new(ReferenceEqualityComparer.Instance);
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
@@ -160,6 +163,19 @@ internal sealed partial class Binder
         _isLibrary = isLibrary;
         _coreLibrary = coreLibrary;
         _reference = reference;
+        if (reference is not null)
+        {
+            _interfaces.AddRange(reference.Interfaces);
+            _genericNominalTypeDefinitions.AddRange(reference.GenericNominalTypeDefinitions);
+            _genericNominalTypeInstances.AddRange(reference.GenericNominalTypeInstances);
+            for (var index = 0; index < reference.GenericNominalTypeInstances.Length; index++)
+            {
+                var instance = reference.GenericNominalTypeInstances[index];
+                _genericNominalTypeUses[BoundGenericNominalTypeContract.CreateUseKey(
+                    instance.Definition, instance.Arguments, instance.Qualifiers)] =
+                    BoundGenericNominalTypeTypes.Type(index);
+            }
+        }
         _nativeCoreRegistration = nativeCoreRegistration ?? reference?.NativeCoreRegistration;
         _runtimePolicy = runtimePolicy;
         _sourceArithmeticProfile = sourceArithmeticProfile;
@@ -391,15 +407,20 @@ internal sealed partial class Binder
                     parameters.Add(new Parameter(parameter.Name, parameter.Type, default, parameter.IsOut,
                         parameter.IsInit, parameter.IsImplicitRef));
                 }
-                _signatures.Add(new Signature(function.Name, function.ReturnType, parameters.ToImmutable(),
-                    null, null, _trees[0], function.DeclaringStruct, function.IsConstructor,
-                    false, false, false, function.IsStatic, function.IsNoThrow, function.DoesNotReturn, function) {
+                var importedFunction = AddTaskOperationCaptureDefault(function);
+                _signatures.Add(new Signature(importedFunction.Name,
+                    importedFunction.ReturnType, parameters.ToImmutable(),
+                    null, null, _trees[0], importedFunction.DeclaringStruct,
+                    importedFunction.IsConstructor, false, false, false,
+                    importedFunction.IsStatic, importedFunction.IsNoThrow,
+                    importedFunction.DoesNotReturn, importedFunction) {
                     IsCleanup = function.IsCleanup,
                     IsOperator = function.IsOperator,
                     PropertyName = function.PropertyName,
                     RequiresUnsafeCaller = function.RequiresUnsafeCaller,
                     DeclaredRequiresUnsafeCaller = function.DeclaredRequiresUnsafeCaller,
                     NativeFunctionPointerType = function.NativeFunctionPointerType,
+                    DependencyContracts = importedFunction.DependencyContracts,
                 });
             }
         }
@@ -536,6 +557,7 @@ internal sealed partial class Binder
         {
             DeclareClass(index);
         }
+        DeclareInterfaces();
         DeclareConformances();
         foreach (var (tree, node) in _scopedDeclarations)
         {
@@ -839,6 +861,10 @@ internal sealed partial class Binder
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
             NativePointerTypes = [.. _nativePointerTypes],
             CheckedReferenceTypes = [.. _checkedReferenceTypes],
+            Interfaces = [.. _interfaces],
+            GenericNominalTypeDefinitions = [.. _genericNominalTypeDefinitions],
+            GenericNominalTypeInstances = [.. _genericNominalTypeInstances],
+            CoreTaskType = _reference?.CoreTaskType,
             Classes = [.. _classes],
             Buffers = _buffers,
             RequiresSourceGrant = _buffers.Any(static buffer => buffer.IsInvocationScoped)
@@ -1542,6 +1568,13 @@ internal sealed partial class Binder
             var typeNode = (SyntaxNode)field.Children[^3];
             var fieldName = ((SyntaxTokenElement)field.Children[^2]).Token;
             var type = BindType(typeNode, allowVoid: false);
+            if (BoundGenericNominalTypeTypes.IsType(type))
+            {
+                Report("TRM3005",
+                    "Generic nominal values do not have a supported struct storage layout.",
+                    field.Span);
+                continue;
+            }
             if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
                 || ManagedClassTypes.IsManaged(type))
             {
@@ -1562,7 +1595,7 @@ internal sealed partial class Binder
             {
                 Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
-            var width = ValueLayout.Size(type, _structs);
+            var width = ValueLayout.Size(type, _structs, [.. _checkedReferenceTypes]);
             var fieldAlignment = width == 0 ? 1 : ValueAlignment(type);
             var duplicate = false;
             foreach (var previous in fields)
@@ -1768,13 +1801,13 @@ internal sealed partial class Binder
     {
         if (!IsStruct(type))
         {
-            return ValueLayout.Alignment(type, _structs);
+            return ValueLayout.Alignment(type, _structs, [.. _checkedReferenceTypes]);
         }
         if (_structureAlignments.TryGetValue(type, out var alignment))
         {
             return alignment;
         }
-        alignment = ValueLayout.Alignment(type, _structs);
+        alignment = ValueLayout.Alignment(type, _structs, [.. _checkedReferenceTypes]);
         if (_laidOut.Contains((int)type - 100))
         {
             _structureAlignments.Add(type, alignment);
@@ -3345,6 +3378,40 @@ internal sealed partial class Binder
             contractSpans.Add(attribute.Span);
         }
 
+        if (IsSelectedCoreTaskType(returnType))
+        {
+            var defaultSources = TaskOperationCaptureSources(parameters,
+                containingType, isStatic, constructor, classConstructor,
+                nativeOutputParameters);
+            var explicitOperationCapture = contracts.Any(static contract =>
+                contract.Relation == BoundDependencyRelation.Captures
+                && contract.Destination == BoundDependencyDestination.Operation);
+            if (!explicitOperationCapture)
+            {
+                contracts.Add(new BoundDependencyContract(
+                    BoundDependencyRelation.Captures,
+                    BoundDependencyDestination.Operation, null, defaultSources));
+                contractSpans.Add(declarationSpan);
+            }
+            else
+            {
+                var permittedSources = defaultSources.ToHashSet();
+                for (var index = 0; index < contracts.Count; index++)
+                {
+                    var operationCapture = contracts[index];
+                    if (operationCapture.Relation == BoundDependencyRelation.Captures
+                        && operationCapture.Destination == BoundDependencyDestination.Operation
+                        && operationCapture.Sources.Any(source =>
+                            !permittedSources.Contains(source)))
+                    {
+                        Report("TRM3023",
+                            "A Core Task operation capture may narrow, but cannot add to, its eligible source set.",
+                            contractSpans[index]);
+                    }
+                }
+            }
+        }
+
         var hasDeclaredResultDependency = attributes.Any(dependency =>
             dependency.InlineParameterOrdinal is null
             && TryGetDependencyRelation(AttributeName(dependency.Attribute),
@@ -3425,6 +3492,135 @@ internal sealed partial class Binder
 
         return boundContracts;
     }
+
+    private BoundFunction AddTaskOperationCaptureDefault(BoundFunction function)
+    {
+        if (!IsSelectedCoreTaskType(function.ReturnType)
+            || function.DependencyContracts.Any(static contract =>
+                contract.Relation == BoundDependencyRelation.Captures
+                && contract.Destination == BoundDependencyDestination.Operation))
+        {
+            return function;
+        }
+
+        var receiverOffset = function.DeclaringStruct is not null
+            && !function.IsStatic && !function.IsConstructor && !function.IsClassConstructor
+                ? 1 : 0;
+        var explicitParameterCount = function.ParameterCount - receiverOffset;
+        if (explicitParameterCount < 0
+            || explicitParameterCount + receiverOffset > function.Variables.Length)
+        {
+            return function;
+        }
+
+        var sources = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        if (receiverOffset == 1
+            && IsEligibleTaskOperationCaptureSource(
+                function.Variables[0].Type, isOut: false, isInit: false,
+                isImplicitRef: false))
+        {
+            sources.Add(new BoundDependencySource(
+                BoundDependencySourceKind.Receiver, null));
+        }
+        for (var ordinal = 0; ordinal < explicitParameterCount; ordinal++)
+        {
+            var formal = function.Variables[ordinal + receiverOffset];
+            if (IsEligibleTaskOperationCaptureSource(formal.Type,
+                formal.IsOut, formal.IsInit, formal.IsImplicitRef))
+            {
+                sources.Add(new BoundDependencySource(
+                    BoundDependencySourceKind.Formal, ordinal));
+            }
+        }
+
+        var dependencyContracts = function.DependencyContracts.IsDefault
+            ? []
+            : function.DependencyContracts;
+        return function with
+        {
+            DependencyContracts = dependencyContracts.Add(
+                new BoundDependencyContract(BoundDependencyRelation.Captures,
+                    BoundDependencyDestination.Operation, null,
+                sources.ToImmutable())),
+        };
+    }
+
+    private ImmutableArray<BoundDependencySource> TaskOperationCaptureSources(
+        ImmutableArray<Parameter> parameters, string? containingType,
+        bool isStatic, bool constructor, bool classConstructor,
+        HashSet<int> nativeOutputParameters)
+    {
+        var sources = ImmutableArray.CreateBuilder<BoundDependencySource>();
+        var hasReceiver = containingType is not null && !isStatic
+            && !constructor && !classConstructor;
+        if (hasReceiver && IsEligibleTaskOperationCaptureSource(
+            ResolveDeclaredType(containingType!), isOut: false, isInit: false,
+            isImplicitRef: false))
+        {
+            sources.Add(new BoundDependencySource(
+                BoundDependencySourceKind.Receiver, null));
+        }
+        for (var ordinal = 0; ordinal < parameters.Length; ordinal++)
+        {
+            var parameter = parameters[ordinal];
+            if (!nativeOutputParameters.Contains(ordinal)
+                && IsEligibleTaskOperationCaptureSource(parameter.Type,
+                parameter.IsOut, parameter.IsInit, parameter.IsImplicitRef))
+            {
+                sources.Add(new BoundDependencySource(
+                    BoundDependencySourceKind.Formal, ordinal));
+            }
+        }
+        return sources.ToImmutable();
+    }
+
+    private bool IsEligibleTaskOperationCaptureSource(
+        PrimitiveType type, bool isOut, bool isInit, bool isImplicitRef)
+        => !isOut && !isInit
+            && (isImplicitRef || HasTaskOperationCaptureBacking(type));
+
+    private bool HasTaskOperationCaptureBacking(PrimitiveType type)
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        var checkedReferenceTypes = _checkedReferenceTypes.ToImmutableArray();
+        pending.Push(type);
+        while (pending.TryPop(out var current))
+        {
+            var isLiveCheckedReference = CheckedReferenceTypeContract.IsValidType(
+                current, checkedReferenceTypes)
+                && !checkedReferenceTypes[CheckedReferenceTypes.Index(current)].IsInitialization;
+            if (ManagedClassTypes.IsManaged(current)
+                || (BoundGenericNominalTypeContract.IsNominalClassType(current,
+                        _genericNominalTypeInstances,
+                        _genericNominalTypeDefinitions)
+                    && !IsUnique(current))
+                || TokenSpanContract.IsDependent(current, _structs)
+                || (isLiveCheckedReference
+                    && CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                        current, _structs, _classes, _enumDefinitions.Count,
+                        checkedReferenceTypes)))
+            {
+                return true;
+            }
+            if (!IsStruct(current) || !visited.Add(current))
+            {
+                continue;
+            }
+
+            foreach (var field in _structs[(int)current - 100].Fields)
+            {
+                pending.Push(field.Type);
+            }
+        }
+
+        return false;
+    }
+
+    private bool IsSelectedCoreTaskType(PrimitiveType type) =>
+        _reference?.CoreTaskType is CoreTaskTypeIdentity selection
+        && BoundGenericNominalTypeContract.IsCoreTaskType(
+            type, _genericNominalTypeInstances, selection);
 
     private bool IsEligibleTokenSpanDependencySource(PrimitiveType type)
     {
@@ -3609,8 +3805,16 @@ internal sealed partial class Binder
                 return true;
 
             case DependencyAttributeTargetKind.Operation:
+                if (relation is BoundDependencyRelation.Captures
+                        or BoundDependencyRelation.ForwardsBacking
+                    && IsSelectedCoreTaskType(returnType)
+                    && !constructor && !classConstructor)
+                {
+                    destination = BoundDependencyDestination.Operation;
+                    return true;
+                }
                 Report("TRM3023",
-                    "The method target requires an admitted completion-operation relationship.",
+                    "The method target requires a selected Core Task completion operation.",
                     span);
                 return false;
 
@@ -3776,9 +3980,7 @@ internal sealed partial class Binder
                 CheckedReferenceTypes.Index(parameter.Type)];
             return referenceType.IsWritable && !referenceType.IsGarbageCollected
                 && !referenceType.IsInitialization && !referenceType.IsOptional
-                && (IsUnique(referenceType.ReferentType)
-                    || ManagedClassTypes.IsManaged(referenceType.ReferentType)
-                    || TokenSpanContract.IsDependent(referenceType.ReferentType, _structs));
+                && CanCaptureValue(referenceType.ReferentType);
         }
         if (parameter.IsOut || parameter.IsImplicitRef
             || IsUnique(parameter.Type) || ManagedClassTypes.IsManaged(parameter.Type))
@@ -3824,7 +4026,35 @@ internal sealed partial class Binder
     }
 
     private bool CanCaptureValue(PrimitiveType type)
-        => IsUnique(type) || ManagedClassTypes.IsManaged(type);
+    {
+        var pending = new Stack<PrimitiveType>();
+        var visited = new HashSet<PrimitiveType>();
+        pending.Push(type);
+        while (pending.TryPop(out var current))
+        {
+            if (IsUnique(current) || ManagedClassTypes.IsManaged(current)
+                || BoundGenericNominalTypeContract.IsNominalClassType(current,
+                    _genericNominalTypeInstances,
+                    _genericNominalTypeDefinitions)
+                || TokenSpanContract.IsDependent(current, _structs)
+                || (CheckedReferenceTypeContract.IsValidType(
+                    current, [.. _checkedReferenceTypes])
+                    && IsSupportedCheckedReferenceStoreType(current)))
+            {
+                return true;
+            }
+            if (!IsStruct(current) || !visited.Add(current))
+            {
+                continue;
+            }
+
+            foreach (var field in _structs[(int)current - 100].Fields)
+            {
+                pending.Push(field.Type);
+            }
+        }
+        return false;
+    }
 
     private static int FindParameterOrdinal(string? parameterName,
         ImmutableArray<Parameter> parameters)
@@ -4017,9 +4247,10 @@ internal sealed partial class Binder
             {
                 var diagnosticCount = DiagnosticCount;
                 var arguments = ImmutableArray.CreateBuilder<PrimitiveType>(typeArgumentNodes.Length);
+                var allowsVoidArgument = HasImportedGenericNominalTypeCandidate(name);
                 foreach (var argumentNode in typeArgumentNodes)
                 {
-                    arguments.Add(BindType(argumentNode, allowVoid: false));
+                    arguments.Add(BindType(argumentNode, allowVoid: allowsVoidArgument));
                 }
                 if (DiagnosticCount != diagnosticCount)
                 {
@@ -4213,8 +4444,65 @@ internal sealed partial class Binder
         return new BoundReferenceFormation(place, referenceType, node.Span);
     }
 
+    private bool IsEligibleUniqueFieldMove(BoundFieldRead place, out int rootVariable)
+    {
+        var fields = new Stack<BoundFieldRead>();
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            fields.Push(field);
+            receiver = field.Receiver;
+        }
+
+        if (receiver is not BoundRead root
+            || (uint)root.Variable >= (uint)_variables.Count
+            || root.Type != _variables[root.Variable].Type
+            || !IsUnique(root.Type))
+        {
+            rootVariable = -1;
+            return false;
+        }
+
+        rootVariable = root.Variable;
+        var isConstructorReceiver = _constructor && root.Variable == 0;
+        if (!isConstructorReceiver && !_variables[root.Variable].IsMutable)
+        {
+            return false;
+        }
+
+        var ownerType = root.Type;
+        while (fields.TryPop(out var field))
+        {
+            var ownerIndex = (int)ownerType - 100;
+            if (field.Receiver.Type != ownerType || !IsUnique(ownerType)
+                || ownerIndex < 0 || ownerIndex >= _structs.Count
+                || (uint)field.Field >= (uint)_structs[ownerIndex].Fields.Length)
+            {
+                return false;
+            }
+            var definition = _structs[ownerIndex].Fields[field.Field];
+            if (definition.Type != field.Type || !IsUnique(definition.Type))
+            {
+                return false;
+            }
+            if (!isConstructorReceiver
+                && (!definition.IsMutable || CleanupMethod(ownerType) is not null))
+            {
+                return false;
+            }
+            ownerType = definition.Type;
+        }
+        return ownerType == place.Type;
+    }
+
     private bool TryGetCheckedReferencePlace(
         BoundExpression place, out int rootVariable, out bool isWritable)
+        => TryGetCheckedReferencePlace(
+            place, isFinal: true, out rootVariable, out isWritable);
+
+    private bool TryGetCheckedReferencePlace(
+        BoundExpression place, bool isFinal,
+        out int rootVariable, out bool isWritable)
     {
         switch (place)
         {
@@ -4246,9 +4534,31 @@ internal sealed partial class Binder
                 isWritable = _variables[element.Variable].IsMutable
                     && NativeFixedArrayContract.AllowsElementWrites(element.Layout);
                 return true;
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type, [.. _checkedReferenceTypes]))
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                var reference = _checkedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                if (reference.IsGarbageCollected || reference.IsInitialization
+                    || reference.IsOptional || reference.ReferentType != referenceRead.Type)
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                rootVariable = referenceRead.Descriptor is BoundRead descriptorRead
+                    ? descriptorRead.Variable : -1;
+                isWritable = reference.IsWritable;
+                return true;
             case BoundFieldRead field:
                 if (!TryGetCheckedReferencePlace(
-                        field.Receiver, out rootVariable, out var receiverWritable))
+                        field.Receiver, isFinal: false,
+                        out rootVariable, out var receiverWritable))
                 {
                     isWritable = false;
                     return false;
@@ -4257,10 +4567,8 @@ internal sealed partial class Binder
                 if (structureIndex < 0 || structureIndex >= _structs.Count
                     || ManagedClassTypes.IsClass(field.Receiver.Type)
                     || (field.Receiver is not BoundRead
-                        && (IsUnique(field.Receiver.Type)
-                            || _structs[structureIndex].CleanupMethod is not null))
-                    || (_structs[structureIndex].CleanupMethod is not null
-                        && !IsUnique(field.Receiver.Type))
+                        && !IsUnique(field.Receiver.Type)
+                        && _structs[structureIndex].CleanupMethod is not null)
                     || (uint)field.Field >= (uint)_structs[structureIndex].Fields.Length)
                 {
                     rootVariable = -1;
@@ -4274,7 +4582,10 @@ internal sealed partial class Binder
                     isWritable = false;
                     return false;
                 }
-                if (!IsSupportedCheckedReferenceStoreType(fieldDefinition.Type))
+                if (isFinal
+                    ? !IsSupportedCheckedReferenceStoreType(fieldDefinition.Type)
+                    : !IsStruct(fieldDefinition.Type)
+                        || ManagedClassTypes.IsClass(fieldDefinition.Type))
                 {
                     rootVariable = -1;
                     isWritable = false;
@@ -4290,7 +4601,9 @@ internal sealed partial class Binder
     }
 
     private bool IsSupportedCheckedReferenceStoreType(PrimitiveType type) =>
-        CheckedReferenceTypeContract.IsSupportedWriteValueType(type, _structs, _enumDefinitions.Count);
+        CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+            type, _structs, _classes, _enumDefinitions.Count,
+            [.. _checkedReferenceTypes]);
 
     private PrimitiveType BindNativeFunctionPointerType(SyntaxNode node,
         NativeCallingConvention callingConvention, bool allowLegacyAbiPrefix,
@@ -4761,6 +5074,8 @@ internal sealed partial class Binder
 
     private bool IsUnique(PrimitiveType type) =>
         type == PrimitiveType.OwnedInt32Buffer
+            || BoundGenericNominalTypeContract.IsCoreTaskType(type,
+                _genericNominalTypeInstances, _reference?.CoreTaskType)
             || ((int)type >= 100 && (int)type - 100 < _structs.Count
                 && _structs[(int)type - 100].IsUnique);
 
@@ -6598,7 +6913,7 @@ internal sealed partial class Binder
             remainingMembers--;
             if (remainingMembers == 0 || !IsClass(type) || !IsClass(GetField(type, field).Type))
             {
-                CheckFieldMutation(type, field, _constructor && variable == 0 && fields.Count == 0, member.Span);
+                CheckFieldMutation(type, field, _constructor && variable == 0, member.Span);
             }
             fields.Add(field);
             type = GetField(type, field).Type;
@@ -6609,16 +6924,13 @@ internal sealed partial class Binder
         }
         var path = fields.ToImmutable();
         var fieldType = GetField(_variables[variable].Type, path[0]).Type;
-        if (IsUnique(fieldType)
-            && (path.Length != 1
-                || !IsUnique(_variables[variable].Type)
-                || (_hasReceiver && variable == 0 && !_constructor)))
+        if (IsUnique(fieldType) && !IsUnique(_variables[variable].Type))
         {
             Report("TRM3023", "An owning field requires a top-level unique owner place.", target.Span);
         }
         for (var index = 1; index < path.Length; index++)
         {
-            if (IsUnique(fieldType))
+            if (IsUnique(fieldType) && !IsUnique(_variables[variable].Type))
             {
                 Report("TRM3023", "Mutation through an owning field loan is unsupported.", target.Span);
                 break;
@@ -7031,6 +7343,18 @@ internal sealed partial class Binder
                 var member = ((SyntaxTokenElement)node.Children[2]).Token.Name;
                 var receiverNode = (SyntaxNode)node.Children[0];
                 var receiverType = KnownType(receiverNode);
+                BoundExpression? boundReceiver = null;
+                var parenthesizedReceiverExpression =
+                    receiverNode.Kind == SyntaxKind.ParenthesizedExpression
+                        ? receiverNode.Children.OfType<SyntaxNode>().SingleOrDefault()
+                        : null;
+                if (parenthesizedReceiverExpression?.Kind == SyntaxKind.UnaryExpression
+                    && parenthesizedReceiverExpression.Children[0]
+                        is SyntaxTokenElement { Token.Kind: TokenKind.Star })
+                {
+                    boundReceiver = BindExpression(receiverNode, null);
+                    receiverType = boundReceiver.Type;
+                }
                 if (receiverType is null && !HasVariableReceiverName(receiverNode)
                     && TryResolveEnumMember(receiverNode, member, out var enumType, out var enumMember))
                 {
@@ -7075,7 +7399,8 @@ internal sealed partial class Binder
                 if (receiverType is PrimitiveType fieldType && TryFindField(fieldType, member, out var field))
                 {
                     var isUnsafeAuthorized = CheckFieldAccess(fieldType, field, node.Span);
-                    expression = new BoundFieldRead(BindExpression(receiverNode, fieldType), field,
+                    expression = new BoundFieldRead(
+                        boundReceiver ?? BindExpression(receiverNode, fieldType), field,
                         GetField(fieldType, field).Type, node.Span) {
                         IsUnsafeAuthorized = isUnsafeAuthorized,
                     };
@@ -7305,15 +7630,8 @@ internal sealed partial class Binder
                     {
                         expression = new BoundMove(owner, _variables[owner].Type, node.Span);
                     }
-                    else if (BindExpression(operandNode, expected: null) is BoundFieldRead {
-                        Receiver: BoundRead root,
-                    } field
-                        && IsUnique(root.Type) && IsUnique(field.Type)
-                        && (uint)root.Variable < (uint)_variables.Count
-                        && ((_constructor && root.Variable == 0)
-                            || (_variables[root.Variable].IsMutable
-                                && GetField(root.Type, field.Field).IsMutable
-                                && CleanupMethod(root.Type) is null)))
+                    else if (BindExpression(operandNode, expected: null) is BoundFieldRead field
+                        && IsEligibleUniqueFieldMove(field, out _))
                     {
                         expression = new BoundFieldMove(field, field.Type, node.Span);
                     }
@@ -8253,7 +8571,8 @@ internal sealed partial class Binder
                     allowBufferField: true)
                 : signature.IsMutable && IsStruct(receiverType)
                     ? BindMutableReceiverLoan(receiver, receiverType, receiver.Span)
-                : IsUnique(receiverType) && !signature.IsCleanup
+                : (signature.ResultDependencyIncludesReceiver && IsStruct(receiverType))
+                    || (IsUnique(receiverType) && !signature.IsCleanup)
                     ? BindReceiverLoan(receiver, receiverType)
                     : BindExpression(receiver, receiverType));
             receiverCount = 1;
@@ -8271,6 +8590,8 @@ internal sealed partial class Binder
                     ? _variables[0].IsMutable
                         ? new BoundMutableReceiverLoan(0, receiverType, node.Span)
                         : ErrorMutableReceiver(node.Span)
+                    : signature.ResultDependencyIncludesReceiver && IsStruct(receiverType)
+                    ? new BoundReceiverLoan(0, receiverType, node.Span)
                     : IsUnique(receiverType) && !signature.IsCleanup
                     ? new BoundReceiverLoan(0, receiverType, node.Span)
                     : BindImplicitReceiver(receiverType, node.Span));
@@ -9402,6 +9723,13 @@ internal sealed partial class Binder
                     && NativePointerTypeContract.IsValidType(pointerType, [.. _nativePointerTypes]))
                 {
                     return _nativePointerTypes[NativePointerTypes.Index(pointerType)].PointeeType;
+                }
+                if (operation == TokenKind.Star && operand is PrimitiveType referenceType
+                    && CheckedReferenceTypeContract.IsValidType(referenceType,
+                        [.. _checkedReferenceTypes]))
+                {
+                    return _checkedReferenceTypes[
+                        CheckedReferenceTypes.Index(referenceType)].ReferentType;
                 }
                 if (operand is PrimitiveType concrete && IsStruct(concrete)
                     && IsStaticUnaryOperator(operation)

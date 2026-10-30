@@ -37,13 +37,39 @@ offers Release explicitly, and keeps runtime-failure policy independent. The
 arithmetic selection currently applies to hosted source binding, direct
 native/JIT lowering, eligible CLI source compilation and scalar frontend
 subject binding; compiler/scanner component compilation remains Development.
+Noninterpolated raw text is lexed and decoded with matched fences, multiline
+framing/indentation, newline directives and Unicode-scalar validation.
+Target-directed `utf8z` binding consumes the decoded value. Raw interpolated
+text now tokenizes and parses dollar-counted holes with alignment and format
+syntax; typed formatter construction, segment framing/newline decoding, and
+runtime execution remain unfinished. Constant generic-argument binding also
+remains unfinished. The checked development and Standard TRRM type-reference
+paths now carry exact generic nominal TypeDef/provider identities, formal
+domains/defaults, ordered substitutions and TypeSpec qualifications into
+source binding. A host
+may select one exact `Terrum.Threading.Tasks.Task<T = void>` definition for
+signature identity; selected Task-returning declarations now retain the
+registered operation-capture default over eligible receiver/formal sources,
+separately from completed-payload dependencies. Explicit method-targeted
+captures can narrow that set, including to empty. These contracts pass through
+selected Standard TRRM source references and are structurally verified.
+Source-level async bodies, operation-result provenance at call sites, private
+generic nominal persistence, Task ownership transfer/consuming await and
+native execution remain unsupported. Standard executable persistence and
+private semantic/native modules still reject these carriers.
 The
 [unapproved private-persistence proposal](proposals/source-arithmetic-private-persistence.md) is
 provisionally implemented for structured semantic modules and their native
 package, set, and graph embeddings. The selected fail-fast development
 executable profile also preserves resolved arithmetic through its existing
-linear, indexed and ScalarInitOutput controls; standard register-Body
-persistence remains unfinished. Hosted calls also
+linear, indexed and ScalarInitOutput controls. A bounded standard register-Body
+producer/consumer profile handles assigned scalar arithmetic opcodes `0x20..0x2B`
+in a map-free, single-method library: source emission covers direct unary or
+binary integer and float32/float64 operations, while standard loading rebuilds
+and verifies the corresponding BoundProgram. Native execution covers int32
+wrapping/division/remainder edges and float32/float64 remainder. General
+standard Body persistence and execution remain unfinished.
+Hosted calls also
 support non-unique, handle-free `Copy`-struct `out` values on non-Boolean and
 `void` functions across semantic modules, native libraries and native graphs;
 compilation-local `[Copy]` templates support the bounded generic `out T` and
@@ -146,10 +172,12 @@ currently implemented operation matrix. Hosted `int128`/`uint128` binding, verif
 ConstEval and Windows x64 JIT/AOT execution cover the accepted integer
 operators. Hosted binding, verification, exact folding and ConstEval also
 cover the binary and BID floating operator matrix, including truncating
-remainder and decimal preferred cohorts; native `float128` and BID lowering
-remain incomplete. Windows x64 lowering covers the `float16`, `bfloat16`,
-`float32` and `float64` operator matrices, including truncating remainder,
-updates and compound assignments.
+remainder and decimal preferred cohorts. Windows x64 lowering covers BID
+decimal32/64/128 arithmetic, comparisons, sign operations, updates, compound
+assignments and truncating remainder through JIT and PE under both runtime
+policies. Native `float128` lowering remains incomplete. Windows x64 lowering
+also covers the `float16`, `bfloat16`, `float32` and `float64` operator
+matrices, including truncating remainder, updates and compound assignments.
 Standard register-Body execution remains a separate gap. The evaluator limits
 are 4,096 interpreted statement steps and a call-depth limit of 64; these are
 not portable guarantees. Wide scalar static-proof facts now preserve 128-bit
@@ -169,9 +197,12 @@ Public fixed-layout source support is implemented for natural Windows x64
 `Sequential` and scalar-or-raw-pointer-carrier `Transparent` layouts committed
 with `[Blittable]`. Mandatory verification recomputes the fixed-storage facts,
 and private semantic modules persist them. Packing, alignment controls,
-and standard TRRM layout persistence remain unsupported. Raw pointer fields
-carry only their declared address bits, not pointee validity, backing,
-ownership, or lifetime.
+and standard TRRM layout persistence remain unsupported. The verifier now
+tracks selected native-pointer origins through local inline-field reads,
+writes, copies and replacement, but this is not a published callable summary
+or a serialized standard/private contract. Raw pointer fields still carry
+only address bits in their declared representation and do not establish
+pointee validity, access, ownership, or lifetime.
 The verifier also carries provisional local CopyOrigin facts for currently
 represented native-pointer, function-pointer and TokenSpan values, separating
 source kind/view/formal/path from backing dependencies. Missing facts remain
@@ -188,8 +219,11 @@ or standard transport, and these facts are not consumed by lowering.
 Direct `NativeParameter` inputs can point at committed aggregates in source,
 private semantic modules, and native execution. The canonical standard TRRM
 `NativeParameter` encoding remains unapproved; the provisional executable
-experiment is described below. Direct native outputs remain limited to scalar
-and raw-pointer pointees.
+experiment is described below. The old scalar/opaque-pointer `NativeOutput`
+prototype has been retired from source admission. The replacement aggregate
+source path is provisional under
+[`aggregate-native-outputs.md`](proposals/aggregate-native-outputs.md);
+private persistence and standard register-Body support remain incomplete.
 The detailed [hosted output profiles](implementation/output-profiles.md)
 are informative development inventories. Their historical `out` modes do not
 add parameter forms to the canonical reference model.
@@ -197,6 +231,25 @@ The [hosted view and owner profiles](implementation/view-and-owner-profiles.md)
 record the current TokenCursor prototype and bounded owner/field loans and
 cleanup projections; their restrictions do not limit the general source
 dependency contracts.
+Source binding now resolves `DependsOn`, `Captures`, and `ForwardsBacking`
+flat recipes into in-memory receiver/formal and destination identities for
+callable results, initialized output values, retained destinations, and
+getters. It distinguishes direct `this` from an escaped `@this` formal,
+supports explicit empty sets, and rejects unknown, duplicate, non-source, and
+incompatible recipes. `ForwardsBacking` is checked against an explicit
+same-destination dependency/capture set when one is present. The legacy
+TokenSpan call/capture flow now consumes normalized contracts; the legacy
+projection remains limited to Span results and TokenCursor constructor
+captures and is checked for consistency. That flow is compilation-local and
+uses live slot identities. In the TokenSnapshot/TokenSpan profile, owner moves
+remap backing dependencies to the transfer destination; per-state copies and
+joins distinguish that moved owner from a later value reusing its old slot.
+Transfer, retirement, reinitialization, conditional-source union, loop-scope
+cleanup and staged-call cases have active coverage. General
+source-instance/version tracking, aliasable reference provenance, body proof,
+inherited relationships, private/TRRM persistence and remapping, and general
+native lowering remain incomplete. This slice is not end-to-end dependency
+support.
 The [sample catalog](samples.md) distinguishes runnable programs from design
 sketches.
 The [experimental CLI response reference](implementation/cli-protocol.md)
@@ -249,8 +302,10 @@ so this does not establish current-schema conformance.
 The standard Contract reader/writer accepts only Effects bits `0x02` and
 `0x04`, rejects retired bit `0x01`, and permits an explicit zero mask.
 Standard Cleanup clauses no longer require that retired bit; the private
-development executable profile remains separately selected. Source-level
-NoThrow retirement is a separate provisional decision.
+development executable profile remains separately selected. Source admission
+and frontend/CLI NoThrow retirement are provisionally implemented from an
+unapproved proposal; private semantic/native contracts and replacement paths
+still need migration.
 Selected Body access now has a register-stream reader for kind-01 framing,
 all optional-map extents, fixed Blocks, typed-record offsets/payload shapes,
 instruction boundaries and block terminators, plus shape decoding for compact
@@ -311,6 +366,100 @@ profile, with no fallback between them. Standard SourceMap slots use section
 kind zero for Body-instruction targets and zero-based `u16` blocks; the
 development SourceMap layout remains isolated. This routes framing correctly
 but does not establish current-schema execution for every registered row.
+The Standard Param reader/writer now require mode `00`, accept only flag `01`
+for an ordinary readonly outer `ref<T>`, and reject all other flags/modes.
+Development artifacts explicitly retain legacy modes `01..04` with zero flags.
+This is structural row support; Standard source production and all selected
+Body call/adaptation consumers do not yet preserve the adaptation flag.
+The standard structural validator now consumes `NativeImport` section
+`0x0021` using the assigned 16-byte row, checking tagged MethodDef/FieldDef
+owners, staticness, conventions, resolution pairs, String references, duplicate
+owners, callable signature constraints, and admitted data-field representations.
+The Standard Contract reader also consumes the MethodDef-only `0x000C`
+NativeCallable clause with exact convention/reserved-field validation and
+Feature 1 ownership. Standard `NativeExport` section `0x0022` has a 16-byte
+reader/writer that validates static MethodDef/FieldDef owners, the exact
+MethodDef-owned `0x000C` reference, field representation, duplicate owners and
+symbol names, and Feature 4 ownership.
+Callable checks cover only forms admitted by the current Standard TypeSpec
+reader. Standard TypeSpec `0x0D` now has its exact seven-byte convention plus
+MethodDef-anchor form; the Development six-byte signature-row form remains
+separate. Basic anchor checks require a bodyless, non-receiver, non-method-
+generic MethodDef with no NativeCallable, import, export, entry-point,
+accessor or cleanup role. The unapproved, provisionally actionable
+[anchor-contract proposal](proposals/standard-function-pointer-anchor-contracts.md)
+defines the complete applicable clause set and normalized identity.
+The reader/writer also provisionally accept TypeSpec-only convention byte
+`0x00=Terrum`; this follows an unapproved proposal and does not widen
+NativeImport, NativeCallable, NativeExport or source `NativeCallConv` domains
+from `1..4`. No normative registry change or default-convention lowering
+support is implied.
+The provisional MethodDef Contract `0x000B` row now validates its phase,
+flags, reserved field, phase-local ordinals, typed PredicateGraph reference,
+exclusive attachment and Feature 10 closure; the complete predicate-node
+schema, general predicate identity and execution remain open. The bounded
+Standard anchor comparator now normalizes admitted signature types and modes,
+Effects, OutputState, phase-3 selector identity and Dependency rows; it rejects
+structural anchor/type cycles. Selected Body-map type matching uses this
+comparator, but producer/replacement identity, cross-module provider binding,
+other consumer routes and re-encoding/remapping remain open.
+The Standard Contract reader also consumes the assigned 20-byte OutputState
+row, requiring Param mode `00`, a complete `ref<init T>` or `Span<init T>`
+type, and a phase-3 PredicateGraph attached to the same MethodDef. Its bounded
+phase-3 selector profile validates one bool-result node, one ordinary-result
+read root, the six assigned selector kinds and owner result type, with no child
+edges, captures or dependencies. It preserves those clauses on
+DoesNotReturn methods and rejects duplicate or conflicting overlapping
+normal-outcome states for one output; it does not execute the selector.
+The code provisionally uses the unapproved
+[predicate Feature composition](proposals/predicate-feature-composition.md)
+direction: Feature 10/1 has no unconditional Feature 11/9 prerequisite, and
+the proposal limits its semantics to bounded phase-3 selectors. General
+predicate graphs and phase-1/2 semantics remain unsupported. The normative
+registry still records the pending `10 -> 11 -> 9` chain; this divergence is
+not a conformance claim or a compatibility mapping.
+Standard NativeImport/Export field validation recognizes these function-
+pointer values. Feature 1 is enforced for anchors; Feature 2 closure now
+traverses wrappers and type arguments of constructed values in MethodSig
+results/receivers/parameters, FieldDefs, StaticField definitions in the
+selected GeneralPredicateGraphsDraft profile, UnionCaseField payloads and
+TextCaptureShape captures, plus PredicateCapture roles 1 and 2. Union and text
+capture rows use their owning TypeDef's Module; predicate captures use their
+graph owner's Module. Selected Standard Body TypeMap entries containing
+function-pointer values also require Feature 2.
+Selected Body-map validation also rejects MethodMap targets resolving to local
+anchor MethodDefs. E9/record-0D map validation now requires a form-0D,
+zero-qualified TypeMap anchor, checks the local NativeCallable/NativeImport or
+eligible ordinary target's convention, complete signature and supported
+invocation-contract projection, and validates a role-3 Home result's exact
+pointer type. It also checks Feature 4 and uses the Standard NativeImport
+table; imported targets retain their expected MethodDef identity, but selected
+provider binding remains open. Targets with raw NativeOutput/NativeParameter
+obligations reject until the separate unapproved function-pointer contract is
+implemented. General predicate semantics, other registered type-use routes,
+and standard production/remapping remain in
+`native-callconv-standard-trrm-integration`.
+The selected `CopyOriginDraft` consumer also rejects Contract `0x000D` on a
+MethodDef used by a Standard TypeSpec `0x0D` anchor. This role check does not
+complete cross-module provider binding or remapping.
+Blittable aggregate fields require the owning Module's Windows x64 target
+requirement and its exact `(profileId=1, ruleRevision=1)` Blittable Layout;
+another profile's Blittable variant is insufficient. Explicit EntryName rows
+require nonempty, NUL-free ASCII, while zero retains the exact declaration name.
+It applies the task-authorized provisional `IsValidSourceLibraryName` rule
+(still unapproved as a proposal) and enforces the owning Module's standard
+`DirectNativeCalls` or `NativeDataImports` feature closure. The four-word
+`0x0030` import prototype remains development-schema-only, separate from
+standard `0x0030` ConstantSource. This metadata slice does not implement target
+resolution, NativeExport image publication, or runtime lowering, and does not
+establish source-level data-import support.
+The hosted source binder now preserves nominal interface type arguments as
+tagged complete type or constant terms. Literal scalar actuals,
+forwarded interface/member constant formals, trailing type/constant defaults,
+type-domain substitution and cross-tree rewriting are covered by active
+binding regressions. This source declaration slice does not select interface
+witnesses, publish Standard interface members, or implement member-call
+lowering; provider binding and private witness persistence remain separate.
 Standard structural validation now reads `InterfaceDef` and
 `AssociatedTypeDef`, checking interface ownership, optional self-formal
 ownership, declaration-range extents, exclusive associated-type ownership,
@@ -367,12 +516,18 @@ DoesNotReturn/caller-unsafe effects. The structural-only `Validate` entry
 remains profile-agnostic; no current CLI or source-free consumer supplies the
 profile context. Selected-provider Import/Export comparison, replacement,
 remapping/packing, source recipe checking, generated text operations and
-runtime construction remain unimplemented. PredicateGraph rows now validate required PredicateNode and
-PredicateReadFootprint row bounds; PredicateCapture validates graph-local
-ordinals, assigned roles/flags and complete captured TypeSpecRefs. Other
-predicate nodes, footprints, operands, edges and evaluation remain
-incomplete. The associated-type identity and relation-payload proposals
-remain unapproved; their implementation directions are provisional only.
+runtime construction remain unimplemented. PredicateGraph rows validate
+required PredicateNode and PredicateReadFootprint row bounds;
+PredicateReadFootprint rows validate empty/nonempty range shape, target bounds
+and exclusive nonoverlap across footprints. PredicateChildEdge writes sort by
+parent and child ordinal; the reader validates edge references, contiguous
+ordinals independent of physical row order, exclusive rooted trees, and the
+root-first depth-first node-row order. PredicateCapture validates graph-local
+ordinals, assigned roles/flags and complete captured TypeSpecRefs.
+Root/dependency payloads and semantic ordering, canonical graph identity
+ordering/remapping, predicate node/operand semantics and evaluation remain
+incomplete. The associated-type identity and relation-payload proposals remain
+unapproved; their implementation directions are provisional only.
 
 Terrum-authored scanner and scalar-frontend components are implementation
 experiments, not a bootstrapped compiler or compiler interchange. The scalar
@@ -425,28 +580,53 @@ general pointer address/read/write operations, but it carries typed
 native-pointer TypeSpecs and admitted pointer-valued declaration/call
 arguments in its bounded executable profile.
 
-The experimental source/TRRM prototype supports two-string
-`Terrum.Interop.NativeImport` declarations with
-`Terrum.Interop.NativeOutput` for result-correlated writable scalar pointers
-and opaque `ptr<void>` outputs through `write ptr<ptr<void>>`. Direct imports
-also admit target scalar, represented data-pointer and native-function-pointer
-parameters and results. `NativeParameter` is optional: without it, the raw
-pointer remains caller-unsafe and carries no checked access, retention, extent
-or alignment promise. These prototype-only annotations are not part of the
-accepted native schema. This does not enable general pointer locals or memory
-operations in executable Bodies.
-Output conditions are explicit: `NativeOutput(ordinal, NonZero)` selects
-nonzero for `int32` or `uint32` results, while
-`NativeOutput(ordinal, NonNegative)` provisionally expresses signed
-nonnegative status results such as HRESULT success. The latter
-pointer output represents only unmanaged pointer bits; it adds no backing,
-provenance, ownership, pinning, or cleanup guarantee. The prototype carries
-the raw import's caller-unsafety and direct representation through an
-experimental TRRM NativeImport table and source-reference path; that prototype
-path is limited to named Windows System32 imports. Its section, clause and
-Feature assignments are not canonical TRRM assignments. The accepted records
-and assignments are defined in [semantic metadata](specs/il-metadata.md) and
-the [registry](specs/representation/trrm-1.registry.json). It also persists
+The source compiler retains the legacy two-string
+`Terrum.Interop.NativeImport` prototype and implements the unapproved,
+explicit-Core callable schema candidate for LibraryName/EntryName, CallConv,
+ResolutionMode and ResolutionPolicy. With an explicit Core registration,
+these enum-valued arguments now use ordinary exact-E lookup and constant
+evaluation, including aliases, copies, conditionals, and eligible `ConstEval`
+calls. `NativeCallConv` type-use values preserve canonical nested
+function-pointer and pointer identities through bound-tree remapping. The
+current in-memory enum carrier admits checked host-provided int32-backed declarations,
+including unrelated enums through the same shared value model; source-authored
+enum declarations and a production provider adapter remain unsupported.
+LibraryName validation follows a separate
+unapproved source-name proposal. Static-data source binding, target-specific
+EntryName support, actual Link/Dynamic resolution, retained evaluation
+dependencies, and source-free standard/private enum persistence remain
+incomplete; the current writers reject raw enum-bearing programs rather than
+serialize them as integers or aggregates. `NativeParameter` still adds
+prototype raw pointer annotations; without it, a raw pointer remains
+caller-unsafe and carries no checked access, retention, extent, or alignment
+promise. The former ordinal `NativeOutput` scalar and opaque-pointer forms are
+no longer admitted.
+
+The replacement output source path is provisional under the unapproved
+[aggregate native-output proposal](proposals/aggregate-native-outputs.md).
+Direct imports may annotate a formal with
+`NativeOutput(When: NativeOutputCondition.NonZero)` or
+`NativeOutput(When: NativeOutputCondition.NonNegative)` and pass one vacant
+`Blittable Copy` aggregate through `&init local`. The result selector is
+limited to `int32`/`uint32` NonZero or `int32` NonNegative. The verifier tracks
+the reservation through argument evaluation and publishes the complete value
+only on the matching normal result; this does not infer provider truth,
+ownership, pointee backing, retention, or failure cleanup. Direct-import
+source/JIT coverage exists, but exact native-interface methods, private
+semantic/native persistence, and standard register-Body representation remain
+incomplete. The earlier TRRM NativeOutput clauses and ScalarInitOutput encoding
+are prototype artifacts, not a fallback or the selected representation.
+
+`TrRmExecutableCompiler.Emit`/`Load` still use the explicitly selected
+development profile: its four-word `0x0030` NativeImport prototype, NativeAbi
+clause and SystemDirectory import path are not standard TRRM assignments.
+Standard section `0x0021` now has exact assigned-row structural validation,
+and Standard TypeSpec `0x0D` anchors now have structural validation, bounded
+identity comparison and selected Body-map target screening. No
+source-to-standard producer or native execution path exists yet. The accepted
+records and assignments are defined in [semantic metadata](specs/il-metadata.md) and
+the [registry](specs/representation/trrm-1.registry.json). The development
+profile also persists
 `NativeCallable` entries
 through a provisional NativeCallable table and ABI role; source-free references
 expose those entries as caller-unsafe external declarations. Provisional
@@ -594,13 +774,67 @@ arbitrary raw-import DLLs. Runtime regressions exercise
 `GetCurrentThreadId` in standalone and graph JIT paths. Arbitrary
 non-System32 imports and COM runtime behavior remain unqualified.
 
-An additional, provisional prototype supports `[Terrum.Interop.NativeCallable]`
-functions and explicit `fnptr<NativeAbi, ...>` values on Windows x64. It
-retains concrete signatures through address formation, local/field transport,
+An additional, provisional prototype supports foreign
+`[Terrum.Interop.NativeCallable]` entries and explicit or inferred
+`fnptr<Args..., R>` values on Windows x64. The in-memory and private revision-92
+routes also address eligible ordinary top-level/static scalar functions under
+the provisional Terrum convention; a local `var` retains the target's
+complete signature, while an expected pointer type is checked as a directed
+view. A same-module JIT regression and private producer/consumer execution
+exercise that ordinary-entry slice. The binder accepts the bare form with the
+Terrum default convention, but still accepts the prototype `NativeAbi` prefix
+pending migration of foreign callback source and test fixtures; that prefix is
+not the selected source contract. Standard `E9`/Body-record-`0D` production
+remains unimplemented, as does ordinary-address support in the Development
+profile. The Standard reader validates E9/record-0D framing and map-level
+anchor, target, contract, convention, result, and Feature relationships;
+selected-provider binding, canonical production, source-free reconstruction,
+remapping and execution remain open. See the unapproved
+[Standard native-address](proposals/standard-native-address-formation.md) and
+[NativeImport function-pointer](proposals/standard-native-import-function-pointer-contracts.md)
+proposals for the provisional carrier and remaining contracts.
+With an explicit Core registration, source/bound-tree binding now forms an
+inferred pointer type for a callable NativeImport and preserves its complete
+raw NativeOutput contracts in the existing selector, OutputState and
+Dependency identity, and its ordered NativeParameter descriptors, including
+the effective foreign convention. NativeParameter-only pointers can now be
+invoked indirectly in same-compilation source: binding retains the declared
+address/access/extent, mandatory verification checks stable initialized
+storage, and the existing foreign pointer ABI path is exercised through
+Windows x64 `CompareStringOrdinal` under both runtime policies. Calls carrying
+raw NativeOutput states now bind exact `&init local` reservations, correlate
+NonZero status with publication, preserve declared output dependency sources
+and lower through the foreign indirect-call path. Windows x64 `QueryPerformanceCounter` success and invalid-handle
+`ReadFile` complement execution cover scalar outputs under both runtime
+policies; the latter also exercises a fifth stack argument, and AOT emission
+checks the selected imports. Aggregate pointer-cell dependency and
+complement/discard/duplicate-reservation cases are also covered. Other
+selector/dependency call contracts remain gated. Standard `000E`/Feature
+`16/1`, selected-provider binding, private revision 97, source-free consumers,
+CLI and full exceptional reentrancy/cleanup qualification remain open; no
+normative spec is changed.
+The prototype retains
+concrete signatures through address formation, local/field transport,
 indirect calls, private semantic modules (revision 82), native module sets and
 graph consumers. Address formation and indirect invocation require an explicit
-unsafe scope; native-callable entries are `NoThrow` and caller-unsafe. Function
-pointers carry code addresses only: they do not root or extend the lifetime of
+unsafe scope; native-callable entries and callers remain caller-unsafe, and
+defined bodies satisfy scoped no-failure verification. In-memory function-
+pointer identities preserve declared Effects separately from the native
+family's effective caller-unsafety, plus normalized whole-source Dependency
+rows. A `DoesNotReturn` pointer view suppresses normal flow and lowering emits
+a trap after an impossible normal return; address formation can project that
+target to a returning view without changing convention or signature. Checked
+pointer projection preserves the destination and phase while allowing an
+actual source subset and backing-only refinement of a broader expected source
+set; absence and an explicit empty-source contract remain distinct.
+Contract-bearing types are not silently serialized by private revision 92 or
+the Development TRRM signature table; those writers reject the unrepresented
+contracts until the proposed complete private/Standard carriers are
+implemented. Checked OutputState is present in the in-memory model but
+remains unsupported for this ABI signature subset, which has no checked
+initialization-reference parameter representation. The role does not publish
+a general `NoThrow` promise. Function pointers carry code addresses only:
+they do not root or extend the lifetime of
 the image containing the target. An independent .NET unmanaged caller exercises
 the exported native ABI, and JIT/module regressions exercise provider callback
 transport. Bounded experimental `.trrm` support is described above. The
