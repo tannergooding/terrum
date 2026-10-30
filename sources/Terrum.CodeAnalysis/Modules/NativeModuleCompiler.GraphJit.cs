@@ -219,6 +219,9 @@ public static partial class NativeModuleCompiler
         var direct = ResolveDirect(root, providers.ToDictionary(static item => item.Identity!,
             StringComparer.OrdinalIgnoreCase));
         var program = ModuleCompiler.RestoreConsumerAgainstReference(root.Contract, GraphReference(direct));
+        var importProviders = direct.Select(static provider =>
+            (provider.Identity!, provider.Policy, GetValidatedProviderReference(provider))).ToArray();
+        program = BindModuleImportBindings(program, importProviders);
         var declarations = NativeBindings(root.Dependencies);
         var directBindings = DirectNativeBindings(program);
         var imageBindings = new NativeImportBinding[declarations.Length + directBindings.Length];

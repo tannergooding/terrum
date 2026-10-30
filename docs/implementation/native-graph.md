@@ -30,7 +30,7 @@ stores one already emitted consumer EXE and its direct imports. Leaf `.trmn`
 producers remain unchanged. Each graph may contain at most 16 distinct
 producers. Validation walks the *entire selected closure*, rejecting missing
 or extra packages, cycles, case-ambiguous identities, incompatible public
-signatures and layouts, changed ownership/NoThrow contracts, mismatched
+signatures and layouts, changed ownership/output contracts, mismatched
 policies, malformed images and import maps before the root process starts.
 Implementation hashes are not pinned: a compatible leaf implementation can
 replace an independently compiled package without changing the intermediate
@@ -42,13 +42,20 @@ direct-import metadata require their corresponding later revisions.
 Provisionally implemented candidate revision 89 also retains resolved
 per-operation arithmetic in graph contracts under the unapproved
 [private-persistence proposal](../proposals/source-arithmetic-private-persistence.md).
-This serialization revision is distinct from the unchanged
-version-2 graph container and native package formats. Participants
+This serialization revision is distinct from the private version-3 graph
+container and native package formats; the direct-import expectation table is a
+separate unapproved outer-format extension. Participants
 communicate only through the established scalar and handle-free public `Copy`
 value contracts. Each persisted image has its own heap and root chain; an
 imported call preserves the caller's roots, and `ManagedHeap.Collect()` remains
 local to the image where it runs. The experimental `Host.Source` grant is not
 an accepted semantic-module or native-graph capability.
+
+The version-3 graph container omits the former `NoThrow`/`MayThrow` import
+contract tokens; it retains `DoesNotReturn` and caller-unsafety and rejects
+version-2 graph containers rather than silently dropping their recorded
+promises. This is provisional under the unapproved NoThrow-retirement and
+private-persistence proposals.
 The same selected private semantic-module revision supports private managed
 consumers through ordinary single-provider semantic
 linking and native single-provider or module-set entry points. Semantic linking places producer

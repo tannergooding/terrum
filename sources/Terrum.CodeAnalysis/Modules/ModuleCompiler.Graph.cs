@@ -46,6 +46,7 @@ public static partial class ModuleCompiler
             HasPrivateManagedState = hasPrivateManagedState;
         }
 
+        internal Module ParsedModule => _module;
         internal CompilationReference? Reference { get; }
         internal BoundRuntimePolicy RuntimePolicy { get; }
         internal string Profile { get; }
@@ -202,6 +203,9 @@ public static partial class ModuleCompiler
         {
             var function = program.Functions[index];
             var isExport = names.Contains(function.Name);
+            var isOwnedDirectNativeExport = function.IsExternal
+                && function.DirectNativeImport is not null
+                && !function.IsModuleReference && function.ModuleImport is null;
             if (isExport)
             {
                 _ = unmatchedExports.Remove(function.Name);
@@ -211,16 +215,16 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleContractException($"Managed graph boundary '{function.Name}' requires public Copy values.");
             }
-            if (isExport && (function.IsExternal
+            if (isExport && ((function.IsExternal && !isOwnedDirectNativeExport)
                 || !Exportable(function, program.Structures, program.NativePointerTypes)))
             {
                 throw new ModuleContractException($"Graph export '{function.Name}' is not a public implementation.");
             }
             if (function.IsExternal)
             {
-                if (function.DirectNativeImport is not null)
+                if (function.DirectNativeImport is not null && !function.IsModuleReference)
                 {
-                    if (!DirectNativeImportContract.IsValid(function, program.Structures,
+                    if (!DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
                         program.NativeFunctionPointerSignatures, program.NativePointerTypes))
                     {
                         throw new ModuleContractException(
@@ -239,7 +243,9 @@ public static partial class ModuleCompiler
                             dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes))
                     || !SameNativeOutputContracts(function.NativeOutputRole,
                         function.NativeOutputContracts, actual.NativeOutputRole,
-                        actual.NativeOutputContracts, program.Structures, dependencies.Structures)
+                        actual.NativeOutputContracts, program.Structures, dependencies.Structures,
+                        program.NativeFunctionPointerSignatures, program.NativePointerTypes,
+                        dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes)
                     || !CompatibleImportedNativeVTableMethod(
                         function.ModuleImport is null ? null : function.NativeVTableMethod,
                         actual.NativeVTableMethod))
@@ -303,7 +309,8 @@ public static partial class ModuleCompiler
         {
             var function = program.Functions[index];
             var remapped = RemapFunction(function, program.Structures, structures);
-            var isGraphImport = function.IsExternal && function.DirectNativeImport is null;
+            var isGraphImport = function.IsExternal
+                && (function.DirectNativeImport is null || function.IsModuleReference);
             functions.Add(new ModuleFunction(function.Name,
                 Contract(remapped, structures, program.NativeFunctionPointerSignatures,
                     nativePointerTypes),
@@ -505,13 +512,12 @@ public static partial class ModuleCompiler
 
     private static BoundFunction RecordedImportPromises(string contract, BoundFunction replacement)
     {
-        if (!TryContractPromises(contract.AsSpan(), out _, out var noThrow, out var noReturn,
+        if (!TryContractPromises(contract.AsSpan(), out _, out var noReturn,
             out var unsafeCaller))
         {
             throw new ModuleFormatException("Invalid recorded import promises.");
         }
         return replacement with {
-            IsNoThrow = noThrow,
             DoesNotReturn = noReturn,
             RequiresUnsafeCaller = unsafeCaller,
         };
@@ -552,7 +558,9 @@ public static partial class ModuleCompiler
                         dependencies.NativePointerTypes))
                 || !SameNativeOutputContracts(item.NativeOutputRole, item.NativeOutputContracts,
                     actual.NativeOutputRole, actual.NativeOutputContracts,
-                    module.Structures, dependencies.Structures)
+                    module.Structures, dependencies.Structures,
+                    module.NativeFunctionPointerSignatures, module.NativePointerTypes,
+                    dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes)
                 || !CompatibleImportedNativeVTableMethod(importedNativeVTableMethod,
                     actual.NativeVTableMethod)
                 || item.HasOwnershipTransfer != Compilation.HasOwnershipTransfer(actual, dependencies.Structures))

@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -19,6 +20,15 @@ public sealed class NativeModuleSetsTests
     private const string Alpha = "public int32 Alpha() { return 20; }";
     private const string Beta = "public int32 Beta() { return 22; }";
     private const string Consumer = "int32 Main() { return Alpha() + Beta(); }";
+    private const string CounterOutputImport = """
+        [Blittable]
+        [Layout(LayoutKind.Sequential)]
+        public struct Counter { public int64 Value; }
+        [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+        public extern int32 ReadCounter(
+            [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            write ptr<Counter> counter);
+        """;
 
     private static byte[] Producer(string source, string export, string identity)
         => Producer(source, [export], identity);
@@ -72,34 +82,150 @@ public sealed class NativeModuleSetsTests
 
     private static byte[] WithSourceGrantRequirement(byte[] artifact) =>
         WithUpdatedSetChecksum(artifact, bytes => {
-            var dependencyCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(6, 2));
-            var at = 16;
-            for (var dependency = 0; dependency < dependencyCount; dependency++)
-            {
-                var identityLength = bytes[at++];
-                at += identityLength;
-                var importCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
-                at += 2;
-                for (var import = 0; import < importCount; import++)
-                {
-                    var importLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
-                    at += 2 + importLength;
-                }
-                var machineImportCount = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
-                at += 2;
-                for (var import = 0; import < machineImportCount; import++)
-                {
-                    var importLength = BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(at, 2));
-                    at += 2 + importLength;
-                }
-            }
-
-            Assert.That(bytes.AsSpan(at, 4).SequenceEqual("TRRM"u8), Is.True);
+            var at = ConsumerModuleOffset(bytes);
             var profileLength = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(at + 8, 4));
             var requirementOffset = checked(at + 8 + 4 + profileLength + 2);
             Assert.That(bytes[requirementOffset], Is.EqualTo(0));
             bytes[requirementOffset] = 1;
         });
+
+    private static int ConsumerModuleOffset(byte[] artifact)
+    {
+        var dependencyCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(6, 2));
+        var at = 16;
+        for (var dependency = 0; dependency < dependencyCount; dependency++)
+        {
+            var identityLength = artifact[at++];
+            at += identityLength;
+            var importCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var import = 0; import < importCount; import++)
+            {
+                var importLength = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + importLength;
+            }
+            var machineImportCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var import = 0; import < machineImportCount; import++)
+            {
+                var importLength = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + importLength;
+            }
+        }
+        var expectationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        for (var expectation = 0; expectation < expectationCount; expectation++)
+        {
+            for (var field = 0; field < 5; field++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + length;
+            }
+            var parameterCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + (parameterCount * 14);
+        }
+
+        Assert.That(artifact.AsSpan(at, 4).SequenceEqual("TRRM"u8), Is.True);
+        return at;
+    }
+
+    private static int DirectExpectationStringOffset(byte[] artifact,
+        string functionName, int fieldIndex)
+    {
+        var at = 16;
+        var dependencyCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(6, 2));
+        for (var dependency = 0; dependency < dependencyCount; dependency++)
+        {
+            var identityLength = artifact[at++];
+            at += identityLength;
+            var importCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var import = 0; import < importCount; import++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + length;
+            }
+            var machineImportCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var import = 0; import < machineImportCount; import++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + length;
+            }
+        }
+        var expectationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        Assert.That(expectationCount, Is.GreaterThan(0));
+        for (var expectation = 0; expectation < expectationCount; expectation++)
+        {
+            var localName = string.Empty;
+            for (var field = 0; field < 5; field++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                var valueOffset = at + 2;
+                var value = Encoding.UTF8.GetString(artifact, valueOffset, length);
+                if (field == 0)
+                {
+                    localName = value;
+                }
+                if (localName == functionName && field == fieldIndex)
+                {
+                    return valueOffset;
+                }
+                at = valueOffset + length;
+            }
+            var parameterCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + (parameterCount * 14);
+        }
+        throw new InvalidOperationException(
+            $"Native set has no direct expectation field {fieldIndex} for '{functionName}'.");
+    }
+
+    private static int SetMachineImportCount(byte[] artifact)
+    {
+        var at = 16;
+        var dependencyCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(6, 2));
+        var total = 0;
+        for (var dependency = 0; dependency < dependencyCount; dependency++)
+        {
+            var identityLength = artifact[at++];
+            at += identityLength;
+            var declarationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var declaration = 0; declaration < declarationCount; declaration++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + length;
+            }
+            var machineImportCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            total += machineImportCount;
+            at += 2;
+            for (var import = 0; import < machineImportCount; import++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                at += 2 + length;
+            }
+        }
+        return total;
+    }
+
+    private static int NativeOutputSelectorOffset(byte[] artifact, string functionName)
+    {
+        var moduleOffset = ConsumerModuleOffset(artifact);
+        var name = Encoding.UTF8.GetBytes(functionName);
+        var nameRecord = new byte[sizeof(int) + name.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(nameRecord, name.Length);
+        name.CopyTo(nameRecord, sizeof(int));
+        var relativeFunctionOffset = artifact.AsSpan(moduleOffset).IndexOf(nameRecord);
+        Assert.That(relativeFunctionOffset, Is.GreaterThanOrEqualTo(0));
+        var contractLengthOffset = moduleOffset + relativeFunctionOffset + nameRecord.Length;
+        var contractLength = BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(contractLengthOffset, sizeof(int)));
+        var outputCountOffset = contractLengthOffset + sizeof(int) + contractLength + 3;
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(outputCountOffset, sizeof(int))), Is.EqualTo(1));
+        return outputCountOffset + 18;
+    }
 
     private static int UniqueOffset(byte[] bytes, string text)
     {
@@ -128,6 +254,76 @@ public sealed class NativeModuleSetsTests
         Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(bytes, [betaReplacement, alpha],
             TimeSpan.FromSeconds(10), NativeRuntimePolicy.FailFast), Is.EqualTo(43));
         Assert.That(bytes, Is.EqualTo(unchanged));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task AggregateNativeOutputExecutesThroughPersistedConsumerSetAsync(
+        NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string OutputProviderSource = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Counter { public int64 Value; }
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Counter> counter);
+
+            public int32 ReadCounter() {
+                init Counter counter;
+                unsafe {
+                    if (QueryPerformanceCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value < 0) { return -2; }
+                return 42;
+            }
+            """;
+        var outputProvider = Producer(
+            OutputProviderSource, "ReadCounter", "CounterOutput", policy);
+        var secondProvider = Producer(
+            "public int32 Other() { return 22; }", "Other", "OtherProvider", policy);
+        var consumer = MakeConsumerSource("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct ConsumerCounter { public int64 Value; }
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<ConsumerCounter> counter);
+
+            int32 Main() {
+                int32 counter = ReadCounter();
+                init ConsumerCounter current;
+                unsafe {
+                    if (QueryPerformanceCounter(&init current) == 0) { return -1; }
+                }
+                if (counter < 42 || current.Value < 0) { return -2; }
+                return counter - 20 + Other();
+            }
+            """, policy, outputProvider, secondProvider);
+
+        Assert.That(NativeModuleCompiler.Inspect(outputProvider).IsConsumer, Is.False);
+        Assert.That(NativeModuleCompiler.InspectConsumerSet(consumer).Dependencies,
+            Is.EqualTo(["CounterOutput", "OtherProvider"]));
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [secondProvider, outputProvider]);
+        var malformed = WithUpdatedSetChecksum(consumer, bytes =>
+            bytes[NativeOutputSelectorOffset(bytes, "QueryPerformanceCounter")] = byte.MaxValue);
+        Assert.Throws<ModuleFormatException>(
+            () => NativeModuleCompiler.InspectConsumerSet(malformed));
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer,
+            [secondProvider, outputProvider], TimeSpan.FromSeconds(30), policy)
+            .ConfigureAwait(true), Is.EqualTo(44));
+
+        var replacementSource = OutputProviderSource.Replace(
+            "return 42;", "return 43;", StringComparison.Ordinal);
+        var replacement = Producer(replacementSource, "ReadCounter", "CounterOutput", policy);
+        NativeModuleCompiler.ValidateConsumerSet(consumer, [replacement, secondProvider]);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(consumer,
+            [replacement, secondProvider], TimeSpan.FromSeconds(30), policy)
+            .ConfigureAwait(true), Is.EqualTo(45));
     }
 
     [Test]
@@ -202,7 +398,7 @@ public sealed class NativeModuleSetsTests
         var alpha = Producer(Alpha, "Alpha", "First");
         var beta = Producer(Beta, "Beta", "Second");
         var consumer = MakeConsumer(alpha, beta);
-        Assert.That(consumer[4], Is.EqualTo(2));
+        Assert.That(consumer[4], Is.EqualTo(3));
         var sourceRequired = WithSourceGrantRequirement(consumer);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(sourceRequired))!;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateConsumerSet(sourceRequired, [alpha, beta]))!;
@@ -228,9 +424,9 @@ public sealed class NativeModuleSetsTests
         var tampered = consumer.ToArray();
         tampered[^1] ^= 1;
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.ValidateConsumerSet(tampered, [alpha, beta]))!;
-        var previousVersion = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 1);
+        var previousVersion = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 2);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(previousVersion))!;
-        var version = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 3);
+        var version = WithUpdatedSetChecksum(consumer, bytes => bytes[4] = 4);
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(version))!;
         var mapping = WithUpdatedSetChecksum(consumer, bytes => {
             var firstImportOffset = 16 + 1 + "First".Length + 2 + 2;
@@ -240,6 +436,51 @@ public sealed class NativeModuleSetsTests
         var bounds = WithUpdatedSetChecksum(consumer, bytes =>
             BinaryPrimitives.WriteInt32LittleEndian(bytes.AsSpan(8), int.MaxValue));
         _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectConsumerSet(bounds))!;
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NativeSetBindsDirectOutputToProviderAndRejectsForeignReplacementAsync(
+        NativeRuntimePolicy policy)
+    {
+        var counterProvider = Producer(CounterOutputImport, "ReadCounter",
+            "CounterProvider", policy);
+        var helperProvider = Producer("public int32 Helper() { return 0; }",
+            "Helper", "HelperProvider", policy);
+        var providers = new[] { counterProvider, helperProvider };
+        var consumer = MakeConsumerSource("""
+            int32 Main() {
+                init Counter counter;
+                unsafe {
+                    if (ReadCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value <= 0) { return -2; }
+                return Helper();
+            }
+            """, policy, providers);
+
+        NativeModuleCompiler.ValidateConsumerSet(consumer, providers);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
+            consumer, providers, TimeSpan.FromSeconds(30), policy), Is.Zero);
+
+        var malformed = WithUpdatedSetChecksum(consumer, bytes =>
+            bytes[DirectExpectationStringOffset(bytes, "ReadCounter", 3)] = (byte)'/');
+        Assert.Throws<ModuleFormatException>(
+            () => NativeModuleCompiler.InspectConsumerSet(malformed));
+
+        var changedProvider = Producer(CounterOutputImport.Replace(
+                "QueryPerformanceCounter", "QueryPerformanceFrequency", StringComparison.Ordinal),
+            "ReadCounter", "CounterProvider", policy);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateConsumerSet(consumer,
+                [changedProvider, helperProvider]));
+        var uncalledConsumer = MakeConsumerSource(
+            "int32 Main() { return 0; }", policy, providers);
+        Assert.That(SetMachineImportCount(uncalledConsumer), Is.Zero);
+        NativeModuleCompiler.ValidateConsumerSet(uncalledConsumer, providers);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateConsumerSet(uncalledConsumer,
+                [changedProvider, helperProvider]));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]

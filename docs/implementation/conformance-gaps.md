@@ -359,8 +359,13 @@ provisional revision 92, which omits the general NoThrow field/tokens and
 persists direct-import aggregate outputs with their supported output-specific
 dependency rows. It rejects unsupported general Dependency contracts rather
 than dropping them; candidate revision 93 remains required for general
-Captures/provenance persistence. Native graph recorded-import promises still
-retain a separate private NoThrow dimension. The unapproved
+Captures/provenance persistence. Native graph packages and consumer sets now
+select outer schema version 3, which removes `NoThrow`/`MayThrow` from
+recorded import contracts while retaining directed DoesNotReturn and
+caller-unsafe checks; exact readers reject older v2 artifacts instead of
+normalizing away those promises. Focused NoThrow module/graph/set regression
+selection passed 88/88 with zero skips. Remaining private semantic/native
+binding and proof boundaries stay open. The unapproved
 [direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md)
 is provisionally implemented with version-3 TNPK/TNSP/TNGP expectation tables
 and provider-owned leaf thunks; package, set and graph AOT plus root-only graph

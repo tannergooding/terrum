@@ -61,6 +61,8 @@ public static partial class NativeModuleCompiler
         }
         Array.Sort(sortedExports, StringComparer.Ordinal);
         var contractSnapshot = ModuleCompiler.ReadGraphProviderSnapshot(contract);
+        var directImportExpectations = CreateDirectImportExpectations(
+            program, contractSnapshot.ParsedModule.Structures);
         var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);
@@ -89,6 +91,7 @@ public static partial class NativeModuleCompiler
         var package = new GraphPackage(false, identity, runtimePolicy,
             sortedExports, WithGraphUsage(bindings, graphUsedBuilder.ToImmutable()), contract, image) {
             ContractSnapshot = contractSnapshot,
+            DirectImportExpectations = directImportExpectations,
             ValidatedReference = contractSnapshot.Reference,
             Origins = CreateGraphOrigins(contractSnapshot, false, identity, providers),
         };
@@ -117,6 +120,8 @@ public static partial class NativeModuleCompiler
         var contract = ModuleCompiler.CreateConsumerAgainstReference(program, GraphReference(providers),
             allowManagedParticipant: true);
         var contractSnapshot = ModuleCompiler.ReadGraphConsumerContract(contract);
+        var directImportExpectations = CreateDirectImportExpectations(
+            program, contractSnapshot.ParsedModule.Structures);
         var imports = contractSnapshot.Imports;
         var bindings = GraphBindings(providers, imports);
         var declarations = NativeBindings(bindings);
@@ -145,6 +150,7 @@ public static partial class NativeModuleCompiler
         var package = new GraphPackage(true, null, runtimePolicy, [],
             WithGraphUsage(bindings, graphUsedBuilder.ToImmutable()), contract, image) {
             ContractSnapshot = contractSnapshot,
+            DirectImportExpectations = directImportExpectations,
             Origins = CreateGraphOrigins(contractSnapshot, true, null, providers),
         };
         var result = WriteGraphPackage(package);
@@ -353,6 +359,19 @@ public static partial class NativeModuleCompiler
         {
             contractSnapshot.ValidateGraphLibrary(reference);
         }
+        foreach (var expectation in package.DirectImportExpectations)
+        {
+            var providerIndex = Array.FindIndex(providers, provider =>
+                StringComparer.Ordinal.Equals(provider.Identity, expectation.ProviderIdentity));
+            if (providerIndex < 0)
+            {
+                throw new ModuleContractException(
+                    "Direct-import expectation selects a missing graph provider.");
+            }
+            ValidateDirectImportExpectationsAgainstProvider(
+                [expectation], contractSnapshot.ParsedModule,
+                providers[providerIndex].Identity!, references[providerIndex]);
+        }
         for (var index = 0; index < providers.Length; index++)
         {
             var dependency = package.Dependencies[index];
@@ -533,7 +552,16 @@ public static partial class NativeModuleCompiler
             {
                 continue;
             }
-            if (!function.IsExternal || !DirectNativeImportContract.IsValid(function, program.Structures,
+            if (function.ModuleImport is not null)
+            {
+                continue;
+            }
+            if (function.IsModuleReference)
+            {
+                throw new ModuleContractException(
+                    $"Direct native module import '{function.Name}' has no selected provider binding.");
+            }
+            if (!function.IsExternal || !DirectNativeImportContract.IsValidPrivateWindows(function, program.Structures,
                 program.NativeFunctionPointerSignatures, program.NativePointerTypes))
             {
                 throw new ModuleContractException(

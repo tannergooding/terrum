@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -17,6 +18,16 @@ namespace Terrum.CodeAnalysis.Tests.Native.Graphs;
 
 public sealed class NativeGraphTests
 {
+    private const string CounterOutputImport = """
+        [Blittable]
+        [Layout(LayoutKind.Sequential)]
+        public struct Counter { public int64 Value; }
+        [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+        public extern int32 ReadCounter(
+            [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+            write ptr<Counter> counter);
+        """;
+
     private static string CompilerApphost()
     {
         var framework = new DirectoryInfo(AppContext.BaseDirectory);
@@ -120,19 +131,184 @@ public sealed class NativeGraphTests
         return result;
     }
 
+    private static int GraphContractOffset(byte[] artifact)
+    {
+        var at = 19 + artifact[7];
+        for (var dependency = 0; dependency < artifact[8]; dependency++)
+        {
+            SkipGraphString(artifact, ref at);
+            var declarationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var declaration = 0; declaration < declarationCount; declaration++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+
+            var importCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var import = 0; import < importCount; import++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+        }
+
+        var exportCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(9, 2));
+        for (var export = 0; export < exportCount; export++)
+        {
+            SkipGraphString(artifact, ref at);
+        }
+
+        var originCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        for (var origin = 0; origin < originCount; origin++)
+        {
+            SkipGraphString(artifact, ref at);
+            SkipGraphString(artifact, ref at);
+            var cleanupLength = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + cleanupLength;
+        }
+        var expectationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        for (var expectation = 0; expectation < expectationCount; expectation++)
+        {
+            for (var field = 0; field < 5; field++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+            var parameterCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + (parameterCount * 14);
+        }
+
+        var contractLength = BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(11, 4));
+        Assert.That(at + contractLength, Is.LessThanOrEqualTo(artifact.Length - 32));
+        return at;
+    }
+
+    private static int GraphDirectExpectationStringOffset(byte[] artifact,
+        string functionName, int fieldIndex)
+    {
+        var at = 19 + artifact[7];
+        for (var dependency = 0; dependency < artifact[8]; dependency++)
+        {
+            SkipGraphString(artifact, ref at);
+            var declarationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var declaration = 0; declaration < declarationCount; declaration++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+            var importCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var import = 0; import < importCount; import++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+        }
+        var exportCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(9, 2));
+        for (var export = 0; export < exportCount; export++)
+        {
+            SkipGraphString(artifact, ref at);
+        }
+        var originCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        for (var origin = 0; origin < originCount; origin++)
+        {
+            SkipGraphString(artifact, ref at);
+            SkipGraphString(artifact, ref at);
+            var cleanupLength = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + cleanupLength;
+        }
+        var expectationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+        at += 2;
+        Assert.That(expectationCount, Is.GreaterThan(0));
+        for (var expectation = 0; expectation < expectationCount; expectation++)
+        {
+            var localName = string.Empty;
+            for (var field = 0; field < 5; field++)
+            {
+                var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+                var valueOffset = at + 2;
+                var value = Encoding.UTF8.GetString(artifact, valueOffset, length);
+                if (field == 0)
+                {
+                    localName = value;
+                }
+                if (localName == functionName && field == fieldIndex)
+                {
+                    return valueOffset;
+                }
+                at = valueOffset + length;
+            }
+            var parameterCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2 + (parameterCount * 14);
+        }
+        throw new InvalidOperationException(
+            $"Native graph has no direct expectation field {fieldIndex} for '{functionName}'.");
+    }
+
+    private static int GraphMachineImportCount(byte[] artifact)
+    {
+        var at = 19 + artifact[7];
+        var total = 0;
+        for (var dependency = 0; dependency < artifact[8]; dependency++)
+        {
+            SkipGraphString(artifact, ref at);
+            var declarationCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            at += 2;
+            for (var declaration = 0; declaration < declarationCount; declaration++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+            var importCount = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(at, 2));
+            total += importCount;
+            at += 2;
+            for (var import = 0; import < importCount; import++)
+            {
+                SkipGraphString(artifact, ref at);
+            }
+        }
+        return total;
+    }
+
+    private static int NativeOutputSelectorOffset(byte[] artifact)
+    {
+        var contractOffset = GraphContractOffset(artifact);
+        var contractLength = BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(11, 4));
+        var name = Encoding.UTF8.GetBytes("QueryPerformanceCounter");
+        var nameRecord = new byte[sizeof(int) + name.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(nameRecord, name.Length);
+        name.CopyTo(nameRecord, sizeof(int));
+        var relativeFunctionOffset = artifact.AsSpan(contractOffset, contractLength)
+            .IndexOf(nameRecord);
+        Assert.That(relativeFunctionOffset, Is.GreaterThanOrEqualTo(0));
+        var contractLengthOffset = contractOffset + relativeFunctionOffset + nameRecord.Length;
+        var functionContractLength = BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(contractLengthOffset, sizeof(int)));
+        var outputCountOffset = contractLengthOffset + sizeof(int) + functionContractLength + 3;
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(outputCountOffset, sizeof(int))), Is.EqualTo(1));
+        return outputCountOffset + 18;
+    }
+
+    private static void SkipGraphString(byte[] artifact, ref int offset)
+    {
+        var length = BinaryPrimitives.ReadUInt16LittleEndian(artifact.AsSpan(offset, 2));
+        offset += 2 + length;
+    }
+
     [Test]
     public void GraphPackagesUseCurrentVersionAndRejectPreviousVersion()
     {
         var leaf = Leaf(" public int32 Leaf() { return 40; }");
         var middle = Middle("public int32 Middle() { return Leaf() + 1; }", leaf);
         var root = Consumer(middle);
-        Assert.That(middle[4], Is.EqualTo(2));
-        Assert.That(root[4], Is.EqualTo(2));
+        Assert.That(middle[4], Is.EqualTo(3));
+        Assert.That(root[4], Is.EqualTo(3));
 
         foreach (var artifact in new[] { middle, root })
         {
             var previousVersion = (byte[])artifact.Clone();
-            previousVersion[4] = 1;
+            previousVersion[4] = 2;
             SHA256.HashData(previousVersion.AsSpan(0, previousVersion.Length - 32))
                 .CopyTo(previousVersion, previousVersion.Length - 32);
             _ = Assert.Throws<ModuleFormatException>(() => NativeModuleCompiler.InspectGraphArtifact(previousVersion))!;
@@ -295,6 +471,206 @@ public sealed class NativeGraphTests
         var consumer = NativeModuleCompiler.CreateGraphConsumer(consumerCompilation.Program!,
             [provider], NativeRuntimePolicy.FailFast);
         NativeModuleCompiler.ValidateGraph(consumer, [leaf, provider]);
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task AggregateNativeOutputRunsThroughGraphAotAndRootJitAsync(
+        NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string MiddleSource = """
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Counter { public int64 Value; }
+
+            [Terrum.Interop.NativeImport("kernel32.dll", "QueryPerformanceCounter")]
+            extern int32 QueryPerformanceCounter(
+                [Terrum.Interop.NativeOutput(When: Terrum.Interop.NativeOutputCondition.NonZero)]
+                write ptr<Counter> counter);
+
+            public int32 Middle() {
+                init Counter counter;
+                unsafe {
+                    if (QueryPerformanceCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value < 0) { return -2; }
+                return 42 + Leaf();
+            }
+            """;
+        var boundPolicy = (BoundRuntimePolicy)policy;
+        var leaf = Leaf("public int32 Leaf() { return 40; }", policy);
+        var middleCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(MiddleSource),
+            NativeModuleCompiler.CreateGraphReference([leaf]), boundPolicy);
+        Assert.That(middleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        var middle = NativeModuleCompiler.CreateGraphProducer(
+            middleCompilation.Program!, ["Middle"], "NodeA", [leaf], policy);
+        var rootCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Middle(); }"),
+            NativeModuleCompiler.CreateGraphReference([middle]), boundPolicy);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(
+            rootCompilation.Program!, [middle], policy);
+
+        Assert.That(NativeModuleCompiler.InspectGraphArtifact(middle).Dependencies,
+            Is.EqualTo(["NodeB"]));
+        NativeModuleCompiler.ValidateGraph(root, [leaf, middle]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [middle, leaf],
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(82));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root, [leaf, middle],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true),
+            Is.EqualTo(82));
+
+        var malformedMiddle = (byte[])middle.Clone();
+        malformedMiddle[NativeOutputSelectorOffset(malformedMiddle)] = byte.MaxValue;
+        SHA256.HashData(malformedMiddle.AsSpan(0, malformedMiddle.Length - 32))
+            .CopyTo(malformedMiddle, malformedMiddle.Length - 32);
+        Assert.Throws<ModuleFormatException>(
+            () => NativeModuleCompiler.InspectGraphArtifact(malformedMiddle));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GraphIntermediateBindsDirectOutputToSelectedProviderAsync(
+        NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var counterCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(CounterOutputImport),
+            (BoundRuntimePolicy)policy);
+        Assert.That(counterCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, counterCompilation.Diagnostics));
+        var counterProvider = NativeModuleCompiler.CreateProducer(counterCompilation.Program!,
+            ["ReadCounter"], "CounterProvider", policy);
+        var leaf = Leaf("public int32 Leaf() { return 40; }", policy);
+        var middleCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Middle() {
+                init Counter counter;
+                unsafe {
+                    if (ReadCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value < 0) { return -2; }
+                return Leaf();
+            }
+            """), NativeModuleCompiler.CreateGraphReference([counterProvider, leaf]),
+            (BoundRuntimePolicy)policy);
+        Assert.That(middleCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, middleCompilation.Diagnostics));
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateGraphProducer(middleCompilation.Program!,
+                ["ReadCounter"], "NoDirectImportProxy", [counterProvider, leaf], policy));
+        var middle = NativeModuleCompiler.CreateGraphProducer(middleCompilation.Program!,
+            ["Middle"], "NodeA", [counterProvider, leaf], policy);
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init Counter counter;
+                unsafe {
+                    if (ReadCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value <= 0) { return -2; }
+                return Middle();
+            }
+            """), NativeModuleCompiler.CreateGraphReference([middle, counterProvider]),
+            (BoundRuntimePolicy)policy);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var root = NativeModuleCompiler.CreateGraphConsumer(rootCompilation.Program!,
+            [middle, counterProvider], policy);
+
+        NativeModuleCompiler.ValidateGraph(root, [middle, counterProvider, leaf]);
+        var malformedRoot = (byte[])root.Clone();
+        malformedRoot[GraphDirectExpectationStringOffset(malformedRoot,
+            "ReadCounter", 3)] = (byte)'/';
+        SHA256.HashData(malformedRoot.AsSpan(0, malformedRoot.Length - 32))
+            .CopyTo(malformedRoot, malformedRoot.Length - 32);
+        Assert.Throws<ModuleFormatException>(
+            () => NativeModuleCompiler.InspectGraphArtifact(malformedRoot));
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(root,
+            [middle, counterProvider, leaf], TimeSpan.FromSeconds(30), policy)
+            .ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(root,
+            [middle, counterProvider, leaf], CompilerApphost(), TimeSpan.FromSeconds(30), policy)
+            .ConfigureAwait(true), Is.EqualTo(40));
+
+        var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            CounterOutputImport.Replace("QueryPerformanceCounter",
+                "QueryPerformanceFrequency", StringComparison.Ordinal)),
+            (BoundRuntimePolicy)policy);
+        Assert.That(changedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, changedCompilation.Diagnostics));
+        var changedProvider = NativeModuleCompiler.CreateProducer(changedCompilation.Program!,
+            ["ReadCounter"], "CounterProvider", policy);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(root, [middle, changedProvider, leaf]));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task GraphProviderExportsOwnedDirectOutputThroughLeafThunkAsync(
+        NativeRuntimePolicy policy)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var leaf = Leaf("public int32 Leaf() { return 40; }", policy);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(CounterOutputImport + """
+                public int32 FromLeaf() { return Leaf(); }
+                """), NativeModuleCompiler.CreateGraphReference([leaf]),
+            (BoundRuntimePolicy)policy);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var provider = NativeModuleCompiler.CreateGraphProducer(providerCompilation.Program!,
+            ["ReadCounter", "FromLeaf"], "CounterGraphProvider", [leaf], policy);
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                init Counter counter;
+                unsafe {
+                    if (ReadCounter(&init counter) == 0) { return -1; }
+                }
+                if (counter.Value <= 0) { return -2; }
+                return FromLeaf();
+            }
+            """), NativeModuleCompiler.CreateGraphReference([provider]),
+            (BoundRuntimePolicy)policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateGraphConsumer(
+            consumerCompilation.Program!, [provider], policy);
+
+        NativeModuleCompiler.ValidateGraph(consumer, [provider, leaf]);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(consumer, [provider, leaf],
+            TimeSpan.FromSeconds(30), policy).ConfigureAwait(true), Is.EqualTo(40));
+        Assert.That(await NativeModuleCompiler.RunGraphJitAsync(consumer, [provider, leaf],
+            CompilerApphost(), TimeSpan.FromSeconds(30), policy).ConfigureAwait(true),
+            Is.EqualTo(40));
+
+        var changedCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            CounterOutputImport.Replace("QueryPerformanceCounter",
+                "QueryPerformanceFrequency", StringComparison.Ordinal)
+            + "public int32 FromLeaf() { return Leaf(); }"),
+            NativeModuleCompiler.CreateGraphReference([leaf]), (BoundRuntimePolicy)policy);
+        Assert.That(changedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, changedCompilation.Diagnostics));
+        var changedProvider = NativeModuleCompiler.CreateGraphProducer(
+            changedCompilation.Program!, ["ReadCounter", "FromLeaf"],
+            "CounterGraphProvider", [leaf], policy);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(consumer, [changedProvider, leaf]));
+
+        var uncalledCompilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 0; }"),
+            NativeModuleCompiler.CreateGraphReference([provider]), (BoundRuntimePolicy)policy);
+        Assert.That(uncalledCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, uncalledCompilation.Diagnostics));
+        var uncalled = NativeModuleCompiler.CreateGraphConsumer(
+            uncalledCompilation.Program!, [provider], policy);
+        Assert.That(GraphMachineImportCount(uncalled), Is.Zero);
+        NativeModuleCompiler.ValidateGraph(uncalled, [provider, leaf]);
+        Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.ValidateGraph(uncalled, [changedProvider, leaf]));
     }
 
     [Test]

@@ -18,6 +18,7 @@ public static partial class NativeModuleCompiler
     private const int MaximumGraphProviderCount = 16;
     private const int GraphHeaderSize = 19;
     private const int GraphMaximumBytes = 16 * 1024 * 1024;
+    private const byte GraphVersion = 3;
 
     private sealed record GraphDependency(string Identity, string[] Declarations, string[] Imports);
     private sealed record GraphTypeOrigin(string Name, string Identity, string? CleanupIdentity);
@@ -27,6 +28,7 @@ public static partial class NativeModuleCompiler
         public bool IsLeaf { get; init; }
         public GraphTypeOrigin[] Origins { get; init; } = [];
         public ModuleCompiler.GraphContractSnapshot? ContractSnapshot { get; init; }
+        public ImmutableArray<DirectImportExpectation> DirectImportExpectations { get; init; } = [];
         public string? ValidatedProfile { get; init; }
         public CompilationReference? ValidatedReference { get; init; }
     }
@@ -113,7 +115,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Native graph package has invalid bounds.");
         }
         var bytes = isSnapshot ? artifact : (byte[])artifact.Clone();
-        if (!bytes.AsSpan(0, 4).SequenceEqual("TNGP"u8) || bytes[4] != 2
+        if (!bytes.AsSpan(0, 4).SequenceEqual("TNGP"u8) || bytes[4] != GraphVersion
             || bytes[5] is not (1 or 2)
             || bytes[6] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
             || !HasValidChecksum(bytes))
@@ -229,6 +231,7 @@ public static partial class NativeModuleCompiler
             }
             origins[i] = new GraphTypeOrigin(name, owner, cleanupOwner);
         }
+        var directImportExpectations = ReadDirectImportExpectations(bytes, ref at);
         if ((long)at + contractLength + imageLength + HashSize != bytes.Length)
         {
             throw new ModuleFormatException("Graph package payload bounds differ from its header.");
@@ -241,10 +244,13 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Graph package and semantic runtime policies differ.");
         }
+        ValidateDirectImportExpectationsAgainstModule(
+            directImportExpectations, contractSnapshot.ParsedModule);
         var image = bytes.AsSpan(at + contractLength, imageLength).ToArray();
         var package = new GraphPackage(consumer, identity, policy, exports, dependencies, contract, image) {
             Origins = origins,
             ContractSnapshot = contractSnapshot,
+            DirectImportExpectations = directImportExpectations,
             ValidatedReference = contractSnapshot.Reference,
         };
         var imported = contractSnapshot.Imports;
@@ -329,9 +335,12 @@ public static partial class NativeModuleCompiler
                 }
             }
         }
+        var directImportExports = consumer ? null : System32DirectImportExports(
+            ModuleCompiler.GetGraphProducerDirectNativeImportExports(contract, exports));
         NativeModuleImageValidator.Validate(image, consumer, GraphImports(package), exports, policy,
             allowOwnedBufferRuntime: AllowsOwnedBufferRuntime(contractSnapshot.Profile),
-            allowManagedRuntimeData: AllowsManagedRuntimeData(contractSnapshot.Profile));
+            allowManagedRuntimeData: AllowsManagedRuntimeData(contractSnapshot.Profile),
+            directImportExports: directImportExports);
         return package;
     }
 
@@ -346,7 +355,7 @@ public static partial class NativeModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write("TNGP"u8);
-        writer.Write((byte)2);
+        writer.Write(GraphVersion);
         writer.Write(package.Consumer ? (byte)2 : (byte)1);
         writer.Write((byte)package.Policy);
         writer.Write(checked((byte)(package.Identity?.Length ?? 0)));
@@ -390,6 +399,10 @@ public static partial class NativeModuleCompiler
                 writer.Write((ushort)0);
             }
         }
+        ValidateDirectImportExpectationsAgainstModule(package.DirectImportExpectations,
+            package.ContractSnapshot?.ParsedModule
+                ?? throw new ModuleFormatException("Graph contract snapshot is missing."));
+        writer.Write(SerializeDirectImportExpectations(package.DirectImportExpectations));
         writer.Write(package.Contract);
         writer.Write(package.Image);
         if (stream.Length + HashSize > GraphMaximumBytes)
@@ -483,7 +496,7 @@ public static partial class NativeModuleCompiler
         var directImports = package.Consumer
             ? ModuleCompiler.GetConsumerNativeImports(package.Contract)
             : package.IsLeaf ? ImmutableDictionary<string, IReadOnlyList<string>>.Empty
-                : ModuleCompiler.GetGraphProducerNativeImports(package.Contract);
+                : ModuleCompiler.GetGraphProducerNativeImports(package.Contract, package.Exports);
         foreach (var (dllName, symbols) in System32DirectImports(directImports))
         {
             if (!imports.TryGetValue(dllName, out var expectedSymbols))

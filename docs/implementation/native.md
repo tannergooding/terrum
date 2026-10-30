@@ -339,11 +339,11 @@ and [publication contracts](../specs/language-contracts.md#22-declared-outcome-r
 | Boolean requirements | Kind 21 retains checked-require behavior under either runtime policy without a hidden local or new source scope. |
 | Structured returns and void completion | Tree/statement scalar returns use kind 8 with a typed root and keyword-through-semicolon span; their terminal header words 38–40 are `-1`. Terminal-expression envelopes remain a separate current form. All roots are consumed; reachable non-void fallthrough rejects unless a verified DoesNotReturn contract removes that normal edge. Void bodies permit empty/implicit completion and bare or grouped unit returns; a parameterless void entry exits zero. |
 | Else-if chains | False arms lower to nested conditionals without synthetic lexical blocks, retaining source coverage, local scopes and structural limits. |
-| `[NoThrow]` and `[DoesNotReturn]` | Exact declaration flags/spellings and body effects are audited. Shared verification owns failure/completion proofs; DoesNotReturn preserves any declared result type and removes implicit normal completion. General attributes are not enabled. |
+| NoThrow retirement and `DoesNotReturn` | The hosted binder rejects retired `[NoThrow]` source use with `TRM3017`; the scalar projection rejects its reserved bit and the CLI omits the retired `noThrow` field. `DoesNotReturn` remains independent, preserves its declared result type and removes implicit normal completion. Structured private revision 92 and native package/set/graph version 3 omit general NoThrow promises; native-boundary and role-specific obligations remain a separate in-progress migration. |
 | Named local lifetime ending | Kind 24 retains the slot, root `-1` and statement span. Parameters, unknown/inactive names and non-local places reject; shared verification owns definite liveness and reinitialization. |
 | Typed/inferred vacant locals | Kind 25 carries explicit `init T`; kind 26 carries `init var`; flag `0x2` records initialization authority. Inferred type comes from the first already-typed assignment expression, not an untyped literal. Unresolved, incompatible or optional storage rejects. |
 | Typed scalar constants | Kind 27 carries a direct literal; kind 28 carries an initializer reducible to `BoundConstant`; flag `0x4` records constant authority. Selected constant branches follow source evaluation. Inferred constants, runtime-dependent evaluated work and for-initializer constants reject. |
-| Try/finally and bare recovery | Kinds 29/30 retain try/finally extents; kind 31 retains an unsafe block; kinds 32/33 retain bare try/catch inside that scope; kind 34 retains its optional NoThrow finally. Recovery requires checked-exceptions; typed catches and filters reject. |
+| Try/finally and bare recovery | Kinds 29/30 retain try/finally extents; kind 31 retains an unsafe block; kinds 32/33 retain bare try/catch inside that scope; kind 34 retains the finally extent. Recovery requires checked-exceptions; typed catches and filters reject. |
 | Static body proofs | Kinds 35/36 carry foldable-true static require and outer-body static ensure. Scopes/anchors are audited, ensure is closed, and only proven-true conditions are erased. |
 | Direct call statements | Kind 37 owns the direct call root; void calls reject in value contexts. Complete-program operation 105 and its target table identify source-order callees and their argument roots/count/types. |
 | Scalar output modes | Header words 16/17 carry separate out/init masks; operations 107/108 encode matching existing/declared init destinations. Boolean returns use conditional publication; non-Boolean/void results require every output initialized on each normal return. |
@@ -448,9 +448,9 @@ operations do not store receiver loans or resize backing memory. `Set`,
 initialized unique owners, including forwarded writable `this`. The root
 is reserved before argument evaluation, and active views block mutation.
 The buffer remains owned by its containing value and is released by the
-same recursive cleanup. `Clear()` is NoThrow for an eligible live writable
-buffer place: it sets count to zero without freeing or reallocating the
-fixed-capacity storage. Lexical mutable slices can also borrow those fields;
+same recursive cleanup. `Clear()` sets count to zero for an eligible live
+writable buffer place without freeing or reallocating the fixed-capacity
+storage; this operation carries no general no-failure promise. Lexical mutable slices can also borrow those fields;
 this does not implement the general `write`-view migration.
 `ReadonlyInt32BufferView` captures a checked pointer/length descriptor in a
 16-byte local frame slot, with its root retained only in structured semantic
@@ -714,7 +714,7 @@ The [binary-protocol sample](../../samples/LanguageFeatures/StaticProtocols/stat
 also returns 42, using explicitly declared subtraction, division, remainder
 and bitwise `&`, `|`, `^` witnesses. The same concrete call lowering preserves
 ordinary checked arithmetic and declaration-site effect checks; bitwise
-spelling alone does not make an arbitrary operator implementation NoThrow.
+spelling alone does not prove an operator implementation has no failure edge.
 The hosted compiler supports the six nominal Copy-struct equality/comparison protocols
 (`==`, `!=`, `<`, `<=`, `>` and `>=`); see the
 [bounded generic contract](../implementation.md#bounded-generic-functions).
@@ -840,35 +840,48 @@ not transitive dependency resolution or multi-provider JIT loading. The separate
 [native graph commands](native-graph.md) validate explicit acyclic dependencies
 between DLLs while retaining the original consumer and intermediate images.
 
-## Checked no-throw declarations
+## Provisional NoThrow source retirement
 
-`[NoThrow]` on a function or constructor declares a bound on language-level
-throwing effects. Binding preserves it in `BoundFunction.IsNoThrow`; mandatory
-verification rejects a violating implementation, including publicly constructed
-IR. Calls depend on the callee's declaration, not its current body. Module
-contracts preserve that guarantee: adding it is compatible, removing it is not.
-The attribute neither disables runtime checks nor treats fail-fast termination
-as a proof of no throwing effects.
+The unapproved
+[retirement proposal](../proposals/no-throw-retirement-and-proof-boundaries.md)
+recommends removing the general source and published `[NoThrow]` promise while
+retaining scoped proof facts and role-specific obligations. This is a
+provisional implementation direction; it does not amend the normative source
+or metadata owners. The hosted binder now rejects `[NoThrow]` on functions,
+constructors, accessors, static protocol requirements and generic templates
+with `TRM3017`. The scalar projection rejects its reserved bit, and CLI JSON
+no longer publishes `noThrow`. Ordinary declarations may fail according to
+their checked operations and runtime policy; call sites do not infer guarantees
+from callee bodies.
 
-The current conservative proof accepts initialized value/field reads and writes,
-constants, comparisons, boolean and integer bitwise operations, unary plus and
-complement, and calls to other NoThrow declarations. Numeric casts are total
-for identity conversions, `char16` to the supported integers, `int32` to `int64`,
-and `uint32` to `int64`/`uint64`. Negation of a constant operand is accepted
-when its result is representable, including ordinary negative literals.
-The provisional source arithmetic profile is resolved before verification:
-Development-default and explicit checked integer operations remain potentially
-throwing, while Release-default add/subtract/multiply/negation and updates wrap
-and contribute no arithmetic-failure edge. Other conversions and host-buffer
-accesses without a statically constant, proven in-range index remain potentially
-throwing in the verified IR.
+`BoundFunction.IsNoThrow` remains an internal proof/role fact, not a source
+declaration or published ordinary-call promise. Structured semantic revision
+92 omits the general Boolean and NoThrow/MayThrow suffixes; native graph
+package and consumer-set version 3 likewise omits that contract dimension and
+rejects older package versions rather than stripping the promise. Directed
+DoesNotReturn and caller-unsafety comparisons remain. Defined `NativeCallable`
+bodies receive scoped no-failure verification. Validated `NativeImport` and
+vtable roles are admitted separately from ordinary potentially-failing calls,
+without erasing native exception, output or cleanup failure edges.
+
+The internal conservative proof accepts initialized value/field reads and
+writes, constants, comparisons, boolean and integer bitwise operations, unary
+plus and complement, total conversions, and calls carrying an internal
+no-failure fact or an admitted role-specific guarantee. Negation of a constant
+operand is accepted when its result is representable, including ordinary
+negative literals. The provisional source arithmetic profile is resolved before
+verification: Development-default and explicit checked integer operations
+remain potentially failing, while Release-default add/subtract/multiply/
+negation and updates wrap and contribute no arithmetic-failure edge. Other
+conversions and host-buffer accesses without a statically constant, proven
+in-range index remain potentially failing in the verified IR.
 
 Source binding folds already-typed constant `+`, `-`, `*`, `/`, `%`, `&`, `|`
 and `^`, supported unary plus/negation/complement, and integer/code-unit
 conversions under their resolved operation policies. Checked results must be
 representable; Release-default integer operations fold modulo their destination
-width. Thus `[NoThrow] int32 Answer() { return (1 + 2) * 14; }` remains accepted,
-and a profile-selected wrapping overflow adds no failure. Checked overflow,
+width. Thus `int32 Answer() { return (1 + 2) * 14; }` is accepted as an ordinary
+function, and a profile-selected wrapping overflow adds no failure edge. Checked overflow,
 division by zero and out-of-range casts retain their existing failure behavior;
 a later cancellation cannot erase an earlier checked failure. Calls and storage
 reads stay opaque, including a call multiplied by zero. Folding does not provide
@@ -883,25 +896,25 @@ remains unfinished under its accepted contract.
 
 Matching constant integer/code-unit comparisons and boolean equality also
 fold into boolean constants, as do built-in boolean `!`, `&&`, `||`, `&`, `|`
-and `^` when all their operands are constants. For example, `[NoThrow] void Check() {
-require int32(1) == int32(1); }` satisfies the existing requirement proof.
+and `^` when all their operands are constants. For example, `void Check() {
+require int32(1) == int32(1); }` has a statically true requirement condition.
 False comparisons retain requirement failure, and unknown or failing operands
 remain in the IR, even behind a constant short-circuit operand. Folding does
 not remove the ordinary conservative checks on unreachable source or authorize
 access to uninitialized outputs.
 
-The proof uses the exact immutable host-buffer grant
+The internal proof uses the exact immutable host-buffer grant
 and its element type/read-write capability; it does not authorize unchecked
-pointers or treat fail-fast as NoThrow. A `require` needs a
+pointers or equate fail-fast termination with absence of a language failure. A `require` needs a
 boolean condition whose false outcome is statically impossible. There is no
 numeric range or user-invariant inference; unreachable operations are still
-checked conservatively. NoThrow says nothing about termination or fatal
+checked conservatively. This proof says nothing about termination or fatal
 operating-system faults.
 
-The [no-throw sample](../../samples/LanguageFeatures/Contracts/no-throw.terrum) returns 42 through
-checked constructors, methods, widening conversion and conditional output
-publication, using the same AOT/JIT encoder. `CharacterFacts` publishes
-NoThrow on its two comparison-only classification helpers.
+The [scalar-values sample](../../samples/LanguageFeatures/Contracts/scalar-values.terrum) returns
+42 through ordinary constructors, methods, widening conversion and conditional output
+publication, using the same AOT/JIT encoder. `CharacterFacts` uses ordinary
+functions for its comparison-only classification helpers.
 
 ## Compact unique owners
 
@@ -998,10 +1011,11 @@ representation contracts.
 For supported calls, a bool/out failure branch ending in a nonreturning call
 leaves only the successful, initialized output path at the join. It neither
 manufactures a false-path value nor removes potential failure effects.
-`[NoThrow]` and `[DoesNotReturn]` may be combined for an infallible
-nonterminating body, while `require false` satisfies only the no-normal-return
-guarantee. Both promises persist in private module contracts and may
-independently strengthen, but not weaken, during replacement.
+General `[NoThrow]` source use is provisionally rejected; `DoesNotReturn`
+remains independent. Internal no-failure proof state and `DoesNotReturn` may
+hold together, while `require false` establishes only the no-normal-return
+guarantee. Legacy private contracts still persist effect facts pending their
+separate migration.
 
 The [no-return sample](../../samples/LanguageFeatures/Contracts/no-return.terrum) returns 42 on success.
 Changing its entry to `Select(false)` reaches the nonreturning failure helper
@@ -1212,7 +1226,8 @@ remainder. This retains truncation toward zero and negative remainder signs,
 including signed minima. Signed divisor one keeps the numerator for division
 and yields zero for remainder after evaluating it. Zero, negative and other
 non-power-of-two divisors retain their checked general paths. This instruction
-selection changes neither verified IR nor source `NoThrow` acceptance, module
+selection changes neither verified IR nor the provisional source NoThrow
+retirement, module
 formats or ABI.
 
 A bool-returning declaration with `out` parameters promises initialized outputs

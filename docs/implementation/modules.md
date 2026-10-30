@@ -112,15 +112,48 @@ Candidate revision 89 adds one checked/wrapping mode byte to unary, binary,
 update and compound-assignment arithmetic records. This private schema is
 provisionally implemented under the unapproved
 [private-persistence proposal](../proposals/source-arithmetic-private-persistence.md):
-all new writes use 89, while exact revisions 76–88 reconstruct these
-operations as checked.
-Ordinary private-module replacement remains slot-flexible. Readers accept
-the supported private revisions through 89 while rejecting unsupported
-combinations. Older artifacts must
-be recreated from source. These private formats preserve verified, typed,
-source-mapped structured IR and the supported declaration, layout,
-initialization, cleanup, and runtime contracts described in this reference and
-the [implementation reference](../implementation.md).
+the current exact revision 92 carries those operation modes, while revision
+89 is not selected independently. Candidate revision 92 composes the
+unapproved NoThrow-retirement delta on 89
+with the aggregate-output collection and reservation tag 41 described by the
+separate [output persistence proposal](../proposals/aggregate-native-output-private-persistence.md).
+The retirement delta is specified in the unapproved
+[private NoThrow persistence proposal](../proposals/no-throw-private-persistence.md).
+This exact-schema implementation remains provisional: the current structured
+writer and reader select only 92; candidate revisions 90/91 and older
+revisions reject and require regeneration. Revision 92 omits the general
+NoThrow field and contract tokens, persists direct-import NativeOutput
+declarations and output-specific dependency rows, and rejects general
+Dependency contracts it cannot represent. NativeCallable Captures and other
+general dependency contracts require the candidate revision 93 described in
+the [provenance proposal](../proposals/reference-provenance-carriers.md);
+standard TRRM and register-Body output persistence remain separate gaps. A
+provisional private revision-92 amendment now assigns expression tag 42 to
+typed `BoundFieldMove` field-place paths and carries them through serialization,
+resolution, call traversal, linked verification and type-table remapping. This
+is private-only support under the unapproved
+[owning-field move persistence proposal](../proposals/owning-field-move-private-persistence.md),
+not Standard TRRM support. A
+supervised Windows x64 native-package test also executes the persisted
+consumer EXE/provider DLL using `kernel32!QueryPerformanceCounter` through
+aggregate NativeOutput under both runtime policies; this is single-provider
+package evidence, not general set/graph or TRRM execution support
+([test](../../tests/Terrum.CodeAnalysis.Tests/Native/Modules/NativeModuleTests.cs)).
+The separately unapproved
+[direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md)
+is provisionally implemented in native containers: outer version 3 retains
+each selected direct-import provider/export, foreign DLL/export and
+`NativeParameter` expectation; provider-owned direct-import exports use a
+validated six-byte IAT leaf thunk. TNPK, TNSP and TNGP consumers preserve the
+selected provider DLL route and compare the retained descriptor/output
+contracts on replacement. AOT is qualified for packages and sets; graphs also
+exercise root-only JIT, including a graph-owned direct-import export. This
+provisional path does not amend revision 92, source syntax or standard TRRM,
+and remains subject to the proposal's unapproved status. Ordinary
+private-module replacement remains slot-flexible. These private
+formats preserve verified, typed, source-mapped structured IR and the
+supported declaration, layout, initialization, cleanup, and runtime contracts
+described in this reference and the [implementation reference](../implementation.md).
 
 ## Persisted caller-unsafe operations
 
@@ -134,7 +167,7 @@ not persisted as an independent capability; removing the only scope rejects.
 | Field-value reads and getters inside `unsafe(expr)` | Eligible public `Copy` paths/owners and recursively exportable results. Getter identity remains canonical; linking permits only established producer qualification. This slice does not admit field/getter mutation. |
 | Readonly instance calls inside `unsafe(expr)` | One by-value receiver with recursively exportable by-value parameters/results. The method identifier is owner-relative; producer qualification is admitted only during linking. |
 | Mutable field-receiver calls inside `unsafe(expr)` | A nonescaping receiver loan is source argument zero mapped to formal zero of an ordinary or caller-unsafe synchronous mutable method. At least one field edge is caller-unsafe; every edge's declared access and the complete `MutReceiver`, initialization, place, mutability, ownership and reservation contracts are checked. Public non-unique `Copy` layouts and explicit by-value parameters/results must be recursively exportable. Wrapped/remapped or readonly receiver loans, mutable receiver imports, direct mutable-method exports, unsafe-block calls in this slice and other reference/output modes reject. |
-| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain `NoThrow` plus caller-unsafety; address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. The development `.trrm` path also persists local callable entries and imported expected declarations, including provider identity/export key, but does not bind the provider or retain code lifetime; direct native imports can carry native-function-pointer parameters and results through their complete signature TypeSpecs. |
+| Native function addresses and indirect calls | Revision 82 retains explicit Windows x64 `NativeAbi` signatures, native-callable function identities, address targets, and indirect-call operands/results. The target must exactly match its declared signature and retain caller-unsafety; defined native-callable bodies satisfy scoped no-failure verification, and call sites rely on the callable role rather than callee-body inference. Address formation and invocation require reconstructed unsafe scopes. Function-pointer values are non-owning code addresses and do not extend image lifetime. The development `.trrm` path also persists local callable entries and imported expected declarations, including provider identity/export key, but does not bind the provider or retain code lifetime; direct native imports can carry native-function-pointer parameters and results through their complete signature TypeSpecs. |
 | Typed native pointers | Revision 83 retains pointer identities, pointee types, write access, and address/read/write body nodes. Pointer and function-pointer tables are recursively validated and structurally remapped through private dependency sets and graphs; unsafe scopes are reconstructed and verified. The development `.trrm` path carries typed-pointer TypeSpecs and native-pointer rows for admitted declarations and call arguments, including direct-import pointer parameters and results. `NativeParameter` remains optional and adds no access, retention, extent, or alignment promise when absent; general pointer address/read/write Body nodes remain unsupported. |
 | Numeric-slot native vtable methods | Revisions 84-85 retain the slot, aligned vptr offset, and pointer parameter contracts; revision 86 retains the expected binding on imported consumer declarations, and revision 87 retains their output contracts. The development `.trrm` path encodes bodyless declarations in section `0x0032` and same-artifact compact-indexed calls through ordinary `Call` targets. A source reference preserves provider identity/export key in ModuleRef/Import and copies the role-4 binding row for source-free verification and lowering. Native-package single-provider, set, and graph routes validate the selected identity and exact binding, then rebind the local stub to the provider export. Ordinary private-module replacement remains slot-flexible. Bounded bodies preserve admitted typed-pointer signatures and arguments and support scalar output destinations with result-condition verification through ScalarInitOutput. General address/pointer operations remain unsupported. Loaded indexed bodies are not yet reserializable by the private semantic-module writer. |
 | Static binary nominal operators inside `unsafe(expr)` | Two exact owner-typed by-value operands and an owner result, or `bool` for comparisons. Public non-unique `Copy` owners have recursively exportable layouts, and the complete call retains canonical positional mapping. |
@@ -275,10 +308,11 @@ the existing replacement checks below remain limited to recorded contracts.
 ## Current compatibility checks
 
 Existing module tests exercise those bounded checks: consumers retain their
-recorded promises, weakened `NoThrow` contracts and changed signatures, output
-modes, layouts or access contracts are rejected, and provider catalogs reject
-missing, incompatible or multiple compatible selections. This is evidence for already-bound repository artifacts only; it does not
-establish source compatibility or provide source-binding diagnostics.
+recorded promises, weakened `DoesNotReturn` or caller-unsafe contracts and
+changed signatures, output modes, layouts or access contracts are rejected,
+and provider catalogs reject missing, incompatible or multiple compatible
+selections. This is evidence for already-bound repository artifacts only; it
+does not establish source compatibility or provide source-binding diagnostics.
 
 The current binary reader rejects unknown versions, malformed/truncated records,
 trailing bytes, unknown nodes, invalid graph depth, excessive symbols, strings
@@ -659,24 +693,27 @@ Both paths use compact acyclic value layouts and the existing native value
 profile. Nested field types are retained
 transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
-order, access and declared mutation authority. The current format retains the checked
-`IsMutable` flag per field; changing it in either direction changes the
-published value contract and is rejected during replacement. Function bodies
-and public contracts store the checked `IsNoThrow` and `DoesNotReturn`
-declarations. Either promise can be strengthened independently: MayThrow may
-be replaced by NoThrow, and MayReturn by DoesNotReturn. Weakening either
-promise is rejected without inferring effects from replacement bodies.
+order, access and declared mutation authority. The current format retains the checked `IsMutable` flag per field; changing it
+in either direction changes the published value contract and is rejected
+during replacement. Structured-module revision 92 retains `DoesNotReturn` but
+does not persist a general `IsNoThrow` declaration or compare that retired
+promise during replacement. It still rejects weakening `DoesNotReturn`
+without inferring effects from replacement bodies. Native graph package and
+consumer-set outer schema version 3 removes the former `NoThrow`/`MayThrow`
+contract-string dimension; readers select that exact version and reject older
+v2 artifacts rather than silently dropping their expectations. `DoesNotReturn`
+and caller-unsafety remain directed replacement obligations. This migration
+is provisional under the unapproved private NoThrow/output proposals.
 `DoesNotReturn` preserves any declared logical result type and means normal
 continuation is unreachable, including after an imported call; it does not
 introduce a public never type, general exception objects or asynchronous
 cleanup. Constructor applicability remains provisional; constructor-specific
 standard interchange and imported replacement contracts are separate work.
-Producer bodies claiming either promise must independently pass the verifier's
-structured-flow or conservative effect proof. NoThrow is about permitted
-operations and declared callees, not an exception handler or a claim that
-fail-fast process termination counts as NoThrow. A version-ordering policy and
-resilient public layouts remain undefined; cyclic dependencies remain
-unsupported.
+Producer bodies claiming `DoesNotReturn` must independently pass the
+verifier's structured-flow proof. Role-specific native no-failure analysis
+remains distinct from a published ordinary-call promise. A version-ordering
+policy and resilient public layouts remain undefined; cyclic dependencies
+remain unsupported.
 
 ## Native package and image boundaries
 
@@ -706,8 +743,8 @@ foreach ($policy in 'fail-fast', 'checked-exceptions') {
     & $replacementExe # exits 44
 }
 ```
-A consumer importing a unique type must also import the exported NoThrow
-cleanup methods of that type and its owning children. Their cleanup identities
+A consumer importing a unique type must also import the exported cleanup
+methods of that type and its owning children. Their cleanup identities
 and Copy/unique distinctions participate in layout and signature compatibility;
 a replacement implementation may change without changing the consumer artifact.
 Producer-private owners retain recursive cleanup targets without exporting
@@ -807,7 +844,7 @@ consumer PE once, binding every external declaration from the reference and
 emitting IAT entries for actual calls, including implicit recursive cleanup, named
 exactly after their declarations. At validation and launch,
 `ModuleCompiler.Link` checks the persisted declaration, value layout,
-conditional output, field mutability, NoThrow and DoesNotReturn promises,
+conditional output, field mutability, DoesNotReturn and caller-unsafe promises,
 and visibility contracts and verifies the linked IR. It does **not** emit
 code: the native consumer image is
 unchanged when a compatible producer package is selected for another

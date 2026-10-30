@@ -25,6 +25,7 @@ public static partial class NativeModuleCompiler
 {
     private const int SetMaximumBytes = 16 * 1024 * 1024;
     private const int SetHeaderSize = 16;
+    private const byte SetVersion = 3;
 
     private sealed record ValidatedProvider(Package Package, CompilationReference Reference);
 
@@ -53,11 +54,14 @@ public static partial class NativeModuleCompiler
         var semantic = ModuleCompiler.CreateConsumerAgainstReference(program, referenceSet,
             allowManagedParticipant: true);
         var contractSnapshot = ModuleCompiler.ReadConsumerContractSnapshot(semantic);
+        var directImportExpectations = CreateDirectImportExpectations(
+            program, contractSnapshot.ParsedModule.Structures);
         var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
         var externalFunctionNames = new HashSet<string>(imports.Count, StringComparer.Ordinal);
         foreach (var function in program.Functions)
         {
-            if (function.IsExternal)
+            if (function.ModuleImport is not null
+                || (function.IsExternal && function.DirectNativeImport is null))
             {
                 _ = externalFunctionNames.Add(function.Name);
             }
@@ -110,7 +114,7 @@ public static partial class NativeModuleCompiler
             }
         }
         var artifact = WriteSet(providers, runtimePolicy, semantic, image,
-            providerUsedBuilder.ToImmutable(), contractSnapshot);
+            providerUsedBuilder.ToImmutable(), contractSnapshot, directImportExpectations);
         ValidateSet(ReadSet(artifact), providers);
         return artifact;
     }
@@ -266,6 +270,23 @@ public static partial class NativeModuleCompiler
             }
             providerExports[i] = exported;
         }
+        ValidateDirectImportExpectationsAgainstConsumer(
+            set.DirectImportExpectations, set.ContractSnapshot);
+        foreach (var expectation in set.DirectImportExpectations)
+        {
+            var providerIndex = Array.FindIndex(providers, provider =>
+                StringComparer.Ordinal.Equals(provider.Package.Identity,
+                    expectation.ProviderIdentity));
+            if (providerIndex < 0)
+            {
+                throw new ModuleContractException(
+                    "Direct-import expectation selects an unknown set provider.");
+            }
+            var provider = providers[providerIndex];
+            ValidateDirectImportExpectationsAgainstProvider(
+                [expectation], set.ContractSnapshot,
+                provider.Package.Identity, provider.Reference);
+        }
         var referenceSet = CreateReferenceSet(providers);
         set.ContractSnapshot.ValidateAgainstReference(referenceSet);
         for (var i = 0; i < providers.Length; i++)
@@ -335,10 +356,16 @@ public static partial class NativeModuleCompiler
         return result;
     }
 
-    private static byte[] WriteSet(ValidatedProvider[] providers, NativeRuntimePolicy policy, byte[] contract, byte[] image,
-        IReadOnlyList<NativeImportBinding> used, ModuleCompiler.ConsumerContractSnapshot contractSnapshot)
+    private static byte[] WriteSet(ValidatedProvider[] providers, NativeRuntimePolicy policy,
+        byte[] contract, byte[] image, IReadOnlyList<NativeImportBinding> used,
+        ModuleCompiler.ConsumerContractSnapshot contractSnapshot,
+        ImmutableArray<DirectImportExpectation> directImportExpectations)
     {
         var imports = contractSnapshot.Declarations.ToHashSet(StringComparer.Ordinal);
+        ValidateDirectImportExpectationsAgainstConsumer(
+            directImportExpectations, contractSnapshot);
+        var directImportExpectationTable = SerializeDirectImportExpectations(
+            directImportExpectations);
         var usedByDll = new Dictionary<string, List<string>>(Math.Min(providers.Length, used.Count),
             StringComparer.Ordinal);
         foreach (var import in used)
@@ -353,7 +380,7 @@ public static partial class NativeModuleCompiler
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
         writer.Write("TNSP"u8);
-        writer.Write((byte)2);
+        writer.Write(SetVersion);
         writer.Write((byte)policy);
         writer.Write((ushort)providers.Length);
         writer.Write(contract.Length);
@@ -424,6 +451,7 @@ public static partial class NativeModuleCompiler
         {
             throw new ModuleFormatException("Native set machine import has no selected provider.");
         }
+        writer.Write(directImportExpectationTable);
         writer.Write(contract);
         writer.Write(image);
         if (stream.Length + HashSize > SetMaximumBytes)
@@ -451,7 +479,7 @@ public static partial class NativeModuleCompiler
             throw new ModuleFormatException("Invalid native module set bounds.");
         }
         var bytes = (byte[])artifact.Clone();
-        if (!bytes.AsSpan(0, 4).SequenceEqual("TNSP"u8) || bytes[4] != 2
+        if (!bytes.AsSpan(0, 4).SequenceEqual("TNSP"u8) || bytes[4] != SetVersion
             || bytes[5] is not ((byte)NativeRuntimePolicy.FailFast or (byte)NativeRuntimePolicy.CheckedExceptions)
             || !HasValidChecksum(bytes))
         {
@@ -537,6 +565,7 @@ public static partial class NativeModuleCompiler
                 MachineImports = machineImports,
             };
         }
+        var directImportExpectations = ReadDirectImportExpectations(bytes, ref at);
         if ((long)at + contractLength + imageLength + HashSize != bytes.Length)
         {
             throw new ModuleFormatException("Invalid native set payload bounds.");
@@ -562,8 +591,11 @@ public static partial class NativeModuleCompiler
                 throw new ModuleFormatException("Native set declaration or machine imports differ from semantic contract.");
             }
         }
+        ValidateDirectImportExpectationsAgainstConsumer(
+            directImportExpectations, contractSnapshot);
         return new SetPackage((NativeRuntimePolicy)bytes[5], contract,
-            bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies, contractSnapshot);
+            bytes.AsSpan(at + contractLength, imageLength).ToArray(), dependencies,
+            contractSnapshot, directImportExpectations);
     }
 
     private sealed record SetDependency(string Identity, string[] Imports)
@@ -571,5 +603,6 @@ public static partial class NativeModuleCompiler
         public string[] MachineImports { get; init; } = [];
     }
     private sealed record SetPackage(NativeRuntimePolicy Policy, byte[] Contract, byte[] Image,
-        SetDependency[] Dependencies, ModuleCompiler.ConsumerContractSnapshot ContractSnapshot);
+        SetDependency[] Dependencies, ModuleCompiler.ConsumerContractSnapshot ContractSnapshot,
+        ImmutableArray<DirectImportExpectation> DirectImportExpectations);
 }

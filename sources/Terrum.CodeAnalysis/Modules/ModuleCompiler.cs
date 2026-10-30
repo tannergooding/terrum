@@ -2550,7 +2550,7 @@ public static partial class ModuleCompiler
         }
         var parts = function.Contract.Split('|');
         return parts.Length > 5 && parts[5] != "-"
-            && TryContractPromises(function.Contract.AsSpan(), out _, out _, out _, out var unsafeCaller)
+            && TryContractPromises(function.Contract.AsSpan(), out _, out _, out var unsafeCaller)
             && unsafeCaller && (parts[0] != function.Name
                 || !IsSupportedModuleUnsafeMethodContract(function.Contract, structures, valueTypes));
     }
@@ -2630,7 +2630,7 @@ public static partial class ModuleCompiler
     private static bool IsSupportedModuleOperatorContract(string contract,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes, bool requirePublic)
     {
-        if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out _, out _)
+        if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out _)
             || !signature.EndsWith("|Operator".AsSpan(), StringComparison.Ordinal))
         {
             return false;
@@ -2696,7 +2696,7 @@ public static partial class ModuleCompiler
     private static bool IsSupportedModuleUnsafeMethodContract(string contract,
         ImmutableArray<BoundStruct> structures, ModuleUnsafeValueTypeCache valueTypes)
     {
-        if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out _, out var unsafeCaller)
+        if (!TryContractPromises(contract.AsSpan(), out var signature, out _, out var unsafeCaller)
             || !unsafeCaller)
         {
             return false;
@@ -3267,9 +3267,9 @@ public static partial class ModuleCompiler
     }
 
     private static bool CompatibleContract(string expected, string actual) =>
-        TryContractPromises(expected.AsSpan(), out var expectedSignature, out _,
+        TryContractPromises(expected.AsSpan(), out var expectedSignature,
             out var expectedNoReturn, out var expectedUnsafeCaller)
-        && TryContractPromises(actual.AsSpan(), out var actualSignature, out _,
+        && TryContractPromises(actual.AsSpan(), out var actualSignature,
             out var actualNoReturn, out var actualUnsafeCaller)
         && expectedSignature.SequenceEqual(actualSignature)
         && (!expectedNoReturn || actualNoReturn)
@@ -3297,11 +3297,10 @@ public static partial class ModuleCompiler
         }
     }
 
-    private static bool TryContractPromises(ReadOnlySpan<char> contract, out ReadOnlySpan<char> signature,
-        out bool noThrow, out bool noReturn, out bool unsafeCaller)
+    private static bool TryContractPromises(ReadOnlySpan<char> contract,
+        out ReadOnlySpan<char> signature, out bool noReturn, out bool unsafeCaller)
     {
         signature = default;
-        noThrow = false;
         noReturn = false;
         unsafeCaller = false;
         if (ContainsRetiredNoThrowToken(contract))
@@ -5552,7 +5551,7 @@ public static partial class ModuleCompiler
         {
             var name = GetString(reader);
             var contract = GetString(reader);
-            if (!TryContractPromises(contract.AsSpan(), out _, out _, out _, out _))
+            if (!TryContractPromises(contract.AsSpan(), out _, out _, out _))
             {
                 throw new ModuleFormatException(
                     "Module declaration contains an invalid or retired effect token.");
