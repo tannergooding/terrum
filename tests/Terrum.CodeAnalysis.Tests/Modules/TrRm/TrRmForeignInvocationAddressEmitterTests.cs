@@ -502,6 +502,63 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void EmitsIndirectScalarResultFromNativeAddress()
+    {
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern uint32 Transform(uint32 value);
+
+            internal uint32 Form(uint32 value) {
+                unsafe {
+                    var callback = &Transform;
+                    return callback(value);
+                }
+            }
+            """), core);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler
+            .EmitForeignInvocationDraftNativeAddressLibrary(
+                compilation.Program!, "native-address-result");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var caller = 0;
+        var target = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            var name = tables.Methods.GetName(row);
+            caller = name == "Form" ? row : caller;
+            target = name == "Transform" ? row : target;
+        }
+
+        Assert.That(caller, Is.GreaterThan(0));
+        Assert.That(target, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(caller);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(caller), tables.Contracts.Count);
+        var callSite = body.GetRecord(2);
+        Assert.That(callSite[4], Is.EqualTo(3));
+        Assert.That(callSite[5], Is.EqualTo(1));
+        Assert.That(callSite[10], Is.Zero);
+        Assert.That(callSite[11], Is.Zero);
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE9, 0, 1, 0, 0xE0, 0, 2, 0, 0x17, 0,
+            }));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+            tables.Signatures.GetResultTypeSpec(
+                tables.Methods.GetSignature(caller)),
+            tables.Signatures.GetResultTypeSpec(
+                tables.Methods.GetSignature(target))), Is.True);
+    }
+
+    [Test]
     public void NativeParameterIndirectCallBindsThroughAnInferredAddress()
     {
         var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,

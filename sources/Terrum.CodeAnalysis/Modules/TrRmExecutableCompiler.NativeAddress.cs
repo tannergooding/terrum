@@ -85,7 +85,6 @@ public static partial class TrRmExecutableCompiler
                 or > NativeCallingConvention.Vectorcall
             || target.DoesNotReturn
             || caller.IsExternal || caller.DirectNativeImport is not null
-            || caller.ReturnType != PrimitiveType.Void
             || caller.DoesNotReturn || caller.RequiresUnsafeCaller
             || !caller.NativeOutputContracts.IsEmpty
             || !NativeFunctionPointerTypes.IsType(selectedAddress.Type))
@@ -420,14 +419,17 @@ public static partial class TrRmExecutableCompiler
             nativeAddress,
         };
         byte[] code = [0xE9, 0, 1, 0];
+        var returnsCallResult = indirectCall is not null
+            && indirectCall.Type != PrimitiveType.Void;
         if (emitsIndirectCall)
         {
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                3, 0, checked((ushort)callHomeIndex), 0, callInputs, []));
+                3, returnsCallResult ? (byte)1 : (byte)0,
+                checked((ushort)callHomeIndex), 0, callInputs, []));
             code = [.. code, 0xE0, 0, 2, 0];
         }
 
-        code = [.. code, 0x18, 0];
+        code = [.. code, returnsCallResult ? (byte)0x17 : (byte)0x18, 0];
         var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
@@ -539,25 +541,52 @@ public static partial class TrRmExecutableCompiler
         homeIndex = -1;
         var statements = new List<BoundStatement>();
         if (!AppendStatements(function.Body, statements)
-            || statements.Count != 3
-            || statements[2] is not BoundReturn { Value: null }
+            || statements.Count is not (2 or 3)
             || statements[0] is not BoundLocal
                 { Initializer: BoundNativeFunctionAddress localAddress } local
             || localAddress != address
-            || statements[1] is not BoundExpressionStatement
-                { Expression: BoundIndirectCall call }
             || (uint)local.Variable >= (uint)function.Variables.Length
             || function.Variables.Length != function.ParameterCount + 1
             || local.Variable != function.ParameterCount
-            || call.Target is not BoundRead targetRead
+            || !function.Body.RetiredManagedLocals.IsEmpty)
+        {
+            return null;
+        }
+
+        BoundIndirectCall call;
+        var returnsCallResult = false;
+        if (statements.Count == 3
+            && statements[1] is BoundExpressionStatement
+                { Expression: BoundIndirectCall statementCall }
+            && statements[2] is BoundReturn { Value: null })
+        {
+            call = statementCall;
+        }
+        else if (statements.Count == 2
+            && statements[1] is BoundReturn
+                { Value: BoundIndirectCall returnedCall })
+        {
+            call = returnedCall;
+            returnsCallResult = true;
+        }
+        else
+        {
+            return null;
+        }
+
+        if (call.Target is not BoundRead targetRead
             || targetRead.Variable != local.Variable
             || targetRead.Type != address.Type
-            || call.Type != PrimitiveType.Void
-            || signature.ReturnType != PrimitiveType.Void
             || call.Arguments.Length != signature.ParameterTypes.Length
             || call.Arguments.Length != function.ParameterCount
             || !call.IsUnsafeAuthorized
-            || !function.Body.RetiredManagedLocals.IsEmpty)
+            || (returnsCallResult
+                ? call.Type == PrimitiveType.Void
+                    || function.ReturnType != call.Type
+                    || signature.ReturnType != call.Type
+                : call.Type != PrimitiveType.Void
+                    || function.ReturnType != PrimitiveType.Void
+                    || signature.ReturnType != PrimitiveType.Void))
         {
             return null;
         }
