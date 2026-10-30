@@ -45,13 +45,18 @@ selection, not a TargetProfile, semantic schema or persisted authorization.
 Analysis responses publish `"profile": null` and identify the selected key
 separately as `nativeLoweringAgreement`; they do not label it as one of the
 existing private native profiles. Native `build` and `jit` now execute the
-agreement for source-bound classes with scalar/native-address, inline-copy and
-ordinary class-handle fields. This slice supports class creation, local handle
-copies, handle-field assignment and replacement, borrowed receiver calls,
-scope retirement, iterative child-handle retirement and checked construction
-rollback under both runtime policies. Reference descriptors, handle results,
-by-value handle parameters, Cleanup, foreign calls and source-independent
-indexed bodies remain unsupported and reject before emission.
+selected agreement for source-bound classes with scalar/native-address,
+inline-copy and ordinary class-handle fields. They also support local ordinary
+references with the candidate 16-byte/8-aligned carrier and a zero support word
+for stack/inline places: formation, Copy/rebind, reborrow, and scalar or
+inline-Copy reads/writes. This does not extend the referent lifetime. Class
+creation, handle copies, handle-field assignment/replacement, borrowed receiver
+calls, scope retirement, iterative child-handle retirement and checked
+construction rollback remain supported under both runtime policies.
+Support-bearing class/box subplace references, optional-reference operations,
+reference-bearing fields/aggregates, reference parameters/results, by-value
+handle parameters, Cleanup, foreign calls and source-independent indexed
+bodies remain unsupported and reject before emission.
 `build-native-import` accepts the selector but still rejects at its
 native-import lowering boundary. No route falls back to the address-only or
 tracing representation. This provisional implementation follows the unapproved

@@ -138,6 +138,13 @@ internal sealed partial class PeCompiler
         {
             EmitCheckedReferencePlaceAddress(formation.Place, spill);
         }
+        if (_normalBacking)
+        {
+            _code.Store64(Spill(spill));
+            _code.Bytes(0x31, 0xC0);
+            _code.Store64(Spill(spill) + sizeof(ulong));
+            _code.Address(Spill(spill));
+        }
     }
 
     private void EmitCheckedReferencePlaceAddress(BoundExpression place, int spill)
@@ -146,13 +153,40 @@ internal sealed partial class PeCompiler
         {
             case BoundRead read:
                 var variable = _program.Functions[_currentFunction].Variables[read.Variable];
-                if (variable.IsImplicitRef)
+                if (read.Variable == 0 && IsBorrowedReceiver())
+                {
+                    _code.Load64(Slot(0));
+                }
+                else if (variable.IsImplicitRef)
                 {
                     _code.Load64(Slot(read.Variable));
                 }
                 else
                 {
                     _code.Address(variable.IsOut ? OutSlot(read.Variable) : Slot(read.Variable));
+                }
+                break;
+            case BoundReferenceRead referenceRead:
+                if (!CheckedReferenceTypeContract.IsValidType(
+                        referenceRead.Descriptor.Type, _program.CheckedReferenceTypes)
+                    || Size(referenceRead.Type) == 0)
+                {
+                    throw new InvalidOperationException(
+                        "The checked-reference place has an invalid descriptor type.");
+                }
+                var referenceType = _program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(referenceRead.Descriptor.Type)];
+                if (referenceType.IsGarbageCollected
+                    || referenceType.IsInitialization || referenceType.IsOptional
+                    || referenceType.ReferentType != referenceRead.Type)
+                {
+                    throw new InvalidOperationException(
+                        "The checked-reference place does not match its referent.");
+                }
+                Expression(referenceRead.Descriptor, spill);
+                if (_normalBacking)
+                {
+                    _code.LoadPointerField(0, sizeof(ulong));
                 }
                 break;
             case BoundNativeFixedArrayElement element:
@@ -188,11 +222,6 @@ internal sealed partial class PeCompiler
                 }
                 if (IsUnique(field.Receiver.Type))
                 {
-                    if (field.Receiver is not BoundRead)
-                    {
-                        throw new InvalidOperationException(
-                            "A checked reference to a nested owner field is not supported.");
-                    }
                     EmitUniqueFieldPlace(field);
                     break;
                 }
@@ -255,6 +284,10 @@ internal sealed partial class PeCompiler
         }
 
         Expression(read.Descriptor, spill);
+        if (_normalBacking)
+        {
+            _code.LoadPointerField(0, sizeof(ulong));
+        }
         if (!IsIndirect(read.Type))
         {
             _code.LoadPointerField(0, Size(read.Type));
@@ -344,11 +377,15 @@ internal sealed partial class PeCompiler
     private bool IsSupportedCheckedReferenceStoreType(PrimitiveType type) =>
         CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
             type, _program.Structures, _program.Classes,
-            _program.EnumDefinitions.Length);
+            _program.EnumDefinitions.Length, _program.CheckedReferenceTypes);
 
     private void EmitPointerValueWrite(BoundExpression address, BoundExpression value, int spill)
     {
         Expression(address, spill + 1);
+        if (_normalBacking && CheckedReferenceTypes.IsType(address.Type))
+        {
+            _code.LoadPointerField(0, sizeof(ulong));
+        }
         _code.Store64(Spill(spill));
         Expression(value, spill + 1);
         if (IsIndirect(value.Type))

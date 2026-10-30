@@ -159,6 +159,75 @@ public sealed partial class NativeManagedClassModuleTests
 
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NormalBackingLocalReferencesUseSelectedDescriptorLayoutAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            struct Cell {
+                public mut int32 Value;
+                public Cell(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                mut int32 value = int32(40);
+                mut int32 second = int32(0);
+                mut write ref<int32> target = ref value;
+                mut int32 observed = int32(0);
+                {
+                    ref<int32> readonlyTarget = ref *target;
+                    *target = int32(41);
+                    observed = *readonlyTarget;
+                }
+                target = ref second;
+                *target = int32(42);
+                mut Cell cell = new Cell(int32(0));
+                write ref<int32> fieldTarget = ref cell.Value;
+                *fieldTarget = observed + second;
+                return cell.Value;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var code = NativeEmitter.EmitCode(program, policy, agreement);
+        Assert.That(code.ManagedRuntimeOffset, Is.EqualTo(-1));
+        Assert.That(code.NormalBackingRuntimeOffset, Is.Zero);
+        Assert.That(code.Data.Length, Is.EqualTo(24));
+        Assert.That(NativeJit.ExecuteWithData(program, policy,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(83));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy, agreement))
+            .ConfigureAwait(true), Is.EqualTo(83));
+    }
+
+    [Test]
+    public void NormalBackingReferenceCallAbiRemainsFailClosed()
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            void Set(write ref<int32> target) { *target = int32(42); }
+            int32 Main() {
+                mut int32 value = int32(0);
+                Set(ref value);
+                return value;
+            }
+            """), new CompilationOptions {
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.Throws<NotSupportedException>(() =>
+            NativeEmitter.EmitCode(program, NativeRuntimePolicy.FailFast, agreement));
+        Assert.Throws<NotSupportedException>(() =>
+            NativeJit.ExecuteWithData(program, NativeRuntimePolicy.FailFast,
+                nativeLoweringAgreement: agreement));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void NormalBackingProgramCannotEnterPrivateNativeModuleGraph(
         NativeRuntimePolicy policy)
     {

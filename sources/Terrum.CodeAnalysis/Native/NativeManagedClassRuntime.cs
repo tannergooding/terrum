@@ -27,7 +27,7 @@ internal sealed partial class PeCompiler
     {
         if (program.NativeLoweringAgreement
                 != CompilationOptions.WindowsX64NormalBackingAgreement
-            || program.RequiresSourceGrant || !program.CheckedReferenceTypes.IsEmpty
+            || program.RequiresSourceGrant
             || program.CoreTaskType is not null || !program.Interfaces.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty)
         {
@@ -95,11 +95,19 @@ internal sealed partial class PeCompiler
                     $"The selected normal-backing runtime does not support the result type of '{function.Name}'.");
             }
 
-            foreach (var variable in function.Variables)
+            for (var variableIndex = 0; variableIndex < function.Variables.Length; variableIndex++)
             {
+                var variable = function.Variables[variableIndex];
+                var isReference = CheckedReferenceTypes.IsType(variable.Type);
+                if (isReference && (variableIndex < function.ParameterCount || variable.IsOut))
+                {
+                    throw new NotSupportedException(
+                        "The selected normal-backing runtime does not support reference call handoff.");
+                }
                 if ((!IsNormalBackingHandle(variable.Type)
-                        && !IsNormalBackingRuntimeValue(variable.Type, program, []))
-                    || (variable.IsOut && IsNormalBackingHandle(variable.Type)
+                        && !IsNormalBackingRuntimeValue(variable.Type, program, [])
+                        && !IsNormalBackingLocalReference(variable.Type, program))
+                    || (variable.IsOut && (IsNormalBackingHandle(variable.Type) || isReference)
                         && function.Intrinsic != BoundIntrinsic.ClassTryCreate))
                 {
                     throw new NotSupportedException(
@@ -120,7 +128,8 @@ internal sealed partial class PeCompiler
                         var argument = call.Arguments[index];
                         var isReceiver = (argument is BoundReceiverLoan or BoundMutableReceiverLoan)
                             || (index == 0 && !target.IsStatic && argument is BoundRead);
-                        if (IsNormalBackingHandle(argument.Type)
+                        if ((IsNormalBackingHandle(argument.Type)
+                                || CheckedReferenceTypes.IsType(argument.Type))
                             && !isReceiver
                             && !(target.Intrinsic == BoundIntrinsic.ClassTryCreate
                                 && argument is BoundOutArgument))
@@ -231,6 +240,19 @@ internal sealed partial class PeCompiler
         ManagedClassTypes.IsClass(type)
         || (ManagedClassTypes.IsOptional(type)
             && ManagedClassTypes.IsClass(ManagedClassTypes.Required(type)));
+
+    private static bool IsNormalBackingLocalReference(PrimitiveType type, BoundProgram program)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes))
+        {
+            return false;
+        }
+
+        var reference = program.CheckedReferenceTypes[CheckedReferenceTypes.Index(type)];
+        return !reference.IsGarbageCollected && !reference.IsInitialization
+            && !reference.IsOptional && !CheckedReferenceTypes.IsType(reference.ReferentType)
+            && IsNormalBackingRuntimeValue(reference.ReferentType, program, []);
+    }
 
     private void EmitManagedClassFactory(BoundFunction function)
     {

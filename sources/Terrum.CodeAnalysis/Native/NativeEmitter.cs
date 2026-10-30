@@ -2221,7 +2221,8 @@ internal sealed partial class PeCompiler
             case BoundNativePointerRead pointerRead:
                 return ExpressionSpills(pointerRead.Address, ref maximumArguments);
             case BoundReferenceFormation formation:
-                return ExpressionSpills(formation.Place, ref maximumArguments);
+                return Math.Max(_normalBacking ? 1 : 0,
+                    ExpressionSpills(formation.Place, ref maximumArguments));
             case BoundReferenceReborrow reborrow:
                 return ExpressionSpills(reborrow.Descriptor, ref maximumArguments);
             case BoundReferenceRead referenceRead:
@@ -4564,6 +4565,7 @@ internal sealed partial class PeCompiler
         }
     }
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
+        || (_normalBacking && CheckedReferenceTypes.IsType(type))
         || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
             or PrimitiveType.Decimal128
         || IsStruct(type) && Size(type) is not (1 or 2 or 4 or 8);

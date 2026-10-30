@@ -375,7 +375,22 @@ public sealed partial class CliTests
     [Test]
     public async Task NormalBackingAgreementSelectsSupportedAndRejectsUnsupportedRoutesAsync()
     {
-        var input = Encoding.UTF8.GetBytes("int32 Main() { return 42; }");
+        var input = Encoding.UTF8.GetBytes("""
+            int32 Main() {
+                mut int32 value = int32(40);
+                mut int32 second = int32(0);
+                mut write ref<int32> target = ref value;
+                mut int32 observed = int32(0);
+                {
+                    ref<int32> readonlyTarget = ref *target;
+                    *target = int32(41);
+                    observed = *readonlyTarget;
+                }
+                target = ref second;
+                *target = int32(42);
+                return observed + second;
+            }
+            """);
         var unsupportedInput = Encoding.UTF8.GetBytes("""
             class Leaf {
                 public int32 Value;
@@ -423,7 +438,7 @@ public sealed partial class CliTests
                 Assert.That(build.RootElement.GetProperty("nativeLoweringAgreement")
                     .GetString(), Is.EqualTo(agreement));
             }
-            Assert.That(await ExecuteNativeImageAsync(outputPath).ConfigureAwait(true), Is.EqualTo(42));
+            Assert.That(await ExecuteNativeImageAsync(outputPath).ConfigureAwait(true), Is.EqualTo(83));
 
             var (nativeImportExit, nativeImportOutput, nativeImportError) =
                 await RunAsync(input, "build-native-import", "-", "-o", nativeImportPath,
@@ -442,7 +457,7 @@ public sealed partial class CliTests
             var (jitExit, jitOutput, jitError) = await RunAsync(input,
                 "jit", "-", "--runtime", "fail-fast", "--native-lowering-agreement",
                 agreement, "--json");
-            Assert.That(jitExit, Is.EqualTo(42), jitOutput + jitError);
+            Assert.That(jitExit, Is.EqualTo(83), jitOutput + jitError);
             Assert.That(jitOutput, Is.Empty);
             Assert.That(jitError, Is.Empty);
 
