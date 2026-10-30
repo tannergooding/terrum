@@ -23,8 +23,6 @@ public sealed class NoReturnModuleTests
             require false;
         }
         """;
-    private const string Both = "[NoThrow] [DoesNotReturn] public void Stop() { while (true) { } }";
-
     private static BoundProgram CompileLibrary(string source)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
@@ -36,7 +34,8 @@ public sealed class NoReturnModuleTests
         ModuleCompiler.CreateProducer(CompileLibrary(source), ["Stop"]);
 
     private static byte[] NativeProducer(string source) =>
-        NativeModuleCompiler.CreateProducer(CompileLibrary(source), ["Stop"], "Termination", NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.CreateProducer(CompileLibrary(source), ["Stop"],
+            "Termination", NativeRuntimePolicy.FailFast);
 
     private static BoundProgram CompileConsumer(string source, byte[] producer,
         BoundRuntimePolicy policy = BoundRuntimePolicy.FailFast)
@@ -54,7 +53,7 @@ public sealed class NoReturnModuleTests
         var declaration = global::System.Linq.Enumerable.Single(reference.Functions);
         Assert.That(declaration.IsExternal, Is.True);
         Assert.That(declaration.DoesNotReturn, Is.True);
-        Assert.That(declaration.IsNoThrow, Is.False);
+        Assert.That(declaration.NoFailureProof, Is.False);
         var consumer = CompileConsumer("int32 Main() { Stop(); }", producer);
         var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
         var linked = ModuleCompiler.Link(artifact, producer);
@@ -195,23 +194,26 @@ public sealed class NoReturnModuleTests
     }
 
     [Test]
-    public void BothPromisesStrengthenIndependentlyButNeverWeaken()
+    public void NonReturnPromiseStrengthensButNeverWeakens()
     {
-        var sources = new[] { Returning, "[NoThrow] " + Returning, Terminating, Both };
+        var sources = new[] { Returning, Terminating };
         var modules = sources.Select(Producer).ToArray();
         var packages = sources.Select(NativeProducer).ToArray();
         for (var expected = 0; expected < sources.Length; expected++)
         {
             var reference = ModuleCompiler.CreateReference(modules[expected]);
             var promise = global::System.Linq.Enumerable.Single(reference.Functions);
-            Assert.That(promise.IsNoThrow, Is.EqualTo((expected & 1) != 0));
-            Assert.That(promise.DoesNotReturn, Is.EqualTo((expected & 2) != 0));
-            var consumer = CompileConsumer("int32 Main() { Stop(); return 42; }", modules[expected]);
+            Assert.That(promise.NoFailureProof, Is.False);
+            Assert.That(promise.DoesNotReturn, Is.EqualTo(expected != 0));
+            var consumerSource = expected == 0
+                ? "int32 Main() { Stop(); return 42; }"
+                : "int32 Main() { Stop(); }";
+            var consumer = CompileConsumer(consumerSource, modules[expected]);
             var semantic = ModuleCompiler.CreateConsumer(consumer, modules[expected]);
             var native = NativeModuleCompiler.CreateConsumer(consumer, packages[expected], NativeRuntimePolicy.FailFast);
             for (var actual = 0; actual < sources.Length; actual++)
             {
-                if ((expected & actual) == expected)
+                if (expected == 0 || actual == 1)
                 {
                     _ = ModuleCompiler.Link(semantic, modules[actual]);
                     NativeModuleCompiler.Validate(native, packages[actual]);
@@ -228,23 +230,20 @@ public sealed class NoReturnModuleTests
     [Test]
     public void ConsumerDeclarationNormalizationChecksEachPromise()
     {
-        var both = Producer(Both);
-        var consumer = CompileConsumer("int32 Main() { Stop(); return 42; }", both);
+        var terminating = Producer(Terminating);
+        var consumer = CompileConsumer("int32 Main() { Stop(); return 42; }", terminating);
         var index = consumer.Functions.IndexOf(consumer.Functions.Single(static function => function.IsExternal));
         var weaker = consumer with {
             Functions = consumer.Functions.SetItem(index, consumer.Functions[index] with {
-                IsNoThrow = false,
                 DoesNotReturn = false,
             }),
         };
-        var normalized = ModuleCompiler.CreateConsumer(weaker, both);
-        var imported = ModuleCompiler.Link(normalized, both).Functions[index];
-        Assert.That(imported.IsNoThrow, Is.True);
+        var normalized = ModuleCompiler.CreateConsumer(weaker, terminating);
+        var imported = ModuleCompiler.Link(normalized, terminating).Functions[index];
+        Assert.That(imported.NoFailureProof, Is.False);
         Assert.That(imported.DoesNotReturn, Is.True);
         _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateConsumer(consumer, Producer("[NoThrow] " + Returning)))!;
-        _ = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateConsumer(consumer, Producer(Terminating)))!;
+            ModuleCompiler.CreateConsumer(consumer, Producer(Returning)))!;
     }
 
     [Test]
@@ -266,11 +265,11 @@ public sealed class NoReturnModuleTests
         var producer = Producer(Returning);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { Stop(); return 0; }", producer), producer);
         var malformed = (byte[])consumer.Clone();
-        var suffix = Encoding.UTF8.GetBytes("|MayThrow|MayReturn");
+        var suffix = Encoding.UTF8.GetBytes("|MayReturn");
         var offset = malformed.AsSpan().IndexOf(suffix);
         Assert.That(offset >= 0, Is.True);
-        malformed[offset + "|MayThrow|".Length] = (byte)'X';
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(malformed, producer))!;
+        malformed[offset + 1] = (byte)'X';
+        _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(malformed, producer))!;
         producer[4] = 8;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(producer))!;
     }

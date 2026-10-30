@@ -1,9 +1,11 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
@@ -18,6 +20,19 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 
 public sealed class NoThrowModuleTests
 {
+    private static BoundProgram MarkNoFailureProof(BoundProgram program, params string[] functionNames)
+    {
+        var functions = program.Functions;
+        for (var index = 0; index < functions.Length; index++)
+        {
+            if (functionNames.Contains(functions[index].Name, StringComparer.Ordinal))
+            {
+                functions = functions.SetItem(index, functions[index] with { NoFailureProof = true });
+            }
+        }
+        return program with { Functions = functions };
+    }
+
     private static BoundProgram CompileLibrary(string source)
     {
         var result = Compilation.CreateLibrary(SyntaxTree.Parse(source));
@@ -36,13 +51,13 @@ public sealed class NoThrowModuleTests
     }
 
     [Test]
-    public async Task NoThrowConstructorAndImportedFunctionRemainDeclaredThroughRemappingAsync()
+    public async Task ImportedFunctionAndConstructorDoNotPublishNoThrowThroughRemappingAsync()
     {
         const string Source = """
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Value {
                 public int32 Number;
-                [NoThrow] public Value(int32 number) { Number = number; }
-                [NoThrow] public int32 Read() { return Number; }
+                public Value(int32 number) { Number = number; }
+                public int32 Read() { return Number; }
             }
             """;
         var original = CompileLibrary(Source);
@@ -53,42 +68,42 @@ public sealed class NoThrowModuleTests
             {
                 {
                     Assert.That(__nunitItem2.IsExternal, Is.True);
-                    Assert.That(__nunitItem2.IsNoThrow, Is.True);
+                    Assert.That(__nunitItem2.NoFailureProof, Is.False);
                 }
             }
         });}
         var consumerSource = """
-            [NoThrow] int32 Main() {
+            int32 Main() {
                 Value value = new Value(42);
                 return value.Read();
             }
             """;
         var consumer = CompileConsumer(consumerSource, producer);
-        Assert.That(consumer.Functions[consumer.EntryPoint].IsNoThrow, Is.True);
         var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
         var linked = ModuleCompiler.Link(artifact, producer);
-        {var __nunitItems1 = linked.Functions.Where(static function => function.Name is "Value.#ctor" or "Value.Read");        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems1) { Assert.That(__nunitItem3.IsNoThrow, Is.True); } });}
+        {var __nunitItems1 = linked.Functions.Where(static function => function.Name is "Value.#ctor" or "Value.Read");        Assert.Multiple(() => { foreach (var __nunitItem3 in __nunitItems1) { Assert.That(__nunitItem3.NoFailureProof, Is.False); } });}
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
 
     [Test]
-    public async Task StrengtheningPromiseAllowsSameSemanticAndNativeConsumerWithNewBodyAsync()
+    public async Task SemanticAndNativeConsumersAllowReplacementWithoutNoThrowMetadataAsync()
     {
         var mayThrow = Producer("public int32 Compute() { return 42; }");
-        var noThrow = Producer("[NoThrow] public int32 Compute() { return 43; }");
+        var replacement = Producer("public int32 Compute() { return 43; }");
         var reference = ModuleCompiler.CreateReference(mayThrow);
-        Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).IsNoThrow, Is.False);
+        Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).NoFailureProof, Is.False);
         var consumer = CompileConsumer("int32 Main() { return Compute(); }", mayThrow);
         var semantic = ModuleCompiler.CreateConsumer(consumer, mayThrow);
         var originalSemantic = (byte[])semantic.Clone();
         var nativeProducer = NativeModuleCompiler.CreateProducer(CompileLibrary("public int32 Compute() { return 42; }"),
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast);
-        var nativeReplacement = NativeModuleCompiler.CreateProducer(CompileLibrary("[NoThrow] public int32 Compute() { return 43; }"),
+        var nativeReplacement = NativeModuleCompiler.CreateProducer(
+                CompileLibrary("public int32 Compute() { return 43; }"),
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast);
         var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, nativeProducer, NativeRuntimePolicy.FailFast);
         var unchanged = (byte[])nativeConsumer.Clone();
         var imageHash = NativeModuleCompiler.Inspect(nativeConsumer).ImageSha256;
-        foreach (var (module, package, result) in new[] { (mayThrow, nativeProducer, 42), (noThrow, nativeReplacement, 43) })
+        foreach (var (module, package, result) in new[] { (mayThrow, nativeProducer, 42), (replacement, nativeReplacement, 43) })
         {
             Assert.That(await ExecuteAsync(NativeEmitter.Emit(ModuleCompiler.Link(semantic, module),
                 NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(result));
@@ -102,58 +117,121 @@ public sealed class NoThrowModuleTests
     }
 
     [Test]
-    public void ConsumerCreationChecksDeclaredPromiseBeforeNormalizingImports()
+    public void PrivateModulesRejectRetiredPublicNoThrowClaims()
     {
-        var noThrow = Producer("[NoThrow] public int32 Compute() { return 42; }");
-        var mayThrow = Producer("public int32 Compute() { return 42; }");
-        var consumer = CompileConsumer("int32 Main() { return Compute(); }", noThrow);
-        var index = consumer.Functions.IndexOf(consumer.Functions.Single(static function => function.IsExternal));
-        var weakenedDeclaration = consumer with {
-            Functions = consumer.Functions.SetItem(index, consumer.Functions[index] with { IsNoThrow = false }),
+        var ordinary = CompileLibrary("public int32 Compute() { return 42; }");
+        var forgedProducer = MarkNoFailureProof(ordinary, "Compute");
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(forgedProducer, ["Compute"]))!;
+
+        var producer = ModuleCompiler.CreateProducer(ordinary, ["Compute"]);
+        var consumer = CompileConsumer("int32 Main() { return Compute(); }", producer);
+        var importIndex = consumer.Functions.IndexOf(
+            consumer.Functions.Single(static function => function.IsExternal));
+        var forgedConsumer = consumer with {
+            Functions = consumer.Functions.SetItem(importIndex,
+                consumer.Functions[importIndex] with { NoFailureProof = true }),
         };
-        var normalized = ModuleCompiler.CreateConsumer(weakenedDeclaration, noThrow);
-        Assert.That(ModuleCompiler.Link(normalized, noThrow).Functions[index].IsNoThrow, Is.True);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(consumer, mayThrow))!;
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateConsumer(forgedConsumer, producer))!;
+
+        var artifact = ModuleCompiler.CreateConsumer(consumer, producer);
+        Assert.That(ModuleCompiler.Link(artifact, producer).Functions[importIndex].NoFailureProof, Is.False);
     }
 
     [Test]
-    public void WeakeningNoThrowPromiseRejectsSafeUnmarkedBodyBeforeExecution()
+    public void PrivateConsumersDoNotPersistNoThrowClaimsOnTheirOwnedBodies()
     {
-        var noThrow = Producer("[NoThrow] public int32 Compute() { return 42; }");
-        var mayThrow = Producer("public int32 Compute() { return 43; }");
-        var consumer = CompileConsumer("[NoThrow] int32 Forward() { return Compute(); } "
-            + "int32 Main() { return Forward(); }", noThrow);
-        var semantic = ModuleCompiler.CreateConsumer(consumer, noThrow);
-        _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.Link(semantic, mayThrow))!;
-        var nativeProducer = NativeModuleCompiler.CreateProducer(CompileLibrary("[NoThrow] public int32 Compute() { return 42; }"),
-            ["Compute"], "Effects", NativeRuntimePolicy.FailFast);
-        var nativeReplacement = NativeModuleCompiler.CreateProducer(CompileLibrary("public int32 Compute() { return 43; }"),
-            ["Compute"], "Effects", NativeRuntimePolicy.FailFast);
-        var nativeConsumer = NativeModuleCompiler.CreateConsumer(consumer, nativeProducer, NativeRuntimePolicy.FailFast);
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.Validate(nativeConsumer, nativeReplacement))!;
-        _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.RunAsync(nativeConsumer, nativeReplacement,
-            TimeSpan.FromSeconds(10)).GetAwaiter().GetResult())!;
+        var producer = Producer("public int32 Compute() { return 42; }");
+        var consumer = CompileConsumer("int32 Forward() { return Compute(); } "
+            + "int32 Main() { return Forward(); }", producer);
+        var claimed = MarkNoFailureProof(consumer, "Forward");
+
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateConsumer(claimed, producer))!;
     }
 
     [Test]
-    public void ProducerBodyCannotForgeNoThrowOrOldModuleVersion()
+    public void ReaderRejectsOldPrivateModuleRevision()
     {
         var unsafeProgram = CompileLibrary("public int32 Compute(int32 value) { return value + 1; }");
         var forged = unsafeProgram with {
-            Functions = unsafeProgram.Functions.SetItem(0, unsafeProgram.Functions[0] with { IsNoThrow = true }),
+            Functions = unsafeProgram.Functions.SetItem(0, unsafeProgram.Functions[0] with { NoFailureProof = true }),
         };
         _ = Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateProducer(forged, ["Compute"]))!;
         _ = Assert.Throws<ModuleContractException>(() => NativeModuleCompiler.CreateProducer(forged,
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
-        var artifact = Producer("[NoThrow] public int32 Compute() { return 42; }");
+        var artifact = Producer("public int32 Compute() { return 42; }");
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(sizeof(int))),
+            Is.EqualTo(92));
+        var serialized = Encoding.UTF8.GetString(artifact);
+        Assert.That(serialized, Does.Not.Contain("|NoThrow"));
+        Assert.That(serialized, Does.Not.Contain("|MayThrow"));
         artifact[4] = 7;
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(artifact))!;
+    }
+
+    [TestCase("|NoThrow")]
+    [TestCase("|MayThrow")]
+    public void ReaderRejectsRetiredNoThrowContractTokens(string retiredToken)
+    {
+        var artifact = Producer("public int32 Compute() { return 42; }");
+        var functionName = Encoding.UTF8.GetBytes("Compute");
+        var nameRecord = new byte[sizeof(int) + functionName.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(nameRecord, functionName.Length);
+        functionName.CopyTo(nameRecord, sizeof(int));
+        var functionNameOffset = IndexOf(artifact, nameRecord);
+        Assert.That(functionNameOffset, Is.GreaterThanOrEqualTo(0));
+        var contractLengthOffset = functionNameOffset + nameRecord.Length;
+        var contractLength = BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(contractLengthOffset, sizeof(int)));
+        var contractStart = contractLengthOffset + sizeof(int);
+        var contract = Encoding.UTF8.GetString(artifact, contractStart, contractLength);
+        var returnMarker = contract.LastIndexOf("|MayReturn", StringComparison.Ordinal);
+        Assert.That(returnMarker, Is.GreaterThanOrEqualTo(0));
+        var forgedContract = contract.Insert(returnMarker, retiredToken);
+        var forgedContractBytes = Encoding.UTF8.GetBytes(forgedContract);
+        var forged = new byte[artifact.Length + forgedContractBytes.Length - contractLength];
+        artifact.AsSpan(0, contractStart).CopyTo(forged);
+        forgedContractBytes.CopyTo(forged, contractStart);
+        artifact.AsSpan(contractStart + contractLength)
+            .CopyTo(forged.AsSpan(contractStart + forgedContractBytes.Length));
+        BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(contractLengthOffset),
+            forgedContractBytes.Length);
+
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forged));
+    }
+
+    [TestCase("|NoThrow")]
+    [TestCase("|MayThrow")]
+    public void ReaderRejectsRetiredNoThrowTokensOnBodylessImports(string retiredToken)
+    {
+        var producer = Producer("public int32 Compute() { return 42; }");
+        var consumer = ModuleCompiler.CreateConsumer(
+            CompileConsumer("int32 Main() { return Compute(); }", producer), producer);
+        var forged = InsertRetiredContractToken(consumer, "Compute", retiredToken);
+
+        Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(forged, producer));
+    }
+
+    [Test]
+    public void FunctionNamedNoThrowRemainsValidInPrivateModules()
+    {
+        var producer = ModuleCompiler.CreateProducer(
+            CompileLibrary("public int32 NoThrow() { return 42; }"), ["NoThrow"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        Assert.That(reference.Functions.Single().Name, Is.EqualTo("NoThrow"));
+
+        var consumer = ModuleCompiler.CreateConsumer(
+            CompileConsumer("int32 Main() { return NoThrow(); }", producer), producer);
+        Assert.That(ModuleCompiler.Link(consumer, producer).Functions
+            .Single(static function => function.Name == "NoThrow").NoFailureProof, Is.False);
     }
 
     [Test]
     public void PureUnfoldedCheckedArithmeticCannotForgeNoThrowInPersistedProducer()
     {
-        var folded = CompileLibrary("[NoThrow] public int32 Compute() { return 1 + 2; }");
+        var folded = MarkNoFailureProof(CompileLibrary("public int32 Compute() { return 1 + 2; }"), "Compute");
         var function = global::System.Linq.Enumerable.Single(folded.Functions);
         var statement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual4 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual4, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual4!; }))();
         var constant = ((global::System.Func<BoundConstant>)(() => { var __nunitActual5 = statement.Value; Assert.That(__nunitActual5, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual5!; }))();
@@ -198,5 +276,44 @@ public sealed class NoThrowModuleTests
         {
             await TestFileCleanup.DeleteWithRetryAsync(path).ConfigureAwait(true);
         }
+    }
+
+    private static int IndexOf(byte[] source, byte[] value)
+    {
+        for (var index = 0; index <= source.Length - value.Length; index++)
+        {
+            if (source.AsSpan(index, value.Length).SequenceEqual(value))
+            {
+                return index;
+            }
+        }
+        return -1;
+    }
+
+    private static byte[] InsertRetiredContractToken(byte[] artifact, string functionName,
+        string retiredToken)
+    {
+        var name = Encoding.UTF8.GetBytes(functionName);
+        var nameRecord = new byte[sizeof(int) + name.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(nameRecord, name.Length);
+        name.CopyTo(nameRecord, sizeof(int));
+        var functionOffset = IndexOf(artifact, nameRecord);
+        Assert.That(functionOffset, Is.GreaterThanOrEqualTo(0));
+        var contractLengthOffset = functionOffset + nameRecord.Length;
+        var contractLength = BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(contractLengthOffset, sizeof(int)));
+        var contractStart = contractLengthOffset + sizeof(int);
+        var contract = Encoding.UTF8.GetString(artifact, contractStart, contractLength);
+        var returnMarker = contract.LastIndexOf("|MayReturn", StringComparison.Ordinal);
+        Assert.That(returnMarker, Is.GreaterThanOrEqualTo(0));
+        var replacement = Encoding.UTF8.GetBytes(contract.Insert(returnMarker, retiredToken));
+        var forged = new byte[artifact.Length + replacement.Length - contractLength];
+        artifact.AsSpan(0, contractStart).CopyTo(forged);
+        replacement.CopyTo(forged, contractStart);
+        artifact.AsSpan(contractStart + contractLength)
+            .CopyTo(forged.AsSpan(contractStart + replacement.Length));
+        BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(contractLengthOffset),
+            replacement.Length);
+        return forged;
     }
 }

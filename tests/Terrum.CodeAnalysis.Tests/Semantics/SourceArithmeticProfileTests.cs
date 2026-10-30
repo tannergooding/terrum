@@ -226,12 +226,13 @@ public sealed class SourceArithmeticProfileTests
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return 0; }"), new CompilationOptions());
         _ = GetProgram(compilation, BoundRuntimePolicy.FailFast);
         var defaultedLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] int32 Add(int32 left, int32 right) { return left + right; }"));
-        Assert.That(defaultedLibrary.HasErrors, Is.True);
+            " int32 Add(int32 left, int32 right) { return left + right; }"));
+        Assert.That(defaultedLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, defaultedLibrary.Diagnostics));
         var runtimeOnlyLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[NoThrow] int32 Add(int32 left, int32 right) { return left + right; }"),
+            " int32 Add(int32 left, int32 right) { return left + right; }"),
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.That(runtimeOnlyLibrary.HasErrors, Is.True);
+        Assert.That(runtimeOnlyLibrary.HasErrors, Is.False, string.Join(Environment.NewLine, runtimeOnlyLibrary.Diagnostics));
+        Assert.That(runtimeOnlyLibrary.Program!.Functions[0].NoFailureProof, Is.False);
     }
 
     [TestCase(SourceArithmeticProfile.Development, BoundRuntimePolicy.FailFast, true)]
@@ -243,18 +244,24 @@ public sealed class SourceArithmeticProfileTests
     {
         var source = SyntaxTree.Parse(
             """
-            [NoThrow] int32 Add(int32 left, int32 right) { return left + right; }
-            [NoThrow] int64 Multiply(int64 left, int64 right) { return left * right; }
-            [NoThrow] uint64 Negate(uint64 value) { return -value; }
+             int32 Add(int32 left, int32 right) { return left + right; }
+             int64 Multiply(int64 left, int64 right) { return left * right; }
+             uint64 Negate(uint64 value) { return -value; }
             """);
         var compilation = Compilation.CreateLibrary(source, new CompilationOptions {
             SourceArithmeticProfile = profile,
             RuntimePolicy = runtimePolicy,
         });
-        Assert.That(compilation.HasErrors, Is.EqualTo(expectError),
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
-            static diagnostic => diagnostic.Code == "TRM3017"), Is.EqualTo(expectError));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!);
+        if (expectError)
+        {
+            Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
+        }
+        else
+        {
+            SemanticVerifier.VerifyLibrary(program);
+        }
     }
 
     [Test]
@@ -321,7 +328,7 @@ public sealed class SourceArithmeticProfileTests
         var producer = ModuleCompiler.CreateProducer(GetProgram(provider,
             BoundRuntimePolicy.CheckedExceptions), ["Compute"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(sizeof(int), sizeof(int))),
-            Is.EqualTo(89));
+            Is.EqualTo(92));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var consumer = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Compute(); }"),
@@ -356,7 +363,7 @@ public sealed class SourceArithmeticProfileTests
     }
 
     [Test]
-    public void Revision88ArithmeticRemainsCheckedAndInvalidModesReject()
+    public void Revision92ArithmeticRemainsCheckedAndInvalidModesReject()
     {
         const string source = """
             public int32 Add(int32 left, int32 right) { return left + right; }
@@ -376,13 +383,7 @@ public sealed class SourceArithmeticProfileTests
         BinaryPrimitives.WriteInt32LittleEndian(unknownRevision.AsSpan(sizeof(int), sizeof(int)), 90);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(unknownRevision));
 
-        // Revision 88 predates the mode byte, so its arithmetic records are checked-only.
-        var legacy = new byte[producer.Length - 1];
-        producer.AsSpan(0, modeOffset).CopyTo(legacy);
-        producer.AsSpan(modeOffset + 1).CopyTo(legacy.AsSpan(modeOffset));
-        BinaryPrimitives.WriteInt32LittleEndian(legacy.AsSpan(sizeof(int), sizeof(int)), 88);
-
-        var reference = ModuleCompiler.CreateReference(legacy);
+        var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
                 unsafe {
@@ -395,8 +396,8 @@ public sealed class SourceArithmeticProfileTests
             RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
         });
         var consumer = ModuleCompiler.CreateConsumer(GetProgram(consumerCompilation,
-            BoundRuntimePolicy.CheckedExceptions), legacy);
-        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, legacy),
+            BoundRuntimePolicy.CheckedExceptions), producer);
+        Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer),
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
 
         var comparisonCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

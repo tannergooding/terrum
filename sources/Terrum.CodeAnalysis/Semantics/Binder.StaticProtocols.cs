@@ -19,7 +19,7 @@ internal sealed partial class Binder
     private readonly Dictionary<string, Dictionary<string, PrimitiveType>> _conformances = new(StringComparer.Ordinal);
 
     internal readonly record struct StaticOperatorKey(TokenKind Operator, int Arity);
-    private sealed record StaticProtocol(string Name, StaticOperatorKey Key, bool IsNoThrow,
+    private sealed record StaticProtocol(string Name, StaticOperatorKey Key,
         bool RequiresUnsafeCaller, bool HasSelf, SyntaxNode Declaration, SyntaxTree Tree);
     internal sealed record GenericOperatorConstraint(string Protocol, PrimitiveType? FixedResult,
         int ResultTypeParameterIndex)
@@ -37,7 +37,7 @@ internal sealed partial class Binder
     }
     internal sealed record GenericTemplate(string Name, ImmutableArray<GenericTypeParameter> TypeParameters,
         PrimitiveType? ScalarReturnType, int ReturnTypeParameterIndex, ImmutableArray<GenericParameter> Parameters,
-        SyntaxNode Body, SyntaxNode Declaration, SyntaxTree Tree, bool IsNoThrow)
+        SyntaxNode Body, SyntaxNode Declaration, SyntaxTree Tree)
     {
         internal bool RequiresUnsafeCaller { get; init; }
 
@@ -200,7 +200,7 @@ internal sealed partial class Binder
             IsConstructor = declaration.IsConstructor,
             IsStatic = declaration.IsStatic,
             IsOperator = declaration.IsOperator,
-            IsNoThrow = declaration.IsNoThrow,
+            NoFailureProof = declaration.NoFailureProof,
             DoesNotReturn = declaration.DoesNotReturn,
             RequiresUnsafeCaller = declaration.RequiresUnsafeCaller,
             DeclaringStruct = owner,
@@ -447,11 +447,11 @@ internal sealed partial class Binder
                     continue;
                 }
                 TokenKind? op = null;
-                var noThrowCount = 0;
                 var unsafeModifierCount = 0;
                 var staticModifierCount = 0;
                 var hasInvalidModifier = false;
                 var hasInvalidAttribute = false;
+                var hasRetiredNoThrow = false;
                 var signatureCount = 0;
                 SyntaxNode? firstSignature = null;
                 SyntaxNode? formals = null;
@@ -480,7 +480,8 @@ internal sealed partial class Binder
                     {
                         if (NameText(attribute) == "[NoThrow]")
                         {
-                            noThrowCount++;
+                            Report("TRM3017", "The general NoThrow source contract is retired.", attribute.Span);
+                            hasRetiredNoThrow = true;
                         }
                         else
                         {
@@ -519,7 +520,10 @@ internal sealed partial class Binder
                         arity++;
                     }
                 }
-                var noThrow = noThrowCount > 0;
+                if (hasRetiredNoThrow)
+                {
+                    continue;
+                }
                 if (op is not TokenKind operation
                     || !((arity == 1 && IsStaticUnaryOperator(operation))
                         || (arity == 2 && IsStaticBinaryOperator(operation)))
@@ -534,14 +538,14 @@ internal sealed partial class Binder
                     || staticModifierCount != 1
                     || hasInvalidModifier
                     || hasInvalidAttribute
-                    || noThrowCount > 1 || unsafeModifierCount > 1)
+                    || unsafeModifierCount > 1)
                 {
                     Report("TRM3001", "Static operator protocol signatures must match their operand and result formals and end in ';'.", member.Span);
                     continue;
                 }
                 if (qualified == DirectNativeImportContract.AttributeFullyQualifiedName
                     || !_protocols.TryAdd(qualified, new StaticProtocol(qualified,
-                    new StaticOperatorKey(operation, arity), noThrow, unsafeModifierCount != 0,
+                    new StaticOperatorKey(operation, arity), unsafeModifierCount != 0,
                     hasSelf, node, tree)))
                 {
                     Report("TRM3003", $"Duplicate static operator interface '{qualified}'.", node.Span);
@@ -623,10 +627,9 @@ internal sealed partial class Binder
                 if (signature.ReturnType != result
                     || signature.Parameters.Length != protocol.Key.Arity
                     || signature.Parameters.Any(parameter => parameter.Type != type || parameter.IsOut)
-                    || !signature.IsStatic || !signature.IsOperator || signature.IsPrivate || signature.IsConstructor
-                    || (protocol.IsNoThrow && !signature.IsNoThrow))
+                    || !signature.IsStatic || !signature.IsOperator || signature.IsPrivate || signature.IsConstructor)
                 {
-                    SetContext(signature.Tree);
+                    SetContext(signature.Tree, signature.Declaration);
                     Report("TRM3007", $"'{name}' does not fulfill the static operator contract '{protocolName}'.",
                         signature.Declaration?.Span ?? protocol.Declaration.Span);
                 }
@@ -663,12 +666,12 @@ internal sealed partial class Binder
         SyntaxNode? returnType = null;
         SyntaxNode? parameters = null;
         SyntaxNode? body = null;
-        var noThrowCount = 0;
         var attributeCount = 0;
         var hasInvalidAttribute = false;
+        var hasRetiredNoThrow = false;
         foreach (var child in children)
         {
-            if (returnType is null && child.Kind == SyntaxKind.TypeName)
+            if (returnType is null && IsTypeSyntax(child))
             {
                 returnType = child;
             }
@@ -685,7 +688,8 @@ internal sealed partial class Binder
                 attributeCount++;
                 if (NameText(child) == "[NoThrow]")
                 {
-                    noThrowCount++;
+                    Report("TRM3017", "The general NoThrow source contract is retired.", child.Span);
+                    hasRetiredNoThrow = true;
                 }
                 else
                 {
@@ -693,11 +697,14 @@ internal sealed partial class Binder
                 }
             }
         }
+        if (hasRetiredNoThrow)
+        {
+            return;
+        }
         var returnName = returnType is null ? "" : NameText(returnType);
         var scalarReturn = returnName == "void" ? PrimitiveType.Void
             : GenericScalarType(returnName) ?? GenericOutputScalarType(returnName);
         SyntaxToken? nameToken = null;
-        var noThrow = noThrowCount != 0;
         var unsafeModifierCount = 0;
         var hasInvalidModifier = false;
         foreach (var element in declaration.Children)
@@ -840,9 +847,7 @@ internal sealed partial class Binder
                         && (parameter.ScalarType is not PrimitiveType scalarType
                             || !IsSupportedNonBooleanGenericOutputType(scalarType)))))
             || Enumerable.Range(0, typeNames.Length).Any(index => returnIndex != index
-                && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index))
-            || (noThrow && operations.Any(operators =>
-                operators.Values.Any(operation => !_protocols[operation.Protocol].IsNoThrow))))
+                && !templateParameters.Any(parameter => parameter.TypeParameterIndex == index)))
         {
             valid = false;
         }
@@ -853,7 +858,7 @@ internal sealed partial class Binder
         }
         if (!_templates.TryAdd(qualified, new GenericTemplate(qualified,
             [.. typeNames.Select((name, index) => new GenericTypeParameter(name, operations[index].ToImmutable()))],
-            scalarReturn, returnIndex, templateParameters.ToImmutable(), body!, declaration, _tree, noThrow) {
+            scalarReturn, returnIndex, templateParameters.ToImmutable(), body!, declaration, _tree) {
                 RequiresUnsafeCaller = requiresUnsafeCaller,
             }))
         {
@@ -1103,7 +1108,7 @@ internal sealed partial class Binder
         var signature = new Signature(instantiated, template.ReturnType(types), parameters,
             _genericProofFunctions is null ? template.Body : null,
             _genericProofFunctions is null ? template.Declaration : null,
-            template.Tree, null, false, false, true, false, true, template.IsNoThrow, false) {
+            template.Tree, null, false, false, true, false, true, false, false) {
             RequiresUnsafeCaller = template.RequiresUnsafeCaller,
         };
         if (_genericProofFunctions is not null)
@@ -1116,7 +1121,6 @@ internal sealed partial class Binder
             var external = new BoundFunction(instantiated, signature.ReturnType, variables, parameters.Length,
                 new BoundBlock([], callee.Span), callee.Span) {
                 IsExternal = true,
-                IsNoThrow = template.IsNoThrow,
                 RequiresUnsafeCaller = template.RequiresUnsafeCaller,
             };
             signature = signature with { External = external };
@@ -1173,7 +1177,7 @@ internal sealed partial class Binder
             proofBinder._functions.Add(collect.Name, proofBinder._signatures.Count);
             proofBinder._signatures.Add(new Signature(collect.Name, collect.ReturnType, [],
                 null, null, template.Tree, collect.DeclaringStruct, false, false, true, false,
-                collect.IsStatic, collect.IsNoThrow, false, collect));
+                collect.IsStatic, collect.NoFailureProof, false, collect));
             functions.Add(collect);
             for (var parameterIndex = 0; parameterIndex < template.TypeParameters.Length; parameterIndex++)
             {
@@ -1208,7 +1212,6 @@ internal sealed partial class Binder
                         IsExternal = true,
                         IsStatic = true,
                         IsOperator = true,
-                        IsNoThrow = _protocols[constraint.Protocol].IsNoThrow,
                         RequiresUnsafeCaller = _protocols[constraint.Protocol].RequiresUnsafeCaller,
                         DeclaringStruct = probeName,
                     };
@@ -1217,7 +1220,7 @@ internal sealed partial class Binder
                         new Parameter(variable.Name, probeType, operatorSpan, false)).ToImmutableArray();
                     proofBinder._signatures.Add(new Signature(name, resultType, parameters,
                         null, null, template.Tree, probeName, false, false, false, false, true,
-                        external.IsNoThrow, false, external) {
+                        external.NoFailureProof, false, external) {
                         IsOperator = true,
                         RequiresUnsafeCaller = external.RequiresUnsafeCaller,
                     });
@@ -1245,11 +1248,10 @@ internal sealed partial class Binder
             var symbolicIndex = proofBinder._signatures.Count;
             proofBinder._functions.Add(symbolicName, symbolicIndex);
             proofBinder._signatures.Add(new Signature(symbolicName, symbolicReturn, symbolicParameters,
-                null, null, template.Tree, null, false, false, true, false, true, template.IsNoThrow, false,
+                null, null, template.Tree, null, false, false, true, false, true, false, false,
                 new BoundFunction(symbolicName, symbolicReturn, symbolicVariables, symbolicParameters.Length,
                     new BoundBlock([], template.Declaration.Span), template.Declaration.Span) {
                     IsExternal = true,
-                    IsNoThrow = template.IsNoThrow,
                     RequiresUnsafeCaller = template.RequiresUnsafeCaller,
                 }));
             functions.Add(proofBinder._signatures[symbolicIndex].External
@@ -1290,7 +1292,6 @@ internal sealed partial class Binder
             var function = new BoundFunction(symbolicName, symbolicReturn,
                 [.. proofBinder._variables],
                 template.Parameters.Length, body, template.Declaration.Span) {
-                IsNoThrow = template.IsNoThrow,
                 RequiresUnsafeCaller = template.RequiresUnsafeCaller,
             };
             functions[symbolicIndex] = function;

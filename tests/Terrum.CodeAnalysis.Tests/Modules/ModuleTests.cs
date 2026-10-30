@@ -1953,7 +1953,7 @@ public sealed class ModuleTests
         var retiredNoThrow = export == "Read";
         if (retiredNoThrow)
         {
-            var forgedProgram = BoundProgramTestHelpers.MarkNoThrow(initialProgram, export);
+            var forgedProgram = BoundProgramTestHelpers.MarkNoFailureProof(initialProgram, export);
             _ = Assert.Throws<ModuleContractException>(() =>
                 ModuleCompiler.CreateProducer(forgedProgram, [export]))!;
         }

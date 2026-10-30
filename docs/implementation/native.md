@@ -854,7 +854,7 @@ no longer publishes `noThrow`. Ordinary declarations may fail according to
 their checked operations and runtime policy; call sites do not infer guarantees
 from callee bodies.
 
-`BoundFunction.IsNoThrow` remains an internal proof/role fact, not a source
+`BoundFunction.NoFailureProof` remains a verified local proof/role fact, not a source
 declaration or published ordinary-call promise. Structured semantic revision
 92 omits the general Boolean and NoThrow/MayThrow suffixes; native graph
 package and consumer-set version 3 likewise omits that contract dimension and

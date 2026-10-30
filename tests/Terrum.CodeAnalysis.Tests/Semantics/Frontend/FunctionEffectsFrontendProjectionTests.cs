@@ -2,6 +2,7 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Linq;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -13,14 +14,14 @@ namespace Terrum.CodeAnalysis.Tests.Semantics.Frontend;
 
 public sealed class FunctionEffectsFrontendProjectionTests
 {
-    [TestCase("[NoThrow]","void","{}",false,2)]
-    [TestCase("[NoThrow]","void","{ require true; }",false,2)]
-    [TestCase("[NoThrow]","void","=> require true;",true,2)]
+    [TestCase("","void","{}",false,0)]
+    [TestCase("","void","{ require true; }",false,0)]
+    [TestCase("","void","=> require true;",true,0)]
     [TestCase("[DoesNotReturn]","void","{ require false; }",false,4)]
     [TestCase("[DoesNotReturn]","void","=> require false;",true,4)]
     [TestCase("[DoesNotReturn]","int32","{ require false; }",false,4)]
-    [TestCase("[NoThrow]","int32","{ return 42; }",false,2)]
-    [TestCase("[NoThrow]","int32","=> 42;",true,2)]
+    [TestCase("","int32","{ return 42; }",false,0)]
+    [TestCase("","int32","=> 42;",true,0)]
     public void IndependentFunctionEffectsPreserveHostedFlagsCompletionSpansAndPe(
         string attribute, string type, string body, bool arrow, int effects)
     {
@@ -34,18 +35,29 @@ public sealed class FunctionEffectsFrontendProjectionTests
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var first = expected.Functions[0];
             var second = actual.Functions[0];
-            Assert.That(second.IsNoThrow, Is.EqualTo(first.IsNoThrow));
+            Assert.That(first.NoFailureProof, Is.False);
+            Assert.That(second.NoFailureProof, Is.False);
             Assert.That(second.DoesNotReturn, Is.EqualTo(first.DoesNotReturn));
             Assert.That(second.Span, Is.EqualTo(first.Span));
             Assert.That(second.Body.Span, Is.EqualTo(first.Body.Span));
             Assert.That(second.Body.IsManagedLexicalScope, Is.EqualTo(first.Body.IsManagedLexicalScope));
             Assert.That(second.Body.Statements, Is.EqualTo(first.Body.Statements));
-            Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy), Is.EqualTo(NativeEmitter.EmitLibrary(expected, ["await"], (NativeRuntimePolicy)policy)));
+            if (policy == BoundRuntimePolicy.CheckedExceptions && body.Contains("require false", StringComparison.Ordinal))
+            {
+                _ = Assert.Throws<ArgumentException>(() =>
+                    NativeEmitter.EmitLibrary(actual, ["await"], NativeRuntimePolicy.CheckedExceptions))!;
+                _ = Assert.Throws<ArgumentException>(() =>
+                    NativeEmitter.EmitLibrary(expected, ["await"], NativeRuntimePolicy.CheckedExceptions))!;
+            }
+            else
+            {
+                Assert.That(NativeEmitter.EmitLibrary(actual, ["await"], (NativeRuntimePolicy)policy),
+                    Is.EqualTo(NativeEmitter.EmitLibrary(expected, ["await"], (NativeRuntimePolicy)policy)));
+            }
         }
     }
     [TestCase(0,60)]
     [TestCase(2,0)]
-    [TestCase(2,1)]
     [TestCase(2,4)]
     [TestCase(2,7)]
     [TestCase(2,10)]
@@ -64,10 +76,28 @@ public sealed class FunctionEffectsFrontendProjectionTests
     [TestCase(336,1)]
     public void IndependentFunctionEffectsRejectContradictingFlagsHeadersRootsAndCoverage(int index, int value)
     {
-        const string text = "[NoThrow] public void @await() { require true; }";
-        var words = Projection(text, true, false, 2);
+        const string text = "public void @await() { require true; }";
+        var words = Projection(text, true, false, 0);
         words[index] = value;
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+    }
+    [Test]
+    public void RetiredNoThrowSourceAndProjectionFlagsAreRejected()
+    {
+        const string text = "[NoThrow] public void @await() {}";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic => diagnostic.Code == "TRM3017"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var words = Projection(text, true, false, 0);
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+
+        const string plainText = "public void @await() {}";
+        words = Projection(plainText, true, false, 0);
+        words[2] |= 2;
+        Assert.Throws<ArgumentException>(() =>
+            ScalarFrontendHost.ReadResult(SourceText.From(plainText), Bytes(words)));
     }
     [TestCase("[nothrow]")]
     [TestCase("[NoThrow][NoThrow]")]
@@ -89,8 +119,9 @@ public sealed class FunctionEffectsFrontendProjectionTests
     [Test]
     public void AllHistoricalVersionsRejectEffectBitsEvenForOtherwiseCompatibleBodies()
     {
-        const string text = "[NoThrow] public void @await() {}";
-        var words = Projection(text, true, false, 2);
+        const string text = "public void @await() {}";
+        var words = Projection(text, true, false, 0);
+        words[2] |= 2;
         for (var version = 1; version <= 58; version++)
         {
             words[0] = version;
@@ -99,15 +130,15 @@ public sealed class FunctionEffectsFrontendProjectionTests
     }
 
     [Test]
-    public void EffectsBracedBodiesCannotClaimHistoricalScalarReturnEnvelopes()
+    public void UnannotatedBracedBodiesMayUseHistoricalScalarReturnEnvelopes()
     {
-        const string text = "[NoThrow] public int32 @await() { return 42; }";
-        var words = Projection(text, false, false, 2);
+        const string text = "public int32 @await() { return 42; }";
+        var words = Projection(text, false, false, 0);
         Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
         words[298] = 0;
         Array.Clear(words, 332, 5);
         words[39] = 0;
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)));
+        Assert.That(ScalarFrontendHost.ReadResult(SourceText.From(text), Bytes(words)).IsValid, Is.True);
     }
     [TestCase("[DoesNotReturn] public void @await() {}",true,4)]
     [TestCase("[DoesNotReturn] public void @await() { return; }",true,4)]
@@ -118,15 +149,14 @@ public sealed class FunctionEffectsFrontendProjectionTests
         Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(
             SourceText.From(text), Bytes(Projection(text, isVoid, false, effects))));
     }
-    [TestCase("[NoThrow][DoesNotReturn]")]
-    [TestCase("[DoesNotReturn][NoThrow]")]
-    public void IndependentCombinedEffectsPreserveUnreachableReturnAndNoImplicitCompletion(string attributes)
+    [TestCase("[DoesNotReturn]")]
+    public void IndependentDoesNotReturnPreservesUnreachableReturnAndNoImplicitCompletion(string attributes)
     {
         var text = $"{attributes} public void @await() {{ while (true) {{}} return; }}";
         var words = new int[ScalarFrontendHost.WordCount];
         words[0] = 87;
         words[1] = 1;
-        words[2] = 7;
+        words[2] = 5;
         words[9] = text.IndexOf("@await", StringComparison.Ordinal);
         words[10] = 6;
         words[37] = 1;
@@ -152,7 +182,7 @@ public sealed class FunctionEffectsFrontendProjectionTests
             var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
             var actual = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(words), policy);
             var function = actual.Functions[0];
-            Assert.That(function.IsNoThrow, Is.True);
+            Assert.That(function.NoFailureProof, Is.False);
             Assert.That(function.DoesNotReturn, Is.True);
             Assert.That(function.Body.Statements.Length, Is.EqualTo(2));
             Assert.That(function.Body.Statements[1], Is.EqualTo(hosted.Functions[0].Body.Statements[1]));

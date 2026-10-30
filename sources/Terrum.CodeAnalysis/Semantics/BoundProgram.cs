@@ -547,7 +547,7 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
     /// <summary>Whether a value has one noncopyable owner.</summary>
     public bool IsUnique { get; init; }
 
-    /// <summary>The declared NoThrow instance cleanup method, if any.</summary>
+    /// <summary>The selected instance cleanup method, if any.</summary>
     public string? CleanupMethod { get; init; }
 
     /// <summary>Whether access is limited to its declaring scope.</summary>
@@ -694,8 +694,8 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     /// <summary>Whether this method consumes its unique receiver during lexical cleanup.</summary>
     public bool IsCleanup { get; init; }
 
-    /// <summary>Whether the declaration guarantees no language-level throwing effects; implementations must prove this bound.</summary>
-    public bool IsNoThrow { get; init; }
+    /// <summary>Whether mandatory verification must prove this function body satisfies a scoped no-failure obligation.</summary>
+    public bool NoFailureProof { get; init; }
 
     /// <summary>Whether calling this declaration requires an explicit unsafe caller context.</summary>
     public bool RequiresUnsafeCaller { get; init; }

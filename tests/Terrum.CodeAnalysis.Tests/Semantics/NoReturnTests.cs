@@ -27,7 +27,7 @@ public sealed class NoReturnTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
         Assert.That(program.Functions[0].DoesNotReturn, Is.True);
-        Assert.That(program.Functions[0].IsNoThrow, Is.False);
+        Assert.That(program.Functions[0].NoFailureProof, Is.False);
         SemanticVerifier.VerifyLibrary(program);
     }
     [TestCase("void Stop(bool value) { }")]
@@ -203,11 +203,14 @@ public sealed class NoReturnTests
     public void NoReturnAndNoThrowAreIndependentBounds()
     {
         var valid = Compilation.CreateLibrary(SyntaxTree.Parse(
-            "[DoesNotReturn] [NoThrow] void Spin() { for (;;) { } }"));
+            "[DoesNotReturn]  void Spin() { for (;;) { } }"));
         Assert.That(valid.HasErrors, Is.False, string.Join(Environment.NewLine, valid.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = valid.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))();
         Assert.That(program.Functions[0].DoesNotReturn, Is.True);
-        Assert.That(program.Functions[0].IsNoThrow, Is.True);
+        Assert.That(program.Functions[0].NoFailureProof, Is.False);
+        var bothPromises = BoundProgramTestHelpers.MarkNoFailureProof(program, "Spin");
+        SemanticVerifier.VerifyLibrary(bothPromises);
+        Assert.That(bothPromises.Functions[0].NoFailureProof, Is.True);
         var invalid = Compilation.CreateLibrary(SyntaxTree.Parse(
             "[NoThrow] [DoesNotReturn] void Stop() { require false; }"));
         Assert.That(invalid.HasErrors, Is.True);

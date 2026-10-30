@@ -2,9 +2,11 @@
 
 using System;
 using System.Linq;
+using System.Runtime.InteropServices;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Storage;
@@ -91,6 +93,30 @@ public sealed class NativeFixedArrayStorageTests
             NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
     }
 
+    [Test]
+    public void TypedNativePointerRetainsItsEvaluatedFixedArrayProjection()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            int32 Main() {
+                mut InlineArray<uint32, 3> values = [4, 5, 6];
+                mut int32 index = 1;
+                unsafe {
+                    ptr<uint32> first = &values[0];
+                    ptr<uint32> selected = &values[index];
+                    index = 2;
+                    return int32(*first + *selected);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.EqualTo(9));
+    }
+
     [TestCase("ptr<char16> selected = &values[0];")]
     [TestCase("write ptr<uint32> selected = &values[0];")]
     [TestCase("ptr<uint32> selected = &values[3];")]
@@ -144,10 +170,10 @@ public sealed class NativeFixedArrayStorageTests
     public void FixedArrayDynamicIndexEffectDependsOnSelectedRuntimePolicy()
     {
         const string source = """
-            [NoThrow]
+
             int32 Index() { return 0; }
 
-            [NoThrow]
+
             int32 Main() {
                 InlineArray<uint32, 2> values = [4, 5];
                 return values[Index()] == 4 ? 0 : 1;
@@ -156,10 +182,14 @@ public sealed class NativeFixedArrayStorageTests
 
         var failFast = Compilation.Create(SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
         Assert.That(failFast.HasErrors, Is.False, string.Join(Environment.NewLine, failFast.Diagnostics));
+        SemanticVerifier.Verify(BoundProgramTestHelpers.MarkNoFailureProof(
+            failFast.Program!, "Main", "Index"));
         var checkedExceptions = Compilation.Create(SyntaxTree.Parse(source),
             BoundRuntimePolicy.CheckedExceptions);
-        Assert.That(checkedExceptions.Program, Is.Null);
-        Assert.That(checkedExceptions.Diagnostics, Is.Not.Empty);
+        Assert.That(checkedExceptions.HasErrors, Is.False,
+            string.Join(Environment.NewLine, checkedExceptions.Diagnostics));
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(
+            BoundProgramTestHelpers.MarkNoFailureProof(checkedExceptions.Program!, "Main", "Index")));
     }
 
 }

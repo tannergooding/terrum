@@ -205,7 +205,7 @@ public sealed class RequireFrontendProjectionTests
         var text = accepted ? Source : Source.Replace("true", "false", StringComparison.Ordinal);
         var program = ScalarFrontendHost.BindLibrary(SourceText.From(text), Bytes(Projection(text)),
             BoundRuntimePolicy.CheckedExceptions);
-        program = program with { Functions = ImmutableArray.Create(program.Functions[0] with { IsNoThrow = true }) };
+        program = program with { Functions = ImmutableArray.Create(program.Functions[0] with { NoFailureProof = true }) };
         if (accepted)
         {
             SemanticVerifier.VerifyLibrary(program);

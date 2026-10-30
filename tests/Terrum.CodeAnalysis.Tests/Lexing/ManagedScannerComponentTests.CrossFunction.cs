@@ -97,7 +97,6 @@ public sealed partial class ManagedScannerComponentTests
                 Assert.That(function.Name.Start, Is.InRange(sourceStart, sourceStart + sourceLength - function.Name.Length));
 
                 var flags = (function.IsPublic ? 1 : 0)
-                    | (function.IsNoThrow ? 2 : 0)
                     | (function.DoesNotReturn ? 4 : 0)
                     | (function.RequiresUnsafeCaller ? 8 : 0);
                 var signature = function.ReturnType
@@ -313,8 +312,8 @@ public sealed partial class ManagedScannerComponentTests
     [TestCase("public int32 Main() { require !Fill(false, init var value); return Fill(true, init value) ? value : 0; } bool Fill(bool publish, init ref<int32> value) { if (publish) { value = 42; return true; } return false; }",42)]
     [TestCase("public int32 Main() { for (Sink(1); false; Sink(2)) { } return 42; } void Sink(int32 value) { }",42)]
     [TestCase("[DoesNotReturn] void Halt() { require false; } public int32 Main() { if (false) { Halt(); } return 42; }",42)]
-    [TestCase("[NoThrow] public void Main() { Step(); } [NoThrow] void Step() { }",0)]
-    [TestCase("public int32 Main() => Next(42); [NoThrow] int32 Next(int32 value) => value;",42)]
+    [TestCase(" public void Main() { Step(); }  void Step() { }",0)]
+    [TestCase("public int32 Main() => Next(42);  int32 Next(int32 value) => value;",42)]
     [TestCase("public int32 Main() { int32 result = Next(41); return result; } int32 Next(int32 value) { return value + 1; }",42)]
     [TestCase("public int32 Main() { mut int32 result = 0; Set(second: 2, first: 4, result: out result); return result; } void Set(int32 first, int32 second, out int32 result) { result = first * 10 + second; }",42)]
     [TestCase("public int32 Main() => Sum(10, 10, 10, 12); int32 Sum(int32 first, int32 second, int32 third, int32 fourth) => first + second + third + fourth;",42)]
@@ -326,7 +325,7 @@ public sealed partial class ManagedScannerComponentTests
     [TestCase("public int32 Main() { { int32 Next = 1; } return Next(); } int32 Next() => 42;",42)]
     [TestCase("public int32 Main() => @await(41); int32 @await(int32 value) => value + 1;",42)]
     [TestCase("public int32 Main() => int32(41); int32 int32(int32 value) => value + 1;",42)]
-    [TestCase("[NoThrow] public int32 Main() => Next(42); [NoThrow] int32 Next(int32 value) => value;",42)]
+    [TestCase(" public int32 Main() => Next(42);  int32 Next(int32 value) => value;",42)]
     [TestCase("public int32 Main() => -Pack(1, 2); int32 Pack(int32 a, int32 b) => a + b;",-3)]
     [TestCase("public int32 Main() => -Pack(1, 2, 3); int32 Pack(int32 a, int32 b, int32 c) => a + b + c;",-6)]
     [TestCase("public int32 Main() => !Check(false, false) ? 42 : 0; bool Check(bool a, bool b) => a || b;",42)]
@@ -531,9 +530,9 @@ public sealed partial class ManagedScannerComponentTests
             Assert.That(actual.Functions.Select(static function => function.Span), Is.EqualTo(hosted.Functions.Select(static function => function.Span)));
             Assert.That(actual.Functions.Select(static function => function.Body.Span), Is.EqualTo(hosted.Functions.Select(static function => function.Body.Span)));
             Assert.That(actual.Functions.Select(static function =>
-                    (function.ParameterCount, function.IsInternal, function.IsNoThrow,
+                    (function.ParameterCount, function.IsInternal,
                         function.DoesNotReturn, function.RequiresUnsafeCaller)), Is.EqualTo(hosted.Functions.Select(static function =>
-                    (function.ParameterCount, function.IsInternal, function.IsNoThrow,
+                    (function.ParameterCount, function.IsInternal,
                         function.DoesNotReturn, function.RequiresUnsafeCaller))));
             Assert.That(actual.Functions.Select(static function => function.Variables
                     .Select(static variable => (variable.Name, variable.Type, variable.IsMutable,
@@ -724,8 +723,10 @@ public sealed partial class ManagedScannerComponentTests
     {
         var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(programBytes), Is.EqualTo(88));
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(SourceText.From(text),
-            bytes, programBytes, BoundRuntimePolicy.FailFast));
+    var result = ScalarFrontendHost.ReadProgram(SourceText.From(text),
+        bytes, programBytes, BoundRuntimePolicy.FailFast);
+    Assert.That(result.Projection.IsValid, Is.False);
+    Assert.That(result.Program, Is.Null);
     }
     [TestCase("public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() => unsafe(Danger(41));",42)]
     [TestCase("public unsafe int32 Danger(int32 value) => value + 1; public int32 Main() => unsafe(Danger(40) + 2);",43)]
@@ -888,9 +889,10 @@ public sealed partial class ManagedScannerComponentTests
                 var (incompleteBytes, incompleteProgramBytes, _) = await ProduceScalarProgramAsync(
                     incompleteText, policy);
                 Assert.That(BinaryPrimitives.ReadInt32LittleEndian(incompleteProgramBytes), Is.EqualTo(88));
-                Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadProgram(
-                    SourceText.From(incompleteText), incompleteBytes, incompleteProgramBytes,
-                    (BoundRuntimePolicy)policy));
+                var invalid = ScalarFrontendHost.ReadProgram(SourceText.From(incompleteText),
+                    incompleteBytes, incompleteProgramBytes, (BoundRuntimePolicy)policy);
+                Assert.That(invalid.Projection.IsValid, Is.False);
+                Assert.That(invalid.Program, Is.Null);
             }
         }
     }
@@ -1008,15 +1010,21 @@ public sealed partial class ManagedScannerComponentTests
     }
 
     [Test]
-    public async Task ScalarFrontendCrossFunctionNoThrowRequiresNoThrowCalleeAsync()
+    public async Task ScalarFrontendCrossFunctionCallsNeedNoGeneralNoThrowPromiseAsync()
     {
-        const string text = "[NoThrow] int32 Main() => Next(); int32 Next() => 42;";
-        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(text), BoundRuntimePolicy.FailFast);
-        Assert.That(compilation.HasErrors, Is.True);
-
-        var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, NativeRuntimePolicy.FailFast);
-        Assert.Throws<ArgumentException>(() => ScalarFrontendHost.ReadResult(SourceText.From(text),
-            bytes, programBytes, BoundRuntimePolicy.FailFast));
+        const string text = " int32 Main() => Next(); int32 Next() => 42;";
+        var source = SourceText.From(text);
+        foreach (var policy in new[] { NativeRuntimePolicy.FailFast, NativeRuntimePolicy.CheckedExceptions })
+        {
+            var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source), (BoundRuntimePolicy)policy);
+            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+            var hosted = ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))();
+            var (bytes, programBytes, _) = await ProduceScalarProgramAsync(text, policy);
+            var actual = ScalarFrontendHost.BindLibrary(source, bytes, programBytes, (BoundRuntimePolicy)policy);
+            Assert.That(actual.Functions.All(static function => !function.NoFailureProof), Is.True);
+            Assert.That(NativeJit.Execute(actual with { EntryPoint = 0 }, policy), Is.EqualTo(42));
+            Assert.That(NativeJit.Execute(hosted with { EntryPoint = 0 }, policy), Is.EqualTo(42));
+        }
     }
 
     [Test]
@@ -1044,7 +1052,7 @@ public sealed partial class ManagedScannerComponentTests
     }
     [TestCase("public int32 Main() { Halt(true); } [DoesNotReturn] void Halt(bool value) { require false; }")]
     [TestCase("public int32 Main() { if (true) { Halt(true); } } [DoesNotReturn] void Halt(bool value) { require false; }")]
-    [TestCase("public int32 Main() { Halt(); } [NoThrow][DoesNotReturn] void Halt() { while (true) { } }")]
+    [TestCase("public int32 Main() { Halt(); } [DoesNotReturn] void Halt() { while (true) { } }")]
     public async Task ScalarFrontendCrossFunctionDoesNotReturnCallSuppressesFallthroughAsync(string text)
     {
         var source = SourceText.From(text);

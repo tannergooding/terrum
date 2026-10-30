@@ -581,7 +581,7 @@ public static partial class TrRmExecutableCompiler
             || function.NativeFunctionPointerType is not null
             || function.NativeCallableEntryName is not null
             || function.NativeVTableMethod is not null || function.IndexedBody is not null
-            || function.PropertyName is not null || function.IsCleanup || function.IsNoThrow
+            || function.PropertyName is not null || function.IsCleanup || function.NoFailureProof
             || function.RequiresUnsafeCaller || function.DoesNotReturn || function.IsConstructor
             || function.DeclaringStruct is not null || function.IsStatic || function.IsOperator
             || function.Intrinsic != BoundIntrinsic.None || function.IsClassConstructor
@@ -618,7 +618,7 @@ public static partial class TrRmExecutableCompiler
             || function.NativeFunctionPointerType is not null
             || function.NativeCallableEntryName is not null
             || function.NativeVTableMethod is not null || function.IndexedBody is not null
-            || function.PropertyName is not null || function.IsCleanup || function.IsNoThrow
+            || function.PropertyName is not null || function.IsCleanup || function.NoFailureProof
             || function.RequiresUnsafeCaller || function.DoesNotReturn || function.IsConstructor
             || function.DeclaringStruct is not null || function.IsStatic || function.IsOperator
             || function.Intrinsic != BoundIntrinsic.None || function.IsClassConstructor

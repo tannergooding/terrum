@@ -116,16 +116,18 @@ public sealed class TrRmCallAuditTests
     }
 
     [Test]
-    public void DeclaredNoThrowCalleeCannotHideACheckedOperation()
+    public void OrdinaryCallDoesNotRequireNoThrowContractOnCheckedCallee()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
             1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2];
         byte[] callee = [4, 1, 1, 0, 0, 0, 2,
             1, 2, 1, 1, 0x15, 3, 1, 1, 2, 0x83, 3];
-        var artifact = TrRmExecutionAuditTests.LocalCallArtifact(caller, callee,
-            callerNoThrow: true, calleeNoThrow: true);
+        var artifact = TrRmExecutionAuditTests.LocalCallArtifact(caller, callee);
         TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        var program = TrRmExecutableCompiler.Load(artifact);
+        Assert.That(program.Functions[0].NoFailureProof, Is.False);
+        Assert.That(program.Functions[1].NoFailureProof, Is.False);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
     [TestCase("bool","true")]
     [TestCase("char16","char16(65535)")]
@@ -135,7 +137,7 @@ public sealed class TrRmCallAuditTests
     [TestCase("uint64","uint64.MaxValue")]
     public void ScalarCallResultsPreserveFullWidthAndSignedness(string type, string value)
         => RoundTrip($"int32 Main() {{ return Echo({value}) == {value} ? 42 : 0; }} "
-            + $"[NoThrow] {type} Echo({type} value) {{ return value; }}", 42);
+            + $" {type} Echo({type} value) {{ return value; }}", 42);
 
     [Test]
     public void ArgumentSnapshotsSurviveLazyContinuationChanges()

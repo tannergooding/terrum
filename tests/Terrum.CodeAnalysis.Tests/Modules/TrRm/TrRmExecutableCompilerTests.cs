@@ -2037,7 +2037,7 @@ public sealed class TrRmExecutableCompilerTests
                 return 42;
             }
             """;
-        var program = BoundProgramTestHelpers.MarkNoThrow(
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(
             Compile(source, true), "Convert", "ConvertIf");
 
         Assert.Throws<NotSupportedException>(() =>
@@ -2515,14 +2515,14 @@ public sealed class TrRmExecutableCompilerTests
         var program = TrRmExecutableCompiler.Load(
             TrRmExecutableCompiler.Emit(compiled, "effects"));
         var function = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Halt");
-        Assert.That(function.IsNoThrow, Is.False);
+        Assert.That(function.NoFailureProof, Is.False);
         Assert.That(function.DoesNotReturn, Is.EqualTo(doesNotReturn));
     }
 
     [Test]
     public void ExecutableWriterRejectsRetiredNoThrowClaims()
     {
-        var program = BoundProgramTestHelpers.MarkNoThrow(
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(
             Compile("void Halt() { } int32 Main() { return 42; }"), "Halt");
 
         Assert.Throws<NotSupportedException>(() =>
@@ -2567,9 +2567,9 @@ public sealed class TrRmExecutableCompilerTests
         var unsafeFunction = global::System.Linq.Enumerable.Single(program.Functions,
             static function => function.Name == "Unsafe");
         var halt = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Halt");
-        Assert.That(unsafeFunction.IsNoThrow, Is.False);
+        Assert.That(unsafeFunction.NoFailureProof, Is.False);
         Assert.That(unsafeFunction.RequiresUnsafeCaller, Is.True);
-        Assert.That(halt.IsNoThrow, Is.False);
+        Assert.That(halt.NoFailureProof, Is.False);
         Assert.That(halt.DoesNotReturn, Is.True);
     }
     [TestCase("int32 Main() { return 1 << 2; }",4)]

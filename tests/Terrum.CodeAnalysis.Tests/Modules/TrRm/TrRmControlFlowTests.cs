@@ -8,6 +8,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 using Terrum.CodeAnalysis.Tests.Infrastructure;
@@ -180,7 +181,8 @@ public sealed class TrRmControlFlowTests
     [Test]
     public void NoThrowCannotRetainAnUnprovedIndexedFailureTerminator()
     {
-        var program = Compile("[NoThrow] void Guard() { require true; } int32 Main() { return 42; }");
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(
+            Compile(" void Guard() { require true; } int32 Main() { return 42; }"), "Guard");
         Assert.Throws<NotSupportedException>(() => TrRmExecutableCompiler.Emit(program, "no-throw-failure"));
     }
     [TestCase("int32 Main() { mut int32 x = 0; while (x < 2) { int32 inner = x; x = inner + 1; } return x; }",2)]
@@ -200,7 +202,6 @@ public sealed class TrRmControlFlowTests
         BoundFunction[] invalid =
         [
             function with { DoesNotReturn = true },
-            function with { IsNoThrow = !function.IsNoThrow },
             function with { ParameterCount = 0 },
             function with { ReturnType = PrimitiveType.Int32 },
             function with { IsStatic = true },

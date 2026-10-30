@@ -275,7 +275,7 @@ public sealed class TrRmExecutionAuditTests
     [TestCase(15)]
     public void RejectsEveryReservedContractFlagBit(int bit)
     {
-        var artifact = Artifact(s_return42, effect: 1);
+        var artifact = Artifact(s_return42, effect: 4);
         var data = SectionOffset(artifact, 0x1B) + 8;
         BinaryPrimitives.WriteUInt16LittleEndian(artifact.AsSpan(data + 6), (ushort)(1 << bit));
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
@@ -291,28 +291,26 @@ public sealed class TrRmExecutionAuditTests
             TrRmExecutableCompiler.Load(Artifact(s_return42, effect: 2)));
 
     [Test]
-    public void NoThrowAuditRejectsEvenConstantSafeCheckedOperations()
+    public void RetiredNoThrowEffectRejectsConstantSafeCheckedOperations()
     {
         byte[] body = [4, 1, 1, 0, 0, 0, 3,
             1, 1, 1, 20, 1, 2, 1, 22, 0x15, 3, 1, 1, 2, 0x83, 3];
         var artifact = Artifact(body, effect: 1);
-        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact));
     }
 
     [Test]
-    public void NoThrowAuditRejectsCheckedDivRem()
+    public void RetiredNoThrowEffectRejectsCheckedDivRem()
     {
         var artifact = Artifact(CheckedDivRemBody(PrimitiveType.Int32, 7, 3, 2, 1), effect: 1);
-        TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact);
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        Assert.Throws<InvalidDataException>(() => TrRmStructuralMetadataValidator.ValidateCompactLinear(artifact));
     }
 
     [Test]
-    public void NoThrowAllowsTotalWrappingBinary()
+    public void TotalWrappingBinaryExecutesWithoutNoThrowEffect()
     {
         var artifact = Artifact(WrappingBinaryBody(PrimitiveType.Int32, 10,
-            0x7FFF_FFFF, 1, 0x8000_0000), effect: 1);
+            0x7FFF_FFFF, 1, 0x8000_0000));
         var program = TrRmExecutableCompiler.Load(artifact);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -330,7 +328,7 @@ public sealed class TrRmExecutionAuditTests
     [Test]
     public void ContractOwnerMustBeTheExactMethodDef()
     {
-        var artifact = Artifact(s_return42, effect: 1);
+        var artifact = Artifact(s_return42, effect: 4);
         WriteWord(artifact, SectionOffset(artifact, 0x1B) + 8, 0x13000001);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
     }
@@ -439,21 +437,19 @@ public sealed class TrRmExecutionAuditTests
     }
 
     [Test]
-    public void NoThrowCallRequiresCalleeDeclarationAndCannotBeForgedAfterLoad()
+    public void OrdinaryCallLoadsWithoutNoThrowContracts()
     {
         byte[] caller = [4, 1, 1, 0, 0, 0, 2,
             1, 1, 1, 41, 0x12, 2, 2, 1, 1, 0x83, 2];
         byte[] callee = [4, 1, 1, 0, 0, 0, 0, 0x83, 1];
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
             LocalCallArtifact(caller, callee, callerNoThrow: true)));
-        var program = TrRmExecutableCompiler.Load(
-            LocalCallArtifact(caller, callee, callerNoThrow: true, calleeNoThrow: true));
+        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(
+            LocalCallArtifact(caller, callee, calleeNoThrow: true)));
+        var program = TrRmExecutableCompiler.Load(LocalCallArtifact(caller, callee));
+        Assert.That(program.Functions[0].NoFailureProof, Is.False);
+        Assert.That(program.Functions[1].NoFailureProof, Is.False);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(41));
-        var changedEffect = program with {
-            Functions = program.Functions.SetItem(1, program.Functions[1] with { IsNoThrow = false }),
-        };
-        Assert.Throws<ArgumentException>(() =>
-            NativeEmitter.Emit(changedEffect, NativeRuntimePolicy.FailFast));
         var changedType = program with {
             Functions = program.Functions.SetItem(1, program.Functions[1] with {
                 Variables = program.Functions[1].Variables.SetItem(0,
@@ -839,11 +835,11 @@ public sealed class TrRmExecutionAuditTests
     [Test]
     public void AuditChecksNonentryMethodsAsWellAsTheEntry()
     {
-        byte[] invalid = [4, 1, 4, 0, 0, 0, 3,
-            1, 1, 1, 20, 1, 2, 1, 22, 0x15, 3, 1, 1, 2, 0x83, 3];
+        var invalid = (byte[])s_return42.Clone();
+        invalid[^2] = 0xFF;
         var original = TrRmExecutableCompiler.Load(Artifact(s_return42));
         var source = original with {
-            Functions = original.Functions.Add(original.Functions[0] with { Name = "Other", IsNoThrow = true }),
+            Functions = original.Functions.Add(original.Functions[0] with { Name = "Other" }),
         };
         var bytes = TrRmExecutableCompiler.Emit(source, "two-bodies");
         var index = TrRmArtifactIndex.ForDevelopment(bytes);
@@ -857,7 +853,6 @@ public sealed class TrRmExecutionAuditTests
                 kind == 0x20 ? Rows([firstBody, invalid]) : payload.ToArray()));
         }
         var tampered = TrRmArtifactWriter.EncodeDevelopment(sections);
-        TrRmStructuralMetadataValidator.ValidateCompactLinear(tampered);
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(tampered));
     }
     [TestCase(new byte[] { 4, 1, 1, 0, 0, 0, 1, 1, 1, 1, 42, 0x83, 2 })]

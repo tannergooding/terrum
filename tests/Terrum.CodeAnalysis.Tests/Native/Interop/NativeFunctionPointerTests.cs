@@ -169,7 +169,7 @@ public sealed class NativeFunctionPointerTests
         foreach (var function in compilation.Program!.Functions.Where(
             static function => function.NativeFunctionPointerType is not null))
         {
-            Assert.That(function.IsNoThrow, Is.False, function.Name);
+            Assert.That(function.NoFailureProof, Is.False, function.Name);
         }
         Assert.That(NativeJit.Execute(compilation.Program, NativeRuntimePolicy.FailFast), Is.Zero);
     }
@@ -227,20 +227,20 @@ public sealed class NativeFunctionPointerTests
         Assert.That(callback.Body.Statements, Is.Not.Empty);
         Assert.That(imported.IsExternal, Is.True);
         Assert.That(imported.DirectNativeImport, Is.Not.Null);
-        Assert.That(callback.IsNoThrow, Is.False);
+        Assert.That(callback.NoFailureProof, Is.False);
         Assert.That(callback.NativeFunctionPointerType, Is.Not.Null);
         var vtableCallback = program.Functions.Single(static function => function.Name == "VTableCallback");
-        Assert.That(vtableCallback.IsNoThrow, Is.False);
+        Assert.That(vtableCallback.NoFailureProof, Is.False);
         Assert.That(vtableCallback.NativeFunctionPointerType, Is.Not.Null);
 
         var privateProducer = ModuleCompiler.CreateProducer(program, ["Callback", "VTableCallback"]);
         var privateReference = ModuleCompiler.CreateReference(privateProducer);
         var privateCallback = privateReference.Functions.Single(static function => function.Name == "Callback");
-        Assert.That(privateCallback.IsNoThrow, Is.False);
+        Assert.That(privateCallback.NoFailureProof, Is.False);
         Assert.That(privateCallback.NativeFunctionPointerType, Is.Not.Null);
         var privateVTableCallback = privateReference.Functions
             .Single(static function => function.Name == "VTableCallback");
-        Assert.That(privateVTableCallback.IsNoThrow, Is.False);
+        Assert.That(privateVTableCallback.NoFailureProof, Is.False);
         Assert.That(privateVTableCallback.NativeFunctionPointerType, Is.Not.Null);
         var privateConsumerCompilation = Compilation.Create(SyntaxTree.Parse("""
             namespace Terrum.CodeAnalysis;
@@ -259,14 +259,14 @@ public sealed class NativeFunctionPointerTests
         foreach (var name in new[] { "Callback", "VTableCallback" })
         {
             var linkedFunction = linkedCallback.Functions.Single(function => function.Name == name);
-            Assert.That(linkedFunction.IsNoThrow, Is.False, name);
+            Assert.That(linkedFunction.NoFailureProof, Is.False, name);
             Assert.That(linkedFunction.NativeFunctionPointerType, Is.Not.Null, name);
         }
 
         var loaded = TrRmExecutableCompiler.Load(
             TrRmExecutableCompiler.Emit(program, "native-callable-import"));
         var loadedCallback = loaded.Functions.Single(static function => function.Name == "Callback");
-        Assert.That(loadedCallback.IsNoThrow, Is.False);
+        Assert.That(loadedCallback.NoFailureProof, Is.False);
         Assert.That(loadedCallback.NativeFunctionPointerType, Is.Not.Null);
     }
 
@@ -1812,7 +1812,7 @@ public sealed class NativeFunctionPointerTests
         Assert.That(loaded.NativeFunctionPointerSignatures[0].ReturnType, Is.EqualTo(PrimitiveType.Float64));
         Assert.That(loaded.NativeFunctionPointerSignatures[0].ParameterTypes,
             Is.EqualTo(new[] { PrimitiveType.Float64, PrimitiveType.Int32, PrimitiveType.Float64 }));
-        Assert.That(callable.IsNoThrow, Is.False);
+        Assert.That(callable.NoFailureProof, Is.False);
         Assert.That(callable.RequiresUnsafeCaller, Is.True);
         Assert.That(TrRmExecutableCompiler.Emit(loaded, "native-callable"), Is.EqualTo(artifact));
 

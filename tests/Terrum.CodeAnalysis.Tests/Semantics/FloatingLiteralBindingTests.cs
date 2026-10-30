@@ -1135,7 +1135,7 @@ public sealed class FloatingLiteralBindingTests
             " public int32 Convert(float64 value) { return int32(value); }"));
 
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = BoundProgramTestHelpers.MarkNoThrow(compilation.Program!, "Convert");
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Convert");
         Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 

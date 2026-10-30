@@ -91,15 +91,12 @@ public sealed class StaticProtocolComparisonTests
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == diagnostic),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
-    [TestCase(false)]
-    [TestCase(true)]
-    public void NoThrowComparisonRequiresDeclaredAndVerifiedEffect(bool witnessNoThrow)
+    public void RetiredNoThrowOnStaticProtocolRequirementIsDiagnosed()
     {
         var source = LessSource.Replace("static C operator <",
-            (witnessNoThrow ? "[NoThrow] " : "") + "static C operator <", StringComparison.Ordinal)
-            .Replace("bool Compare<T>", "[NoThrow] bool Compare<T>", StringComparison.Ordinal);
+            "[NoThrow] static C operator <", StringComparison.Ordinal);
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
         Assert.That(compilation.Program, Is.Null);
     }
 
@@ -174,28 +171,23 @@ public sealed class StaticProtocolComparisonTests
     }
     [TestCase(false)]
     [TestCase(true)]
-    public void ComparisonEffectsComeFromTheDeclaredProtocolAndBody(bool valid)
+    public void ComparisonBodiesRemainOrdinaryWithoutNoThrowPromises(bool requireFailure)
     {
         var source = LessSource.Replace("static C operator <",
-            "[NoThrow] static C operator <", StringComparison.Ordinal)
+            " static C operator <", StringComparison.Ordinal)
             .Replace("public static bool operator <",
-                "[NoThrow] public static bool operator <", StringComparison.Ordinal)
-            .Replace("bool Compare<T>", "[NoThrow] bool Compare<T>", StringComparison.Ordinal);
-        if (!valid)
+                " public static bool operator <", StringComparison.Ordinal)
+            .Replace("bool Compare<T>", " bool Compare<T>", StringComparison.Ordinal);
+        if (requireFailure)
         {
             source = source.Replace("return left.Number < right.Number;",
                 "require false; return left.Number < right.Number;", StringComparison.Ordinal);
         }
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        if (valid)
-        {
-            Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            SemanticVerifier.Verify(((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))());
-        }
-        else
-        {
-            Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        }
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
+        Assert.That(program.Functions.All(static function => !function.NoFailureProof), Is.True);
+        SemanticVerifier.Verify(program);
     }
 
     [Test]

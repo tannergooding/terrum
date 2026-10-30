@@ -65,10 +65,18 @@ public sealed class CompoundAssignmentTests
     [TestCase("uint32",NativeRuntimePolicy.FailFast)]
     [TestCase("int64",NativeRuntimePolicy.FailFast)]
     [TestCase("uint64",NativeRuntimePolicy.FailFast)]
+    [TestCase("int8",NativeRuntimePolicy.FailFast)]
+    [TestCase("int16",NativeRuntimePolicy.FailFast)]
+    [TestCase("uint8",NativeRuntimePolicy.FailFast)]
+    [TestCase("uint16",NativeRuntimePolicy.FailFast)]
     [TestCase("int32",NativeRuntimePolicy.CheckedExceptions)]
     [TestCase("uint32",NativeRuntimePolicy.CheckedExceptions)]
     [TestCase("int64",NativeRuntimePolicy.CheckedExceptions)]
     [TestCase("uint64",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("int8",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("int16",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("uint8",NativeRuntimePolicy.CheckedExceptions)]
+    [TestCase("uint16",NativeRuntimePolicy.CheckedExceptions)]
     public async Task EveryOperatorExecutesForEveryIntegerWidth(string type, NativeRuntimePolicy policy)
     {
         var program = Compile($$"""
@@ -99,7 +107,7 @@ public sealed class CompoundAssignmentTests
             $"public int64 Shift(int64 value, int32 count) {{ return value {operation} count; }}",
             NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(library, ["Shift"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var stale = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));
@@ -111,7 +119,6 @@ public sealed class CompoundAssignmentTests
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
     [TestCase("var value = 1 << 2;")]
-    [TestCase("mut int64 value = 1; value <<= int64(1);")]
     [TestCase("mut int32 value = 1; value += uint32(1);")]
     [TestCase("mut char16 value = 1; value += 1;")]
     [TestCase("mut bool value = true; value &= false;")]
@@ -120,6 +127,19 @@ public sealed class CompoundAssignmentTests
         var compilation = Compilation.Create(SyntaxTree.Parse(
             "int32 Main() { " + statement + " return 42; }"));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+    }
+
+    [Test]
+    public void TypedIntegerShiftCountRetainsItsType()
+    {
+        var program = Compile("""
+            int32 Main() {
+                mut int64 value = 1;
+                value <<= int64(1);
+                return value == 2 ? 42 : 0;
+            }
+            """, NativeRuntimePolicy.CheckedExceptions);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
     }
 
     [Test]
@@ -140,7 +160,7 @@ public sealed class CompoundAssignmentTests
                 count += 1;
                 return initial;
             }
-            [NoThrow] int32 Bits(int32 initial) {
+             int32 Bits(int32 initial) {
                 mut int32 value = initial;
                 value &= 63; value |= 32; value ^= 0;
                 return value;
@@ -359,7 +379,7 @@ public sealed class CompoundAssignmentTests
             unique struct Owner {
                 public mut int32 Value;
                 public Owner(int32 initial) { Value = initial; }
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = 1; }
+                 [Cleanup] public void Close() { Host.Trace[0] = 1; }
             }
             int32 Main() {
                 mut Owner owner = new Owner(int32.MaxValue);
@@ -410,14 +430,16 @@ public sealed class CompoundAssignmentTests
     [Test]
     public void ThrowingCompoundOperationIsNotAdmittedInNoThrowBody()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] int32 Main() {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+             int32 Main() {
                 mut int32 value = 1;
                 value /= 1;
                 return value;
             }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Main");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -444,7 +466,7 @@ public sealed class CompoundAssignmentTests
             public int32 Next() { mut int32 value = 40; value += 2; return value; }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(library, ["Next"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 44);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));

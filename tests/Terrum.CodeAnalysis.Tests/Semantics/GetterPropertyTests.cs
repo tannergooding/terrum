@@ -21,7 +21,7 @@ public sealed class GetterPropertyTests
         struct Counter {
             int32 _value;
             public Counter(int32 value) { _value = value; }
-            public int32 Value { [NoThrow] get { return _value; } }
+            public int32 Value {  get { return _value; } }
             public int32 get_Value() { return 1; }
         }
         class Box {
@@ -48,9 +48,9 @@ public sealed class GetterPropertyTests
         var getter = global::System.Linq.Enumerable.Single(program.Functions, function => function.PropertyName == "Value"
             && function.DeclaringStruct == "Counter");
         Assert.That(getter.Name, Is.EqualTo("Counter.#get:Value"));
-        Assert.That(getter.IsNoThrow, Is.True);
+        Assert.That(getter.NoFailureProof, Is.False);
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.PropertyName == "Value"
-            && function.DeclaringStruct == "Box").IsNoThrow, Is.False);
+            && function.DeclaringStruct == "Box").NoFailureProof, Is.False);
         Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Counter.get_Value").PropertyName, Is.Null);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
         var index = program.Functions.IndexOf(getter);
@@ -65,7 +65,7 @@ public sealed class GetterPropertyTests
         const string source = """
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public int32 Placeholder;
-                public static int32 Base { [NoThrow] get { return 40; } }
+                public static int32 Base {  get { return 40; } }
                 public static int32 LocalValue {
                     get {
                         int32 local = 42;
@@ -74,7 +74,7 @@ public sealed class GetterPropertyTests
                 }
                 public static int32 Direct => 2;
                 public static int32 Value {
-                    [NoThrow] get { return Base; }
+                     get { return Base; }
                 }
                 public static int32 UnsafeValue { unsafe get { return 1; } }
                 public static int32 Read() { return Value + Direct; }
@@ -91,7 +91,7 @@ public sealed class GetterPropertyTests
             Assert.That(getter.Name, Is.EqualTo("Counter.#get:" + propertyName));
             Assert.That(getter.IsStatic, Is.True);
             Assert.That(getter.ParameterCount, Is.EqualTo(0));
-            Assert.That(getter.IsNoThrow, Is.True);
+            Assert.That(getter.NoFailureProof, Is.False);
         }
         var localGetter = global::System.Linq.Enumerable.Single(program.Functions, static function => function.DeclaringStruct == "Counter" && function.PropertyName == "LocalValue");
         Assert.That(localGetter.ParameterCount, Is.EqualTo(0));
@@ -314,7 +314,6 @@ public sealed class GetterPropertyTests
     [TestCase("public static UniqueCounter Value { get { return new UniqueCounter(1); } }","TRM3007")]
     [TestCase("public void Value { get { return; } }","TRM3007")]
     [TestCase("public int32 _value { get { return _value; } }","TRM3001")]
-    [TestCase("[NoThrow] public int32 Value { get { return _value; } }","TRM3001")]
     public void UnsupportedGetterShapesDiagnose(string declaration, string code)
     {
         var source = "unique struct UniqueCounter { public int32 Number; "
@@ -360,12 +359,14 @@ public sealed class GetterPropertyTests
                 int32 _value;
                 public Box(int32 value) { _value = value; }
                 public int32 Value { get { require _value > 0; return _value; } }
-                [NoThrow] public int32 Read() { return this.Value; }
+                 public int32 Read() { return this.Value; }
             }
             int32 Main() { return 42; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Box.Read");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -376,7 +377,7 @@ public sealed class GetterPropertyTests
                 public int32 _value;
                 public Counter(int32 value) { _value = value; }
                 public static Counter Create() { return new Counter(42); }
-                public int32 Value { [NoThrow] get { return _value; } }
+                public int32 Value {  get { return _value; } }
                 public int32 get_Value() { return 1; }
             }
             """;
@@ -387,7 +388,7 @@ public sealed class GetterPropertyTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse(Consumer),
             ModuleCompiler.CreateReference(producer), boundPolicy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -417,7 +418,7 @@ public sealed class GetterPropertyTests
             class Box {
                 int32 _value;
                 public Box(int32 value) { _value = value; }
-                public int32 Value { [NoThrow] get { return _value; } }
+                public int32 Value {  get { return _value; } }
             }
             public int32 Read() {
                 require Box.TryCreate(Bias(), out var box);
@@ -445,7 +446,7 @@ public sealed class GetterPropertyTests
             struct Counter {
                 int32 _value;
                 public Counter(int32 value) { _value = value; }
-                public int32 Value { [NoThrow] get { return _value; } }
+                public int32 Value {  get { return _value; } }
             }
             bool Fill(init ref<int32> value) { value = 42; return true; }
             public int32 Read() {
@@ -454,7 +455,7 @@ public sealed class GetterPropertyTests
             }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Read(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
@@ -473,7 +474,7 @@ public sealed class GetterPropertyTests
             [Blittable] [Layout(LayoutKind.Sequential)] public struct Counter {
                 public int32 ValueField;
                 public Counter(int32 value) { ValueField = value; }
-                int32 Value { [NoThrow] get { return ValueField; } }
+                int32 Value {  get { return ValueField; } }
                 public static Counter Create() { return new Counter(42); }
                 public int32 Read() { return Value; }
             }

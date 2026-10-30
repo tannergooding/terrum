@@ -40,11 +40,12 @@ public sealed class Integer64Tests
     [TestCase("int64 value = (0X7FFFFFFF + 0x1); return value == 2147483648;",true)]
     [TestCase("return int64(0x80000000) == 2147483648 && uint32(0XFFFFFFFF) == uint32.MaxValue;",true)]
     [TestCase("return int32(0xFFFFFFFF) == -1 && int32(0x80000000) == int32.MinValue;",true)]
+    [TestCase("return int32(-0x80000000) == int32.MinValue && int64(-0x8000000000000000) == int64.MinValue;",true)]
     [TestCase("return int32(0B11111111111111111111111111111111) == -1 && uint32(0b101010) == 42;",true)]
     [TestCase("return int64(0xFFFFFFFF) == 4294967295 && int64(int32(0xFFFFFFFF)) == -1;",true)]
     [TestCase("return int64(0xFFFFFFFFFFFFFFFF) == -1 && uint64(0xFFFFFFFFFFFFFFFF) == uint64.MaxValue;",true)]
     [TestCase("return int32(0x000000000000000000FFFFFFFF) == -1 && int32(0b000000000000000000000000000000001) == 1;",true)]
-    [TestCase("return int32(-0xFFFFFFFF) == 1 && ~int32(0b0) == -1;",true)]
+    [TestCase("return -int32(0xFFFFFFFF) == 1 && ~int32(0b0) == -1;",true)]
     [TestCase("return ~int32(0x80000000) == int32.MaxValue && -int32(0b1) == -1;",true)]
     [TestCase("return int32(0x_8000_0000) == int32.MinValue && int32(0b_11111111_11111111_11111111_11111111) == -1;",true)]
     [TestCase("return int64(9_223_372_036_854_775_807) == int64.MaxValue && uint32(1__0_00) == 1000;",true)]
@@ -97,9 +98,9 @@ public sealed class Integer64Tests
     [TestCase("int32 Main() { uint32 x = uint32(uint64(4294967296)); return 0; }",unchecked((int)0xE0540001))]
     [TestCase("int32 Main() { char16 x = char16(uint64(65536)); return 0; }",unchecked((int)0xE0540001))]
     [TestCase("int32 Main() { int32 x = int32(uint32(0xFFFFFFFF)); return 0; }",unchecked((int)0xE0540001))]
-    [TestCase("int32 Main() { int32 x = -0x80000000; return 0; }",unchecked((int)0xE0540001))]
-    [TestCase("int32 Main() { int32 x = -0b10000000000000000000000000000000; return 0; }",unchecked((int)0xE0540001))]
-    [TestCase("int32 Main() { int64 x = -0x8000000000000000; return 0; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { int32 x = -int32(0x80000000); return 0; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { int32 x = -int32(0b10000000000000000000000000000000); return 0; }",unchecked((int)0xE0540001))]
+    [TestCase("int32 Main() { int64 x = -int64(0x8000000000000000); return 0; }",unchecked((int)0xE0540001))]
     public async Task WideFailuresUseCheckedRuntimePolicyAsync(string source, int expected)
     {
         await ExecuteBothAsync(Compile(source), expected).ConfigureAwait(true);
@@ -285,11 +286,12 @@ public sealed class Integer64Tests
     [TestCase("int64","%","1")]
     public void SignedPowerOfTwoSelectionDoesNotRelaxNoThrowProof(string type, string operation, string divisor)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
-            [NoThrow] {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
-            int32 Main() { return 42; }
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+             {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Calculate");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase("uint32","/","2")]
     [TestCase("uint32","%","2147483648")]
@@ -297,11 +299,12 @@ public sealed class Integer64Tests
     [TestCase("uint64","%","1")]
     public void NativeUnsignedStrengthReductionDoesNotRelaxNoThrowProof(string type, string operation, string divisor)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
-            [NoThrow] {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
-            int32 Main() { return 42; }
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+             {{type}} Calculate({{type}} n) { return n {{operation}} {{type}}({{divisor}}); }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Calculate");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]

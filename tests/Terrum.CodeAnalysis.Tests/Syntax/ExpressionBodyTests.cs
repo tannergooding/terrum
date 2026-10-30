@@ -20,7 +20,7 @@ public sealed class ExpressionBodyTests
             public Meter(int32 value) => Value = value;
             public int32 Read() => Value;
             public int32 X => Value;
-            public int32 Y { [NoThrow] get => Value; }
+            public int32 Y {  get => Value; }
             public static Meter operator +(Meter left, Meter right) => new Meter(left.Value + right.Value);
         }
         class Box {
@@ -59,7 +59,7 @@ public sealed class ExpressionBodyTests
         var compilation = Compilation.Create(tree);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
-        Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Meter.#get:Y").IsNoThrow, Is.True);
+        Assert.That(global::System.Linq.Enumerable.Single(program.Functions, function => function.Name == "Meter.#get:Y").NoFailureProof, Is.False);
         Assert.That(global::Terrum.CodeAnalysis.Native.NativeJit.Execute(
             program, global::Terrum.CodeAnalysis.Native.NativeRuntimePolicy.FailFast), Is.EqualTo(42));
     }
@@ -69,11 +69,23 @@ public sealed class ExpressionBodyTests
     [TestCase("struct S { int32 Value; public S(int32 value) => value; } int32 Main() => 0;","TRM3009")]
     [TestCase("struct S { int32 Value; public int32 Result => _ = Value; } int32 Main() => 0;","TRM3010")]
     [TestCase("[NoThrow] int32 Unsafe(int32 x) => x / 0; int32 Main() => 0;","TRM3017")]
-    [TestCase("struct S { public int32 Value; public S(int32 x) => Value = x; [NoThrow] public int32 Result => Value / 0; } int32 Main() => 0;","TRM3001")]
     public void InvalidExpressionBodyStatementDiagnoses(string source, string code)
     {
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void FallibleExpressionBodyGetterRemainsOrdinary()
+    {
+        const string source = "struct S { public int32 Value; public S(int32 x) => Value = x; "
+            + "public int32 Result => Value / 0; } int32 Main() => 0;";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var getter = global::System.Linq.Enumerable.Single(compilation.Program!.Functions,
+            static function => function.PropertyName == "Result");
+        Assert.That(getter.NoFailureProof, Is.False);
     }
 }

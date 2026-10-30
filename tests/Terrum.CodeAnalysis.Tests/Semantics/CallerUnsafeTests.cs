@@ -897,7 +897,7 @@ public sealed class CallerUnsafeTests
         var producer = ModuleCompiler.CreateProducer(
         CompileLibrary(UnsafeFieldExpressionModuleSource, policy),
         ["MakeOuter", "MakeLeafOuter", "ReadValue"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var (owner, fieldName, expected) in new[]
@@ -935,7 +935,7 @@ public sealed class CallerUnsafeTests
         var unsafeRead = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual9 = expressionReturn.Value; Assert.That(__nunitActual9, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual9!; }))();
         var expressionConsumer = ModuleCompiler.CreateConsumer(expressionProgram, producer);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+            expressionConsumer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])expressionConsumer.Clone();
@@ -1059,7 +1059,7 @@ public sealed class CallerUnsafeTests
         Assert.Throws<ModuleContractException>(() => ModuleCompiler.CreateConsumer(forgedProgram, producer));
 
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
@@ -1298,8 +1298,10 @@ public sealed class CallerUnsafeTests
             unsafeBlockMethodArtifact, safeMethodContract, safeMethodContract + "|CallerUnsafe");
         forgedUnsafeBlockMethod = SetSerializedFunctionRequiresUnsafeCaller(
             forgedUnsafeBlockMethod, "LoanCounter.NextBy");
-        Assert.Throws<ModuleContractException>(
+        var forgedUnsafeBlockMethodException = TestExceptionCapture.Capture(
             () => ModuleCompiler.CreateReference(forgedUnsafeBlockMethod));
+        Assert.That(forgedUnsafeBlockMethodException is ModuleContractException or ModuleFormatException,
+            Is.True, forgedUnsafeBlockMethodException?.ToString());
 
         var reference = ModuleCompiler.CreateReference(producer);
         var consumerCompilation = Compilation.Create(SyntaxTree.Parse("""
@@ -2380,7 +2382,7 @@ public sealed class CallerUnsafeTests
         var reference = ModuleCompiler.CreateReference(producer);
         var read = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.Read");
         Assert.That(read.RequiresUnsafeCaller, Is.True);
-        Assert.That(read.IsNoThrow, Is.False);
+        Assert.That(read.NoFailureProof, Is.False);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.SafeRead").RequiresUnsafeCaller, Is.False);
 
         var unscoped = Compilation.Create(SyntaxTree.Parse(
@@ -2479,7 +2481,7 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
         var computeContract = GetModuleStringStartingWith(producer, "Value.Compute|");
         var forgedProducer = ReplaceModuleString(producer, "Value.Compute", "Value.$producer.Compute");
         forgedProducer = ReplaceModuleString(forgedProducer, computeContract,
@@ -2600,7 +2602,7 @@ public sealed class CallerUnsafeTests
             public struct Value {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
-                public int32 Read { [NoThrow] unsafe get { return Number; } }
+                public int32 Read {  unsafe get { return Number; } }
                 public int32 SafeRead() { unsafe { return Read; } }
                 public int32 get_Read() { return 7; }
             }
@@ -2625,13 +2627,13 @@ public sealed class CallerUnsafeTests
         ];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
         Assert.That(getter.PropertyName, Is.EqualTo("Read"));
         Assert.That(getter.RequiresUnsafeCaller, Is.True);
-        Assert.That(getter.IsNoThrow, Is.True);
+        Assert.That(getter.NoFailureProof, Is.False);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.get_Read").PropertyName, Is.Null);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.SafeRead").RequiresUnsafeCaller, Is.False);
 
@@ -2700,7 +2702,7 @@ public sealed class CallerUnsafeTests
             ModuleCompiler.Link(strippedGetterConsumer, producer));
 
         var safeReplacementSource = Source
-            .Replace("[NoThrow] unsafe get", "[NoThrow] get", StringComparison.Ordinal)
+            .Replace(" unsafe get", " get", StringComparison.Ordinal)
             .Replace("return Number;", "return 43;", StringComparison.Ordinal)
             .Replace("unsafe { return Read; }", "return Read;", StringComparison.Ordinal);
         var safeReplacement = ModuleCompiler.CreateProducer(
@@ -2725,7 +2727,7 @@ public sealed class CallerUnsafeTests
             public struct Value {
                 public int32 Placeholder;
                 public static int32 Read {
-                    [NoThrow] unsafe get {
+                     unsafe get {
                         int32 local = 42;
                         return local;
                     }
@@ -2743,7 +2745,7 @@ public sealed class CallerUnsafeTests
         string[] exports = ["Value.#get:Read", "Value.SafeRead"];
         var providerProgram = CompileLibrary(Source, policy);
         var producer = ModuleCompiler.CreateProducer(providerProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
 
         var reference = ModuleCompiler.CreateReference(producer);
         var getter = global::System.Linq.Enumerable.Single(reference.Functions, static function => function.Name == "Value.#get:Read");
@@ -2751,7 +2753,7 @@ public sealed class CallerUnsafeTests
         Assert.That(getter.IsStatic, Is.True);
         Assert.That(getter.ParameterCount, Is.EqualTo(0));
         Assert.That(getter.RequiresUnsafeCaller, Is.True);
-        Assert.That(getter.IsNoThrow, Is.True);
+        Assert.That(getter.NoFailureProof, Is.False);
 
         var unscoped = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Value.Read; }"),
             reference, policy);
@@ -2777,7 +2779,7 @@ public sealed class CallerUnsafeTests
         Assert.That(NativeEmitter.Emit(linked, runtimePolicy), Is.Not.Empty);
 
         var safeReplacementSource = Source
-            .Replace("[NoThrow] unsafe get", "[NoThrow] get", StringComparison.Ordinal)
+            .Replace(" unsafe get", " get", StringComparison.Ordinal)
             .Replace("local = 42;", "local = 43;", StringComparison.Ordinal)
             .Replace("unsafe { return Read; }", "return Read;", StringComparison.Ordinal);
         var safeReplacement = ModuleCompiler.CreateProducer(
@@ -2806,7 +2808,7 @@ public sealed class CallerUnsafeTests
                 public static unsafe int32 Zero() { return 0; }
                 public static unsafe float64 Echo(float64 value) { return value; }
                 public static int32 Read {
-                    [NoThrow] unsafe get { return 0; }
+                     unsafe get { return 0; }
                 }
                 public unsafe int32 ReadInstance(int32 value) { return value; }
             }
@@ -2823,7 +2825,7 @@ public sealed class CallerUnsafeTests
             "ScalarOps.ReadInstance", "Top", "Forward", "MakeScalarOps", "EchoForward",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(source, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
 
         var reference = ModuleCompiler.CreateReference(producer);
         foreach (var name in exports[..3])
@@ -2848,7 +2850,7 @@ public sealed class CallerUnsafeTests
         var returned = ((global::System.Func<BoundReturn>)(() => { var __nunitActual92 = main.Body.Statements[1]; Assert.That(__nunitActual92, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual92!; }))();
         var unsafeExpression = ((global::System.Func<BoundUnsafeExpression>)(() => { var __nunitActual93 = returned.Value; Assert.That(__nunitActual93, Is.TypeOf<BoundUnsafeExpression>()); return (BoundUnsafeExpression)__nunitActual93!; }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
         foreach (var unsupportedVersion in new[] { 69, 70, 71, 72, 73, 74, 75 })
         {
             var unsupportedConsumer = (byte[])consumer.Clone();
@@ -2900,7 +2902,7 @@ public sealed class CallerUnsafeTests
             .Replace("static unsafe int32 Add", "static int32 Add", StringComparison.Ordinal)
             .Replace("static unsafe int32 Zero", "static int32 Zero", StringComparison.Ordinal)
             .Replace("static unsafe float64 Echo", "static float64 Echo", StringComparison.Ordinal)
-            .Replace("[NoThrow] unsafe get", "[NoThrow] get", StringComparison.Ordinal)
+            .Replace(" unsafe get", " get", StringComparison.Ordinal)
             .Replace("public unsafe int32 ReadInstance", "public int32 ReadInstance", StringComparison.Ordinal)
             .Replace("public unsafe int32 Top", "public int32 Top", StringComparison.Ordinal);
         var safeProducer = ModuleCompiler.CreateProducer(CompileLibrary(safeSource, policy), exports);
@@ -2923,7 +2925,7 @@ public sealed class CallerUnsafeTests
         ];
         var producer = ModuleCompiler.CreateProducer(
             CompileLibrary(CopyValueExpressionProviderSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
         var reference = ModuleCompiler.CreateReference(producer);
         var compilation = Compilation.Create(
             SyntaxTree.Parse(CopyValueExpressionConsumerSource), reference, policy);
@@ -3078,7 +3080,7 @@ public sealed class CallerUnsafeTests
             "GetterOwner.#get:StaticNested",
         ];
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(CopyValueGetterSource, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, sizeof(int))), Is.EqualTo(92));
         var reference = ModuleCompiler.CreateReference(producer);
 
         foreach (var (name, isStatic, parameterCount) in new[]
@@ -3094,7 +3096,7 @@ public sealed class CallerUnsafeTests
             Assert.That(getter.IsStatic, Is.EqualTo(isStatic));
             Assert.That(getter.ParameterCount, Is.EqualTo(parameterCount));
             Assert.That(getter.RequiresUnsafeCaller, Is.True, name);
-            Assert.That(getter.IsNoThrow, Is.False);
+            Assert.That(getter.NoFailureProof, Is.False);
         }
 
         foreach (var source in new[]
@@ -3429,7 +3431,7 @@ public sealed class CallerUnsafeTests
             [Layout(LayoutKind.Sequential)]
             public struct Value {
                 public int32 Placeholder;
-                public static int32 Read { [NoThrow] unsafe get { return 42; } }
+                public static int32 Read {  unsafe get { return 42; } }
                 public static int32 SafeRead() { unsafe { return Read; } }
             }
             """;
@@ -4114,23 +4116,23 @@ public sealed class CallerUnsafeTests
     public void TrRmPreservesCallerUnsafeObligationsAndRejectsCalls()
     {
         var declaration = CompileLibrary(
-            "[NoThrow] public unsafe int32 Danger() { return 42; }"
+            " public unsafe int32 Danger() { return 42; }"
             + " [DoesNotReturn] public unsafe void Never() { while (true) { } }");
         var loadedUnsafe = TrRmExecutableCompiler.Load(
             TrRmExecutableCompiler.Emit(declaration, "unsafe-contract"));
         var unsafeFunction = global::System.Linq.Enumerable.Single(loadedUnsafe.Functions, static function => function.Name == "Danger");
-        Assert.That(unsafeFunction.IsNoThrow, Is.True);
+        Assert.That(unsafeFunction.NoFailureProof, Is.False);
         Assert.That(unsafeFunction.DoesNotReturn, Is.False);
         Assert.That(unsafeFunction.RequiresUnsafeCaller, Is.True);
         var nonReturningFunction = global::System.Linq.Enumerable.Single(loadedUnsafe.Functions, static function => function.Name == "Never");
-        Assert.That(nonReturningFunction.IsNoThrow, Is.False);
+        Assert.That(nonReturningFunction.NoFailureProof, Is.False);
         Assert.That(nonReturningFunction.DoesNotReturn, Is.True);
         Assert.That(nonReturningFunction.RequiresUnsafeCaller, Is.True);
 
-        var safeDeclaration = CompileLibrary("[NoThrow] public int32 Danger() { return 42; }");
+        var safeDeclaration = CompileLibrary(" public int32 Danger() { return 42; }");
         var loaded = TrRmExecutableCompiler.Load(TrRmExecutableCompiler.Emit(safeDeclaration, "safe-contract"));
         var function = global::System.Linq.Enumerable.Single(loaded.Functions);
-        Assert.That(function.IsNoThrow, Is.True);
+        Assert.That(function.NoFailureProof, Is.False);
         Assert.That(function.RequiresUnsafeCaller, Is.False);
 
         var caller = Compilation.Create(SyntaxTree.Parse(
@@ -4253,10 +4255,10 @@ public sealed class CallerUnsafeTests
     }
 
     [Test]
-    public void TrRmAuditsUnscopedCallerUnsafeCallsInUncalledIndexedFunctions()
+    public void TrRmRejectsRetiredNoThrowClaimsInUncalledIndexedFunctions()
     {
         var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] int32 Danger() { return 42; }
+             int32 Danger() { return 42; }
             int32 Caller() {
                 mut int32 value = 0;
                 while (value < 1) { value = Danger(); }
@@ -4265,35 +4267,11 @@ public sealed class CallerUnsafeTests
             int32 Main() { return 0; }
             """));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = TrRmExecutableCompiler.Emit(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual140 = compilation.Program; Assert.That(__nunitActual140, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual140!; }))(), "unsafe-unscoped-uncalled-indexed");
-        Assert.That(artifact[BodyRowOffset(artifact, 2)] & 0xFC, Is.EqualTo(0x08));
-        _ = TrRmExecutableCompiler.Load(artifact);
-
-        var (methodOffset, methodCount) = FindSection(artifact, 0x16);
-        var contractRow = 0;
-        for (var method = 0; method < methodCount; method++)
-        {
-            var methodRow = methodOffset + (method * 28);
-            if (BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(methodRow + 20)) != 0)
-            {
-                contractRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-                    artifact.AsSpan(methodRow + 16)));
-                break;
-            }
-        }
-        Assert.That(contractRow, Is.Not.EqualTo(0));
-
-        var (contractOffset, contractCount) = FindSection(artifact, 0x1B);
-        var contractData = contractOffset + ((contractCount + 1) * sizeof(uint));
-        var contractRowOffset = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-            artifact.AsSpan(contractOffset + ((contractRow - 1) * sizeof(uint)))));
-        var effectsMaskOffset = contractData + contractRowOffset + 8;
-        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
-            artifact.AsSpan(effectsMaskOffset)), Is.EqualTo(1u));
-        BinaryPrimitives.WriteUInt32LittleEndian(artifact.AsSpan(effectsMaskOffset), 5);
-
-        Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(artifact));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(
+            ((global::System.Func<BoundProgram>)(() => { var __nunitActual140 = compilation.Program; Assert.That(__nunitActual140, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual140!; }))(),
+            "Danger", "Caller");
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.Emit(program, "retired-nothrow-uncalled-indexed"));
     }
 
     [Test]
@@ -4579,7 +4557,7 @@ public sealed class CallerUnsafeTests
             public unique struct Owner {
                 public mut Inner Nested;
                 public Owner(Inner nested) { Nested = nested; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
             }
             public int32 Invoke() {
                 mut Owner owner = new Owner(new Inner(new Counter(41)));

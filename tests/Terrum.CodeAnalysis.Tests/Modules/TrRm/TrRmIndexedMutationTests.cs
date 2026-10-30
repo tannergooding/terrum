@@ -7,6 +7,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -117,13 +118,15 @@ public sealed class TrRmIndexedMutationTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.True);
     }
-    [TestCase("[NoThrow] int32 Main() { mut int32 x = 1; x++; return 42; }")]
-    [TestCase("[NoThrow] int32 Main() { mut uint32 x = 1; x >>= 0; return 42; }")]
-    [TestCase("[NoThrow] int32 Main() { mut int32 x = 1; return false ? x << 1 : 42; }")]
+    [TestCase(" int32 Main() { mut int32 x = 1; x++; return 42; }")]
+    [TestCase(" int32 Main() { mut uint32 x = 1; x >>= 0; return 42; }")]
+    [TestCase(" int32 Main() { mut int32 x = 1; return false ? x << 1 : 42; }")]
     public void NoThrowRejectsRetainedCheckedOperations(string source)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(compilation.HasErrors, Is.True);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Main");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -159,14 +162,16 @@ public sealed class TrRmIndexedMutationTests
     }
 
     [Test]
-    public void NoThrowAllowsOnlyTotalIndependentBitReinterpretation()
+    public void DevelopmentReaderRejectsRetiredNoThrowEffectBit()
     {
         byte[] body = [4, 2, 1, 0, 0, 0, 4, 0, 0, 0, 3,
             1, 1, 1, 42, 6, 2, 2, 3, 1, 6, 3, 1, 3, 2, 0x83, 3];
-        var artifact = TrRmExecutionAuditTests.Artifact(body, effect: 1);
+        var artifact = TrRmExecutionAuditTests.Artifact(body);
         var program = TrRmExecutableCompiler.Load(artifact);
-        Assert.That(program.Functions[0].IsNoThrow, Is.True);
+        Assert.That(program.Functions[0].NoFailureProof, Is.False);
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.Load(TrRmExecutionAuditTests.Artifact(body, effect: 1)));
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateProducer(program, ["Main"]));
     }
     [TestCase((byte)(2),(byte)(4))]

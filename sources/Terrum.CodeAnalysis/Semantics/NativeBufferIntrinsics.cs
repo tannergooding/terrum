@@ -40,7 +40,7 @@ internal static class NativeBufferIntrinsics
             || function.ParameterCount != expected.ParameterCount || function.Variables.Length != expected.Variables.Length
             || function.DeclaringStruct != TypeName || function.IsConstructor || function.IsCleanup
             || function.IsExternal || function.IsPrivate || !function.IsInternal
-            || function.IsStatic != expected.IsStatic || function.IsNoThrow != expected.IsNoThrow
+            || function.IsStatic != expected.IsStatic || function.NoFailureProof != expected.NoFailureProof
             || function.DoesNotReturn || function.Body is null
             || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty)
         {
@@ -69,7 +69,7 @@ internal static class NativeBufferIntrinsics
             DeclaringStruct = TypeName,
             IsStatic = isStatic,
             IsInternal = true,
-            IsNoThrow = intrinsic is BoundIntrinsic.BufferCount or BoundIntrinsic.BufferCapacity
+            NoFailureProof = intrinsic is BoundIntrinsic.BufferCount or BoundIntrinsic.BufferCapacity
                 or BoundIntrinsic.BufferTryAppend or BoundIntrinsic.BufferClear,
             Intrinsic = intrinsic,
         };

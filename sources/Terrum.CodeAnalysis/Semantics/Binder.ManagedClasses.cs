@@ -563,7 +563,7 @@ internal sealed partial class Binder
             }
             var parameters = signature.Parameters.Add(new Parameter("result", type, declaration.Span, true));
             _signatures.Add(new Signature(factory, PrimitiveType.Bool, parameters, null, null, tree,
-                name, false, signature.IsPrivate, !signature.IsPrivate, false, true, signature.IsNoThrow, false) {
+                name, false, signature.IsPrivate, !signature.IsPrivate, false, true, signature.NoFailureProof, false) {
                 ClassConstructor = constructor,
                 RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
             });
@@ -588,7 +588,7 @@ internal sealed partial class Binder
             IsStatic = true,
             IsPrivate = signature.IsPrivate,
             IsInternal = signature.IsInternal,
-            IsNoThrow = signature.IsNoThrow,
+            NoFailureProof = signature.NoFailureProof,
             RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
             Intrinsic = BoundIntrinsic.ClassTryCreate,
             ClassConstructor = signature.ClassConstructor,

@@ -256,13 +256,13 @@ public sealed class NominalUpdateTests
     public void NoThrowSelfWitnessSupportsNoThrowGenericUpdates()
     {
         const string source = """
-            interface Increment<this T, R> { [NoThrow] static R operator ++(T value); }
+            interface Increment<this T, R> {  static R operator ++(T value); }
             struct Value : Increment<Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
-                [NoThrow] public static Value operator ++(Value value) { return value; }
+                 public static Value operator ++(Value value) { return value; }
             }
-            [NoThrow] T Next<T>(T value) where T : Increment<T>, [Copy] {
+             T Next<T>(T value) where T : Increment<T>, [Copy] {
                 mut T result = value;
                 return ++result;
             }
@@ -276,34 +276,39 @@ public sealed class NominalUpdateTests
     public void NoThrowRequiresProvenOperatorEffect()
     {
         var source = Operators + """
-            [NoThrow] Value Next(Value value) {
+             Value Next(Value value) {
                 mut Value result = value;
                 return ++result;
             }
             int32 Main() { return 42; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Next");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
-    public void NoThrowProtocolCannotClaimThrowingOperator()
+    public void StaticOperatorRequirementsDoNotPublishNoThrow()
     {
         const string source = """
-            interface Increment<T, R> { [NoThrow] static R operator ++(T value); }
+            interface Increment<T, R> {  static R operator ++(T value); }
             struct Value : Increment<Value, Value> {
                 public int32 Number;
                 public Value(int32 number) { Number = number; }
                 public static Value operator ++(Value value) { return new Value(value.Number + 1); }
             }
-            [NoThrow] T Next<T>(T value) where T : Increment<T, T>, [Copy] {
+             T Next<T>(T value) where T : Increment<T, T>, [Copy] {
                 mut T result = value;
                 return ++result;
             }
             int32 Main() { return 42; }
             """;
         var compilation = Compilation.Create(SyntaxTree.Parse(source));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3007"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(global::System.Linq.Enumerable.Single(program.Functions,
+            static function => function.Name == "Value.op_Increment").NoFailureProof, Is.False);
     }
 
     [Test]
@@ -350,7 +355,7 @@ public sealed class NominalUpdateTests
             unique struct Owner {
                 public mut Value Item;
                 public Owner() { Item = new Value(1); }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() {
                 require Holder.TryCreate(out var holder);
@@ -373,7 +378,7 @@ public sealed class NominalUpdateTests
             unique struct Owner {
                 public mut Value Item;
                 public Owner() { Item = new Value(40); }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() {
                 mut Owner owner = new Owner();
@@ -415,7 +420,7 @@ public sealed class NominalUpdateTests
             }));
         }
         Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
-            Functions = program.Functions.SetItem(index, function with { IsNoThrow = true }),
+            Functions = program.Functions.SetItem(index, function with { NoFailureProof = true }),
         }));
         var operatorIndex = Enumerable.Range(0, program.Functions.Length)
             .Single(i => program.Functions[i].Name == "Value.op_Increment");
@@ -529,7 +534,7 @@ public sealed class NominalUpdateTests
         }
         string[] exports = exportOperator ? ["Next", "Value.op_Increment"] : ["Next"];
         var original = ModuleCompiler.CreateProducer(CompileLibrary(library, policy), exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(92));
         var stale = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));

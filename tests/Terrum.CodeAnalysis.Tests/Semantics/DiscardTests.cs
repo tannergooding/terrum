@@ -97,12 +97,12 @@ public sealed class DiscardTests
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void DiscardDoesNotHideNonconstantCheckedFailureFromNoThrow(BoundRuntimePolicy policy)
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] void Check(int32 divisor) { _ = int32(42) / divisor; }
-            int32 Main() { return 42; }
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+             void Check(int32 divisor) { _ = int32(42) / divisor; }
             """), policy);
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,static diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Check");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]

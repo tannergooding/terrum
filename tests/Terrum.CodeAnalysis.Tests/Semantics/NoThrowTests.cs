@@ -11,14 +11,14 @@ namespace Terrum.CodeAnalysis.Tests.Semantics;
 
 public sealed class NoThrowTests
 {
-    private static BoundProgram MarkNoThrow(BoundProgram program, params string[] functionNames)
+    private static BoundProgram MarkNoFailureProof(BoundProgram program, params string[] functionNames)
     {
         var functions = program.Functions;
         for (var index = 0; index < functions.Length; index++)
         {
             if (functionNames.Length == 0 || functionNames.Contains(functions[index].Name, StringComparer.Ordinal))
             {
-                functions = functions.SetItem(index, functions[index] with { IsNoThrow = true });
+                functions = functions.SetItem(index, functions[index] with { NoFailureProof = true });
             }
         }
         return program with { Functions = functions };
@@ -101,7 +101,7 @@ public sealed class NoThrowTests
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))());
+        var program = MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))());
         SemanticVerifier.VerifyLibrary(program);
     }
     [TestCase("int32","1 + 2",PrimitiveType.Int32,3L)]
@@ -187,7 +187,7 @@ public sealed class NoThrowTests
         var source = $"{resultType} Fold({parameter}) {{ return {expression}; }} {callee}";
         var baseline = Compilation.CreateLibrary(SyntaxTree.Parse(source));
         Assert.That(baseline.HasErrors, Is.False, string.Join(Environment.NewLine, baseline.Diagnostics));
-        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = baseline.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))());
+        var program = MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual6 = baseline.Program; Assert.That(__nunitActual6, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual6!; }))());
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
         var function = global::System.Linq.Enumerable.Single(program.Functions, static function => function.Name == "Fold");
         var result = ((global::System.Func<BoundReturn>)(() => { var __nunitActual7 = global::System.Linq.Enumerable.Single(function.Body.Statements); Assert.That(__nunitActual7, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual7!; }))();
@@ -212,12 +212,12 @@ public sealed class NoThrowTests
         var callee = global::System.Linq.Enumerable.Single(((global::System.Func<BoundProgram>)(() => { var __nunitActual8 = baseline.Program; Assert.That(__nunitActual8, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual8!; }))().Functions);
         var statement = ((global::System.Func<BoundReturn>)(() => { var __nunitActual9 = global::System.Linq.Enumerable.Single(callee.Body.Statements); Assert.That(__nunitActual9, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual9!; }))();
         Assert.That(((global::System.Func<BoundConstant>)(() => { var __nunitActual10 = statement.Value; Assert.That(__nunitActual10, Is.TypeOf<BoundConstant>()); return (BoundConstant)__nunitActual10!; }))().Value, Is.EqualTo(3L));
-        Assert.That(callee.IsNoThrow, Is.False);
+        Assert.That(callee.NoFailureProof, Is.False);
 
         var caller = Compilation.CreateLibrary(SyntaxTree.Parse(
             Callee + " int32 Caller() { return Callee(); }"));
         Assert.That(caller.HasErrors, Is.False, string.Join(Environment.NewLine, caller.Diagnostics));
-        var program = MarkNoThrow(
+        var program = MarkNoFailureProof(
             ((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = caller.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             "Caller");
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
@@ -229,7 +229,7 @@ public sealed class NoThrowTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             "void Check() { require int32(1) == int32(1); }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.VerifyLibrary(MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))()));
+        SemanticVerifier.VerifyLibrary(MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual11 = compilation.Program; Assert.That(__nunitActual11, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual11!; }))()));
     }
     [TestCase("(true && true) == true")]
     [TestCase("(!false) == true")]
@@ -238,7 +238,7 @@ public sealed class NoThrowTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             $"void Check() {{ require {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        SemanticVerifier.VerifyLibrary(MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))()));
+        SemanticVerifier.VerifyLibrary(MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual12 = compilation.Program; Assert.That(__nunitActual12, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual12!; }))()));
     }
     [TestCase("!false",true)]
     [TestCase("!true",false)]
@@ -281,7 +281,7 @@ public sealed class NoThrowTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             $"void Check() {{ require {expression}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))());
+        var program = MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual16 = compilation.Program; Assert.That(__nunitActual16, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual16!; }))());
         if (expected)
         {
             var function = global::System.Linq.Enumerable.Single(program.Functions);
@@ -321,7 +321,7 @@ public sealed class NoThrowTests
         if (code == "TRM3017")
         {
             Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-            var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), "Fold");
+            var program = MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(), "Fold");
             _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
         }
         else
@@ -382,7 +382,7 @@ public sealed class NoThrowTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
             $"void Check() {{ require {comparison}; }}"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))());
+        var program = MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual26 = compilation.Program; Assert.That(__nunitActual26, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual26!; }))());
         if (expected)
         {
             var function = global::System.Linq.Enumerable.Single(program.Functions);
@@ -472,7 +472,7 @@ public sealed class NoThrowTests
         Assert.That(baseline.HasErrors, Is.False, string.Join(Environment.NewLine, baseline.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual32 = baseline.Program; Assert.That(__nunitActual32, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual32!; }))();
         var index = program.Functions.IndexOf(program.Functions.Single(static function => function.Name == "F"));
-        var forged = program with { Functions = program.Functions.SetItem(index, program.Functions[index] with { IsNoThrow = true }) };
+        var forged = program with { Functions = program.Functions.SetItem(index, program.Functions[index] with { NoFailureProof = true }) };
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(forged))!;
         _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitCode(forged, NativeRuntimePolicy.FailFast))!;
     }
@@ -483,7 +483,7 @@ public sealed class NoThrowTests
         var compilation = Compilation.Create(SyntaxTree.Parse("int32 Main() { " + body + " }"),
             [new HostBuffer("Data", PrimitiveType.Int32, [42], true)]);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
-        var program = MarkNoThrow(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))());
+        var program = MarkNoFailureProof(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = compilation.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))());
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program));
     }
 

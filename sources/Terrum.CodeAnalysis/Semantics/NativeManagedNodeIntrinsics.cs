@@ -39,7 +39,7 @@ internal static class NativeManagedNodeIntrinsics
             || function.DeclaringStruct != expected.DeclaringStruct
             || function.IsExternal || function.IsPrivate || !function.IsInternal
             || function.IsConstructor || function.IsCleanup || function.IsStatic != expected.IsStatic
-            || function.IsNoThrow != expected.IsNoThrow || function.DoesNotReturn
+            || function.NoFailureProof != expected.NoFailureProof || function.DoesNotReturn
             || function.Body.Statements.IsDefault || !function.Body.Statements.IsEmpty)
         {
             return false;
@@ -66,7 +66,7 @@ internal static class NativeManagedNodeIntrinsics
             DeclaringStruct = typeName,
             IsStatic = intrinsic is BoundIntrinsic.NodeTryCreate or BoundIntrinsic.NodeCollect,
             IsInternal = true,
-            IsNoThrow = intrinsic is not BoundIntrinsic.NodeTryCreate,
+            NoFailureProof = intrinsic is not BoundIntrinsic.NodeTryCreate,
             Intrinsic = intrinsic,
         };
 }

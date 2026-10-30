@@ -214,7 +214,7 @@ public sealed class UpdateExpressionTests
             unique struct Owner {
                 public mut int32 Value;
                 public Owner(int32 initial) { Value = initial; }
-                [NoThrow] [Cleanup] public void Close() { Host.Trace[0] = 1; }
+                 [Cleanup] public void Close() { Host.Trace[0] = 1; }
             }
             int32 Main() {
                 mut Owner owner = new Owner(int32.MaxValue);
@@ -249,14 +249,15 @@ public sealed class UpdateExpressionTests
     [Test]
     public void NoThrowCannotPromiseAnUnprovenUpdate()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] int32 Next(int32 initial) {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+             int32 Next(int32 initial) {
                 mut int32 value = initial;
                 return value++;
             }
-            int32 Main() { return 42; }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,item => item.Code == "TRM3017"),Is.True);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Next");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase("holder.Value++;")]
     [TestCase("holder.Item++;")]
@@ -361,7 +362,7 @@ public sealed class UpdateExpressionTests
             "public int32 Next(int32 input) { mut int32 value = input; return value++; }"));
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = compilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), ["Next"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 42);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));

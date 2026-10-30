@@ -415,7 +415,7 @@ internal sealed partial class Binder
                     importedFunction.ReturnType, parameters.ToImmutable(),
                     null, null, _trees[0], importedFunction.DeclaringStruct,
                     importedFunction.IsConstructor, false, false, false,
-                    importedFunction.IsStatic, importedFunction.IsNoThrow,
+                    importedFunction.IsStatic, importedFunction.NoFailureProof,
                     importedFunction.DoesNotReturn, importedFunction) {
                     IsCleanup = function.IsCleanup,
                     IsOperator = function.IsOperator,
@@ -638,7 +638,7 @@ internal sealed partial class Binder
                 _signatures.Add(new Signature(intrinsic.Name, intrinsic.ReturnType, [.. parameters],
                     null, null, _trees[0], NativeBufferIntrinsics.TypeName, false,
                     false, true, intrinsic.Variables[0].IsMutable && !intrinsic.IsStatic,
-                    intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
+                    intrinsic.IsStatic, intrinsic.NoFailureProof, false, intrinsic));
             }
         }
         if (_usesManagedNode)
@@ -655,7 +655,7 @@ internal sealed partial class Binder
                     .Select(static variable => new Parameter(variable.Name, variable.Type, default, variable.IsOut));
                 _signatures.Add(new Signature(intrinsic.Name, intrinsic.ReturnType, [.. parameters],
                     null, null, _trees[0], intrinsic.DeclaringStruct, false,
-                    false, true, false, intrinsic.IsStatic, intrinsic.IsNoThrow, false, intrinsic));
+                    false, true, false, intrinsic.IsStatic, intrinsic.NoFailureProof, false, intrinsic));
             }
         }
         DeclareClassFactories();
@@ -826,7 +826,7 @@ internal sealed partial class Binder
                 IsInternal = signature.IsInternal,
                 IsStatic = signature.IsStatic,
                 IsOperator = signature.IsOperator,
-                IsNoThrow = signature.IsNoThrow,
+                NoFailureProof = signature.NoFailureProof,
                 RequiresUnsafeCaller = signature.RequiresUnsafeCaller,
                 DeclaredRequiresUnsafeCaller = signature.DeclaredRequiresUnsafeCaller,
                 NativeFunctionPointerType = signature.NativeFunctionPointerType,
@@ -10305,7 +10305,7 @@ internal sealed partial class Binder
 
     private sealed record Signature(string Name, PrimitiveType ReturnType, ImmutableArray<Parameter> Parameters,
         SyntaxNode? Body, SyntaxNode? Declaration, SyntaxTree Tree, string? StructName, bool IsConstructor, bool IsPrivate,
-        bool IsInternal, bool IsMutable, bool IsStatic, bool IsNoThrow, bool DoesNotReturn, BoundFunction? External = null)
+        bool IsInternal, bool IsMutable, bool IsStatic, bool NoFailureProof, bool DoesNotReturn, BoundFunction? External = null)
     {
         internal string? PropertyName { get; init; }
         internal bool IsCleanup { get; init; }

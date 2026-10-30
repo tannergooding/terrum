@@ -10,6 +10,7 @@ using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Semantics;
 using NUnit.Framework;
 
 using Terrum.CodeAnalysis.Tests.Infrastructure;
@@ -414,7 +415,7 @@ public sealed class NativeReadonlyBufferViewTests
             unique struct Index {
                 private OwnedInt32Buffer _words;
                 public Index(OwnedInt32Buffer words) { _words = move words; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
                 public int32 Find() {
                     ReadonlyInt32BufferView starts = _words.Slice(0, _words.Count);
                     return starts.Read(0) + starts.Read(1);
@@ -450,7 +451,7 @@ public sealed class NativeReadonlyBufferViewTests
             unique struct Index {
                 private OwnedInt32Buffer _starts;
                 public Index(OwnedInt32Buffer starts) { _starts = move starts; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
                 public int32 Find() {
                     ReadonlyInt32BufferView starts = _starts[..];
                     return starts.Read(0);
@@ -486,7 +487,7 @@ public sealed class NativeReadonlyBufferViewTests
             unique struct Index {
                 private OwnedInt32Buffer _starts;
                 public Index(OwnedInt32Buffer starts) { _starts = move starts; }
-                [NoThrow] [Cleanup] public void Close() {}
+                 [Cleanup] public void Close() {}
                 public int32 Steal(Index owner) {
                     ReadonlyInt32BufferView starts = owner._starts.Slice(0, 1);
                     Index moved = move owner;
@@ -662,15 +663,15 @@ public sealed class NativeReadonlyBufferViewTests
     [Test]
     public void SliceBoundsAndReadsCannotForgeNoThrow()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
-            [NoThrow] int32 Read(OwnedInt32Buffer buffer) {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+             int32 Read(OwnedInt32Buffer buffer) {
                 ReadonlyInt32BufferView view = buffer.Slice(0, 1);
                 return view.Read(0);
             }
-            int32 Main() { return 42; }
             """));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
-        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Read");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]

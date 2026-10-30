@@ -12,6 +12,7 @@ using Terrum.CodeAnalysis.Syntax;
 using NUnit.Framework;
 
 using Terrum.CodeAnalysis.Tests.Infrastructure;
+using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Native.Ownership;
 
@@ -78,8 +79,13 @@ public sealed class NativeOwnedBufferTests
             intrinsicCount++;
             var emitted = code.Functions[6 + index];
             Assert.That(emitted.End, Is.InRange(emitted.Start + 1, code.Code.Length));
-            Assert.That(code.Code[emitted.End - 2], Is.EqualTo(0x5D));
-            Assert.That(code.Code[emitted.End - 1], Is.EqualTo(0xC3));
+            var epilogueOffset = emitted.End - (policy == BoundRuntimePolicy.CheckedExceptions ? 3 : 2);
+            Assert.That(code.Code[epilogueOffset], Is.EqualTo(0x5D));
+            Assert.That(code.Code[epilogueOffset + 1], Is.EqualTo(0xC3));
+            if (policy == BoundRuntimePolicy.CheckedExceptions)
+            {
+                Assert.That(code.Code[emitted.End - 1], Is.EqualTo(0x90));
+            }
         }
         Assert.That(intrinsicCount, Is.EqualTo(7));
     }
@@ -322,15 +328,24 @@ public sealed class NativeOwnedBufferTests
             """));
         Assert.That(global::System.Linq.Enumerable.Any(result.Diagnostics,diagnostic => diagnostic.Code == "TRM3003"),Is.True);
     }
-    [TestCase("struct Copy { public OwnedInt32Buffer Value; }","TRM3023")]
-    [TestCase("[NoThrow] int32 Get(OwnedInt32Buffer value) { return value.Read(0); }","TRM3017")]
-    [TestCase("[NoThrow] bool Make(out OwnedInt32Buffer value) { return OwnedInt32Buffer.TryCreate(1, out value); }","TRM3017")]
-    public void NativeBufferOwnershipAndEffectsAreChecked(string declaration, string code)
+    [Test]
+    public void NativeBufferCannotBeCopiedAsAField()
     {
-        var compilation = Compilation.Create(SyntaxTree.Parse(declaration
-            + " int32 Main() { return 0; }"));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == code),Is.True);
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "struct Copy { public OwnedInt32Buffer Value; } int32 Main() { return 0; }"));
+        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,
+            static diagnostic => diagnostic.Code == "TRM3023"), Is.True);
         Assert.That(compilation.Program, Is.Null);
+    }
+
+    [TestCase("int32 Get(OwnedInt32Buffer value) { return value.Read(0); }", "Get")]
+    [TestCase("bool Make(out OwnedInt32Buffer value) { return OwnedInt32Buffer.TryCreate(1, out value); }", "Make")]
+    public void NativeBufferOperationsCannotForgeNoThrow(string declaration, string functionName)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(declaration));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, functionName);
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
@@ -385,7 +400,7 @@ public sealed class NativeOwnedBufferTests
         var intrinsic = global::System.Linq.Enumerable.Single(program.Functions, function => function.Intrinsic == BoundIntrinsic.BufferRead);
         var index = program.Functions.IndexOf(intrinsic);
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
-            Functions = program.Functions.SetItem(index, intrinsic with { IsNoThrow = true }),
+            Functions = program.Functions.SetItem(index, intrinsic with { NoFailureProof = true }),
         }))!;
         _ = Assert.Throws<ArgumentException>(() => SemanticVerifier.Verify(program with {
             Functions = program.Functions.SetItem(index, intrinsic with { Intrinsic = BoundIntrinsic.BufferSet }),

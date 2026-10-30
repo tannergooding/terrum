@@ -2489,15 +2489,15 @@ public static partial class SemanticVerifier
     }
 
     internal static bool RequiresNoFailureProof(BoundFunction function) =>
-        function.IsNoThrow || (!function.IsExternal && function.NativeFunctionPointerType is not null);
+        function.NoFailureProof || (!function.IsExternal && function.NativeFunctionPointerType is not null);
 
     internal static bool ProvidesNoFailureGuarantee(BoundFunction function) =>
-        function.IsNoThrow || function.NativeFunctionPointerType is not null;
+        function.NoFailureProof || function.NativeFunctionPointerType is not null;
 
     // Native exception unwinding remains a separate failure edge.
     internal static bool CanCallWithoutTerrumFailure(BoundFunction caller, BoundFunction target) =>
         ProvidesNoFailureGuarantee(target)
-        || (!caller.IsNoThrow && caller.NativeFunctionPointerType is not null
+        || (!caller.NoFailureProof && caller.NativeFunctionPointerType is not null
             && (target.DirectNativeImport is not null || target.NativeVTableMethod is not null));
 
     private static bool Statement(BoundStatement statement, InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
@@ -5945,6 +5945,279 @@ public static partial class SemanticVerifier
         return expression;
     }
 
+    // Keep long left-associated operators off the verifier's recursive call stack.
+    private const int RecursiveBinaryChainLimit = 16;
+
+    private static bool TryEvaluateLongLeftBinaryChain(
+        BoundBinary root,
+        InitializationState initialized,
+        uint[] fieldMasks,
+        HashSet<int> declarations,
+        BoundFunction function,
+        BoundProgram program,
+        ref int remaining,
+        int depth,
+        FailureEdges? failures,
+        BoundBinary? cleanupCounterStep)
+    {
+        var current = root;
+        var chainLength = 1;
+        while (chainLength < RecursiveBinaryChainLimit
+            && current.Operator is not (TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
+            && current.Left is BoundBinary left
+            && left.Operator is not (TokenKind.AmpersandAmpersand or TokenKind.PipePipe))
+        {
+            current = left;
+            chainLength++;
+        }
+        if (chainLength < RecursiveBinaryChainLimit
+            || root.Operator is TokenKind.AmpersandAmpersand or TokenKind.PipePipe)
+        {
+            return false;
+        }
+
+        var chain = new BoundBinary[chainLength];
+        current = root;
+        for (var index = 0; index < chain.Length; index++)
+        {
+            chain[index] = current;
+            if (index + 1 < chain.Length)
+            {
+                current = (BoundBinary)current.Left;
+            }
+        }
+
+        for (var index = 1; index < chainLength; index++)
+        {
+            Count(ref remaining, depth + index);
+        }
+
+        var completes = EvaluateExpression(chain[^1].Left, initialized,
+            fieldMasks, declarations, function, program, ref remaining,
+            depth + chainLength, failures);
+        for (var index = chainLength - 1; index >= 0; index--)
+        {
+            var binary = chain[index];
+            var rightDepth = depth + index + 1;
+            var rightCompletes = completes && EvaluateExpression(binary.Right,
+                initialized, fieldMasks, declarations, function, program,
+                ref remaining, rightDepth, failures);
+            if (!completes)
+            {
+                ValidateUnreachableExpression(binary.Right, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, rightDepth);
+            }
+            completes &= rightCompletes;
+            VerifyBinaryOperation(binary, completes, initialized, fieldMasks,
+                function, program, failures, cleanupCounterStep);
+        }
+        return true;
+    }
+
+    private static bool TryGetLongLeftLogicalChain(BoundBinary root, out BoundBinary[] chain)
+    {
+        chain = [];
+        if (root.Operator is not (TokenKind.AmpersandAmpersand or TokenKind.PipePipe))
+        {
+            return false;
+        }
+
+        var current = root;
+        var chainLength = 1;
+        while (chainLength < RecursiveBinaryChainLimit
+            && current.Left is BoundBinary left
+            && left.Operator == root.Operator)
+        {
+            current = left;
+            chainLength++;
+        }
+        if (chainLength < RecursiveBinaryChainLimit)
+        {
+            return false;
+        }
+
+        chain = new BoundBinary[chainLength];
+        current = root;
+        for (var index = 0; index < chain.Length; index++)
+        {
+            chain[index] = current;
+            if (index + 1 < chain.Length)
+            {
+                current = (BoundBinary)current.Left;
+            }
+        }
+        return true;
+    }
+
+    private static bool TryEvaluateLongLeftLogicalChain(
+        BoundBinary root,
+        InitializationState initialized,
+        uint[] fieldMasks,
+        HashSet<int> declarations,
+        BoundFunction function,
+        BoundProgram program,
+        ref int remaining,
+        int depth,
+        FailureEdges? failures,
+        BoundBinary? cleanupCounterStep)
+    {
+        if (!TryGetLongLeftLogicalChain(root, out var chain))
+        {
+            return false;
+        }
+
+        for (var index = 1; index < chain.Length; index++)
+        {
+            Count(ref remaining, depth + index);
+        }
+
+        var beforeLeft = initialized.Clone();
+        var beforeMasks = (uint[])fieldMasks.Clone();
+        var leftCompletes = EvaluateExpression(chain[^1].Left, initialized,
+            fieldMasks, declarations, function, program, ref remaining,
+            depth + chain.Length, failures);
+        for (var index = chain.Length - 1; index >= 0; index--)
+        {
+            var binary = chain[index];
+            var evaluateWhenTrue = binary.Operator == TokenKind.AmpersandAmpersand;
+            var rightState = Outcome(binary.Left, beforeLeft, evaluateWhenTrue, ref remaining);
+            var rightMasks = (uint[])beforeMasks.Clone();
+            MarkOutMasks(rightState, rightMasks, function, program);
+            var evaluates = leftCompletes
+                && CanCompleteAs(binary.Left, evaluateWhenTrue, beforeLeft,
+                    program, ref remaining, depth + index + 1);
+            var rightCompletes = evaluates && EvaluateExpression(binary.Right,
+                rightState, rightMasks, declarations, function, program,
+                ref remaining, depth + index + 1, failures);
+            if (!evaluates)
+            {
+                ValidateUnreachableExpression(binary.Right, rightState, rightMasks,
+                    declarations, function, program, ref remaining, depth + index + 1);
+            }
+
+            var skippedState = Outcome(binary.Left, beforeLeft, !evaluateWhenTrue, ref remaining);
+            var skippedMasks = (uint[])beforeMasks.Clone();
+            MarkOutMasks(skippedState, skippedMasks, function, program);
+            var skips = leftCompletes
+                && CanCompleteAs(binary.Left, !evaluateWhenTrue, beforeLeft,
+                    program, ref remaining, depth + index + 1);
+            if (rightCompletes || skips)
+            {
+                for (var variable = 0; variable < initialized.Length; variable++)
+                {
+                    initialized.SetPossibilities(variable, !rightCompletes
+                        ? skippedState.Possibilities(variable)
+                        : !skips ? rightState.Possibilities(variable)
+                        : (byte)(rightState.Possibilities(variable) | skippedState.Possibilities(variable)));
+                    fieldMasks[variable] = !rightCompletes ? skippedMasks[variable]
+                        : !skips ? rightMasks[variable]
+                        : rightMasks[variable] & skippedMasks[variable];
+                    initialized.SetPossibleFieldMask(variable, !rightCompletes
+                        ? skippedState.PossibleFieldMask(variable)
+                        : !skips ? rightState.PossibleFieldMask(variable)
+                        : rightState.PossibleFieldMask(variable) | skippedState.PossibleFieldMask(variable));
+                    if (rightCompletes && skips)
+                    {
+                        _ = initialized.MergeFieldPlaceGenerations(
+                            variable, rightState, skippedState);
+                        _ = initialized.MergeNestedOwnerStates(
+                            variable, rightState, skippedState);
+                    }
+                    else if (rightCompletes)
+                    {
+                        _ = initialized.CopyFieldPlaceGenerations(variable, rightState);
+                        _ = initialized.CopyNestedOwnerStates(variable, rightState);
+                    }
+                    else if (skips)
+                    {
+                        _ = initialized.CopyFieldPlaceGenerations(variable, skippedState);
+                        _ = initialized.CopyNestedOwnerStates(variable, skippedState);
+                    }
+                }
+                _ = initialized.MergeNativeOutputState(
+                    rightState, rightCompletes, skippedState, skips);
+            }
+            leftCompletes = rightCompletes || skips;
+            VerifyBinaryOperation(binary, false, initialized, fieldMasks,
+                function, program, failures, cleanupCounterStep);
+        }
+        return true;
+    }
+
+    private static void VerifyBinaryOperation(
+        BoundBinary binary,
+        bool binaryCompletes,
+        InitializationState initialized,
+        uint[] fieldMasks,
+        BoundFunction function,
+        BoundProgram program,
+        FailureEdges? failures,
+        BoundBinary? cleanupCounterStep)
+    {
+        var operands = binary.Left.Type == binary.Right.Type
+            && binary.Left.Type != PrimitiveType.Void;
+        var integerOperands = PrimitiveTypeFacts.IsIntegerOrWide(binary.Left.Type);
+        var floatingOperands = PrimitiveTypeFacts.IsFloating(binary.Left.Type);
+        var codeUnitOperands = PrimitiveTypeFacts.IsCodeUnitOrRune(binary.Left.Type);
+        var floatingArithmetic = floatingOperands && (binary.Operator is TokenKind.Plus
+            or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
+        var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus
+            or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
+        var integerOverflowOperation = integerOperands
+            && (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star);
+        if (binary.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
+            or BoundIntegerOverflowBehavior.Wrapping)
+            || (binary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping
+                && !integerOverflowOperation))
+        {
+            throw Invalid();
+        }
+        var checkedIntegerOperation = (integerOverflowOperation
+                && binary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
+            || (integerOperands && (binary.Operator is TokenKind.Slash or TokenKind.Percent
+                or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned));
+        var binaryValid = binary.Operator switch {
+            TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash
+                or TokenKind.Percent =>
+                    operands && (integerArithmetic || floatingArithmetic)
+                        && binary.Type == binary.Left.Type,
+            TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned =>
+                integerOperands && PrimitiveTypeFacts.IsIntegerOrWide(binary.Right.Type)
+                    && binary.Type == binary.Left.Type,
+            TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater
+                or TokenKind.GreaterEquals =>
+                    operands && (integerOperands || codeUnitOperands || floatingOperands)
+                        && binary.Type == PrimitiveType.Bool,
+            TokenKind.EqualsEquals or TokenKind.BangEquals =>
+                operands && (integerOperands || codeUnitOperands
+                    || binary.Left.Type == PrimitiveType.Bool || floatingOperands
+                    || binary.Left.Type == PrimitiveType.NativeRawPointer)
+                    && binary.Type == PrimitiveType.Bool,
+            TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret =>
+                operands && (integerOperands || binary.Left.Type == PrimitiveType.Bool)
+                    && binary.Type == binary.Left.Type,
+            TokenKind.AmpersandAmpersand or TokenKind.PipePipe =>
+                operands && binary.Left.Type == PrimitiveType.Bool
+                    && binary.Type == PrimitiveType.Bool,
+            _ => false,
+        };
+        if (!binaryValid)
+        {
+            throw Invalid();
+        }
+        var verifiedNoFailureArithmetic = RequiresNoFailureProof(function)
+            && checkedIntegerOperation && ReferenceEquals(binary, cleanupCounterStep);
+        if (RequiresNoFailureProof(function) && checkedIntegerOperation
+            && binaryCompletes && !verifiedNoFailureArithmetic)
+        {
+            throw InvalidNoFailureEffect(function, binary.Span);
+        }
+        if (checkedIntegerOperation && binaryCompletes && !verifiedNoFailureArithmetic)
+        {
+            failures?.Add(initialized, fieldMasks);
+        }
+    }
+
     private static void Expression(BoundExpression expression, InitializationState initialized, uint[] fieldMasks,
         HashSet<int> declarations, BoundFunction function,
         BoundProgram program, ref int remaining, int depth, FailureEdges? failures = null,
@@ -6982,7 +7255,7 @@ public static partial class SemanticVerifier
                     || snapshot.SourceBuffer < 0 || snapshot.SourceBuffer >= program.Buffers.Length
                     || program.Buffers[snapshot.SourceBuffer].Name != "Source"
                     || program.Buffers[snapshot.SourceBuffer].ElementType != PrimitiveType.Char16
-                    || program.Buffers[snapshot.SourceBuffer].IsWritable || function.IsNoThrow)
+                    || program.Buffers[snapshot.SourceBuffer].IsWritable || function.NoFailureProof)
                 {
                     throw InvalidEffect(snapshot.Span, "Ownership");
                 }
@@ -7035,7 +7308,7 @@ public static partial class SemanticVerifier
                         dependencies.Staged.RemoveAt(dependencies.Staged.Count - 1);
                     }
                 }
-                if (function.IsNoThrow)
+                if (function.NoFailureProof)
                 {
                     throw InvalidEffect(spanRead.Span, "Ownership");
                 }
@@ -7044,7 +7317,7 @@ public static partial class SemanticVerifier
             case BoundSpanAdvance advance:
                 if (advance.Type != PrimitiveType.TokenSpan
                     || function.DeclaringStruct != TokenSpanContract.CursorName || function.IsConstructor
-                    || function.IsStatic || !function.Variables[0].IsMutable || function.IsNoThrow
+                    || function.IsStatic || !function.Variables[0].IsMutable || function.NoFailureProof
                     || advance.View is not BoundFieldRead { Receiver: BoundRead { Variable: 0 }, Field: 0 })
                 {
                     throw InvalidEffect(advance.Span, "Ownership");
@@ -7512,6 +7785,18 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundBinary binary:
+                if (TryEvaluateLongLeftLogicalChain(binary, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth,
+                    failures, cleanupCounterStep))
+                {
+                    break;
+                }
+                if (TryEvaluateLongLeftBinaryChain(binary, initialized, fieldMasks,
+                    declarations, function, program, ref remaining, depth,
+                    failures, cleanupCounterStep))
+                {
+                    break;
+                }
                 var beforeLeft = initialized.Clone();
                 var leftCompletes = EvaluateExpression(binary.Left, initialized, fieldMasks,
                     declarations, function, program, ref remaining, depth + 1, failures);
@@ -7586,64 +7871,8 @@ public static partial class SemanticVerifier
                     }
                     binaryCompletes = leftCompletes && rightCompletes;
                 }
-                var operands = binary.Left.Type == binary.Right.Type && binary.Left.Type != PrimitiveType.Void;
-                var integerOperands = PrimitiveTypeFacts.IsIntegerOrWide(binary.Left.Type);
-                var floatingOperands = PrimitiveTypeFacts.IsFloating(binary.Left.Type);
-                var codeUnitOperands = PrimitiveTypeFacts.IsCodeUnitOrRune(binary.Left.Type);
-                var floatingArithmetic = floatingOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
-                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
-                var integerArithmetic = integerOperands && (binary.Operator is TokenKind.Plus or TokenKind.Minus
-                    or TokenKind.Star or TokenKind.Slash or TokenKind.Percent);
-                var integerOverflowOperation = integerOperands
-                    && (binary.Operator is TokenKind.Plus or TokenKind.Minus or TokenKind.Star);
-                if (binary.OverflowBehavior is not (BoundIntegerOverflowBehavior.Checked
-                    or BoundIntegerOverflowBehavior.Wrapping)
-                    || (binary.OverflowBehavior == BoundIntegerOverflowBehavior.Wrapping
-                        && !integerOverflowOperation))
-                {
-                    throw Invalid();
-                }
-                var checkedIntegerOperation = (integerOverflowOperation
-                        && binary.OverflowBehavior == BoundIntegerOverflowBehavior.Checked)
-                    || (integerOperands && (binary.Operator is TokenKind.Slash or TokenKind.Percent
-                        or TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned));
-                var binaryValid = binary.Operator switch {
-                    TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Slash or TokenKind.Percent =>
-                        operands && (integerArithmetic || floatingArithmetic)
-                            && binary.Type == binary.Left.Type,
-                    TokenKind.ShiftLeft or TokenKind.ShiftRight or TokenKind.ShiftRightUnsigned =>
-                        integerOperands
-                            && PrimitiveTypeFacts.IsIntegerOrWide(binary.Right.Type)
-                            && binary.Type == binary.Left.Type,
-                    TokenKind.Less or TokenKind.LessEquals or TokenKind.Greater or TokenKind.GreaterEquals =>
-                        operands && (integerOperands || codeUnitOperands || floatingOperands)
-                            && binary.Type == PrimitiveType.Bool,
-                    TokenKind.EqualsEquals or TokenKind.BangEquals =>
-                        operands && (integerOperands || codeUnitOperands || binary.Left.Type == PrimitiveType.Bool
-                            || floatingOperands || binary.Left.Type == PrimitiveType.NativeRawPointer)
-                            && binary.Type == PrimitiveType.Bool,
-                    TokenKind.Ampersand or TokenKind.Pipe or TokenKind.Caret =>
-                        operands && (integerOperands || binary.Left.Type == PrimitiveType.Bool)
-                            && binary.Type == binary.Left.Type,
-                    TokenKind.AmpersandAmpersand or TokenKind.PipePipe =>
-                        operands && binary.Left.Type == PrimitiveType.Bool && binary.Type == PrimitiveType.Bool,
-                    _ => false,
-                };
-                if (!binaryValid)
-                {
-                    throw Invalid();
-                }
-                var verifiedNoThrowArithmetic = RequiresNoFailureProof(function) && checkedIntegerOperation
-                    && ReferenceEquals(binary, cleanupCounterStep);
-                if (RequiresNoFailureProof(function) && checkedIntegerOperation
-                    && binaryCompletes && !verifiedNoThrowArithmetic)
-                {
-                    throw InvalidNoFailureEffect(function, binary.Span);
-                }
-                if (checkedIntegerOperation && binaryCompletes && !verifiedNoThrowArithmetic)
-                {
-                    failures?.Add(initialized, fieldMasks);
-                }
+                VerifyBinaryOperation(binary, binaryCompletes, initialized,
+                    fieldMasks, function, program, failures, cleanupCounterStep);
                 break;
             case BoundConditional conditional:
                 if (conditional.Condition is null || conditional.WhenTrue is null || conditional.WhenFalse is null
@@ -8823,7 +9052,7 @@ public static partial class SemanticVerifier
             || function.Variables[function.ParameterCount - 1] is not { IsOut: true, IsMutable: false }
             || function.Variables[function.ParameterCount] is not { IsOut: false, IsMutable: false }
             || function.Variables[function.ParameterCount].Type != type
-            || function.IsNoThrow != constructor.IsNoThrow
+            || function.NoFailureProof != constructor.NoFailureProof
             || function.RequiresUnsafeCaller != constructor.RequiresUnsafeCaller)
         {
             throw Invalid();
@@ -9023,6 +9252,40 @@ public static partial class SemanticVerifier
             return initialized.Clone();
         }
         Count(ref remaining, 0);
+        if (expression is BoundBinary logical
+            && TryGetLongLeftLogicalChain(logical, out var chain))
+        {
+            for (var index = 1; index < chain.Length; index++)
+            {
+                Count(ref remaining, 0);
+            }
+
+            var continueResult = logical.Operator == TokenKind.AmpersandAmpersand;
+            var stopResult = !continueResult;
+            var logicalState = initialized;
+            InitializationState? stopState = null;
+            for (var index = chain.Length; index >= 0; index--)
+            {
+                var operand = index == chain.Length
+                    ? chain[^1].Left
+                    : chain[index].Right;
+                if (result == stopResult
+                    && CanBe(operand, stopResult, ref remaining, logicalState))
+                {
+                    var operandStopState = Outcome(operand, logicalState, stopResult, ref remaining);
+                    stopState = stopState is null
+                        ? operandStopState
+                        : Combine(stopState, true, operandStopState, true);
+                }
+                if (!CanBe(operand, continueResult, ref remaining, logicalState))
+                {
+                    return result == stopResult ? stopState ?? initialized.Clone()
+                        : initialized.Clone();
+                }
+                logicalState = Outcome(operand, logicalState, continueResult, ref remaining);
+            }
+            return result == continueResult ? logicalState : stopState ?? initialized.Clone();
+        }
         if (expression is BoundUnary { Operator: TokenKind.Bang } unary)
         {
             return Outcome(unary.Operand, initialized, !result, ref remaining);
@@ -9688,6 +9951,41 @@ public static partial class SemanticVerifier
             return true;
         }
         Count(ref remaining, depth);
+        if (expression is BoundBinary logical
+            && TryGetLongLeftLogicalChain(logical, out var chain))
+        {
+            for (var index = 1; index < chain.Length; index++)
+            {
+                Count(ref remaining, depth + index);
+            }
+
+            var continueWhenTrue = logical.Operator == TokenKind.AmpersandAmpersand;
+            var continueResult = continueWhenTrue;
+            var stopResult = !continueResult;
+            var state = initialized;
+            for (var index = chain.Length; index >= 0; index--)
+            {
+                var operand = index == chain.Length
+                    ? chain[^1].Left
+                    : chain[index].Right;
+                var operandDepth = index == chain.Length
+                    ? depth + chain.Length
+                    : depth + index + 1;
+                if (result == stopResult
+                    && CanCompleteAs(operand, stopResult, state, program,
+                        ref remaining, operandDepth))
+                {
+                    return true;
+                }
+                if (!CanCompleteAs(operand, continueResult, state, program,
+                    ref remaining, operandDepth))
+                {
+                    return false;
+                }
+                state = Outcome(operand, state, continueResult, ref remaining);
+            }
+            return result == continueResult;
+        }
         switch (expression)
         {
             case BoundUnsafeExpression unsafeExpression:
@@ -9778,6 +10076,35 @@ public static partial class SemanticVerifier
     private static bool CanBe(BoundExpression expression, bool result, ref int remaining,
         InitializationState initialized)
     {
+        if (expression is BoundBinary logical
+            && TryGetLongLeftLogicalChain(logical, out var chain))
+        {
+            for (var index = 0; index < chain.Length; index++)
+            {
+                Count(ref remaining, 0);
+            }
+
+            var continueResult = logical.Operator == TokenKind.AmpersandAmpersand;
+            var stopResult = !continueResult;
+            var state = initialized;
+            for (var index = chain.Length; index >= 0; index--)
+            {
+                var operand = index == chain.Length
+                    ? chain[^1].Left
+                    : chain[index].Right;
+                if (result == stopResult
+                    && CanBe(operand, stopResult, ref remaining, state))
+                {
+                    return true;
+                }
+                if (!CanBe(operand, continueResult, ref remaining, state))
+                {
+                    return false;
+                }
+                state = Outcome(operand, state, continueResult, ref remaining);
+            }
+            return result == continueResult;
+        }
         if (expression is BoundIsNull nullTest
             && KnownOptionalPresence(nullTest.Value, initialized, ref remaining) is bool nullPresence)
         {
@@ -9964,6 +10291,42 @@ public static partial class SemanticVerifier
             return (facts & possible) != 0;
         }
 
+        if (expression is BoundBinary logical
+            && TryGetLongLeftLogicalChain(logical, out var chain))
+        {
+            for (var index = 0; index < chain.Length; index++)
+            {
+                Count(ref remaining, 0);
+            }
+
+            var continueResult = logical.Operator == TokenKind.AmpersandAmpersand;
+            var stopResult = !continueResult;
+            var logicalCanBe = true;
+            for (var index = chain.Length; index >= 0; index--)
+            {
+                var operand = index == chain.Length
+                    ? chain[^1].Left
+                    : chain[index].Right;
+                if (result == stopResult
+                    && CanBe(operand, stopResult, ref remaining, remainingCanBeFacts))
+                {
+                    logicalCanBe = true;
+                    break;
+                }
+                if (!CanBe(operand, continueResult, ref remaining, remainingCanBeFacts))
+                {
+                    logicalCanBe = false;
+                    break;
+                }
+                if (index == 0)
+                {
+                    logicalCanBe = result == continueResult;
+                }
+            }
+            remainingCanBeFacts[expression] = (byte)(facts | known | (logicalCanBe ? possible : 0));
+            return logicalCanBe;
+        }
+
         var canBe = expression switch {
             BoundConstant { Type: PrimitiveType.Bool } constant => constant.Value != (result ? 0 : 1),
             BoundUnsafeExpression unsafeExpression =>
@@ -10090,7 +10453,7 @@ public static partial class SemanticVerifier
     }
 
     private static ArgumentException InvalidNoFailureEffect(BoundFunction function, TextSpan span) =>
-        InvalidEffect(span, function.IsNoThrow ? "NoThrow" : "NativeCallable");
+        InvalidEffect(span, function.NoFailureProof ? "NoThrow" : "NativeCallable");
 
     private static NotSupportedException Limit() => new("Bound program exceeds native resource limits.");
 }

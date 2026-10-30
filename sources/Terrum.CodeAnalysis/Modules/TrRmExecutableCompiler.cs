@@ -196,7 +196,7 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            if (function.IsNoThrow)
+            if (function.NoFailureProof)
             {
                 throw Unsupported(
                     $"Function '{function.Name}' carries a retired NoThrow claim.");

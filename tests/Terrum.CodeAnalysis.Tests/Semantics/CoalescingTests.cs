@@ -133,16 +133,16 @@ public sealed class CoalescingTests
     public void KnownCoalescePresencePreservesNestedOutputState(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 42;
                 return null;
             }
-            [NoThrow] bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, init ref<int32> result) {
                 if (!input) { return false; }
                 result = 42;
                 return true;
             }
-            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
                 value = 42;
                 return true;
@@ -167,16 +167,16 @@ public sealed class CoalescingTests
     public void KnownCoalescePresenceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 42;
                 return null;
             }
-            [NoThrow] bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, init ref<int32> result) {
                 if (!input) { return false; }
                 result = 42;
                 return true;
             }
-            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
                 value = 42;
                 return true;
@@ -201,16 +201,16 @@ public sealed class CoalescingTests
     public void KnownPresentCoalesceMakesNullArmInfeasible(NativeRuntimePolicy policy)
     {
         const string source = """
-                [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                 ManagedNode? OptionalFallback(init ref<int32> value) {
                     value = 42;
                     return null;
                 }
-                [NoThrow] bool Identity(bool input, init ref<int32> result) {
+                 bool Identity(bool input, init ref<int32> result) {
                     if (!input) { return false; }
                     result = 42;
                     return true;
                 }
-                [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+                 bool Fill(bool publish, init ref<int32> value) {
                     if (!publish) { return false; }
                     value = 42;
                     return true;
@@ -235,11 +235,11 @@ public sealed class CoalescingTests
     public void KnownInitializationSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] bool Fill(init ref<int32> value) {
+             bool Fill(init ref<int32> value) {
                 value = 42;
                 return true;
             }
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 21;
                 return null;
             }
@@ -263,11 +263,11 @@ public sealed class CoalescingTests
     public void KnownConstantSelectsPresentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
-                [NoThrow] bool Fill(init ref<int32> value) {
+                 bool Fill(init ref<int32> value) {
                     value = 42;
                     return true;
                 }
-                [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                 ManagedNode? OptionalFallback(init ref<int32> value) {
                     value = 21;
                     return null;
                 }
@@ -289,7 +289,7 @@ public sealed class CoalescingTests
     public void KnownUninitializedSelectsAbsentConditionalBeforeCoalescing(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 21;
                 return null;
             }
@@ -311,11 +311,11 @@ public sealed class CoalescingTests
     public void NestedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 42;
                 return null;
             }
-            [NoThrow] bool Fill(init ref<int32> value) {
+             bool Fill(init ref<int32> value) {
                 value = 42;
                 return true;
             }
@@ -336,16 +336,16 @@ public sealed class CoalescingTests
     public void KnownInitializationPrunesInfeasibleSomeBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 42;
                 return null;
             }
-            [NoThrow] bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, init ref<int32> result) {
                 if (!input) { return false; }
                 result = 42;
                 return true;
             }
-            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
                 value = 42;
                 return true;
@@ -373,16 +373,16 @@ public sealed class CoalescingTests
     public void KnownInitializationPrunesInfeasibleNullBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 42;
                 return null;
             }
-            [NoThrow] bool Identity(bool input, init ref<int32> result) {
+             bool Identity(bool input, init ref<int32> result) {
                 if (!input) { return false; }
                 result = 42;
                 return true;
             }
-            [NoThrow] bool Fill(bool publish, init ref<int32> value) {
+             bool Fill(bool publish, init ref<int32> value) {
                 if (!publish) { return false; }
                 value = 42;
                 return true;
@@ -410,11 +410,11 @@ public sealed class CoalescingTests
     public void ChainedKnownPresentCoalesceKeepsFallbackOutputVacant(NativeRuntimePolicy policy)
     {
         const string source = """
-                [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+                 ManagedNode? OptionalFallback(init ref<int32> value) {
                     value = 42;
                     return null;
                 }
-                [NoThrow] bool Fill(init ref<int32> value) {
+                 bool Fill(init ref<int32> value) {
                     value = 42;
                     return true;
                 }
@@ -470,11 +470,11 @@ public sealed class CoalescingTests
     public void ConditionalKnownPresentCoalesceSkipsInfeasibleBooleanArm(NativeRuntimePolicy policy)
     {
         const string source = """
-            [NoThrow] ManagedNode? OptionalFallback(init ref<int32> value) {
+             ManagedNode? OptionalFallback(init ref<int32> value) {
                 value = 42;
                 return null;
             }
-            [NoThrow] bool Fill(init ref<int32> value) {
+             bool Fill(init ref<int32> value) {
                 value = 42;
                 return true;
             }
@@ -655,22 +655,27 @@ public sealed class CoalescingTests
     public void NoThrowChecksPotentiallyActiveFallbackButAllowsTotalOptionalFallback()
     {
         const string safe = """
-            [NoThrow] ManagedNode? Select(ManagedNode? optional) {
+             ManagedNode? Select(ManagedNode? optional) {
                 return optional ?? null;
             }
             int32 Main() { return 42; }
             """;
-        Assert.That(Compilation.Create(SyntaxTree.Parse(safe)).HasErrors, Is.False);
+        var safeCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(safe));
+        Assert.That(safeCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, safeCompilation.Diagnostics));
+        SemanticVerifier.VerifyLibrary(BoundProgramTestHelpers.MarkNoFailureProof(
+            safeCompilation.Program!, "Select"));
 
         const string unsafeSource = """
             ManagedNode? Fail() { require false; return null; }
-            [NoThrow] ManagedNode? Select(ManagedNode? optional) {
+             ManagedNode? Select(ManagedNode? optional) {
                 return optional ?? Fail();
             }
             int32 Main() { return 42; }
             """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(unsafeSource));
-        Assert.That(global::System.Linq.Enumerable.Any(compilation.Diagnostics,diagnostic => diagnostic.Code == "TRM3017"),Is.True);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(unsafeSource));
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "Select");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
 
     [Test]
@@ -785,7 +790,7 @@ public sealed class CoalescingTests
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(library), (BoundRuntimePolicy)policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = compilation.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))(), ["Select"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 47);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));
@@ -794,7 +799,7 @@ public sealed class CoalescingTests
             reference, runtimePolicy: (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(92));
         var linked = ModuleCompiler.Link(consumer, producer);
         Assert.That(NativeEmitter.Emit(linked, policy), Is.Not.Empty);
         Assert.That(NativeJit.Execute(linked, policy), Is.EqualTo(42));

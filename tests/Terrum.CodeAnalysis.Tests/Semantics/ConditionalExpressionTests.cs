@@ -90,7 +90,7 @@ public sealed class ConditionalExpressionTests
     {
         const string Source = """
             [ConstEval] int32 Next(int32 n) { return n + 1; }
-            [NoThrow] T Select<T>(bool first, T left, T right) where T : [Copy] {
+             T Select<T>(bool first, T left, T right) where T : [Copy] {
                 return first ? left : right;
             }
             int32 Main() {
@@ -100,13 +100,14 @@ public sealed class ConditionalExpressionTests
             """;
         Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
-    [TestCase("[NoThrow] int32 F() { return false ? 1 / 0 : 42; }")]
-    [TestCase("[NoThrow] int32 F() { return true ? 42 : Throw(); } int32 Throw() { require false; return 0; }")]
+    [TestCase(" int32 F() { return false ? 1 / 0 : 42; }")]
+    [TestCase(" int32 F() { return true ? 42 : Throw(); } int32 Throw() { require false; return 0; }")]
     public void NoThrowChecksInactiveArm(string source)
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
-        Assert.That(compilation.HasErrors, Is.True);
-        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = BoundProgramTestHelpers.MarkNoFailureProof(compilation.Program!, "F");
+        Assert.Throws<ArgumentException>(() => SemanticVerifier.VerifyLibrary(program));
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
@@ -196,7 +197,7 @@ public sealed class ConditionalExpressionTests
             unique struct Owner {
                 public int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup] public void Close() { }
+                 [Cleanup] public void Close() { }
             }
             int32 Main() {
                 Owner first = new Owner(42);
@@ -235,7 +236,7 @@ public sealed class ConditionalExpressionTests
         Assert.That(library.HasErrors, Is.False, string.Join(Environment.NewLine, library.Diagnostics));
         var producerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual4 = library.Program; Assert.That(__nunitActual4, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual4!; }))();
         var producer = ModuleCompiler.CreateProducer(producerProgram, ["Choose"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
         var forgedOldReader = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forgedOldReader.AsSpan(4, 4), 40);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(forgedOldReader));
@@ -245,7 +246,7 @@ public sealed class ConditionalExpressionTests
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumerProgram = ((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = consumerCompilation.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))();
         var consumer = ModuleCompiler.CreateConsumer(consumerProgram, producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(92));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
 
         var nativeProducer = NativeModuleCompiler.CreateProducer(producerProgram, ["Choose"], "Conditional", policy);

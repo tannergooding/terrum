@@ -3087,11 +3087,11 @@ public static partial class ModuleCompiler
         return found;
     }
 
-    private static bool IsRoleNoThrowIntrinsic(BoundIntrinsic intrinsic) =>
+    private static bool IsRoleNoFailureIntrinsic(BoundIntrinsic intrinsic) =>
         NativeBufferIntrinsics.Functions.Any(function =>
-            function.Intrinsic == intrinsic && function.IsNoThrow)
+            function.Intrinsic == intrinsic && function.NoFailureProof)
         || NativeManagedNodeIntrinsics.Functions.Any(function =>
-            function.Intrinsic == intrinsic && function.IsNoThrow);
+            function.Intrinsic == intrinsic && function.NoFailureProof);
 
     private static bool HasOnlyRevision92NativeOutputDependencyContracts(BoundFunction function)
     {
@@ -4582,7 +4582,7 @@ public static partial class ModuleCompiler
     private static byte[] Write(Module module, BoundProgram program)
     {
         if (program.Functions.Any(static function =>
-            function.IsNoThrow && !IsRoleNoThrowIntrinsic(function.Intrinsic)))
+            function.NoFailureProof && !IsRoleNoFailureIntrinsic(function.Intrinsic)))
         {
             throw new ModuleContractException(
                 "General NoThrow declarations are not supported by structured-module revision 92.");
@@ -5983,7 +5983,7 @@ public static partial class ModuleCompiler
             IsInternal = isInternal,
             IsStatic = isStatic,
             IsOperator = isOperator,
-            IsNoThrow = IsRoleNoThrowIntrinsic(intrinsic),
+            NoFailureProof = IsRoleNoFailureIntrinsic(intrinsic),
             DoesNotReturn = doesNotReturn,
             RequiresUnsafeCaller = requiresUnsafeCaller,
             IsCleanup = isCleanup,
