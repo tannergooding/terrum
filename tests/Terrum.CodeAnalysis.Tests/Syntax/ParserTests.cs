@@ -211,6 +211,44 @@ public sealed class ParserTests
         Assert.That(addition.Children[0], Is.SameAs(cast));
         AssertLossless(tree);
     }
+
+    [Test]
+    public void ParsesAwaitWithPrefixPrecedenceAndNonSymbolicSpacing()
+    {
+        const string Source = """
+            void F() {
+                var first = await ReadAsync() + offset;
+                var second = await (ChooseTask());
+                var third = await move task;
+                var escaped = @await;
+            }
+            """;
+        var tree = SyntaxTree.Parse(Source);
+
+        Assert.That(tree.HasErrors, Is.False, string.Join(Environment.NewLine, tree.Diagnostics));
+        var awaitExpressions = tree.Root.DescendantNodes()
+            .Where(static node => node.Kind == SyntaxKind.UnaryExpression
+                && node.Children[0] is SyntaxTokenElement
+                    { Token.Kind: TokenKind.AwaitKeyword })
+            .ToArray();
+        Assert.That(awaitExpressions, Has.Length.EqualTo(3));
+        Assert.That(((SyntaxNode)awaitExpressions[0].Children[1]).Kind,
+            Is.EqualTo(SyntaxKind.InvocationExpression));
+        Assert.That(((SyntaxNode)awaitExpressions[1].Children[1]).Kind,
+            Is.EqualTo(SyntaxKind.ParenthesizedExpression));
+        var movedTask = (SyntaxNode)awaitExpressions[2].Children[1];
+        Assert.That(movedTask.Kind, Is.EqualTo(SyntaxKind.UnaryExpression));
+        Assert.That(((SyntaxTokenElement)movedTask.Children[0]).Token.Kind,
+            Is.EqualTo(TokenKind.MoveKeyword));
+
+        var addition = tree.Root.DescendantNodes()
+            .Single(static node => node.Kind == SyntaxKind.BinaryExpression);
+        Assert.That(addition.Children[0], Is.SameAs(awaitExpressions[0]));
+        Assert.That(tree.Tokens.Any(static token => token.Kind == TokenKind.Identifier
+            && token.Text == "@await"), Is.True);
+        AssertLossless(tree);
+    }
+
     [TestCase("void F() { require /* \u03B1 */ ready; }")]
     [TestCase("void F() { require TryRead(out var value) && value > 0; }")]
     public void ParsesRequirementsWithoutLosingTriviaOrSourceShape(string source)

@@ -1572,7 +1572,8 @@ internal sealed class Parser
         }
         else if (unaryPrecedence != 0 && unaryPrecedence >= parentPrecedence)
         {
-            var op = Current.Kind == TokenKind.MoveKeyword ? Take() : TakePrefix();
+            var op = Current.Kind is TokenKind.MoveKeyword or TokenKind.AwaitKeyword
+                ? Take() : TakePrefix();
             if (op.Token.Kind is TokenKind.PlusPlus or TokenKind.MinusMinus
                 && ((Current.Kind is TokenKind.Plus or TokenKind.Minus or TokenKind.PlusPlus or TokenKind.MinusMinus
                         && Current.Span.Start == op.Span.End)
@@ -2175,7 +2176,7 @@ internal sealed class Parser
     private static int UnaryPrecedence(TokenKind kind) =>
         kind is TokenKind.Plus or TokenKind.Minus or TokenKind.Star or TokenKind.Bang
             or TokenKind.Tilde or TokenKind.Ampersand or TokenKind.MoveKeyword
-            or TokenKind.PlusPlus or TokenKind.MinusMinus ? 13 : 0;
+            or TokenKind.PlusPlus or TokenKind.MinusMinus or TokenKind.AwaitKeyword ? 13 : 0;
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Non-operator tokens have zero precedence.")]
     private static int BinaryPrecedence(TokenKind kind) => kind switch {
