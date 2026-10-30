@@ -358,6 +358,15 @@ internal sealed partial class PeCompiler
                 case BoundFieldRead field:
                     CollectExpression(field.Receiver, spill);
                     break;
+                case BoundReferenceFormation formation:
+                    CollectExpression(formation.Place, spill);
+                    break;
+                case BoundReferenceReborrow reborrow:
+                    CollectExpression(reborrow.Descriptor, spill);
+                    break;
+                case BoundReferenceRead referenceRead:
+                    CollectExpression(referenceRead.Descriptor, spill);
+                    break;
                 case BoundBufferRead buffer:
                     CollectExpression(buffer.Index, spill);
                     break;

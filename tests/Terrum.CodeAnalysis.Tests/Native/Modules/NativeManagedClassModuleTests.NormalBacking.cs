@@ -1143,6 +1143,32 @@ public sealed partial class NativeManagedClassModuleTests
 
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NormalBackingInlineReferenceCallResultCanBeReadAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [return: DependsOn(nameof(value))]
+            ref<int32> Identity(ref<int32> value) { return value; }
+            int32 Main() {
+                int32 input = int32(42);
+                return *Identity(ref input);
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(NativeJit.ExecuteWithData(program, policy,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy, agreement))
+            .ConfigureAwait(true), Is.EqualTo(42));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public async Task NormalBackingReferenceCallsStageArgumentsBeforeRebindingAsync(
         NativeRuntimePolicy policy)
     {
