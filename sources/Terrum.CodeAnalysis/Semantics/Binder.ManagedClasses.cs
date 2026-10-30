@@ -312,7 +312,8 @@ internal sealed partial class Binder
             {
                 Report("TRM3023", "Class fields require scalars, managed handles, or handle-free Copy values.", child.Span);
             }
-            var width = ValueLayout.Size(type, _structs);
+            var width = ValueLayout.Size(type, _structs,
+                [.. _checkedReferenceTypes], _nativeLoweringAgreement);
             var alignment = width == 0 ? 1 : ValueAlignment(type);
             offset = (offset + alignment - 1) & -alignment;
             if (width is < 1 or > ValueLayout.MaximumSize || offset + width > ManagedClassTypes.MaximumPayload

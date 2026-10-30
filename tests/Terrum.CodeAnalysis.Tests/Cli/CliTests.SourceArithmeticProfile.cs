@@ -7,14 +7,15 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Cli;
 
 public sealed partial class CliTests
 {
-    private const string WrappingNoThrowMain = """
-        [NoThrow] int32 Main() {
+    private const string OverflowingMain = """
+         int32 Main() {
             mut int32 value = 2147483647;
             value++;
             if (value < 0) { return 42; }
@@ -28,16 +29,21 @@ public sealed partial class CliTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        var input = Encoding.UTF8.GetBytes(WrappingNoThrowMain);
+        var input = Encoding.UTF8.GetBytes(OverflowingMain);
         var (developmentExit, developmentOutput, developmentError) = await RunAsync(input,
             "analyze", "-", "--runtime", runtimePolicy, "--json");
-        Assert.That(developmentExit, Is.EqualTo(1));
+        Assert.That(developmentExit, Is.Zero);
         Assert.That(developmentError, Is.Empty);
         using (var development = JsonDocument.Parse(developmentOutput))
         {
-            Assert.That(development.RootElement.GetProperty("diagnostics")[0]
-                .GetProperty("code").GetString(), Is.EqualTo("TRM3017"));
+            Assert.That(development.RootElement.GetProperty("success").GetBoolean(), Is.True);
         }
+
+        var (developmentJitExit, developmentJitOutput, developmentJitError) = await RunAsync(input,
+            "jit", "-", "--runtime", runtimePolicy, "--json");
+        Assert.That(developmentJitExit, Is.EqualTo(unchecked((int)0xE0540001)));
+        Assert.That(developmentJitOutput, Is.Empty);
+        Assert.That(developmentJitError, Is.Empty);
 
         var (analysisExit, analysisOutput, analysisError) = await RunAsync(input,
             "analyze", "-", "--arithmetic-profile", "release", "--runtime", runtimePolicy, "--json");
@@ -86,11 +92,11 @@ public sealed partial class CliTests
         var scanner = prefix + ".scanner.exe";
         var frontend = prefix + ".frontend.exe";
         var frontendLibrary = prefix + ".frontend-library.dll";
-        var source = Encoding.UTF8.GetBytes(WrappingNoThrowMain);
+        var source = Encoding.UTF8.GetBytes(OverflowingMain);
         var nativeImportSource = Path.Combine(RepositoryRoot(), "samples", "Win32MessageBox",
             "message-box.terrum");
         var librarySource = Encoding.UTF8.GetBytes(
-            "[NoThrow] public int32 Value() { mut int32 value = 2147483647; value++; return value < 0 ? 42 : 0; }");
+            " public int32 Value() { mut int32 value = 2147483647; value++; return value < 0 ? 42 : 0; }");
         try
         {
             var (hostedExit, hostedOutput, hostedError) = await RunAsync(source,
@@ -163,21 +169,21 @@ public sealed partial class CliTests
         var middleSourcePath = prefix + ".middle.terrum";
         var rootSourcePath = prefix + ".root.terrum";
         var providerSource = Encoding.UTF8.GetBytes("""
-            [NoThrow] public int32 Compute() {
+             public int32 Compute() {
                 mut int32 value = 2147483647;
                 value++;
                 return value < 0 ? 42 : 0;
             }
             """);
         const string ConsumerSource = """
-            [NoThrow] int32 Main() {
+             int32 Main() {
                 mut int32 value = 2147483647;
                 value++;
                 return value < 0 ? Compute() : 0;
             }
             """;
         const string GraphRootSource = """
-            [NoThrow] int32 Main() {
+             int32 Main() {
                 mut int32 value = 2147483647;
                 value++;
                 return value < 0 ? Middle() : 0;
@@ -192,7 +198,7 @@ public sealed partial class CliTests
             await File.WriteAllTextAsync(helperSourcePath, "public int32 Helper() { return 0; }");
             await File.WriteAllTextAsync(setSourcePath, ConsumerSource);
             await File.WriteAllTextAsync(middleSourcePath,
-                "[NoThrow] public int32 Middle() { return Compute(); }");
+                " public int32 Middle() { return Compute(); }");
             await File.WriteAllTextAsync(rootSourcePath, GraphRootSource);
 
             var (trrmExit, trrmOutput, trrmError) = await RunAsync(
@@ -363,6 +369,88 @@ public sealed partial class CliTests
         {
             File.Delete(optionPath);
             Directory.Delete(directory);
+        }
+    }
+
+    [Test]
+    public async Task NormalBackingAgreementRequiresExactSelectionAndRejectsFallbackAsync()
+    {
+        var input = Encoding.UTF8.GetBytes("int32 Main() { return 42; }");
+        var agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var (analysisExit, analysisOutput, analysisError) = await RunAsync(input,
+            "analyze", "-", "--native-lowering-agreement", agreement, "--json");
+        Assert.That(analysisExit, Is.Zero, analysisOutput + analysisError);
+        Assert.That(analysisError, Is.Empty);
+        using (var analysis = JsonDocument.Parse(analysisOutput))
+        {
+            Assert.That(analysis.RootElement.GetProperty("success").GetBoolean(), Is.True);
+            Assert.That(analysis.RootElement.GetProperty("profile").ValueKind,
+                Is.EqualTo(JsonValueKind.Null));
+            Assert.That(analysis.RootElement.GetProperty("nativeLoweringAgreement")
+                .GetString(), Is.EqualTo(agreement));
+        }
+
+        var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"normal-backing-unimplemented-{Guid.NewGuid():N}.exe");
+        try
+        {
+            var (buildExit, buildOutput, buildError) = await RunAsync(input,
+                "build", "-", "-o", outputPath, "--runtime", "fail-fast",
+                "--native-lowering-agreement", agreement, "--json");
+            Assert.That(buildExit, Is.EqualTo(1), buildOutput + buildError);
+            Assert.That(buildError, Is.Empty);
+            using (var build = JsonDocument.Parse(buildOutput))
+            {
+                Assert.That(build.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM4001"));
+            }
+            Assert.That(File.Exists(outputPath), Is.False);
+
+            var (nativeImportExit, nativeImportOutput, nativeImportError) =
+                await RunAsync(input, "build-native-import", "-", "-o", outputPath,
+                    "--runtime", "fail-fast", "--native-lowering-agreement",
+                    agreement, "--json");
+            Assert.That(nativeImportExit, Is.EqualTo(1),
+                nativeImportOutput + nativeImportError);
+            Assert.That(nativeImportError, Is.Empty);
+            using (var nativeImport = JsonDocument.Parse(nativeImportOutput))
+            {
+                Assert.That(nativeImport.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM4001"));
+            }
+            Assert.That(File.Exists(outputPath), Is.False);
+
+            var (jitExit, jitOutput, jitError) = await RunAsync(input,
+                "jit", "-", "--runtime", "fail-fast", "--native-lowering-agreement",
+                agreement, "--json");
+            Assert.That(jitExit, Is.EqualTo(1), jitOutput + jitError);
+            Assert.That(jitError, Is.Empty);
+            using (var jit = JsonDocument.Parse(jitOutput))
+            {
+                Assert.That(jit.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM4001"));
+            }
+
+            var invalid = new[] {
+                new[] { "analyze", "-", "--native-lowering-agreement",
+                    "terrum.experimental.windows-x64.Normal-backing", "--json" },
+                new[] { "analyze", "-", "--native-lowering-agreement", agreement,
+                    "--native-lowering-agreement", agreement, "--json" },
+                new[] { "check", "-", "--native-lowering-agreement", agreement, "--json" },
+                new[] { "analyze", "-", "--corelib", "--native-lowering-agreement",
+                    agreement, "--json" },
+                new[] { "build-library", "-", "--export", "Main", "-o",
+                    outputPath, "--runtime", "fail-fast", "--native-lowering-agreement",
+                    agreement, "--json" },
+            };
+            foreach (var arguments in invalid)
+            {
+                AssertUsageError(await RunAsync(input, arguments).ConfigureAwait(true));
+            }
+        }
+        finally
+        {
+            File.Delete(outputPath);
         }
     }
 

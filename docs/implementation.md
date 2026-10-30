@@ -148,6 +148,19 @@ See the
 [stored-layout proposal](proposals/reference-stored-descriptor-layout.md)
 and [private-schema proposal](proposals/checked-reference-private-persistence.md).
 
+An unapproved, host-selected normal-backing agreement is now carried by
+`CompilationOptions`, the bound program, mandatory verification, source
+binding and `ValueLayout`. Under the exact key
+`terrum.experimental.windows-x64.normal-backing`, ordinary checked-reference
+fields use the candidate 16-byte/8-aligned layout, including nested placement
+and non-Blittable holder sizes up to the existing bounded structure maximum.
+The CLI accepts the key only for `analyze`, `build`, `build-native-import` and
+`jit`. The emitter and JIT deliberately reject selected programs as not yet
+implemented; no normal allocation control, backing hold, support-bearing
+descriptor operations, call/result ABI, runtime retirement or native execution
+is provided. The key is not a TargetProfile, persistence schema or serialized
+authorization, and no existing tracing profile selects it.
+
 Hosted statement switches evaluate the selector once and bind ordered scalar
 constant/wildcard arms, guards, cleanup-aware cross-arm transfers, inferred
 `var`/`mut var` and exact scalar type bindings, and short-circuit

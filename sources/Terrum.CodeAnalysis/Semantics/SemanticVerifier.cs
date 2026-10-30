@@ -35,31 +35,54 @@ public static partial class SemanticVerifier
     /// <summary>Checks types, control flow, slot mutation, definite assignment, and boundedness of a program. The node limit counts analysis visits, including repeated outcome and feasibility checks.</summary>
     /// <exception cref="ArgumentException">The program is malformed.</exception>
     /// <exception cref="NotSupportedException">The program exceeds an emitter resource limit.</exception>
-    public static void Verify(BoundProgram program)
+    public static void Verify(BoundProgram program) =>
+        Verify(program, nativeLoweringAgreement: null);
+
+    /// <summary>Checks a program under the exact host-selected native lowering agreement.</summary>
+    /// <param name="program">The bound source program.</param>
+    /// <param name="nativeLoweringAgreement">The explicit host selection, or null for the existing default.</param>
+    /// <exception cref="ArgumentException">The selected agreement does not match the program.</exception>
+    public static void Verify(BoundProgram program, string? nativeLoweringAgreement)
     {
         ArgumentNullException.ThrowIfNull(program);
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement);
         _ = VerifyCore(program, requireEntryPoint: true);
     }
 
     /// <summary>Checks a fully defined library with no process entry point. Libraries cannot be emitted as executables without linking.</summary>
     /// <exception cref="ArgumentException">The library is malformed or contains an entry point.</exception>
     /// <exception cref="NotSupportedException">The library exceeds verification limits.</exception>
-    public static void VerifyLibrary(BoundProgram program) => _ = VerifyCore(program, requireEntryPoint: false);
+    public static void VerifyLibrary(BoundProgram program) =>
+        VerifyLibrary(program, nativeLoweringAgreement: null);
 
-    internal static void VerifyLibraryWithDirectNativeImports(BoundProgram program)
+    /// <summary>Checks a library under the exact host-selected native lowering agreement.</summary>
+    public static void VerifyLibrary(BoundProgram program, string? nativeLoweringAgreement)
     {
         ArgumentNullException.ThrowIfNull(program);
-        VerifyDirectNativeImports(program, requireEntryPoint: false);
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement);
+        _ = VerifyCore(program, requireEntryPoint: false);
     }
 
-    internal static void VerifyWithDirectNativeImports(BoundProgram program)
+    internal static void VerifyLibraryWithDirectNativeImports(BoundProgram program,
+        string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(program);
-        VerifyDirectNativeImports(program, requireEntryPoint: true);
+        VerifyDirectNativeImports(program, requireEntryPoint: false,
+            nativeLoweringAgreement);
     }
 
-    private static void VerifyDirectNativeImports(BoundProgram program, bool requireEntryPoint)
+    internal static void VerifyWithDirectNativeImports(BoundProgram program,
+        string? nativeLoweringAgreement = null)
     {
+        ArgumentNullException.ThrowIfNull(program);
+        VerifyDirectNativeImports(program, requireEntryPoint: true,
+            nativeLoweringAgreement);
+    }
+
+    private static void VerifyDirectNativeImports(BoundProgram program, bool requireEntryPoint,
+        string? nativeLoweringAgreement)
+    {
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement);
         if (program.Functions.Any(static function =>
             function.IsExternal && function.DirectNativeImport is null))
         {
@@ -71,13 +94,34 @@ public static partial class SemanticVerifier
     internal static void VerifyReferences(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement: null);
         _ = VerifyCore(program, requireEntryPoint: true, allowExternal: true);
     }
 
     internal static void VerifyLibraryReferences(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
+        ValidateNativeLoweringAgreement(program, nativeLoweringAgreement: null);
         _ = VerifyCore(program, requireEntryPoint: false, allowExternal: true);
+    }
+
+    private static void ValidateNativeLoweringAgreement(
+        BoundProgram program,
+        string? nativeLoweringAgreement)
+    {
+        if (nativeLoweringAgreement is not
+            (null or CompilationOptions.WindowsX64NormalBackingAgreement))
+        {
+            throw new ArgumentException("The native lowering agreement is unsupported.",
+                nameof(nativeLoweringAgreement));
+        }
+        if (!string.Equals(program.NativeLoweringAgreement,
+            nativeLoweringAgreement, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "The explicit native lowering agreement does not match the bound program.",
+                nameof(nativeLoweringAgreement));
+        }
     }
 
     private static ImmutableArray<BoundCopyOriginSummary?> VerifyCore(
@@ -315,13 +359,16 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var width = ValueLayout.Size(field.Type, program.Structures);
+                var width = ValueLayout.Size(field.Type, program.Structures,
+                    program.CheckedReferenceTypes, program.NativeLoweringAgreement);
                 var nested = !NativePointerTypes.IsType(field.Type) && !NativeFunctionPointerTypes.IsType(field.Type)
                     && !BoundEnumTypes.IsType(field.Type)
                     && (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
                     ? (int)field.Type - 100 : -1;
                 var alignment = width == 0 ? 1 : nested >= 0 && nested < alignments.Length
-                    ? alignments[nested] : ValueLayout.Alignment(field.Type, program.Structures);
+                    ? alignments[nested] : ValueLayout.Alignment(field.Type,
+                        program.Structures, program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement);
                 offset = (offset + alignment - 1) & -alignment;
                 if (field.Size != width || field.Offset != offset || (field.IsMutable && !@class.IsMutable)
                     || width is < 1 or > ValueLayout.MaximumSize
@@ -407,9 +454,10 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var width = ValueLayout.Size(field.Type, program.Structures,
-                    program.CheckedReferenceTypes);
+                    program.CheckedReferenceTypes, program.NativeLoweringAgreement);
                 var fieldAlignment = nested >= 0 ? alignments[nested]
-                    : field.Type == PrimitiveType.TokenSpan ? 8 : width;
+                    : ValueLayout.Alignment(field.Type, program.Structures,
+                        program.CheckedReferenceTypes, program.NativeLoweringAgreement);
                 var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
@@ -435,7 +483,8 @@ public static partial class SemanticVerifier
                 (PrimitiveType)(100 + index), program.Structures);
             if (structure.Size > ValueLayout.MaximumSize
                 && structure.BlittableTargetRequirement == 0
-                && !isSupportedFixedArrayElement)
+                && !isSupportedFixedArrayElement
+                && program.NativeLoweringAgreement is null)
             {
                 throw Invalid();
             }

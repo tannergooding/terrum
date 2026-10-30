@@ -43,18 +43,19 @@ public static unsafe partial class NativeJit
     /// <exception cref="ArgumentException">The program requires an invocation-scoped source grant.</exception>
     /// <exception cref="PlatformNotSupportedException">The host is not Windows x64.</exception>
     public static int Execute(BoundProgram program, NativeRuntimePolicy runtimePolicy,
-        string? registrarAssembly = null)
+        string? registrarAssembly = null, string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.RequiresSourceGrant)
         {
             throw new ArgumentException("A source-dependent program requires ExecuteWithSourceGrant.", nameof(program));
         }
-        var (code, modules, imports) = EmitForExecution(program, runtimePolicy);
+        var (code, modules, imports) = EmitForExecution(
+            program, runtimePolicy, nativeLoweringAgreement);
         return ExecuteCode(code, modules, imports, registrarAssembly, null, null, 0, false, out _);
     }
 
-    /// <summary>Executes a source-dependent program with one fresh, immutable UTF-16 source grant.</summary>
+    /// <summary>Test-only prototype: executes a source-dependent program with one fresh UTF-16 source grant.</summary>
     /// <param name="program">The verified program requiring <c>Host.Source</c>.</param>
     /// <param name="sourceGrants">Exactly one readonly invocation-scoped <c>Host.Source</c> buffer containing at most 16,384 code units.</param>
     /// <param name="runtimePolicy">The generated native runtime policy.</param>
@@ -95,7 +96,7 @@ public static unsafe partial class NativeJit
         return ExecuteCode(code, [], [], registrarAssembly, null, null, 0, false, out _);
     }
 
-    /// <summary>Executes a persisted scanner-profile program against fresh source and output buffers.</summary>
+    /// <summary>Test-only prototype: executes a scanner-profile program against fresh source and output buffers.</summary>
     /// <param name="program">The linked program retaining the scanner invocation profile.</param>
     /// <param name="source">The source snapshot to scan.</param>
     /// <param name="runtimePolicy">The generated native runtime policy.</param>
@@ -129,7 +130,7 @@ public static unsafe partial class NativeJit
         return ScannerHost.ReadInvocationResult(source, tokenCount, execution, buffers);
     }
 
-    /// <summary>Executes the separate provisional complete-v88 frontend and summary profile with fresh grants.</summary>
+    /// <summary>Test-only prototype: executes the provisional frontend projection with fresh grants.</summary>
     /// <returns>Owned scanner results, host-audited complete program and validated summary.</returns>
     public static ScalarFrontendInvocationResult ExecuteWithScalarFrontendProfile(BoundProgram program,
         SourceText source, NativeRuntimePolicy runtimePolicy, string? registrarAssembly = null)
@@ -186,10 +187,12 @@ public static unsafe partial class NativeJit
     /// <param name="runtimePolicy">The generated native runtime policy.</param>
     /// <param name="registrarAssembly">Trusted CLI assembly serving remote CET continuation registration
     /// when the current host enforces CET and generated code uses checked exception continuations.</param>
+    /// <param name="nativeLoweringAgreement">The explicit host-selected native lowering agreement, if any.</param>
     public static NativeExecutionResult ExecuteWithData(BoundProgram program, NativeRuntimePolicy runtimePolicy,
-        string? registrarAssembly = null)
+        string? registrarAssembly = null, string? nativeLoweringAgreement = null)
     {
-        var (code, modules, imports) = EmitForExecution(program, runtimePolicy);
+        var (code, modules, imports) = EmitForExecution(
+            program, runtimePolicy, nativeLoweringAgreement);
         var literalPrefixLength = GetNativeLiteralPrefixLength(program);
         var exitCode = ExecuteCode(code, modules, imports, registrarAssembly, null, null,
             literalPrefixLength, true, out var data);
@@ -199,12 +202,22 @@ public static unsafe partial class NativeJit
     }
 
     private static (NativeCode Code, NativeJitModule[] Modules, ImmutableArray<NativeImportBinding> Imports)
-        EmitForExecution(BoundProgram program, NativeRuntimePolicy runtimePolicy)
+        EmitForExecution(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+            string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (nativeLoweringAgreement is not null
+            && program.Functions.Any(static function =>
+                function.DirectNativeImport is not null))
+        {
+            SemanticVerifier.VerifyWithDirectNativeImports(
+                program, nativeLoweringAgreement);
+            throw new NotSupportedException(
+                "The selected native lowering agreement is recognized but not implemented.");
+        }
         if (!program.Functions.Any(static function => function.DirectNativeImport is not null))
         {
-            return (EmitCode(program, runtimePolicy), [], []);
+            return (EmitCode(program, runtimePolicy, nativeLoweringAgreement), [], []);
         }
         if (program.RequiresSourceGrant)
         {
@@ -246,7 +259,8 @@ public static unsafe partial class NativeJit
         return (code, modules, distinctImports.ToImmutable());
     }
 
-    private static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy)
+    private static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (!OperatingSystem.IsWindows() || RuntimeInformation.ProcessArchitecture != Architecture.X64)
@@ -254,7 +268,15 @@ public static unsafe partial class NativeJit
             throw new PlatformNotSupportedException("Native JIT requires a Windows x64 process.");
         }
 
-        var code = NativeEmitter.EmitCode(program, runtimePolicy);
+        var code = NativeEmitter.EmitCode(program, runtimePolicy,
+            nativeLoweringAgreement: nativeLoweringAgreement);
+        if (!string.Equals(code.NativeLoweringAgreement,
+            nativeLoweringAgreement, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "The emitted code does not match the explicit native lowering agreement.",
+                nameof(program));
+        }
         ValidateBufferMetadata(program, code);
         return code;
     }

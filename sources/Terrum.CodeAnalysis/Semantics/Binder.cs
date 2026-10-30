@@ -84,6 +84,7 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly NativeCoreRegistrationSet? _nativeCoreRegistration;
+    private readonly string? _nativeLoweringAgreement;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private readonly SourceArithmeticProfile _sourceArithmeticProfile;
     private bool _usesNativeBuffer;
@@ -150,7 +151,8 @@ internal sealed partial class Binder
         bool isLibrary = false, CompilationReference? reference = null,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
         SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
-        NativeCoreRegistrationSet? nativeCoreRegistration = null)
+        NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        string? nativeLoweringAgreement = null)
     {
         if (coreLibrary && (!isLibrary || reference is not null))
         {
@@ -177,6 +179,7 @@ internal sealed partial class Binder
             }
         }
         _nativeCoreRegistration = nativeCoreRegistration ?? reference?.NativeCoreRegistration;
+        _nativeLoweringAgreement = nativeLoweringAgreement;
         _runtimePolicy = runtimePolicy;
         _sourceArithmeticProfile = sourceArithmeticProfile;
     }
@@ -865,6 +868,7 @@ internal sealed partial class Binder
             GenericNominalTypeDefinitions = [.. _genericNominalTypeDefinitions],
             GenericNominalTypeInstances = [.. _genericNominalTypeInstances],
             CoreTaskType = _reference?.CoreTaskType,
+            NativeLoweringAgreement = _nativeLoweringAgreement,
             Classes = [.. _classes],
             Buffers = _buffers,
             RequiresSourceGrant = _buffers.Any(static buffer => buffer.IsInvocationScoped)
@@ -1595,7 +1599,8 @@ internal sealed partial class Binder
             {
                 Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
-            var width = ValueLayout.Size(type, _structs, [.. _checkedReferenceTypes]);
+            var width = ValueLayout.Size(type, _structs,
+                [.. _checkedReferenceTypes], _nativeLoweringAgreement);
             var fieldAlignment = width == 0 ? 1 : ValueAlignment(type);
             var duplicate = false;
             foreach (var previous in fields)
@@ -1710,11 +1715,13 @@ internal sealed partial class Binder
             Report("TRM3005", "Sequential layout supports only nonpublic Copy structs with private fields.", declaration.Span);
         }
         if (size is < 1 or > ValueLayout.MaximumStructureSize
-            || (size > ValueLayout.MaximumSize && !isBlittable))
+            || (size > ValueLayout.MaximumSize && !isBlittable
+                && _nativeLoweringAgreement is null))
         {
-            Report("TRM3005",
-                $"A struct must fit the fixed-storage limit, and aggregates larger than {ValueLayout.MaximumSize} bytes require a Blittable commitment.",
-                declaration.Span);
+            var message = _nativeLoweringAgreement is null
+                ? $"A struct must fit the fixed-storage limit, and aggregates larger than {ValueLayout.MaximumSize} bytes require a Blittable commitment."
+                : "A struct exceeds the selected native-backing layout limit.";
+            Report("TRM3005", message, declaration.Span);
         }
         _ = _layingOut.Remove(index);
         _ = _laidOut.Add(index);
@@ -1801,13 +1808,15 @@ internal sealed partial class Binder
     {
         if (!IsStruct(type))
         {
-            return ValueLayout.Alignment(type, _structs, [.. _checkedReferenceTypes]);
+            return ValueLayout.Alignment(type, _structs,
+                [.. _checkedReferenceTypes], _nativeLoweringAgreement);
         }
         if (_structureAlignments.TryGetValue(type, out var alignment))
         {
             return alignment;
         }
-        alignment = ValueLayout.Alignment(type, _structs, [.. _checkedReferenceTypes]);
+        alignment = ValueLayout.Alignment(type, _structs,
+            [.. _checkedReferenceTypes], _nativeLoweringAgreement);
         if (_laidOut.Contains((int)type - 100))
         {
             _structureAlignments.Add(type, alignment);

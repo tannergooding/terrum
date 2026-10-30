@@ -948,7 +948,8 @@ public static partial class SemanticVerifier
         && (uint)reservation.Variable < (uint)caller.Variables.Length
         && caller.Variables[reservation.Variable].Type == output.PointeeType
         && caller.Variables[reservation.Variable].IsInitializationLocal
-        && ValueLayout.Size(output.PointeeType, program.Structures) > 0;
+        && ValueLayout.Size(output.PointeeType, program.Structures,
+            program.CheckedReferenceTypes, program.NativeLoweringAgreement) > 0;
 
     private static void VerifyNativeOutputReservation(BoundNativeOutputReservation reservation,
         DirectNativeOutput output, InitializationState initialized, uint[] fieldMasks,

@@ -19,11 +19,11 @@ namespace Terrum.Tools;
 internal static partial class Program
 {
     private const string Usage = "Usage: terrumc <check|tokens|tree> <path|-> [--json]\n"
-        + "       terrumc analyze <path|-> [--source <path>] [--source-name <path>] [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--corelib] [--json]\n"
-        + "       terrumc build <path|-> [--source <path>] [--source-name <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
-        + "       terrumc build-native-import <path|-> [--source <path>] [--source-name <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc analyze <path|-> [--source <path>] [--source-name <path>] [--runtime <fail-fast|checked-exceptions>] [--arithmetic-profile <development|release>] [--native-lowering-agreement <key>] [--corelib] [--json]\n"
+        + "       terrumc build <path|-> [--source <path>] [--source-name <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--native-lowering-agreement <key>] [--json]\n"
+        + "       terrumc build-native-import <path|-> [--source <path>] [--source-name <path>] -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--native-lowering-agreement <key>] [--json]\n"
         + "       terrumc build-library <path|-> [--source <path>] [--source-name <path>] (--export <name> [--export <name>] | --export-all-public) -o <output.dll> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--corelib | --source-grant --abi-output <output.json>] [--json]\n"
-        + "       terrumc jit <path|-> [--source <path>] [--source-name <path>] --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
+        + "       terrumc jit <path|-> [--source <path>] [--source-name <path>] --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--native-lowering-agreement <key>] [--json]\n"
         + "       terrumc scan-component <scanner.terrum|terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--json]\n"
         + "       terrumc build-component <scanner.terrum|terrum-project-directory> <input|-> -o <output.exe> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"
         + "       terrumc frontend-component <terrum-project-directory> <input|-> --runtime <fail-fast|checked-exceptions> [--arithmetic-profile <development|release>] [--json]\n"

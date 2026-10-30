@@ -23,14 +23,32 @@ Source-compiling commands accept the provisional
 `--arithmetic-profile development|release` selector. Values are exact and
 case-sensitive; omission selects Development. It applies to eligible source
 compilation commands, including hosted builds and analysis, module/TRRM/native
-artifact producers, and scalar frontend build/run commands. It is rejected by
+artifact producers, and frontend build/library/run commands. It is rejected by
 syntax-only, scanner-only, source-free and artifact-only commands. For
-frontend/component commands, the selected profile applies to subject source;
-the compiler/scanner component is compiled with Development. Arithmetic
-selection is independent of `--runtime`, and invalid or ineligible uses follow
-the existing usage-error path before output replacement. This implementation
-follows the unapproved
+frontend build/library/run commands, the selected profile is forwarded to the
+original-source C# compiler process. In the explicit test-only
+`frontend-component` probe, it applies to the subject source while the
+component itself is compiled with Development. Arithmetic selection is
+independent of `--runtime`, and invalid or ineligible uses follow the existing
+usage-error path before output replacement. This implementation follows the unapproved
 [source arithmetic selection proposal](../proposals/source-arithmetic-profile-selection.md);
+it does not adopt or amend the selected `terrum.cli/1` protocol.
+
+## Provisional normal-backing agreement selection
+
+The source `analyze`, `build`, `build-native-import` and `jit` commands accept
+the exact, case-sensitive
+`--native-lowering-agreement terrum.experimental.windows-x64.normal-backing`
+selector. Other commands, repeated or malformed selections, and library/Core
+output combinations reject it as a usage error. The choice is a host lowering
+selection, not a TargetProfile, semantic schema or persisted authorization.
+Analysis responses publish `"profile": null` and identify the selected key
+separately as `nativeLoweringAgreement`; they do not label it as one of the
+existing private native profiles. Native emission and JIT currently reject the
+recognized selection as not implemented, rather than silently using the
+existing address-only or tracing layouts. This provisional implementation
+follows the unapproved
+[normal-backing proposal](../proposals/reference-normal-backing-support.md);
 it does not adopt or amend the selected `terrum.cli/1` protocol.
 
 Use the built terrumc.dll/executable for stdout isolation; dotnet run may print

@@ -41,6 +41,10 @@ public sealed record NativeCode(byte[] Code, int EntryPoint, ImmutableArray<Nati
 
     /// <summary>RIP-relative code displacements targeting named native imports; executable images only.</summary>
     internal ImmutableArray<NativeImportFixup> NativeImports { get; init; } = [];
+
+    internal ImmutableArray<NativeExportThunk> NativeExportThunks { get; init; } = [];
+
+    internal string? NativeLoweringAgreement { get; init; }
 }
 
 /// <summary>A machine-code range with a bounded stack frame and matching Windows x64 unwind metadata.</summary>
@@ -68,3 +72,6 @@ public readonly record struct NativeDataFixup(int DisplacementOffset, int DataOf
 // A negative declaration index identifies a compiler runtime import rather than a source binding.
 internal readonly record struct NativeImportFixup(int DisplacementOffset, string DllName, string ExportName,
     int DeclarationIndex = -1);
+
+internal readonly record struct NativeExportThunk(int FunctionIndex, string Name,
+    NativeImportBinding Import);

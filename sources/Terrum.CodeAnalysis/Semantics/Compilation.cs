@@ -25,6 +25,10 @@ public enum SourceArithmeticProfile
 /// <summary>Immutable semantic options for one source compilation.</summary>
 public readonly record struct CompilationOptions
 {
+    /// <summary>The exact host-selected Windows x64 agreement for normal-backed references.</summary>
+    public const string WindowsX64NormalBackingAgreement =
+        "terrum.experimental.windows-x64.normal-backing";
+
     /// <summary>The source arithmetic defaults; zero-initialized options select Development.</summary>
     public SourceArithmeticProfile SourceArithmeticProfile { get; init; }
 
@@ -33,6 +37,9 @@ public readonly record struct CompilationOptions
 
     /// <summary>The explicit host-selected Core native registration for this using compilation, if any.</summary>
     public NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
+
+    /// <summary>The explicit host-selected target-lowering agreement, if any.</summary>
+    public string? NativeLoweringAgreement { get; init; }
 }
 
 /// <summary>
@@ -200,6 +207,11 @@ public sealed class Compilation
     public static string GetNativeProfileVersion(BoundProgram program)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (program.NativeLoweringAgreement is not null)
+        {
+            throw new NotSupportedException(
+                "A host-selected native lowering agreement has no persisted native profile.");
+        }
         if (program.Classes.Any(static item => item.Fields.Any(
                 static field => ManagedClassTypes.IsOptional(field.Type))))
         {
@@ -485,7 +497,8 @@ public sealed class Compilation
     {
         get
         {
-            if (Program is not BoundProgram program)
+            if (Program is not BoundProgram program
+                || program.NativeLoweringAgreement is not null)
             {
                 return null;
             }
@@ -526,7 +539,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(tree, isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds a source snapshot under an explicit checked-failure runtime policy.</summary>
@@ -549,7 +563,8 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(tree);
         return CreateCore([tree], [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds source snapshots for explicit native-import emission.</summary>
@@ -564,7 +579,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(trees, [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds a library snapshot under an explicit checked-failure runtime policy.</summary>
@@ -578,7 +594,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(tree, isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds and verifies library definitions without requiring or selecting a Main entry point.</summary>
@@ -612,7 +629,8 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(reference);
         return CreateCore(tree, isLibrary: true, cancellationToken, reference,
             options.RuntimePolicy, options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds consumer source against validated module declarations, without reading producer source or binding its bodies.</summary>
@@ -638,7 +656,8 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(reference);
         return CreateCore(tree, isLibrary: false, cancellationToken, reference,
             options.RuntimePolicy, options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     internal static void ValidateOptions(CompilationOptions options)
@@ -654,12 +673,19 @@ public sealed class Compilation
             throw new ArgumentException("The selected Core native registration is invalid.",
                 nameof(options));
         }
+        if (options.NativeLoweringAgreement is string agreement
+            && agreement != CompilationOptions.WindowsX64NormalBackingAgreement)
+        {
+            throw new ArgumentException("The selected native lowering agreement is unsupported.",
+                nameof(options));
+        }
     }
 
     private static Compilation CreateCore(SyntaxTree tree, bool isLibrary, CancellationToken cancellationToken,
         CompilationReference? reference = null, BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast,
         SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
-        NativeCoreRegistrationSet? nativeCoreRegistration = null)
+        NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(tree);
         cancellationToken.ThrowIfCancellationRequested();
@@ -674,7 +700,8 @@ public sealed class Compilation
 
         var binder = new Binder([tree], [], cancellationToken, isLibrary, reference, runtimePolicy,
             sourceArithmeticProfile: sourceArithmeticProfile,
-            nativeCoreRegistration: selectedNativeCoreRegistration);
+            nativeCoreRegistration: selectedNativeCoreRegistration,
+            nativeLoweringAgreement: nativeLoweringAgreement);
         var program = binder.Bind();
         var diagnosticCount = tree.Diagnostics.Length + binder.Diagnostics.Count;
         if (diagnosticCount == 0)
@@ -736,7 +763,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(trees, [], isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds multiple source snapshots under an explicit checked-failure runtime policy.</summary>
@@ -756,7 +784,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(trees, buffers, isLibrary: false, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds source snapshots and shared host buffers under an explicit checked-failure runtime policy.</summary>
@@ -780,7 +809,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(trees, [], isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds multiple library snapshots under an explicit checked-failure runtime policy.</summary>
@@ -800,7 +830,8 @@ public sealed class Compilation
         ValidateOptions(options);
         return CreateCore(trees, buffers, isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds the compiler-owned primitive declarations and APIs of a Core library without a standard-library reference.</summary>
@@ -822,7 +853,8 @@ public sealed class Compilation
         return CreateCore(trees, [], isLibrary: true, cancellationToken,
             runtimePolicy: options.RuntimePolicy, coreLibrary: true,
             sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds multiple library source snapshots against validated external declarations.</summary>
@@ -849,7 +881,8 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(reference);
         return CreateCore(trees, [], isLibrary: true, cancellationToken, reference,
             options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     /// <summary>Binds consumer source snapshots against one validated module reference.</summary>
@@ -875,14 +908,16 @@ public sealed class Compilation
         ArgumentNullException.ThrowIfNull(reference);
         return CreateCore(trees, [], isLibrary: false, cancellationToken, reference,
             options.RuntimePolicy, sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
     }
 
     private static Compilation CreateCore(IEnumerable<SyntaxTree> trees, ImmutableArray<HostBuffer> buffers, bool isLibrary,
         CancellationToken cancellationToken, CompilationReference? reference = null,
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
         SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
-        NativeCoreRegistrationSet? nativeCoreRegistration = null)
+        NativeCoreRegistrationSet? nativeCoreRegistration = null,
+        string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(trees);
         cancellationToken.ThrowIfCancellationRequested();
@@ -921,7 +956,7 @@ public sealed class Compilation
         }
         var binder = new Binder(snapshotArray, buffers, cancellationToken, isLibrary, reference,
             runtimePolicy, coreLibrary, sourceArithmeticProfile,
-            selectedNativeCoreRegistration);
+            selectedNativeCoreRegistration, nativeLoweringAgreement);
         var program = binder.Bind();
         if (binder.Diagnostics.Count != 0)
         {
@@ -968,7 +1003,8 @@ public sealed class Compilation
         }
         var binder = new Binder([tree], buffers, cancellationToken, runtimePolicy: options.RuntimePolicy,
             sourceArithmeticProfile: options.SourceArithmeticProfile,
-            nativeCoreRegistration: options.NativeCoreRegistration);
+            nativeCoreRegistration: options.NativeCoreRegistration,
+            nativeLoweringAgreement: options.NativeLoweringAgreement);
         var program = binder.Bind();
         var diagnostics = tree.Diagnostics.AddRange(binder.Diagnostics);
         return new Compilation(tree, diagnostics, diagnostics.IsEmpty ? program : null);

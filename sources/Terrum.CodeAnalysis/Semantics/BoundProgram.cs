@@ -495,6 +495,8 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>The host-selected exact Core Task definition, without enabling Task runtime behavior.</summary>
     public CoreTaskTypeIdentity? CoreTaskType { get; init; }
 
+    internal string? NativeLoweringAgreement { get; init; }
+
     /// <summary>Source-defined managed layouts; handles have type identifiers starting at <see cref="ManagedClassTypes.First"/>.</summary>
     public ImmutableArray<BoundClass> Classes { get; init; } = [];
 

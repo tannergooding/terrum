@@ -28,11 +28,16 @@ internal static partial class Program
         SourceArithmeticProfile sourceArithmeticProfile;
         bool coreLibrary;
         bool sourceGrant;
+        bool exportAllPublic;
+        string? sourceName;
+        string? frontendCommand;
+        string? nativeLoweringAgreement;
         try
         {
             if (!TryReadCompilationOptions(args, out var paths, out exports, out outputPath,
                 out runtimePolicy, out sourceArithmeticProfile, out coreLibrary, out sourceGrant,
-                out abiOutputPath))
+                out sourceName, out frontendCommand, out exportAllPublic, out abiOutputPath,
+                out nativeLoweringAgreement))
             {
                 WriteInputError(json, "TRM2000", Usage);
 
@@ -60,9 +65,12 @@ internal static partial class Program
             }
 
             var trees = ImmutableArray.CreateBuilder<SyntaxTree>(paths.Count);
-            foreach (var path in paths)
+            for (var sourceIndex = 0; sourceIndex < paths.Count; sourceIndex++)
             {
-                trees.Add(SyntaxTree.Parse(ReadSource(path), path == "-" ? "<stdin>" : path));
+                var path = paths[sourceIndex];
+                var sourcePath = sourceIndex == 0 && path == "-" && sourceName is not null
+                    ? sourceName : path == "-" ? "<stdin>" : path;
+                trees.Add(SyntaxTree.Parse(ReadSource(path), sourcePath));
             }
 
             snapshots = trees.MoveToImmutable();
@@ -75,22 +83,29 @@ internal static partial class Program
         }
 
         return CompileTrees(args[0], snapshots, outputPath, json, [.. exports],
-            runtimePolicy, coreLibrary, sourceGrant, abiOutputPath, sourceArithmeticProfile);
+            runtimePolicy, coreLibrary, sourceGrant, abiOutputPath, sourceArithmeticProfile,
+            exportAllPublic, frontendCommand, nativeLoweringAgreement);
     }
 
     private static bool TryReadCompilationOptions(string[] args, out List<string> paths, out List<string> exports,
         out string? outputPath, out NativeRuntimePolicy runtimePolicy,
         out SourceArithmeticProfile sourceArithmeticProfile, out bool coreLibrary,
-        out bool sourceGrant, out string? abiOutputPath)
+        out bool sourceGrant, out string? sourceName, out string? frontendCommand,
+        out bool exportAllPublic, out string? abiOutputPath,
+        out string? nativeLoweringAgreement)
     {
         paths = [];
         exports = [];
         outputPath = null;
         abiOutputPath = null;
+        sourceName = null;
+        frontendCommand = null;
+        nativeLoweringAgreement = null;
         runtimePolicy = NativeRuntimePolicy.FailFast;
         sourceArithmeticProfile = SourceArithmeticProfile.Development;
         coreLibrary = false;
         sourceGrant = false;
+        exportAllPublic = false;
         var count = args.Length - (args.Length != 0 && args[^1] == "--json" ? 1 : 0);
         if (count < 2 || args[1] == "--json")
         {
@@ -124,6 +139,13 @@ internal static partial class Program
                 index++;
                 continue;
             }
+            if (args[index] == "--export-all-public" && args[0] == "build-library"
+                && !exportAllPublic && exports.Count == 0)
+            {
+                exportAllPublic = true;
+                index++;
+                continue;
+            }
             if (index + 1 >= count)
             {
                 return false;
@@ -131,10 +153,20 @@ internal static partial class Program
             var value = args[index + 1];
             switch (args[index])
             {
+                case "--frontend-command" when frontendCommand is null && args[1] == "-"
+                    && ((args[0], value) is ("build", "frontend-build")
+                        or ("build-library", "frontend-build-library")
+                        or ("jit", "frontend-run")):
+                    frontendCommand = value;
+                    break;
+                case "--source-name" when args[1] == "-" && sourceName is null && value.Length != 0:
+                    sourceName = value;
+                    break;
                 case "--source" when value != "-" && paths.Count < 256 && knownPaths.Add(Path.GetFullPath(value)):
                     paths.Add(value);
                     break;
-                case "--export" when args[0] == "build-library" && exports.Count < 1024 && exportNames.Add(value):
+                case "--export" when args[0] == "build-library" && !exportAllPublic
+                    && exports.Count < 1024 && exportNames.Add(value):
                     exports.Add(value);
                     break;
                 case "--abi-output" when args[0] == "build-library" && abiOutputPath is null:
@@ -155,6 +187,12 @@ internal static partial class Program
                     && TryParseSourceArithmeticProfile(value, out sourceArithmeticProfile):
                     hasArithmeticProfile = true;
                     break;
+                case "--native-lowering-agreement" when
+                    (args[0] is "analyze" or "build" or "build-native-import" or "jit")
+                    && nativeLoweringAgreement is null
+                    && value == CompilationOptions.WindowsX64NormalBackingAgreement:
+                    nativeLoweringAgreement = value;
+                    break;
                 default:
                     return false;
             }
@@ -162,16 +200,22 @@ internal static partial class Program
         }
 
         return (sourceGrant == (abiOutputPath is not null))
+            && (frontendCommand is null || sourceName is not null)
             && (!sourceGrant || args[0] == "build-library" && !coreLibrary)
+            && (!exportAllPublic || args[0] == "build-library" && !coreLibrary && !sourceGrant)
+            && (nativeLoweringAgreement is null
+                || !coreLibrary && !sourceGrant && frontendCommand is null)
             && (args[0] == "analyze"
             || (hasRuntime && (args[0] == "jit" || outputPath is not null)
-                && (args[0] != "build-library" || exports.Count != 0)));
+                && (args[0] != "build-library" || exports.Count != 0 || exportAllPublic)));
     }
 
     private static int CompileTrees(string command, ImmutableArray<SyntaxTree> trees, string? outputPath, bool json,
         ImmutableArray<string> exports = default, NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast,
         bool coreLibrary = false, bool sourceGrant = false, string? abiOutputPath = null,
-        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development)
+        SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
+        bool exportAllPublic = false, string? frontendCommand = null,
+        string? nativeLoweringAgreement = null)
     {
         var build = outputPath is not null;
         var library = command == "build-library" || coreLibrary;
@@ -183,6 +227,7 @@ internal static partial class Program
         var options = new CompilationOptions {
             SourceArithmeticProfile = sourceArithmeticProfile,
             RuntimePolicy = (BoundRuntimePolicy)runtimePolicy,
+            NativeLoweringAgreement = nativeLoweringAgreement,
         };
         var compilation = nativeImports
             ? Compilation.CreateWithNativeImports(trees, options)
@@ -212,23 +257,37 @@ internal static partial class Program
                 {
                     // This worker returns Main's raw exit status, not a JSON success envelope.
                     // Its caller must enforce a deadline; native fail-fast can terminate it.
-                    return NativeJit.Execute(program, runtimePolicy, GraphJitRegistrarAssemblyPath());
+                    return NativeJit.Execute(program, runtimePolicy,
+                        GraphJitRegistrarAssemblyPath(),
+                        nativeLoweringAgreement: nativeLoweringAgreement);
                 }
 
+                var selectedExports = exports;
+                if (exportAllPublic)
+                {
+                    selectedExports = [
+                        .. program.Functions
+                            .Where(static function => function.DeclaringStruct is null
+                                && !function.IsPrivate && !function.IsInternal && !function.IsExternal)
+                            .Select(static function => function.Name),
+                    ];
+                }
                 if (library && sourceGrant)
                 {
-                    var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program, exports, runtimePolicy);
+                    var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program, selectedExports, runtimePolicy);
                     image = artifact.Image;
                     abiManifest = CreateSourceGrantManifest(artifact, runtimePolicy);
                 }
                 else if (nativeImports)
                 {
-                    image = NativeEmitter.EmitWithNativeImports(program, runtimePolicy);
+                    image = NativeEmitter.EmitWithNativeImports(program, runtimePolicy,
+                        nativeLoweringAgreement: nativeLoweringAgreement);
                 }
                 else
                 {
-                    image = library ? NativeEmitter.EmitLibrary(program, exports, runtimePolicy)
-                        : NativeEmitter.Emit(program, runtimePolicy);
+                    image = library ? NativeEmitter.EmitLibrary(program, selectedExports, runtimePolicy)
+                        : NativeEmitter.Emit(program, runtimePolicy,
+                            nativeLoweringAgreement: nativeLoweringAgreement);
                 }
             }
             catch (NotSupportedException exception)
@@ -274,7 +333,9 @@ internal static partial class Program
             }
         }
 
-        WriteCompilationResult(command, compilation, diagnostics, success, outputPath, image, json, runtimePolicy);
+        WriteCompilationResult(frontendCommand ?? command, compilation, diagnostics,
+            success, outputPath, image, json, runtimePolicy,
+            nativeLoweringAgreement);
 
         return success ? 0 : 1;
     }
@@ -314,19 +375,23 @@ internal static partial class Program
 
     private static void WriteCompilationResult(string command, Compilation compilation,
         ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image, bool json,
-        NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast)
+        NativeRuntimePolicy runtimePolicy = NativeRuntimePolicy.FailFast,
+        string? nativeLoweringAgreement = null)
     {
-        var profile = compilation.NativeProfileVersion ?? Profile(runtimePolicy);
+        var profile = nativeLoweringAgreement is null
+            ? compilation.NativeProfileVersion ?? Profile(runtimePolicy) : null;
         if (json)
         {
             if (compilation.SyntaxTrees.Length == 1)
             {
                 WriteCompilationJson(command, compilation.SyntaxTree, [.. diagnostics.Select(static item => item.Diagnostic)],
-                    success, outputPath, image, runtimePolicy, profile);
+                    success, outputPath, image, runtimePolicy, profile,
+                    nativeLoweringAgreement);
             }
             else
             {
-                WriteCompilationJson(command, compilation, diagnostics, success, outputPath, image, runtimePolicy, profile);
+                WriteCompilationJson(command, compilation, diagnostics, success,
+                    outputPath, image, runtimePolicy, profile, nativeLoweringAgreement);
             }
         }
         else
@@ -344,9 +409,11 @@ internal static partial class Program
                 var sourceDescription = compilation.SyntaxTrees.Length == 1
                     ? compilation.SyntaxTree.Source.Path
                     : FormattableString.Invariant($"{compilation.SyntaxTrees.Length} source files");
+                var profileDescription = nativeLoweringAgreement is null
+                    ? profile : $"native lowering agreement {nativeLoweringAgreement}";
                 Console.Out.WriteLine(outputPath is not null
-                    ? $"{outputPath}: Windows x64 {profile} ({PolicyName(runtimePolicy)} runtime)"
-                    : $"{sourceDescription}: {profile} semantic analysis OK");
+                    ? $"{outputPath}: Windows x64 {profileDescription} ({PolicyName(runtimePolicy)} runtime)"
+                    : $"{sourceDescription}: {profileDescription} semantic analysis OK");
             }
         }
     }
@@ -491,13 +558,18 @@ internal static partial class Program
 
     private static void WriteCompilationJson(string command, SyntaxTree tree, ImmutableArray<Diagnostic> diagnostics,
         bool success, string? outputPath, byte[]? image,
-        NativeRuntimePolicy runtimePolicy, string profile)
+        NativeRuntimePolicy runtimePolicy, string? profile,
+        string? nativeLoweringAgreement = null)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 1);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
         writer.WriteString("profile", profile);
+        if (nativeLoweringAgreement is not null)
+        {
+            writer.WriteString("nativeLoweringAgreement", nativeLoweringAgreement);
+        }
         writer.WriteString("runtimePolicy", PolicyName(runtimePolicy));
         writer.WriteString("command", command);
         writer.WriteString("path", tree.Source.Path);
@@ -509,7 +581,12 @@ internal static partial class Program
 
         if (success && image is not null)
         {
-            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library", runtimePolicy);
+            if (outputPath is not null && (command is "frontend-build" or "frontend-build-library"))
+            {
+                writer.WriteString("output", outputPath);
+            }
+            WriteNativeArtifactJson(writer, outputPath, image,
+                command is "build-library" or "frontend-build-library", runtimePolicy);
         }
 
         writer.WriteEndObject();
@@ -517,13 +594,18 @@ internal static partial class Program
 
     private static void WriteCompilationJson(string command, Compilation compilation,
         ImmutableArray<SourceDiagnostic> diagnostics, bool success, string? outputPath, byte[]? image,
-        NativeRuntimePolicy runtimePolicy, string profile)
+        NativeRuntimePolicy runtimePolicy, string? profile,
+        string? nativeLoweringAgreement = null)
     {
         using var writer = new Utf8JsonWriter(Console.OpenStandardOutput(), new JsonWriterOptions { Indented = true });
         writer.WriteStartObject();
         writer.WriteNumber("schemaVersion", 2);
         writer.WriteString("languageVersion", SyntaxTree.LanguageVersion);
         writer.WriteString("profile", profile);
+        if (nativeLoweringAgreement is not null)
+        {
+            writer.WriteString("nativeLoweringAgreement", nativeLoweringAgreement);
+        }
         writer.WriteString("runtimePolicy", PolicyName(runtimePolicy));
         writer.WriteString("command", command);
         writer.WriteString("coordinateSystem", "utf-16");
@@ -561,7 +643,12 @@ internal static partial class Program
         writer.WriteEndArray();
         if (success && image is not null)
         {
-            WriteNativeArtifactJson(writer, outputPath, image, command == "build-library", runtimePolicy);
+            if (outputPath is not null && (command is "frontend-build" or "frontend-build-library"))
+            {
+                writer.WriteString("output", outputPath);
+            }
+            WriteNativeArtifactJson(writer, outputPath, image,
+                command is "build-library" or "frontend-build-library", runtimePolicy);
         }
 
         writer.WriteEndObject();

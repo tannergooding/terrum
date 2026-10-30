@@ -1722,6 +1722,22 @@ integration, compiler lowering and complete qualification remain open. These
 are scoped implementation facts, not a reason to weaken the accepted
 contracts or infer conformance from the private collector.
 
+The separate unapproved
+[normal-backing candidate](../proposals/reference-normal-backing-support.md)
+now has an exact case-sensitive host agreement key threaded through
+`CompilationOptions`, bound programs, source Binder, `ValueLayout`, mandatory
+verification, native emission/JIT entry points and the four selected CLI
+commands. Under that explicit key, ordinary checked-reference fields have the
+candidate 16/8 size/alignment and nested inline layout is recomputed; regression
+coverage checks the changed field offset/aggregate size and confirms that
+omitting the key cannot verify or emit the candidate-bound program. Emission,
+direct native imports, JIT and AOT fail closed with an unsupported result
+rather than selecting today's 8-byte layout or a tracing profile. This is
+provisional agreement-selection/layout support only: no allocation control,
+hold acquisition/copy/drop, normal handle integration, support-bearing call
+ABI, runtime retirement or native execution has been implemented. The agreement
+is not persisted or accepted by module/graph/TRRM routes.
+
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
 from GC-backed `gc C`, `gc box<T>` and `gc ref<T>`. Carry exact backing
 identity, retains, roots, pin support, resource/guard dependencies and the

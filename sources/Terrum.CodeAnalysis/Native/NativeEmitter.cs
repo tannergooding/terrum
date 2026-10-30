@@ -33,22 +33,54 @@ public static class NativeEmitter
     /// <remarks>Bindings specify ABI identities, not verified provider contracts; callers must validate provider compatibility.</remarks>
     public static byte[] EmitWithImports(BoundProgram program, IReadOnlyList<NativeImportBinding> bindings,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
-        EmitWithImportUsage(program, bindings, runtimePolicy,
+        EmitWithImports(program, bindings, runtimePolicy,
+            nativeLoweringAgreement: null, cancellationToken);
+
+    /// <summary>Emits with the explicit host-selected native lowering agreement.</summary>
+    public static byte[] EmitWithImports(BoundProgram program,
+        IReadOnlyList<NativeImportBinding> bindings, NativeRuntimePolicy runtimePolicy,
+        string? nativeLoweringAgreement, CancellationToken cancellationToken = default)
+    {
+        if (nativeLoweringAgreement is not null)
+        {
+            ArgumentNullException.ThrowIfNull(program);
+            SemanticVerifier.Verify(program, nativeLoweringAgreement);
+            throw new NotSupportedException(
+                "The selected native lowering agreement is recognized but not implemented.");
+        }
+        return EmitWithImportUsage(program, bindings, runtimePolicy,
             cancellationToken: cancellationToken).Image;
+    }
 
     /// <summary>Emits a native executable using verified direct native import declarations.</summary>
     public static byte[] EmitWithNativeImports(BoundProgram program, NativeRuntimePolicy runtimePolicy,
         CancellationToken cancellationToken = default) =>
-        EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: false, cancellationToken);
+        EmitWithNativeImports(program, runtimePolicy,
+            nativeLoweringAgreement: null, cancellationToken);
+
+    /// <summary>Emits direct native imports under the explicit host-selected agreement.</summary>
+    public static byte[] EmitWithNativeImports(BoundProgram program,
+        NativeRuntimePolicy runtimePolicy, string? nativeLoweringAgreement,
+        CancellationToken cancellationToken = default) =>
+        EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: false,
+            cancellationToken, nativeLoweringAgreement);
 
     internal static byte[] EmitWithNativeImportsForTesting(BoundProgram program,
         NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default) =>
-        EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: true, cancellationToken);
+        EmitWithNativeImportsCore(program, runtimePolicy, allowApplicationDirectory: true,
+            cancellationToken, nativeLoweringAgreement: null);
 
     private static byte[] EmitWithNativeImportsCore(BoundProgram program, NativeRuntimePolicy runtimePolicy,
-        bool allowApplicationDirectory, CancellationToken cancellationToken)
+        bool allowApplicationDirectory, CancellationToken cancellationToken,
+        string? nativeLoweringAgreement = null)
     {
         ArgumentNullException.ThrowIfNull(program);
+        if (nativeLoweringAgreement is not null)
+        {
+            SemanticVerifier.VerifyWithDirectNativeImports(program, nativeLoweringAgreement);
+            throw new NotSupportedException(
+                "The selected native lowering agreement is recognized but not implemented.");
+        }
 
         var bindings = ImmutableArray.CreateBuilder<NativeImportBinding>();
         for (var functionIndex = 0; functionIndex < program.Functions.Length; functionIndex++)
@@ -773,14 +805,28 @@ public static class NativeEmitter
     /// <summary>Verifies and emits a complete executable image without accessing the filesystem.</summary>
     /// <exception cref="ArgumentException">The IR is invalid.</exception>
     /// <exception cref="NotSupportedException">The runtime policy or an IR, frame, or image resource limit is unsupported.</exception>
-    public static byte[] Emit(BoundProgram program, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    public static byte[] Emit(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        Emit(program, runtimePolicy, nativeLoweringAgreement: null, cancellationToken);
+
+    /// <summary>Emits a complete image under the explicit host-selected agreement.</summary>
+    public static byte[] Emit(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        string? nativeLoweringAgreement, CancellationToken cancellationToken = default)
     {
-        var code = EmitCode(program, runtimePolicy, cancellationToken);
+        var code = EmitCode(program, runtimePolicy, nativeLoweringAgreement,
+            cancellationToken);
         return PeImage.Build(code);
     }
 
     /// <summary>Verifies and emits relocatable code with a callable int32(void) entry point.</summary>
-    public static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken = default)
+    public static NativeCode EmitCode(BoundProgram program, NativeRuntimePolicy runtimePolicy,
+        CancellationToken cancellationToken = default) =>
+        EmitCode(program, runtimePolicy, nativeLoweringAgreement: null, cancellationToken);
+
+    /// <summary>Emits relocatable code under the explicit host-selected agreement.</summary>
+    public static NativeCode EmitCode(BoundProgram program,
+        NativeRuntimePolicy runtimePolicy, string? nativeLoweringAgreement,
+        CancellationToken cancellationToken = default)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -788,6 +834,12 @@ public static class NativeEmitter
         }
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
+        SemanticVerifier.Verify(program, nativeLoweringAgreement);
+        if (nativeLoweringAgreement is not null)
+        {
+            throw new NotSupportedException(
+                "The selected native lowering agreement is recognized but not implemented.");
+        }
         if (program.Functions.Any(static function => function.DirectNativeImport is not null))
         {
             throw new NotSupportedException("Source native imports require the explicit EmitWithNativeImports path.");
@@ -796,13 +848,13 @@ public static class NativeEmitter
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
         }
-        SemanticVerifier.Verify(program);
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
         }
         var managedNodes = UsesManagedNodes(program);
-        return new PeCompiler(program, managedNodes, cancellationToken: cancellationToken).Compile();
+        return new PeCompiler(program, managedNodes, cancellationToken: cancellationToken)
+            .Compile() with { NativeLoweringAgreement = nativeLoweringAgreement };
     }
 }
 
@@ -2568,7 +2620,8 @@ internal sealed partial class PeCompiler
             || CheckedReferenceTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
     private int Size(PrimitiveType type) =>
-        ValueLayout.Size(type, _program.Structures, _program.CheckedReferenceTypes);
+        ValueLayout.Size(type, _program.Structures, _program.CheckedReferenceTypes,
+            _program.NativeLoweringAgreement);
     private static bool IsNarrowInteger(PrimitiveType type) =>
         PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
 
@@ -2593,7 +2646,8 @@ internal sealed partial class PeCompiler
 
     private int ScratchSize(PrimitiveType type) => Math.Max(8, Size(type));
     private int ScratchAlignment(PrimitiveType type) =>
-        Math.Max(8, ValueLayout.Alignment(type, _program.Structures, _program.CheckedReferenceTypes));
+        Math.Max(8, ValueLayout.Alignment(type, _program.Structures,
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement));
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
 

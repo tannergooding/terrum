@@ -14,7 +14,8 @@ internal static class ValueLayout
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported values have no executable layout.")]
     internal static int Size(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null)
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
+        string? nativeLoweringAgreement = null)
     {
         if (BoundGenericNominalTypeTypes.IsType(type))
         {
@@ -40,7 +41,8 @@ internal static class ValueLayout
                 or PrimitiveType.NativeStorageAddress or PrimitiveType.NativeRawPointer
                     => NativeTargetProfile.PointerSize,
                 _ when NativeFunctionPointerTypes.IsType(type) => NativeTargetProfile.PointerSize,
-        _ when CheckedReferenceTypes.IsType(type) => CheckedReferenceSize(type, checkedReferenceTypes),
+        _ when CheckedReferenceTypes.IsType(type) => CheckedReferenceSize(
+            type, checkedReferenceTypes, nativeLoweringAgreement),
         PrimitiveType.Void => 0,
         _ when BoundEnumTypes.IsType(type) => sizeof(int),
         _ when (int)type >= 100 && (int)type < ManagedClassTypes.First
@@ -51,7 +53,8 @@ internal static class ValueLayout
 
     // Callers have established that all nested layouts are acyclic and complete.
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
-        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null)
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
+        string? nativeLoweringAgreement = null)
     {
         if (BoundGenericNominalTypeTypes.IsType(type))
         {
@@ -65,8 +68,10 @@ internal static class ValueLayout
         }
         if (CheckedReferenceTypes.IsType(type))
         {
-            return CheckedReferenceSize(type, checkedReferenceTypes) == 0
-                ? 0 : NativeTargetProfile.PointerSize;
+            var size = CheckedReferenceSize(type, checkedReferenceTypes,
+                nativeLoweringAgreement);
+            return size == 0 ? 0 : nativeLoweringAgreement is null
+                ? NativeTargetProfile.PointerSize : sizeof(ulong);
         }
         if (ManagedClassTypes.IsManaged(type))
         {
@@ -84,20 +89,29 @@ internal static class ValueLayout
                 return NativeTargetProfile.PointerSize;
             }
             return type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView
-                ? 8 : Size(type, structures, checkedReferenceTypes);
+                ? 8 : Size(type, structures, checkedReferenceTypes,
+                    nativeLoweringAgreement);
         }
         var structure = structures[(int)type - 100];
         var alignment = 1;
         foreach (var field in structure.Fields)
         {
-            alignment = Math.Max(alignment, Alignment(field.Type, structures, checkedReferenceTypes));
+            alignment = Math.Max(alignment, Alignment(field.Type, structures,
+                checkedReferenceTypes, nativeLoweringAgreement));
         }
         return alignment;
     }
 
     private static int CheckedReferenceSize(PrimitiveType type,
-        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes)
+        IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes,
+        string? nativeLoweringAgreement)
     {
+        if (nativeLoweringAgreement is not
+            (null or CompilationOptions.WindowsX64NormalBackingAgreement))
+        {
+            throw new NotSupportedException(
+                "The selected native lowering agreement has no value layout.");
+        }
         if (checkedReferenceTypes is null)
         {
             return 0;
@@ -110,6 +124,9 @@ internal static class ValueLayout
         }
         var referenceType = checkedReferenceTypes[index];
         return referenceType is not null && !referenceType.IsGarbageCollected
-            && !referenceType.IsInitialization ? NativeTargetProfile.PointerSize : 0;
+            && !referenceType.IsInitialization
+            ? nativeLoweringAgreement is null
+                ? NativeTargetProfile.PointerSize : 2 * sizeof(ulong)
+            : 0;
     }
 }
