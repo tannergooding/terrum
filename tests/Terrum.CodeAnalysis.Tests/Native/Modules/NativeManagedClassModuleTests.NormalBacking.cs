@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -154,6 +155,32 @@ public sealed partial class NativeManagedClassModuleTests
             nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(64));
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy, agreement))
             .ConfigureAwait(true), Is.EqualTo(64));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public void NormalBackingProgramCannotEnterPrivateNativeModuleGraph(
+        NativeRuntimePolicy policy)
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Leaf {
+                public int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            public int32 Main() {
+                require Leaf.TryCreate(42, out var leaf);
+                return leaf.Value;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(() => NativeModuleCompiler.CreateProducer(compilation.Program!,
+            ["Main"], "normal-backing-isolation", policy),
+            Throws.ArgumentException);
     }
 
     [Test]
