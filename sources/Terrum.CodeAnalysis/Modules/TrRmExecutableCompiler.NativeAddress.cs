@@ -85,7 +85,7 @@ public static partial class TrRmExecutableCompiler
                 or > NativeCallingConvention.Vectorcall
             || target.DoesNotReturn
             || caller.IsExternal || caller.DirectNativeImport is not null
-            || caller.ReturnType != PrimitiveType.Void || caller.ParameterCount != 0
+            || caller.ReturnType != PrimitiveType.Void
             || caller.DoesNotReturn || caller.RequiresUnsafeCaller
             || !caller.NativeOutputContracts.IsEmpty
             || !NativeFunctionPointerTypes.IsType(selectedAddress.Type))
@@ -115,8 +115,15 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("NativeAddress formation requires bound unsafe authorization.");
         }
-        var emitsIndirectCall = TryGetNativeAddressUnitCallHome(
-            caller, selectedAddress, out var callHomeIndex);
+        var indirectCall = TryGetNativeAddressCall(
+            caller, selectedAddress, signature, out var callHomeIndex);
+        var emitsIndirectCall = indirectCall is not null;
+        if (!emitsIndirectCall && caller.ParameterCount != 0)
+        {
+            throw Unsupported(
+                "The discarded NativeAddress profile requires a parameterless caller.");
+        }
+
         if (!emitsIndirectCall && !IsAddressOnlyVoidBody(caller, selectedAddress))
         {
             throw Unsupported(
@@ -186,23 +193,40 @@ public static partial class TrRmExecutableCompiler
             return typeSpecRef;
         }
 
-        var parameterTypeSpecRefs
+        var callerParameterTypeSpecRefs = caller.Variables
+            .Take(caller.ParameterCount)
+            .Select(static variable => variable.Type)
+            .Select(GetSignatureTypeSpecRef).ToArray();
+        var targetParameterTypeSpecRefs
             = signature.ParameterTypes.Select(GetSignatureTypeSpecRef).ToArray();
+        const int callerSignatureRow = 1;
         const int nativeSignatureRow = 2;
         var parameterRows = new List<TrRmParamRow>(
-            parameterTypeSpecRefs.Length);
-        for (var ordinal = 0; ordinal < parameterTypeSpecRefs.Length; ordinal++)
+            callerParameterTypeSpecRefs.Length
+                + targetParameterTypeSpecRefs.Length);
+        for (var ordinal = 0;
+            ordinal < callerParameterTypeSpecRefs.Length; ordinal++)
+        {
+            parameterRows.Add(new TrRmParamRow(callerSignatureRow, ordinal,
+                callerParameterTypeSpecRefs[ordinal], 0));
+        }
+
+        var targetParameterFirst = targetParameterTypeSpecRefs.Length == 0
+            ? 0 : parameterRows.Count + 1;
+        for (var ordinal = 0;
+            ordinal < targetParameterTypeSpecRefs.Length; ordinal++)
         {
             parameterRows.Add(new TrRmParamRow(nativeSignatureRow, ordinal,
-                parameterTypeSpecRefs[ordinal], 0));
+                targetParameterTypeSpecRefs[ordinal], 0));
         }
 
         var signatureRows = new[]
         {
-            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
+            new TrRmMethodSigRow(GetSignatureTypeSpecRef(caller.ReturnType), 0,
+                callerParameterTypeSpecRefs.Length == 0 ? 0 : 1,
+                callerParameterTypeSpecRefs.Length, 0, 0),
             new TrRmMethodSigRow(GetSignatureTypeSpecRef(signature.ReturnType), 0,
-                parameterRows.Count == 0 ? 0 : 1,
-                parameterRows.Count, 0, 0),
+                targetParameterFirst, targetParameterTypeSpecRefs.Length, 0, 0),
         };
         var featureRows = new List<TrRmFeatureRow> { new(4, 1) };
         if (!import.Parameters.IsEmpty)
@@ -342,8 +366,14 @@ public static partial class TrRmExecutableCompiler
                 targetMethodRow, libraryNameRow, exportNameRow),
         ], strings, methods, default, typeDefs, default, modules,
             signatures, parameters, typeSpecs, contracts, layouts);
-        var maps = TrRmRegisterBodyMapBuilder.Create(
-            [0x1100_0001], [0x1600_0000u | (uint)targetMethodRow]);
+        var typeMapTokens = new List<uint> { 0x1100_0001 };
+        foreach (var typeSpecRef in callerParameterTypeSpecRefs)
+        {
+            typeMapTokens.Add(0x1100_0000u | typeSpecRef);
+        }
+
+        var maps = TrRmRegisterBodyMapBuilder.Create(typeMapTokens,
+            [0x1600_0000u | (uint)targetMethodRow]);
         var entryState = new byte[8];
         entryState[0] = 0x01;
         var nativeAddress = TrRmRegisterBodyRecordWriter.EncodeNativeAddress(
@@ -351,12 +381,38 @@ public static partial class TrRmExecutableCompiler
             emitsIndirectCall ? checked((ushort)callHomeIndex) : (ushort)15,
             maps.GetMethodMapIndex(0x1600_0000u | (uint)targetMethodRow),
             maps.GetTypeMapIndex(0x1100_0001));
-        var homeMap = new byte[emitsIndirectCall ? 8 : 0];
+        var homeMap = emitsIndirectCall
+            ? new byte[(callerParameterTypeSpecRefs.Length + 1) * 8]
+            : [];
+        var callInputs = new List<TrRmRegisterBodyCallInput>(
+            indirectCall?.Arguments.Length ?? 0);
         if (emitsIndirectCall)
         {
             homeMap[0] = 0x03;
             BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
                 maps.GetTypeMapIndex(0x1100_0001));
+            homeMap[1] = caller.Variables[caller.ParameterCount].IsMutable
+                ? (byte)1 : (byte)0;
+            for (var ordinal = 0;
+                ordinal < callerParameterTypeSpecRefs.Length; ordinal++)
+            {
+                var offset = (ordinal + 1) * 8;
+                var typeMapToken = 0x1100_0000u
+                    | callerParameterTypeSpecRefs[ordinal];
+                homeMap[offset] = 0x02;
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    homeMap.AsSpan(offset + 2),
+                    maps.GetTypeMapIndex(typeMapToken));
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    homeMap.AsSpan(offset + 4), checked((ushort)ordinal));
+            }
+
+            foreach (var argument in indirectCall!.Arguments)
+            {
+                var read = (BoundRead)argument;
+                callInputs.Add(new TrRmRegisterBodyCallInput(2, 1,
+                    checked((ushort)(read.Variable + 1))));
+            }
         }
         var records = new List<ReadOnlyMemory<byte>>
         {
@@ -367,7 +423,7 @@ public static partial class TrRmExecutableCompiler
         if (emitsIndirectCall)
         {
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                3, 0, checked((ushort)callHomeIndex), 0, [], []));
+                3, 0, checked((ushort)callHomeIndex), 0, callInputs, []));
             code = [.. code, 0xE0, 0, 2, 0];
         }
 
@@ -476,9 +532,9 @@ public static partial class TrRmExecutableCompiler
         }) && !isRead;
     }
 
-    private static bool TryGetNativeAddressUnitCallHome(
+    private static BoundIndirectCall? TryGetNativeAddressCall(
         BoundFunction function, BoundNativeFunctionAddress address,
-        out int homeIndex)
+        NativeFunctionPointerSignatureDefinition signature, out int homeIndex)
     {
         homeIndex = -1;
         var statements = new List<BoundStatement>();
@@ -491,17 +547,19 @@ public static partial class TrRmExecutableCompiler
             || statements[1] is not BoundExpressionStatement
                 { Expression: BoundIndirectCall call }
             || (uint)local.Variable >= (uint)function.Variables.Length
-            || function.ParameterCount != 0
-            || function.Variables.Length != 1
+            || function.Variables.Length != function.ParameterCount + 1
+            || local.Variable != function.ParameterCount
             || call.Target is not BoundRead targetRead
             || targetRead.Variable != local.Variable
             || targetRead.Type != address.Type
             || call.Type != PrimitiveType.Void
-            || !call.Arguments.IsEmpty
+            || signature.ReturnType != PrimitiveType.Void
+            || call.Arguments.Length != signature.ParameterTypes.Length
+            || call.Arguments.Length != function.ParameterCount
             || !call.IsUnsafeAuthorized
             || !function.Body.RetiredManagedLocals.IsEmpty)
         {
-            return false;
+            return null;
         }
 
         var variable = function.Variables[local.Variable];
@@ -510,11 +568,29 @@ public static partial class TrRmExecutableCompiler
             || variable.IsInitializationLocal
             || variable.NativeFixedArrayLayout is not null)
         {
-            return false;
+            return null;
         }
 
-        homeIndex = local.Variable;
-        return true;
+        for (var ordinal = 0; ordinal < function.ParameterCount; ordinal++)
+        {
+            var formal = function.Variables[ordinal];
+            if (formal.Type == PrimitiveType.Void
+                || (!NativePointerTypes.IsType(formal.Type)
+                    && !DirectNativeImportContract.IsScalar(formal.Type))
+                || formal.IsOut || formal.IsInit || formal.IsImplicitRef
+                || formal.IsImplicitReferenceTemporary
+                || formal.IsInitializationLocal
+                || formal.NativeFixedArrayLayout is not null
+                || call.Arguments[ordinal] is not BoundRead argument
+                || (uint)argument.Variable >= (uint)function.ParameterCount
+                || argument.Type != function.Variables[argument.Variable].Type)
+            {
+                return null;
+            }
+        }
+
+        homeIndex = 0;
+        return call;
     }
 
     private static bool AppendStatements(BoundBlock block,
