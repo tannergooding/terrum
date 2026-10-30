@@ -14,6 +14,12 @@
 #error The RootPin loaded-type interface is selected only for Windows x64.
 #endif
 
+#if defined(TERRUM_ROOT_PIN_TEST_OMIT_METHOD_ADMISSION_EXPORT)
+#define ROOTPIN_LOADED_TYPES_METHOD_API
+#else
+#define ROOTPIN_LOADED_TYPES_METHOD_API ROOTPIN_LOADED_TYPES_API
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -303,7 +309,7 @@ TerrumRootPinAdmitLoadedTypesV2(
     RootPinLoadedTypeV1** vacantOutTypes,
     uint32_t outCount);
 
-ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+ROOTPIN_LOADED_TYPES_METHOD_API uint32_t ROOTPIN_LOADED_TYPES_CALL
 TerrumRootPinAdmitLoadedMethodsV1(
     RootPinDomainV1 domain,
     const RootPinMethodBatchV1* batch,

@@ -2937,7 +2937,7 @@ TerrumRootPinAdmitLoadedTypesV2(
     }
 }
 
-extern "C" ROOTPIN_LOADED_TYPES_API uint32_t ROOTPIN_LOADED_TYPES_CALL
+extern "C" ROOTPIN_LOADED_TYPES_METHOD_API uint32_t ROOTPIN_LOADED_TYPES_CALL
 TerrumRootPinAdmitLoadedMethodsV1(
     RootPinDomainV1 domain,
     const RootPinMethodBatchV1* batch,
@@ -4476,5 +4476,8 @@ RootPinTestRelocateReachableV1(
 extern "C" ROOTPIN_LOADED_TYPES_API const RootPinRuntimeInfoV1*
 ROOTPIN_LOADED_TYPES_CALL TerrumRootPinGetRuntimeV1(void)
 {
+#if defined(TERRUM_ROOT_PIN_TEST_DELAY_RUNTIME_GETTER)
+    Sleep(100);
+#endif
     return &s_runtimeInfo;
 }
