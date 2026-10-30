@@ -140,10 +140,40 @@ public sealed class NativeLibraryTests
     }
 
     [Test]
+    public void CheckedExceptionExportsRequireVerifiedNoFailureBodies()
+    {
+        var policy = BoundRuntimePolicy.CheckedExceptions;
+        var safeCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Identity(int32 value) { return value; }"), policy);
+        Assert.That(safeCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, safeCompilation.Diagnostics));
+        Assert.That(NativeEmitter.EmitLibrary(safeCompilation.Program!, ["Identity"],
+            NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+
+        var failingCompilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Validate(bool condition) { require condition; return 42; }"), policy);
+        Assert.That(failingCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, failingCompilation.Diagnostics));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(
+            failingCompilation.Program!, ["Validate"],
+            NativeRuntimePolicy.CheckedExceptions))!;
+
+        var helperCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            int32 MayFail(bool condition) { require condition; return 7; }
+            public int32 Forward(bool condition) { return MayFail(condition); }
+            """), policy);
+        Assert.That(helperCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, helperCompilation.Diagnostics));
+        _ = Assert.Throws<ArgumentException>(() => NativeEmitter.EmitLibrary(
+            helperCompilation.Program!, ["Forward"],
+            NativeRuntimePolicy.CheckedExceptions))!;
+    }
+
+    [Test]
     public void NativeCallableEntryNamesAreIndependentNamedExports()
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
-            [NoThrow]
+
             [Terrum.Interop.NativeCallable]
             public int32 Callback(int32 value) { return value; }
             public int32 Ordinary() { return 0; }

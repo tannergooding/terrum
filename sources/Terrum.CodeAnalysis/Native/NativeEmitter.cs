@@ -673,6 +673,32 @@ public static class NativeEmitter
             throw new ArgumentException("A native library supports at most 1024 public exports.", nameof(exports));
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
+        if (runtimePolicy == NativeRuntimePolicy.CheckedExceptions)
+        {
+            var exportFunctions = program.Functions;
+            foreach (var (_, functionIndex) in selected)
+            {
+                var function = exportFunctions[functionIndex];
+                if (!function.IsExternal && function.NativeFunctionPointerType is null
+                    && !function.NoFailureProof)
+                {
+                    exportFunctions = exportFunctions.SetItem(functionIndex,
+                        function with { NoFailureProof = true });
+                }
+            }
+            if (exportFunctions != program.Functions)
+            {
+                program = program with { Functions = exportFunctions };
+                if (bindings is null)
+                {
+                    SemanticVerifier.VerifyLibrary(program);
+                }
+                else
+                {
+                    SemanticVerifier.VerifyLibraryReferences(program);
+                }
+            }
+        }
         captureSelectedExports?.Invoke([.. selected]);
         var imports = bindings is null ? null : SelectImports(program, bindings, cancellationToken);
         var compiler = new PeCompiler(program, managedExports, library: true, imports: imports,

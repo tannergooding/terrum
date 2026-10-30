@@ -864,6 +864,14 @@ bodies receive scoped no-failure verification. Validated `NativeImport` and
 vtable roles are admitted separately from ordinary potentially-failing calls,
 without erasing native exception, output or cleanup failure edges.
 
+For `CheckedExceptions` PE-library emission, each selected local export body
+receives an ephemeral `NoFailureProof` and is rechecked by the mandatory
+verifier before emission. A body with a possible Terrum failure, including a
+call to an ordinary unproved helper, rejects instead of unwinding a Terrum
+exception through a native frame. Fail-fast export behavior is unchanged.
+This host-selected export path does not implement the source `NativeExport`
+schema.
+
 The internal conservative proof accepts initialized value/field reads and
 writes, constants, comparisons, boolean and integer bitwise operations, unary
 plus and complement, total conversions, and calls carrying an internal
