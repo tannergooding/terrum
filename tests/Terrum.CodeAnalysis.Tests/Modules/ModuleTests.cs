@@ -57,6 +57,183 @@ public sealed class ModuleTests
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(
             ModuleCompiler.Link(consumer, producer), NativeRuntimePolicy.FailFast)).ConfigureAwait(true), Is.EqualTo(42));
     }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NestedFieldMovesRoundTripAndRemapAcrossPrivateModulesAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string fieldMoveText = "move owner.Nested.Left";
+        var producerSource = """
+            unique struct Child {
+                public mut OwnedInt32Buffer Left;
+                public mut OwnedInt32Buffer Right;
+                public Child(OwnedInt32Buffer left, OwnedInt32Buffer right) {
+                    Left = move left;
+                    Right = move right;
+                }
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(Child nested) {
+                    Nested = move nested;
+                }
+            }
+            OwnedInt32Buffer Create(int32 value) {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(value);
+                return move buffer;
+            }
+            public int32 Consume() {
+                mut Owner owner = new Owner(new Child(Create(40), Create(2)));
+                OwnedInt32Buffer extracted = move owner.Nested.Left;
+                owner.Nested.Left = Create(10);
+                int32 result = extracted.Read(0) + owner.Nested.Left.Read(0)
+                    + owner.Nested.Right.Read(0);
+                owner = _;
+                return result;
+            }
+            public int32 RetireNested() {
+                mut Owner owner = new Owner(new Child(Create(40), Create(2)));
+                OwnedInt32Buffer extracted = move owner.Nested.Left;
+                return extracted.Read(0) + owner.Nested.Right.Read(0);
+            }
+            """;
+        var library = Compilation.CreateLibrary(
+            SyntaxTree.Parse(producerSource), policy);
+        Assert.That(library.HasErrors, Is.False,
+            string.Join(Environment.NewLine, library.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            library.Program!, ["Consume", "RetireNested"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)),
+            Is.EqualTo(92));
+        var fieldMoveStart = producerSource.IndexOf(
+            fieldMoveText, StringComparison.Ordinal);
+        Assert.That(fieldMoveStart, Is.GreaterThanOrEqualTo(0));
+        var fieldMoveEnvelope = new byte[13];
+        fieldMoveEnvelope[0] = 42;
+        BinaryPrimitives.WriteInt32LittleEndian(
+            fieldMoveEnvelope.AsSpan(1), (int)PrimitiveType.OwnedInt32Buffer);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            fieldMoveEnvelope.AsSpan(5), fieldMoveStart);
+        BinaryPrimitives.WriteInt32LittleEndian(
+            fieldMoveEnvelope.AsSpan(9), fieldMoveText.Length);
+        var fieldMoveOffset = producer.AsSpan().IndexOf(fieldMoveEnvelope);
+        Assert.That(fieldMoveOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(producer[fieldMoveOffset + 13], Is.EqualTo(7));
+        Assert.That(producer[fieldMoveOffset + 30], Is.EqualTo(7));
+        Assert.That(producer[fieldMoveOffset + 47], Is.EqualTo(2));
+
+        var consumerSource = """
+            struct Marker {
+                public int32 Value;
+                public Marker(int32 value) { Value = value; }
+            }
+            int32 Main() {
+                mut Marker marker = new Marker(1);
+                return Consume() + RetireNested() + marker.Value;
+            }
+            """;
+        var consumerCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            ModuleCompiler.CreateReference(producer), policy);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var unknownExpression = producer.ToArray();
+        unknownExpression[fieldMoveOffset] = 43;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(consumer, unknownExpression));
+        var nonFieldOperand = producer.ToArray();
+        nonFieldOperand[fieldMoveOffset + 13] = 1;
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(consumer, nonFieldOperand));
+        var onePastField = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            onePastField.AsSpan(fieldMoveOffset + 26), 2);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(consumer, onePastField));
+        var wrongPlaceType = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            wrongPlaceType.AsSpan(fieldMoveOffset + 14), (int)PrimitiveType.Int32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(consumer, wrongPlaceType));
+        var invalidRoot = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            invalidRoot.AsSpan(fieldMoveOffset + 60), -1);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.Link(consumer, invalidRoot));
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var moveCount = 0;
+        var fieldPathLength = 0;
+        Assert.That(BoundTreeTraversal.VisitExpressions(
+            linked.Functions.Single(static function => function.Name == "Consume").Body!,
+            expression => {
+                if (expression is not BoundFieldMove move)
+                {
+                    return;
+                }
+                moveCount++;
+                BoundExpression place = move.Place;
+                while (place is BoundFieldRead field)
+                {
+                    fieldPathLength++;
+                    place = field.Receiver;
+                }
+                Assert.That(place, Is.InstanceOf<BoundRead>());
+            }), Is.True);
+        Assert.That(moveCount, Is.EqualTo(1));
+        Assert.That(fieldPathLength, Is.EqualTo(2));
+
+        var nativePolicy = policy == BoundRuntimePolicy.FailFast
+            ? NativeRuntimePolicy.FailFast : NativeRuntimePolicy.CheckedExceptions;
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, nativePolicy))
+            .ConfigureAwait(true), Is.EqualTo(95));
+
+        var replacementCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(producerSource.Replace(
+                "Create(40)", "Create(41)", StringComparison.Ordinal)), policy);
+        Assert.That(replacementCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, replacementCompilation.Diagnostics));
+        var replacement = ModuleCompiler.CreateProducer(
+            replacementCompilation.Program!, ["Consume", "RetireNested"]);
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(
+            ModuleCompiler.Link(consumer, replacement), nativePolicy))
+            .ConfigureAwait(true), Is.EqualTo(97));
+
+        var nativeProducer = NativeModuleCompiler.CreateProducer(
+            library.Program!, ["Consume", "RetireNested"],
+            "NestedOwnerProvider", nativePolicy);
+        var graphCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateGraphReference([nativeProducer]),
+            runtimePolicy: policy);
+        Assert.That(graphCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, graphCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            graphCompilation.Program!, [nativeProducer], nativePolicy);
+        Assert.That(await NativeModuleCompiler.RunGraphAsync(
+            graphConsumer, [nativeProducer], TimeSpan.FromSeconds(10), nativePolicy)
+            .ConfigureAwait(true), Is.EqualTo(95));
+
+        var unusedLibrary = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Unused() { return 1; }"), policy);
+        Assert.That(unusedLibrary.HasErrors, Is.False,
+            string.Join(Environment.NewLine, unusedLibrary.Diagnostics));
+        var unusedProducer = NativeModuleCompiler.CreateProducer(
+            unusedLibrary.Program!, ["Unused"], "UnusedNestedProvider", nativePolicy);
+        var setProducers = new[] { nativeProducer, unusedProducer };
+        var setCompilation = Compilation.Create(SyntaxTree.Parse(consumerSource),
+            NativeModuleCompiler.CreateReferenceSet(setProducers), policy);
+        Assert.That(setCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, setCompilation.Diagnostics));
+        var setConsumer = NativeModuleCompiler.CreateConsumerSet(
+            setCompilation.Program!, setProducers, nativePolicy);
+        Assert.That(await NativeModuleCompiler.RunConsumerSetAsync(
+            setConsumer, setProducers, TimeSpan.FromSeconds(10), nativePolicy)
+            .ConfigureAwait(true), Is.EqualTo(95));
+    }
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task NamedArgumentsRetainParameterMappingAcrossModuleArtifactsAsync(BoundRuntimePolicy policy)
