@@ -70,11 +70,9 @@ public static partial class NativeModuleCompiler
         var imageBindings = new NativeImportBinding[declarations.Length + directNativeBindings.Length];
         declarations.CopyTo(imageBindings, 0);
         directNativeBindings.CopyTo(imageBindings, declarations.Length);
-        var (image, used) = imageBindings.Length == 0
-            ? (NativeEmitter.EmitLibrary(program, exports, runtimePolicy),
-                ImmutableArray<NativeImportBinding>.Empty)
-            : NativeEmitter.EmitLibraryWithImportUsage(program, exports, imageBindings, runtimePolicy,
-                allowDirectNativeImports: directNativeBindings.Length != 0);
+        var (image, used) = NativeEmitter.EmitModuleLibrary(program, exports,
+            imageBindings.Length == 0 ? null : imageBindings, runtimePolicy,
+            allowDirectNativeImports: directNativeBindings.Length != 0);
         var graphBindingNames = new HashSet<string>(declarations.Length, StringComparer.Ordinal);
         foreach (var declaration in declarations)
         {

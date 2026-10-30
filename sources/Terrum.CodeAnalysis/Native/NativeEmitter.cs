@@ -501,8 +501,25 @@ public static class NativeEmitter
             allowDirectNativeImports: allowDirectNativeImports);
     }
 
+    internal static (byte[] Image, ImmutableArray<NativeImportBinding> Imports)
+        EmitModuleLibrary(BoundProgram program, IReadOnlyList<string> exports,
+            IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy,
+            bool allowDirectNativeImports = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        if (allowDirectNativeImports)
+        {
+            ArgumentNullException.ThrowIfNull(bindings);
+            ValidateDirectNativeBindings(program, bindings);
+        }
+        return EmitLibraryCore(program, exports, bindings, runtimePolicy, cancellationToken,
+            allowDirectNativeImports: allowDirectNativeImports,
+            containCheckedExceptionsAtExports: false);
+    }
+
     internal static byte[] EmitLibraryWithNativeImports(BoundProgram program,
         IReadOnlyList<string> exports, NativeRuntimePolicy runtimePolicy,
+        bool containCheckedExceptionsAtExports = true,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(program);
@@ -532,7 +549,8 @@ public static class NativeEmitter
             throw new ArgumentException("The program contains no direct native imports.", nameof(program));
         }
         return EmitLibraryCore(program, exports, bindings.ToImmutable(), runtimePolicy, cancellationToken,
-            allowDirectNativeImports: true).Image;
+            allowDirectNativeImports: true,
+            containCheckedExceptionsAtExports: containCheckedExceptionsAtExports).Image;
     }
 
     private static void ValidateDirectNativeBindings(BoundProgram program,
@@ -567,7 +585,7 @@ public static class NativeEmitter
         IReadOnlyList<NativeImportBinding>? bindings, NativeRuntimePolicy runtimePolicy, CancellationToken cancellationToken,
         bool[]? sourceDependent = null, Action<NativeCode>? captureCode = null,
         Action<ImmutableArray<(string Name, int Index)>>? captureSelectedExports = null,
-        bool allowDirectNativeImports = false)
+        bool allowDirectNativeImports = false, bool containCheckedExceptionsAtExports = true)
     {
         if (runtimePolicy is not (NativeRuntimePolicy.FailFast or NativeRuntimePolicy.CheckedExceptions))
         {
@@ -673,7 +691,8 @@ public static class NativeEmitter
             throw new ArgumentException("A native library supports at most 1024 public exports.", nameof(exports));
         }
         selected.Sort(static (left, right) => StringComparer.Ordinal.Compare(left.Name, right.Name));
-        if (runtimePolicy == NativeRuntimePolicy.CheckedExceptions)
+        if (runtimePolicy == NativeRuntimePolicy.CheckedExceptions
+            && containCheckedExceptionsAtExports)
         {
             var exportFunctions = program.Functions;
             foreach (var (_, functionIndex) in selected)

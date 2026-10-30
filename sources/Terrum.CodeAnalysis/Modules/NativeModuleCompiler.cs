@@ -58,8 +58,9 @@ public static partial class NativeModuleCompiler
         var names = exports.ToArray();
         var contract = ModuleCompiler.CreateProducer(program, names);
         var image = program.Functions.Any(static function => function.DirectNativeImport is not null)
-            ? NativeEmitter.EmitLibraryWithNativeImports(program, names, runtimePolicy)
-            : NativeEmitter.EmitLibrary(program, names, runtimePolicy);
+            ? NativeEmitter.EmitLibraryWithNativeImports(program, names, runtimePolicy,
+                containCheckedExceptionsAtExports: false)
+            : NativeEmitter.EmitModuleLibrary(program, names, null, runtimePolicy).Image;
         var package = Write(isConsumer: false, identity, runtimePolicy, contract, image);
         ValidateProducer(Read(package));
         return package;

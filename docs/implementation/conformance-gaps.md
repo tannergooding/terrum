@@ -364,8 +364,14 @@ select outer schema version 3, which removes `NoThrow`/`MayThrow` from
 recorded import contracts while retaining directed DoesNotReturn and
 caller-unsafe checks; exact readers reject older v2 artifacts instead of
 normalizing away those promises. Focused NoThrow module/graph/set regression
-selection passed 88/88 with zero skips. Remaining private semantic/native
-binding and proof boundaries stay open. The unapproved
+selection passed 88/88 with zero skips. CheckedExceptions may unwind through
+private `NativeModuleCompiler` producer/graph images into a runtime-policy-
+matched generated caller; public `NativeEmitter.EmitLibrary` exports still
+require an ephemeral verified `NoFailureProof` under `CheckedExceptions`.
+The managed-class/graph plus public-export regression selection passed
+114/114 with zero skips, including cross-image recovery and public-export
+rejection. Remaining private semantic/native binding and proof boundaries
+stay open. The unapproved
 [direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md)
 is provisionally implemented with version-3 TNPK/TNSP/TNGP expectation tables
 and provider-owned leaf thunks; package, set and graph AOT plus root-only graph

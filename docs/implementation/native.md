@@ -864,13 +864,21 @@ bodies receive scoped no-failure verification. Validated `NativeImport` and
 vtable roles are admitted separately from ordinary potentially-failing calls,
 without erasing native exception, output or cleanup failure edges.
 
-For `CheckedExceptions` PE-library emission, each selected local export body
-receives an ephemeral `NoFailureProof` and is rechecked by the mandatory
-verifier before emission. A body with a possible Terrum failure, including a
-call to an ordinary unproved helper, rejects instead of unwinding a Terrum
-exception through a native frame. Fail-fast export behavior is unchanged.
-This host-selected export path does not implement the source `NativeExport`
-schema.
+For public `NativeEmitter.EmitLibrary` and `EmitLibraryWithImports` output
+under `CheckedExceptions`, each selected local export body receives an
+ephemeral `NoFailureProof` and is rechecked by the mandatory verifier before
+emission. A body with a possible Terrum failure, including a call to an
+ordinary unproved helper, rejects instead of unwinding a Terrum exception
+through a native caller. Fail-fast export behavior is unchanged. This
+host-selected export path does not implement the source `NativeExport` schema.
+
+The private `NativeModuleCompiler` producer and graph-image routes are
+different: their package contract is generated-module interop, and a
+runtime-policy-matched generated consumer may catch a Terrum failure
+unwinding from a provider image. The PE exports do not publish a stable
+foreign ABI; arbitrary native callers are outside this module contract.
+Regression coverage verifies both cross-image checked recovery and continued
+rejection from the public native-library export path.
 
 The internal conservative proof accepts initialized value/field reads and
 writes, constants, comparisons, boolean and integer bitwise operations, unary
