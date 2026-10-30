@@ -307,6 +307,11 @@ public static class NativeEmitter
         {
             throw new ArgumentException("Every external function needs exactly one native import binding.", nameof(bindings));
         }
+        if (BoundGenericNominalTypeContract.UsesAny(program))
+        {
+            throw new NotSupportedException(
+                "Generic nominal values do not have a supported native representation.");
+        }
         var selected = new Dictionary<int, NativeImportBinding>(bindings.Count);
         foreach (var binding in bindings)
         {
