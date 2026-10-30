@@ -375,6 +375,216 @@ public sealed class TokenCursorTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ReferenceCallResultRetainsItsDeclaredSourceAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(value))]
+            internal ref<int32> IdentityReference(ref<int32> value) { return value; }
+            int32 Main() {
+                int32 input = int32(42);
+                return *IdentityReference(ref input);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ReferenceCallResultInstantiatesStoredDescriptorFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct ReferenceResultNumber {
+                public int32 Value;
+                public ReferenceResultNumber(int32 value) { Value = value; }
+            }
+            struct ReferenceResultCell {
+                public mut ref<int32> Value;
+                public ReferenceResultNumber Inner;
+                [this: Captures(nameof(value))]
+                public ReferenceResultCell(ref<int32> value) {
+                    Value = value;
+                    Inner = new ReferenceResultNumber(int32(42));
+                }
+                [return: DependsOn(this)]
+                public ref<int32> ReadFromReceiver() { return Value; }
+                [return: DependsOn(this)]
+                public ref<int32> BorrowNumber() { return ref Inner.Value; }
+            }
+            [return: DependsOn(nameof(holder))]
+            internal ref<int32> ReadReferenceResult(ReferenceResultCell holder) {
+                return holder.Value;
+            }
+            [return: DependsOn(nameof(holder))]
+            internal ref<int32> ReadBorrowedReferenceResult(
+                ref<ReferenceResultCell> holder) {
+                return (*holder).Value;
+            }
+            [return: DependsOn(nameof(holder))]
+            internal ref<int32> ReadBorrowedNumber(
+                ref<ReferenceResultCell> holder) {
+                return ref (*holder).Inner.Value;
+            }
+            int32 Main() {
+                int32 input = int32(42);
+                ReferenceResultCell holder = new ReferenceResultCell(ref input);
+                int32 observed = *ReadReferenceResult(holder);
+                int32 borrowed = *ReadBorrowedReferenceResult(ref holder);
+                int32 projected = *ReadBorrowedNumber(ref holder);
+                int32 receiverProjected = *holder.BorrowNumber();
+                require observed == int32(42);
+                require borrowed == int32(42);
+                require projected == int32(42);
+                require receiverProjected == int32(42);
+                return *(holder.ReadFromReceiver());
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NestedReferenceCallResultUsesCurrentDescriptorContentsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(value))]
+            internal ref<int32> ReadNestedReference(ref<ref<int32>> value) {
+                return *value;
+            }
+            int32 Main() {
+                int32 input = int32(42);
+                ref<int32> inner = ref input;
+                return *ReadNestedReference(ref inner);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task NamedReferenceCallResultMapsAllDeclaredSourcesAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(left), nameof(right))]
+            internal ref<int32> ChooseReference(
+                ref<int32> left, ref<int32> right, bool useLeft) {
+                return useLeft ? left : right;
+            }
+            int32 Main() {
+                int32 first = int32(1);
+                int32 second = int32(42);
+                return *ChooseReference(
+                    right: ref second, useLeft: false, left: ref first);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task WritableReferenceCallResultPreservesWriteAuthorityAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(value))]
+            internal write ref<int32> WritableIdentity(
+                write ref<int32> value) { return value; }
+            int32 Main() {
+                mut int32 input = int32(1);
+                *WritableIdentity(ref input) = int32(42);
+                return input;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task ForwardsBackingDoesNotAuthorizeReturningTheSourceReferenceAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [return: DependsOn(nameof(value))]
+            [return: ForwardsBacking(nameof(value))]
+            internal ref<int32> Invalid(ref<int32> value) { return value; }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task ReferenceFieldProjectionRequiresItsDeclaredInputSourceAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct ReferenceResultNumber {
+                public int32 Value;
+                public ReferenceResultNumber(int32 value) { Value = value; }
+            }
+            struct ReferenceResultCell {
+                public ReferenceResultNumber Inner;
+                public ReferenceResultCell(ReferenceResultNumber inner) { Inner = inner; }
+            }
+            [return: DependsOn()]
+            internal ref<int32> Borrow(
+                ref<ReferenceResultCell> holder) {
+                return ref (*holder).Inner.Value;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task ForwardsBackingDoesNotAuthorizeReturningAReceiverFieldAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct ReferenceResultNumber {
+                public int32 Value;
+                public ReferenceResultNumber(int32 value) { Value = value; }
+            }
+            struct ReferenceResultCell {
+                public ReferenceResultNumber Inner;
+                public ReferenceResultCell(ReferenceResultNumber inner) { Inner = inner; }
+                [return: DependsOn(this)]
+                [return: ForwardsBacking(this)]
+                public ref<int32> Borrow() { return ref Inner.Value; }
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task OrdinaryReferenceReborrowPreservesPlaceAndAccessAsync(
         BoundRuntimePolicy policy)
     {
@@ -593,6 +803,249 @@ public sealed class TokenCursorTests
 
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CopyAggregateReferenceFieldsRetainTheirTargetsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferencePair {
+                public mut write ref<int32> First;
+                public mut write ref<int32> Second;
+                [this: Captures(nameof(first), nameof(second))]
+                public ReferencePair(write ref<int32> first, write ref<int32> second) {
+                    First = first;
+                    Second = second;
+                }
+                [return: DependsOn(this)]
+                public ReferencePair Clone() {
+                    return this;
+                }
+            }
+            struct ReferenceBox {
+                public mut ReferencePair Pair;
+                [this: Captures(nameof(pair))]
+                public ReferenceBox(ReferencePair pair) {
+                    Pair = pair;
+                }
+                [return: DependsOn(this)]
+                public ReferenceBox Clone() {
+                    return this;
+                }
+            }
+            [return: DependsOn(nameof(value))]
+            ReferenceBox Preserve(ReferenceBox value) {
+                return value;
+            }
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut int32 second = int32(2);
+                mut int32 third = int32(3);
+                ReferenceBox original = new ReferenceBox(
+                    new ReferencePair(ref first, ref second));
+                ReferencePair fieldCopy = original.Pair.Clone();
+                *fieldCopy.Second = int32(43);
+                require second == int32(43);
+                ReferenceBox preserved = Preserve(value: original);
+                mut ReferenceBox copy = preserved.Clone();
+                {
+                    write ref<int32> borrowed =
+                        ref *copy.Pair.First;
+                    *borrowed = int32(40);
+                }
+                copy.Pair.First = ref third;
+                *copy.Pair.First = int32(39);
+                *copy.Pair.Second = int32(42);
+                *original.Pair.First = int32(41);
+                return first == 41 && second == 42 && third == 39 ? 42 : 0;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ReferenceFieldBackingSurvivesAggregateCopiesAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            unique struct ReferenceSpan {
+                public write ref<Span<Token>> Value;
+                [this: Captures(nameof(value))]
+                public ReferenceSpan(write ref<Span<Token>> value) {
+                    Value = value;
+                }
+            }
+            int32 Main() {
+                require TokenSnapshot.TryScan(init var scanned);
+                mut TokenSnapshot owner = move scanned;
+                require TokenSnapshot.TryScan(init var replacementScanned);
+                mut TokenSnapshot replacement = move replacementScanned;
+                mut Span<Token> span = owner.AsSpan();
+                mut ReferenceSpan original = new ReferenceSpan(ref span);
+                span = replacement.AsSpan();
+                Span<Token> observed = *original.Value;
+                require observed.Length == uint64(replacement.GetCount());
+                observed = _;
+                original = _;
+                span = _;
+                replacement = _;
+                owner = _;
+                return 42;
+            }
+            """;
+        var program = Program(await CompileAsync("alpha beta", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task GenericAggregateReferenceFieldsRetainTheirTargetsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell<T> {
+                public write ref<T> Value;
+                [this: Captures(nameof(value))]
+                public ReferenceCell(write ref<T> value) {
+                    Value = value;
+                }
+            }
+            int32 Main() {
+                mut int32 value = int32(7);
+                ReferenceCell<int32> cell =
+                    new ReferenceCell<int32>(ref value);
+                *cell.Value = int32(42);
+                return value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task PartialOwnerMovesPreserveSiblingReferenceFieldsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            unique struct ReferenceOwner {
+                public mut OwnedInt32Buffer Buffer;
+                public mut write ref<int32> Target;
+                [this: Captures(nameof(target))]
+                public ReferenceOwner(
+                    OwnedInt32Buffer buffer, write ref<int32> target) {
+                    Buffer = move buffer;
+                    Target = target;
+                }
+            }
+            OwnedInt32Buffer Create(int32 value) {
+                require OwnedInt32Buffer.TryCreate(1, out var raw);
+                mut OwnedInt32Buffer buffer = move raw;
+                require buffer.TryAppend(value);
+                return move buffer;
+            }
+            int32 Main() {
+                mut int32 target = int32(1);
+                mut ReferenceOwner owner =
+                    new ReferenceOwner(Create(40), ref target);
+                OwnedInt32Buffer extracted = move owner.Buffer;
+                *owner.Target = int32(42);
+                owner.Buffer = Create(2);
+                int32 observed = *owner.Target;
+                mut ReferenceOwner movedOwner = move owner;
+                *movedOwner.Target = int32(42);
+                int32 result = extracted.Read(0)
+                    + movedOwner.Buffer.Read(0) + target;
+                movedOwner = _;
+                extracted = _;
+                return result == 84 && observed == int32(42) ? 42 : 0;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task RejectsAggregateReferenceFieldEscapeAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell {
+                public write ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public ReferenceCell(write ref<int32> value) {
+                    Value = value;
+                }
+            }
+            ReferenceCell Create() {
+                mut int32 local = int32(7);
+                return new ReferenceCell(ref local);
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry, policy).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task RejectsReplacingBorrowedReferenceFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferencePair {
+                public mut write ref<int32> First;
+                [this: Captures(nameof(first))]
+                public ReferencePair(write ref<int32> first) {
+                    First = first;
+                }
+            }
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut int32 second = int32(2);
+                mut ReferencePair pair =
+                    new ReferencePair(ref first);
+                {
+                    write ref<int32> borrowed =
+                        ref *pair.First;
+                    pair.First = ref second;
+                }
+                return 42;
+            }
+            """;
+        var compilation = await CompileAsync("", entry, policy).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task RejectsAggregateReferenceResultWithoutDependencyAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            struct ReferenceCell {
+                public write ref<int32> Value;
+            }
+            ReferenceCell Preserve(ReferenceCell value) {
+                return value;
+            }
+            int32 Main() { return 42; }
+            """;
+        var compilation = await CompileAsync("", entry, policy).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public async Task CapturesBackingThroughWritableReferenceStoreAsync(
         BoundRuntimePolicy policy)
     {
@@ -666,6 +1119,785 @@ public sealed class TokenCursorTests
             }
             """;
         var compilation = await CompileAsync("alpha 42", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStoreUpdatesAggregateFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreHolder(
+                write ref<CapturedReferenceHolder> destination,
+                CapturedReferenceHolder source) {
+                *destination = source;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceHolder destination =
+                    new CapturedReferenceHolder(ref original);
+                CapturedReferenceHolder source =
+                    new CapturedReferenceHolder(ref replacement);
+                StoreHolder(ref destination, source);
+                require *destination.Value == int32(42);
+                return int32(42);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRejectsExpiredAggregateFieldTargetAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreHolder(
+                write ref<CapturedReferenceHolder> destination,
+                CapturedReferenceHolder source) {
+                *destination = source;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                mut CapturedReferenceHolder destination =
+                    new CapturedReferenceHolder(ref original);
+                {
+                    int32 replacement = int32(42);
+                    CapturedReferenceHolder source =
+                        new CapturedReferenceHolder(ref replacement);
+                    StoreHolder(ref destination, source);
+                }
+                return *destination.Value;
+            }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRejectsUndeclaredAggregateFieldSourceAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(allowed))]
+            internal void StoreHolder(
+                write ref<CapturedReferenceHolder> destination,
+                CapturedReferenceHolder allowed,
+                CapturedReferenceHolder rejected) {
+                *destination = rejected;
+            }
+            int32 Main() { return int32(42); }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task CapturedReferenceStorePreservesAggregateFieldOnExceptionalExitAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreHolderThenFail(
+                write ref<CapturedReferenceHolder> destination,
+                CapturedReferenceHolder source) {
+                *destination = source;
+                require false;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceHolder destination =
+                    new CapturedReferenceHolder(ref original);
+                CapturedReferenceHolder source =
+                    new CapturedReferenceHolder(ref replacement);
+                unsafe {
+                    try {
+                        StoreHolderThenFail(ref destination, source);
+                    } catch { }
+                }
+                require *destination.Value == int32(42);
+                return int32(42);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry,
+            BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions)
+            .ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStoreUpdatesIncomingProjectedFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            [param(destination): Captures(nameof(source))]
+            int32 StoreThroughAlias(
+                write ref<CapturedReferenceHolder> destination,
+                write ref<CapturedReferenceHolder> observer,
+                ref<int32> source) {
+                StoreReference(ref (*destination).Value, source);
+                return *(*observer).Value;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                return StoreThroughAlias(
+                    ref holder, ref holder, ref replacement);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRejectsExpiredIncomingProjectedFieldTargetAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            [param(holder): Captures(nameof(source))]
+            void StoreExpired(
+                write ref<CapturedReferenceHolder> holder, ref<int32> source) {
+                StoreReference(ref (*holder).Value, source);
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                {
+                    int32 replacement = int32(42);
+                    StoreExpired(ref holder, ref replacement);
+                }
+                return int32(42);
+            }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task RejectsUndeclaredTransitiveCaptureIntoIncomingProjectionAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            void StoreWithoutCapture(
+                write ref<CapturedReferenceHolder> holder, ref<int32> source) {
+                StoreReference(ref (*holder).Value, source);
+            }
+            int32 Main() { return int32(42); }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task CapturedReferenceStorePreservesIncomingProjectionAfterFailureAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReferenceThenFail(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+                require false;
+            }
+            [param(holder): Captures(nameof(source))]
+            int32 StoreThenCatch(
+                write ref<CapturedReferenceHolder> holder,
+                ref<int32> source) {
+                mut int32 cleanupCount = int32(0);
+                unsafe {
+                    try {
+                        StoreReferenceThenFail(ref (*holder).Value, source);
+                    } catch { } finally {
+                        cleanupCount = int32(1);
+                    }
+                }
+                return cleanupCount == int32(1)
+                    && *(*holder).Value == int32(42)
+                    ? int32(42) : int32(0);
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                return StoreThenCatch(ref holder, ref replacement);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry,
+            BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true));
+        await ExecuteAsync(program, BoundRuntimePolicy.CheckedExceptions)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRejectsExpiredSourceAfterCleanupFailureAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            [param(holder): Captures(nameof(source))]
+            void StoreThenCleanupFail(
+                write ref<CapturedReferenceHolder> holder,
+                ref<int32> source) {
+                unsafe {
+                    try {
+                        StoreReference(ref (*holder).Value, source);
+                    } finally {
+                        require false;
+                    }
+                }
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                {
+                    int32 replacement = int32(42);
+                    unsafe {
+                        try {
+                            StoreThenCleanupFail(ref holder, ref replacement);
+                        } catch { }
+                    }
+                }
+                return int32(42);
+            }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ReceiverCaptureEffectsPreserveReferenceFieldAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            struct CapturedReferenceCell {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceCell(ref<int32> value) {
+                    Value = value;
+                }
+                [this: Captures(nameof(source))]
+                public mut void Store(ref<int32> source) {
+                    StoreReference(ref this.Value, source);
+                }
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceCell cell =
+                    new CapturedReferenceCell(ref original);
+                cell.Store(ref replacement);
+                return *cell.Value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task ReceiverCaptureEffectsRequirePublishedCaptureContractAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            struct CapturedReferenceCell {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceCell(ref<int32> value) {
+                    Value = value;
+                }
+                public mut void Store(ref<int32> source) {
+                    StoreReference(ref this.Value, source);
+                }
+            }
+            int32 Main() { return int32(42); }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ReceiverCaptureEffectsPropagateThroughNestedCallsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            struct CapturedReferenceCell {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceCell(ref<int32> value) {
+                    Value = value;
+                }
+                [this: Captures(nameof(source))]
+                public mut void Store(ref<int32> source) {
+                    StoreReference(ref this.Value, source);
+                }
+                [this: Captures(nameof(source))]
+                public mut void StoreForwarded(ref<int32> source) {
+                    this.Store(source);
+                }
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceCell cell =
+                    new CapturedReferenceCell(ref original);
+                cell.StoreForwarded(ref replacement);
+                return *cell.Value;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStoreJoinsIncomingProjectedFieldBranchAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            [param(holder): Captures(nameof(source))]
+            int32 StoreConditionally(
+                write ref<CapturedReferenceHolder> holder,
+                ref<int32> source, bool storeNow) {
+                if (storeNow) {
+                    StoreReference(ref (*holder).Value, source);
+                }
+                return *(*holder).Value;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 replacement = int32(42);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                return StoreConditionally(ref holder, ref replacement, true);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStoreJoinsIncomingProjectedFieldLoopAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            [param(holder): Captures(nameof(first), nameof(second))]
+            int32 StoreInLoop(
+                write ref<CapturedReferenceHolder> holder,
+                ref<int32> first, ref<int32> second) {
+                mut int32 index = int32(0);
+                while (index < int32(2)) {
+                    if (index == int32(0)) {
+                        StoreReference(ref (*holder).Value, first);
+                    } else {
+                        StoreReference(ref (*holder).Value, second);
+                    }
+                    index = index + int32(1);
+                }
+                return *(*holder).Value;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                int32 first = int32(41);
+                int32 second = int32(42);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                return StoreInLoop(ref holder, ref first, ref second);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task ExactReferenceReassignmentRestoresJoinedTargetsAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            bool Rebind() { return false; }
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut int32 alternate = int32(2);
+                mut int32 final = int32(42);
+                mut write ref<int32> current = ref first;
+                if (Rebind()) {
+                    current = ref alternate;
+                }
+                current = ref final;
+                return *current;
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStorePreservesTargetAcrossDescriptorRebindingAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source,
+                bool complete) {
+                *destination = source;
+            }
+            [param(destination): Captures(nameof(replacement))]
+            internal bool RebindAndReturnTrue(
+                write ref<ref<int32>> destination, ref<int32> replacement) {
+                *destination = replacement;
+                return true;
+            }
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut int32 second = int32(42);
+                mut ref<int32> retained = ref first;
+                mut ref<ref<int32>> observer = ref retained;
+                mut ref<int32> source = ref second;
+                StoreReference(ref retained, source,
+                    RebindAndReturnTrue(ref source, ref first));
+                require *(*observer) == int32(42);
+                require *retained == int32(42);
+                return int32(42);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRejectsAnExpiredSourcePlaceAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut ref<int32> retained = ref first;
+                {
+                    int32 second = int32(42);
+                    StoreReference(ref retained, ref second);
+                }
+                return *retained;
+            }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStoreRejectsLoopLocalSourceAfterReentryAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                mut int32 iteration = int32(0);
+                while (iteration < int32(2)) {
+                    int32 local = iteration + int32(41);
+                    StoreReference(ref holder.Value, ref local);
+                    iteration = iteration + int32(1);
+                }
+                return *holder.Value;
+            }
+            """;
+        var compilation = await CompileAsync("", entry, policy).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public async Task CapturedReferenceStoreRebindsLoopLocalBeforeReentryAsync(
+        BoundRuntimePolicy policy)
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            struct CapturedReferenceHolder {
+                public mut ref<int32> Value;
+                [this: Captures(nameof(value))]
+                public CapturedReferenceHolder(ref<int32> value) {
+                    Value = value;
+                }
+            }
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            int32 Main() {
+                mut int32 original = int32(1);
+                mut CapturedReferenceHolder holder =
+                    new CapturedReferenceHolder(ref original);
+                mut int32 iteration = int32(0);
+                while (iteration < int32(2)) {
+                    mut int32 local = iteration + int32(41);
+                    StoreReference(ref holder.Value, ref local);
+                    require *holder.Value == local;
+                    holder.Value = ref original;
+                    iteration = iteration + int32(1);
+                }
+                require *holder.Value == original;
+                return int32(42);
+            }
+            """;
+        var program = Program(await CompileAsync("", entry, policy).ConfigureAwait(true));
+        await ExecuteAsync(program, policy).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRetainsSourceOnExceptionalExitAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            internal void StoreReferenceThenRequire(
+                write ref<ref<int32>> destination, ref<int32> source,
+                bool shouldFail) {
+                *destination = source;
+                if (shouldFail) { require false; }
+            }
+            int32 Main() {
+                mut int32 first = int32(1);
+                mut ref<int32> retained = ref first;
+                {
+                    int32 second = int32(42);
+                    try {
+                        StoreReferenceThenRequire(
+                            ref retained, ref second, true);
+                    } catch { }
+                }
+                return int32(42);
+            }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task CapturedReferenceStoreRejectsAnUndeclaredSourceAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(first))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> first,
+                ref<int32> second) {
+                *destination = second;
+            }
+            int32 Main() { return int32(42); }
+            """;
+        var compilation = await CompileAsync("", entry,
+            BoundRuntimePolicy.FailFast).ConfigureAwait(true);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public async Task ForwardsBackingDoesNotAuthorizeRetainingAReferenceTargetAsync()
+    {
+        const string entry = """
+            using Terrum.CodeAnalysis;
+            [param(destination): Captures(nameof(source))]
+            [param(destination): ForwardsBacking(nameof(source))]
+            internal void StoreReference(
+                write ref<ref<int32>> destination, ref<int32> source) {
+                *destination = source;
+            }
+            int32 Main() { return int32(42); }
+            """;
+        var compilation = await CompileAsync("", entry,
             BoundRuntimePolicy.FailFast).ConfigureAwait(true);
 
         Assert.That(compilation.HasErrors, Is.True,
