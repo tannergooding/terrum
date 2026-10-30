@@ -74,4 +74,128 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
             NativeRuntimePolicy.CheckedExceptions, agreement)).ConfigureAwait(true), Is.EqualTo(42));
     }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NormalBackingClassHandleFieldsRetainAndReplaceChildrenAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Child {
+                public int32 Value;
+                public Child(int32 value) { Value = value; }
+            }
+            mut class Parent {
+                public mut Child? First;
+                public mut Child? Second;
+                public Parent() {
+                    require Child.TryCreate(20, out var child);
+                    First = child;
+                    Second = child;
+                }
+            }
+            public int32 Main() {
+                require Parent.TryCreate(out var parent);
+                require Child.TryCreate(22, out var replacement);
+                parent.First = replacement;
+                mut int32 result = 1;
+                if (parent.First is some first) {
+                    if (parent.Second is some second) {
+                        result = first.Value + second.Value + 2;
+                    }
+                }
+                return result;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(NativeJit.ExecuteWithData(program, policy,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(44));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy, agreement))
+            .ConfigureAwait(true), Is.EqualTo(44));
+    }
+
+    [TestCase(NativeRuntimePolicy.FailFast)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions)]
+    public async Task NormalBackingRetiresNestedHandleChainIterativelyAsync(
+        NativeRuntimePolicy policy)
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            mut class Link {
+                public int32 Value;
+                public mut write Link? Next;
+                public Link(int32 value) {
+                    Value = value;
+                    Next = null;
+                    if (value > 0) {
+                        require Link.TryCreate(value - 1, out var next);
+                        Next = next;
+                    }
+                }
+            }
+            public int32 Main() {
+                require Link.TryCreate(64, out var head);
+                return head.Value;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = (BoundRuntimePolicy)policy,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(NativeJit.ExecuteWithData(program, policy,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(64));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program, policy, agreement))
+            .ConfigureAwait(true), Is.EqualTo(64));
+    }
+
+    [Test]
+    public async Task NormalBackingConstructionFailureRetiresChildFieldsAsync()
+    {
+        const string agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            class Child {
+                public int32 Value;
+                public Child(int32 value) { Value = value; }
+            }
+            mut class Parent {
+                public mut Child? First;
+                public mut Child? Second;
+                public Parent() {
+                    require Child.TryCreate(20, out var first);
+                    First = first;
+                    require Child.TryCreate(22, out var second);
+                    Second = second;
+                    require false;
+                }
+            }
+            public int32 Main() {
+                unsafe {
+                    try {
+                        require Parent.TryCreate(out var parent);
+                    } catch {
+                        return 42;
+                    }
+                }
+                return 1;
+            }
+            """), new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeLoweringAgreement = agreement,
+        });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(NativeJit.ExecuteWithData(program, NativeRuntimePolicy.CheckedExceptions,
+            nativeLoweringAgreement: agreement).ExitCode, Is.EqualTo(42));
+        Assert.That(await ExecuteAsync(NativeEmitter.Emit(program,
+            NativeRuntimePolicy.CheckedExceptions, agreement)).ConfigureAwait(true), Is.EqualTo(42));
+    }
 }

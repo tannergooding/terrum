@@ -953,6 +953,7 @@ internal sealed partial class PeCompiler
     private readonly Dictionary<int, int> _externalFunctionAddressStarts = [];
     private readonly List<(int Offset, int Target)> _runtimeCalls = new();
     private readonly List<(int Offset, int Target)> _cleanupCalls = [];
+    private readonly List<int> _normalBackingReleaseCalls = [];
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
     private readonly Dictionary<int, List<(int Value, int Live, PrimitiveType Type)>> _stagedOwners = [];
     private readonly Dictionary<int, List<int>> _managedStagedRoots = [];
@@ -983,6 +984,8 @@ internal sealed partial class PeCompiler
     private int _exceptionHandler;
     private int _catchFilter;
     private int _entryFilter;
+    private int _normalBackingReleaseStart = -1;
+    private int _normalBackingReleaseEnd;
     private int _frame;
     private int _spillBase;
     private int _returnSlot;
@@ -1163,6 +1166,7 @@ internal sealed partial class PeCompiler
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
         EmitSourceFunctions();
         EmitCleanupFunclets();
+        EmitNormalBackingRuntimeHelper();
         EmitManagedCollector();
         EmitManagedDescriptors();
 
@@ -1287,7 +1291,7 @@ internal sealed partial class PeCompiler
         }
         var functionCount = checked(binary128FunctionRanges.Length + bidDecimalFunctionRanges.Length
             + (_library ? 0 : 2) + _failureStarts.Length + _funclets.Count
-            + (_managedNodes ? 1 : 0));
+            + (_managedNodes ? 1 : 0) + (_normalBackingReleaseStart >= 0 ? 1 : 0));
         var sourceFunctionOffsets = ImmutableArray.CreateBuilder<int>(_program.Functions.Length);
         for (var i = 0; i < _program.Functions.Length; i++)
         {
@@ -1336,6 +1340,11 @@ internal sealed partial class PeCompiler
         if (_managedNodes)
         {
             functions.Add(new NativeFunctionRange(_managedCollectorStart, _managedCollectorEnd, 120));
+        }
+        if (_normalBackingReleaseStart >= 0)
+        {
+            functions.Add(new NativeFunctionRange(
+                _normalBackingReleaseStart, _normalBackingReleaseEnd, 120));
         }
         functions.AddRange(binary128FunctionRanges);
         functions.AddRange(bidDecimalFunctionRanges);
@@ -5904,6 +5913,9 @@ internal sealed partial class PeCompiler
                 var classField = ManagedClassTypes.IsClass(fieldType);
                 var field = classField ? _program.Classes[ManagedClassTypes.ClassIndex(fieldType)]
                     .Fields[fieldAssignment.Field] : _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
+                var fieldOwnerClassIndex = classField
+                    ? ManagedClassTypes.ClassIndex(fieldType) : -1;
+                var fieldOrdinal = fieldAssignment.Field;
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
                     + field.Offset;
                 if (!classField)
@@ -6008,6 +6020,8 @@ internal sealed partial class PeCompiler
                             _code.Bytes(0x48, 0x8B, 0x00);
                             field = _program.Classes[ManagedClassTypes.ClassIndex(containingType)]
                                 .Fields[nestedField];
+                            fieldOwnerClassIndex = ManagedClassTypes.ClassIndex(containingType);
+                            fieldOrdinal = nestedField;
                             inlineOffset = 0;
                         }
                         else
@@ -6027,7 +6041,13 @@ internal sealed partial class PeCompiler
                         _managedStagedRoots.Add(stagedFunclet, [Spill(0)]);
                     }
                     Expression(fieldAssignment.Value, 1);
-                    if (IsIndirect(field.Type))
+                    var normalBackingHandleField = _normalBacking
+                        && IsNormalBackingHandle(field.Type);
+                    if (normalBackingHandleField)
+                    {
+                        StoreValue(Spill(1), field.Type);
+                    }
+                    else if (IsIndirect(field.Type))
                     {
                         _code.Bytes(0x48, 0x89, 0xC1); // preserve the source pointer without overwriting its spill
                     }
@@ -6037,29 +6057,47 @@ internal sealed partial class PeCompiler
                     }
                     _code.Load64(Spill(0));
                     _code.PointerOffset(32 + inlineOffset + field.Offset);
-                    _code.Bytes(0x48, 0x89, 0xC2);
-                    if (IsIndirect(field.Type))
+                    if (normalBackingHandleField)
                     {
-                        _code.Bytes(0x48, 0x89, 0xC8);
-                        _code.CopyMemory(field.Size);
+                        _code.LoadPointerField(0, sizeof(ulong));
+                        StoreValue(Spill(2), field.Type);
+                        EmitNormalBackingRecordFieldStore(Spill(0), fieldOwnerClassIndex,
+                            fieldOrdinal, Spill(2), Spill(1));
+                        EmitNormalBackingRelease(Spill(2));
+                        SetManagedRoot(Spill(2), active: false);
+                        _code.Load64(Spill(0));
+                        _code.PointerOffset(32 + inlineOffset + field.Offset);
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        LoadValue(Spill(1), field.Type);
+                        _code.Bytes(0x48, 0x89, 0x02);
+                        TransferManagedRoot(Spill(1));
                     }
                     else
                     {
-                        _code.Load64(Spill(1));
-                        switch (field.Size)
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        if (IsIndirect(field.Type))
                         {
-                            case 1:
-                                _code.Bytes(0x88, 0x02);
-                                break;
-                            case 2:
-                                _code.Bytes(0x66, 0x89, 0x02);
-                                break;
-                            case 4:
-                                _code.Bytes(0x89, 0x02);
-                                break;
-                            default:
-                                _code.Bytes(0x48, 0x89, 0x02);
-                                break;
+                            _code.Bytes(0x48, 0x89, 0xC8);
+                            _code.CopyMemory(field.Size);
+                        }
+                        else
+                        {
+                            _code.Load64(Spill(1));
+                            switch (field.Size)
+                            {
+                                case 1:
+                                    _code.Bytes(0x88, 0x02);
+                                    break;
+                                case 2:
+                                    _code.Bytes(0x66, 0x89, 0x02);
+                                    break;
+                                case 4:
+                                    _code.Bytes(0x89, 0x02);
+                                    break;
+                                default:
+                                    _code.Bytes(0x48, 0x89, 0x02);
+                                    break;
+                            }
                         }
                     }
                     SetManagedRoot(Spill(0), active: false);

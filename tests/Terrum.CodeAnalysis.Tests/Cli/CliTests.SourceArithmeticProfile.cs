@@ -373,9 +373,23 @@ public sealed partial class CliTests
     }
 
     [Test]
-    public async Task NormalBackingAgreementRequiresExactSelectionAndRejectsFallbackAsync()
+    public async Task NormalBackingAgreementSelectsSupportedAndRejectsUnsupportedRoutesAsync()
     {
         var input = Encoding.UTF8.GetBytes("int32 Main() { return 42; }");
+        var unsupportedInput = Encoding.UTF8.GetBytes("""
+            class Leaf {
+                public int32 Value;
+                public Leaf(int32 value) { Value = value; }
+            }
+            Leaf Create() {
+                require Leaf.TryCreate(42, out var leaf);
+                return leaf;
+            }
+            int32 Main() {
+                var leaf = Create();
+                return leaf.Value;
+            }
+            """);
         var agreement = CompilationOptions.WindowsX64NormalBackingAgreement;
         var (analysisExit, analysisOutput, analysisError) = await RunAsync(input,
             "analyze", "-", "--native-lowering-agreement", agreement, "--json");
@@ -391,23 +405,28 @@ public sealed partial class CliTests
         }
 
         var outputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
-            $"normal-backing-unimplemented-{Guid.NewGuid():N}.exe");
+            $"normal-backing-{Guid.NewGuid():N}.exe");
+        var nativeImportPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"normal-backing-native-import-{Guid.NewGuid():N}.exe");
+        var unsupportedOutputPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"normal-backing-unsupported-{Guid.NewGuid():N}.exe");
         try
         {
             var (buildExit, buildOutput, buildError) = await RunAsync(input,
                 "build", "-", "-o", outputPath, "--runtime", "fail-fast",
                 "--native-lowering-agreement", agreement, "--json");
-            Assert.That(buildExit, Is.EqualTo(1), buildOutput + buildError);
+            Assert.That(buildExit, Is.Zero, buildOutput + buildError);
             Assert.That(buildError, Is.Empty);
             using (var build = JsonDocument.Parse(buildOutput))
             {
-                Assert.That(build.RootElement.GetProperty("diagnostics")[0]
-                    .GetProperty("code").GetString(), Is.EqualTo("TRM4001"));
+                Assert.That(build.RootElement.GetProperty("success").GetBoolean(), Is.True);
+                Assert.That(build.RootElement.GetProperty("nativeLoweringAgreement")
+                    .GetString(), Is.EqualTo(agreement));
             }
-            Assert.That(File.Exists(outputPath), Is.False);
+            Assert.That(await ExecuteNativeImageAsync(outputPath).ConfigureAwait(true), Is.EqualTo(42));
 
             var (nativeImportExit, nativeImportOutput, nativeImportError) =
-                await RunAsync(input, "build-native-import", "-", "-o", outputPath,
+                await RunAsync(input, "build-native-import", "-", "-o", nativeImportPath,
                     "--runtime", "fail-fast", "--native-lowering-agreement",
                     agreement, "--json");
             Assert.That(nativeImportExit, Is.EqualTo(1),
@@ -418,18 +437,28 @@ public sealed partial class CliTests
                 Assert.That(nativeImport.RootElement.GetProperty("diagnostics")[0]
                     .GetProperty("code").GetString(), Is.EqualTo("TRM4001"));
             }
-            Assert.That(File.Exists(outputPath), Is.False);
+            Assert.That(File.Exists(nativeImportPath), Is.False);
 
             var (jitExit, jitOutput, jitError) = await RunAsync(input,
                 "jit", "-", "--runtime", "fail-fast", "--native-lowering-agreement",
                 agreement, "--json");
-            Assert.That(jitExit, Is.EqualTo(1), jitOutput + jitError);
+            Assert.That(jitExit, Is.EqualTo(42), jitOutput + jitError);
+            Assert.That(jitOutput, Is.Empty);
             Assert.That(jitError, Is.Empty);
-            using (var jit = JsonDocument.Parse(jitOutput))
+
+            var (unsupportedBuildExit, unsupportedBuildOutput, unsupportedBuildError) =
+                await RunAsync(unsupportedInput, "build", "-", "-o", unsupportedOutputPath,
+                    "--runtime", "fail-fast", "--native-lowering-agreement",
+                    agreement, "--json");
+            Assert.That(unsupportedBuildExit, Is.EqualTo(1),
+                unsupportedBuildOutput + unsupportedBuildError);
+            Assert.That(unsupportedBuildError, Is.Empty);
+            using (var unsupportedBuild = JsonDocument.Parse(unsupportedBuildOutput))
             {
-                Assert.That(jit.RootElement.GetProperty("diagnostics")[0]
+                Assert.That(unsupportedBuild.RootElement.GetProperty("diagnostics")[0]
                     .GetProperty("code").GetString(), Is.EqualTo("TRM4001"));
             }
+            Assert.That(File.Exists(unsupportedOutputPath), Is.False);
 
             var invalid = new[] {
                 new[] { "analyze", "-", "--native-lowering-agreement",
@@ -450,7 +479,9 @@ public sealed partial class CliTests
         }
         finally
         {
-            File.Delete(outputPath);
+            await TestFileCleanup.DeleteWithRetryAsync(outputPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(nativeImportPath).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(unsupportedOutputPath).ConfigureAwait(true);
         }
     }
 

@@ -121,6 +121,7 @@ internal sealed partial class PeCompiler
                     if (ManagedClassTypes.IsClass(function.Variables[assignment.Variable].Type))
                     {
                         _ = slots.Add(0);
+                        _ = slots.Add(2);
                         CollectExpression(assignment.Value, 1);
                     }
                     else
@@ -303,19 +304,29 @@ internal sealed partial class PeCompiler
             return;
         }
         var frame = _managedRootFrames[functionIndex];
-        foreach (var (slot, flag) in roots)
+        if (_normalBacking)
         {
-            _code.Address(slot);
-            _code.Store64(flag - 8);
-            _code.Clear(flag);
+            foreach (var flag in roots.Values)
+            {
+                _code.Clear(flag);
+            }
         }
-        _code.Address(frame);
-        _code.Bytes(0x48, 0xC7, 0x40, 0x08);
-        _code.Int32(roots.Count);
-        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), RuntimeStateOffset));
-        _code.Bytes(0x48, 0x8B, 0x4A, 0x08); // previous frame
-        _code.Bytes(0x48, 0x89, 0x08); // frame.previous = old head
-        _code.Bytes(0x48, 0x89, 0x42, 0x08); // head = frame
+        else
+        {
+            foreach (var (slot, flag) in roots)
+            {
+                _code.Address(slot);
+                _code.Store64(flag - 8);
+                _code.Clear(flag);
+            }
+            _code.Address(frame);
+            _code.Bytes(0x48, 0xC7, 0x40, 0x08);
+            _code.Int32(roots.Count);
+            _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), RuntimeStateOffset));
+            _code.Bytes(0x48, 0x8B, 0x4A, 0x08); // previous frame
+            _code.Bytes(0x48, 0x89, 0x08); // frame.previous = old head
+            _code.Bytes(0x48, 0x89, 0x42, 0x08); // head = frame
+        }
         var function = _program.Functions[functionIndex];
         for (var i = function.IsConstructor ? 1 : 0;
             i < function.ParameterCount + (function.IsConstructor ? 1 : 0); i++)
@@ -343,6 +354,8 @@ internal sealed partial class PeCompiler
             {
                 SetManagedRoot(slot, active: false);
             }
+            _code.Load64(temporary);
+            return;
         }
         _code.Bytes(0x48, 0x8B, 0x8D);
         _code.Int32(_managedRootFrames[functionIndex]);

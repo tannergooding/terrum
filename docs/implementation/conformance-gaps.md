@@ -1755,13 +1755,19 @@ payloads under FailFast and CheckedExceptions; checked constructor failure
 releases the unpublished provisional control before catch recovery.
 
 The current execution gate rejects reference-bearing values, managed class
-fields, Cleanup, tasks, foreign/native-callable routes, source grants, indexed
-semantic bodies, handle results and by-value handle arguments. `build-native-import`
-also remains fail-closed. Stored-reference descriptors, their 16-byte call
-ABI, typed nested-field Copy/drop, arbitrary result/owner provenance, module
-relowering and cross-instance exchange remain unimplemented; this is not full
-normal-backing conformance. The agreement is not persisted or accepted by
-module/graph/TRRM routes.
+fields are no longer rejected: ordinary class and optional-class fields support
+retaining assignment, replacement and typed iterative child retirement. The
+runtime tracks constructor field acquisitions separately from publication and
+rolls partially initialized objects back in reverse acquisition order. A
+65-object nested handle chain retires iteratively in both JIT and AOT tests,
+and shared child handles remain live after replacing one field. Cleanup,
+tasks, foreign/native-callable routes, source grants, indexed semantic bodies,
+handle results and by-value handle arguments remain rejected;
+`build-native-import` is also fail-closed. Stored-reference descriptors, their
+16-byte call ABI, reference-field Copy/drop, arbitrary result/owner provenance,
+module relowering and cross-instance exchange remain unimplemented; this is
+not full normal-backing conformance. The agreement is not persisted or accepted
+by module/graph/TRRM routes.
 
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
 from GC-backed `gc C`, `gc box<T>` and `gc ref<T>`. Carry exact backing
