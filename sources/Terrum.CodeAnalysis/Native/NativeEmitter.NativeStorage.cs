@@ -1,6 +1,8 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Native;
@@ -112,6 +114,13 @@ internal sealed partial class PeCompiler
             throw new InvalidOperationException("The checked-reference formation has an unsupported type.");
         }
 
+        var supportSlot = _normalBacking ? Spill(spill) + sizeof(ulong) : -1;
+        if (_normalBacking)
+        {
+            _code.Bytes(0x31, 0xC0);
+            _code.Store64(supportSlot);
+        }
+
         if (formation.Place is BoundRead read)
         {
             if ((uint)read.Variable
@@ -136,18 +145,17 @@ internal sealed partial class PeCompiler
         }
         else
         {
-            EmitCheckedReferencePlaceAddress(formation.Place, spill);
+            EmitCheckedReferencePlaceAddress(formation.Place, spill, supportSlot);
         }
         if (_normalBacking)
         {
             _code.Store64(Spill(spill));
-            _code.Bytes(0x31, 0xC0);
-            _code.Store64(Spill(spill) + sizeof(ulong));
             _code.Address(Spill(spill));
         }
     }
 
-    private void EmitCheckedReferencePlaceAddress(BoundExpression place, int spill)
+    private void EmitCheckedReferencePlaceAddress(
+        BoundExpression place, int spill, int supportSlot = -1)
     {
         switch (place)
         {
@@ -186,6 +194,20 @@ internal sealed partial class PeCompiler
                 Expression(referenceRead.Descriptor, spill);
                 if (_normalBacking)
                 {
+                    if (supportSlot >= 0)
+                    {
+                        var temporary = _normalBackingTemporarySlots[_currentFunction];
+                        if (temporary < 0)
+                        {
+                            throw new InvalidOperationException(
+                                "A normal-backed reborrow has no verified temporary.");
+                        }
+                        _code.Store64(temporary);
+                        _code.Load64(temporary);
+                        _code.LoadPointerField(sizeof(ulong), sizeof(ulong));
+                        _code.Store64(supportSlot);
+                        _code.Load64(temporary);
+                    }
                     _code.LoadPointerField(0, sizeof(ulong));
                 }
                 break;
@@ -206,6 +228,39 @@ internal sealed partial class PeCompiler
                     element.Layout.ElementCount, element.Layout.ElementStride);
                 break;
             case BoundFieldRead field:
+                if (ManagedClassTypes.IsClass(field.Receiver.Type))
+                {
+                    var classIndex = ManagedClassTypes.ClassIndex(field.Receiver.Type);
+                    if (!_normalBacking || supportSlot < 0
+                        || (uint)classIndex >= (uint)_program.Classes.Length
+                        || (uint)field.Field >=
+                            (uint)_program.Classes[classIndex].Fields.Length)
+                    {
+                        throw new InvalidOperationException(
+                            "A checked reference to this normal-backed class field is not supported.");
+                    }
+                    var @class = _program.Classes[classIndex];
+                    var classField = @class.Fields[field.Field];
+                    var fieldSize = Size(field.Type);
+                    if (classField.Type != field.Type || fieldSize <= 0
+                        || classField.Size != fieldSize || classField.Offset < 0
+                        || classField.Offset > @class.Size - fieldSize
+                        || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                            field.Type, _program.Structures, _program.Classes,
+                            _program.EnumDefinitions.Length, _program.CheckedReferenceTypes))
+                    {
+                        throw new InvalidOperationException(
+                            "The checked-reference class field layout is invalid.");
+                    }
+                    Expression(field.Receiver, spill);
+                    _code.Store64(Spill(spill));
+                    EmitNormalBackingValidateHandle(Spill(spill), classIndex);
+                    _code.Load64(Spill(spill));
+                    _code.Store64(supportSlot);
+                    _code.Load64(Spill(spill));
+                    _code.PointerOffset(32 + classField.Offset);
+                    break;
+                }
                 var receiverIndex = (int)field.Receiver.Type - 100;
                 if (receiverIndex < 0 || receiverIndex >= _program.Structures.Length
                     || ManagedClassTypes.IsClass(field.Receiver.Type))
@@ -230,7 +285,7 @@ internal sealed partial class PeCompiler
                     throw new InvalidOperationException(
                         "A checked reference to this cleanup-bearing field place is not supported.");
                 }
-                EmitCheckedReferencePlaceAddress(field.Receiver, spill);
+                EmitCheckedReferencePlaceAddress(field.Receiver, spill, supportSlot);
                 var offset = fields[field.Field].Offset;
                 if (offset != 0)
                 {
@@ -317,6 +372,12 @@ internal sealed partial class PeCompiler
             throw new InvalidOperationException("The checked-reference store violates its access or value contract.");
         }
 
+        if (_normalBacking && IsNormalBackingHandle(write.Value.Type))
+        {
+            EmitNormalBackingHandleReferenceWrite(write, spill);
+            return;
+        }
+
         if (IsUnique(write.Value.Type))
         {
             EmitCheckedReferenceOwnerWrite(write, spill);
@@ -324,6 +385,110 @@ internal sealed partial class PeCompiler
         }
 
         EmitPointerValueWrite(write.Descriptor, write.Value, spill);
+    }
+
+    private void EmitNormalBackingHandleReferenceWrite(
+        BoundReferenceWrite write, int spill)
+    {
+        var variables = _program.Functions[_currentFunction].Variables;
+        if (write.Descriptor is not BoundRead descriptor
+            || (uint)descriptor.Variable >= (uint)variables.Length
+            || variables[descriptor.Variable].Type != descriptor.Type
+            || !IsNormalBackingLocalReference(descriptor.Type, _program))
+        {
+            throw new NotSupportedException(
+                "The selected normal-backing runtime only supports handle-slot writes through local reference descriptors.");
+        }
+
+        var maximumArguments = 0;
+        var descriptorSpills = ExpressionSpills(
+            write.Descriptor, ref maximumArguments);
+        _ = ExpressionSpills(write.Value, ref maximumArguments);
+        var descriptorBase = spill + 4;
+        var descriptorSlot = Spill(descriptorBase + descriptorSpills);
+        var valueBase = descriptorBase + descriptorSpills + 1;
+        var addressSlot = Spill(spill);
+        var supportSlot = Spill(spill + 1);
+        var newHandleSlot = Spill(spill + 2);
+        var oldHandleSlot = Spill(spill + 3);
+
+        Expression(write.Descriptor, descriptorBase);
+        _code.Store64(descriptorSlot);
+        _code.Load64(descriptorSlot);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _code.Store64(addressSlot);
+        _code.Load64(descriptorSlot);
+        _code.LoadPointerField(sizeof(ulong), sizeof(ulong));
+        _code.Store64(supportSlot);
+
+        Expression(write.Value, valueBase);
+        _code.Store64(newHandleSlot);
+        EmitNormalBackingRetain(newHandleSlot);
+        _code.Load64(addressSlot);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _code.Store64(oldHandleSlot);
+
+        _code.Load64(supportSlot);
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var normalBackingSlot = _code.JumpIf(0x84);
+
+        var completedStores = new List<int>();
+        for (var classIndex = 0; classIndex < _program.Classes.Length; classIndex++)
+        {
+            var @class = _program.Classes[classIndex];
+            _code.Load64(supportSlot);
+            _code.LoadPointerField(24, sizeof(uint));
+            _code.Byte(0x3D);
+            _code.Int32(classIndex);
+            var anotherClass = _code.JumpIf(0x85);
+            EmitNormalBackingValidateHandle(supportSlot, classIndex);
+
+            foreach (var (field, fieldIndex) in @class.Fields
+                .Select(static (field, index) => (field, index)))
+            {
+                if (!field.IsMutable || field.Type != write.Value.Type
+                    || !IsNormalBackingHandle(field.Type))
+                {
+                    continue;
+                }
+                if (field.Size != Size(field.Type) || field.Offset < 0
+                    || field.Offset > @class.Size - field.Size)
+                {
+                    throw new InvalidOperationException(
+                        "The normal-backed class handle field layout is invalid.");
+                }
+
+                _code.Load64(supportSlot);
+                _code.PointerOffset(32 + field.Offset);
+                _code.Load64(addressSlot, destinationRegister: true);
+                _code.Bytes(0x48, 0x39, 0xD0);
+                var anotherField = _code.JumpIf(0x85);
+                EmitNormalBackingRecordFieldStore(
+                    supportSlot, classIndex, fieldIndex, oldHandleSlot, newHandleSlot);
+                _code.Load64(addressSlot, destinationRegister: true);
+                _code.Load64(newHandleSlot);
+                _code.Bytes(0x48, 0x89, 0x02);
+                EmitNormalBackingRelease(oldHandleSlot);
+                completedStores.Add(_code.Jump());
+                _code.PatchRelative(anotherField, _code.Position);
+            }
+
+            EmitNormalBackingContractFailure();
+            _code.PatchRelative(anotherClass, _code.Position);
+        }
+        EmitNormalBackingContractFailure();
+
+        var localStore = _code.Position;
+        _code.PatchRelative(normalBackingSlot, localStore);
+        _code.Load64(addressSlot, destinationRegister: true);
+        _code.Load64(newHandleSlot);
+        _code.Bytes(0x48, 0x89, 0x02);
+        EmitNormalBackingRelease(oldHandleSlot);
+        var complete = _code.Position;
+        foreach (var branch in completedStores)
+        {
+            _code.PatchRelative(branch, complete);
+        }
     }
 
     private void EmitCheckedReferenceOwnerWrite(BoundReferenceWrite write, int spill)

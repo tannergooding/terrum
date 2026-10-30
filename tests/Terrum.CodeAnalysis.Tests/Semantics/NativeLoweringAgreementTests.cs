@@ -31,7 +31,7 @@ public sealed class NativeLoweringAgreementTests
             NativeRuntimePolicy.FailFast, nativeLoweringAgreement: agreement);
         Assert.That(code.ManagedRuntimeOffset, Is.EqualTo(-1));
         Assert.That(code.NormalBackingRuntimeOffset, Is.Zero);
-        Assert.That(code.Data.Length, Is.EqualTo(24));
+        Assert.That(code.Data.Length, Is.EqualTo(32));
         Assert.Throws<System.NotSupportedException>(() =>
             Compilation.GetNativeProfileVersion(program));
         Assert.Throws<System.ArgumentException>(() =>
@@ -82,8 +82,13 @@ public sealed class NativeLoweringAgreementTests
             new CompilationOptions { NativeLoweringAgreement = agreement });
         Assert.That(executable.HasErrors, Is.False,
             string.Join(Environment.NewLine, executable.Diagnostics));
-        Assert.Throws<System.NotSupportedException>(() => NativeEmitter.EmitCode(
-            executable.Program!, NativeRuntimePolicy.FailFast, agreement));
+        var executableCode = NativeEmitter.EmitCode(
+            executable.Program!, NativeRuntimePolicy.FailFast, agreement);
+        Assert.That(executableCode.NormalBackingRuntimeOffset, Is.Zero);
+        Assert.That(executableCode.Data.Length, Is.EqualTo(32));
+        Assert.That(NativeJit.ExecuteWithData(executable.Program!,
+            NativeRuntimePolicy.FailFast, nativeLoweringAgreement: agreement).ExitCode,
+            Is.EqualTo(42));
     }
 
     [TestCase("")]

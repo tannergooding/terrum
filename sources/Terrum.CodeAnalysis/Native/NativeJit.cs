@@ -345,12 +345,14 @@ public static unsafe partial class NativeJit
                 nameof(code));
         }
         var hasRuntimeState = hasManagedRuntime || hasNormalBackingRuntime;
+        var runtimeStateSize = hasManagedRuntime ? 24
+            : hasNormalBackingRuntime ? PeCompiler.NormalBackingRuntimeStateSize : 0;
         var runtimeOffset = hasRuntimeState ? checked((dataLength + 7) & ~7) : dataLength;
         var declaredRuntimeOffset = hasManagedRuntime ? code.ManagedRuntimeOffset
             : hasNormalBackingRuntime ? code.NormalBackingRuntimeOffset : -1;
         if (code.BufferOffsets.Length != buffers.Length || totalLength != code.HostDataLength
             || literalPrefixLength + readOnlyLength != code.ReadOnlyDataLength
-            || code.Data.Length != runtimeOffset + (hasRuntimeState ? 24 : 0)
+            || code.Data.Length != runtimeOffset + runtimeStateSize
             || (hasRuntimeState && declaredRuntimeOffset != runtimeOffset))
         {
             throw new ArgumentException("Native buffer metadata does not match the bound program.", nameof(code));

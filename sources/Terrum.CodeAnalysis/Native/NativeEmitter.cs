@@ -957,6 +957,7 @@ internal sealed partial class PeCompiler
     private readonly List<(BoundBlock Body, int Function, int Start, int End)> _funclets = [];
     private readonly Dictionary<int, List<(int Value, int Live, PrimitiveType Type)>> _stagedOwners = [];
     private readonly Dictionary<int, List<int>> _managedStagedRoots = [];
+    private readonly Dictionary<int, int> _normalBackingCallPlanFunclets = [];
     private readonly HashSet<int> _unwindRootFrames = [];
     private readonly List<int> _imports = new();
     private readonly List<NativeImportFixup> _nativeImportFixups = [];
@@ -972,6 +973,10 @@ internal sealed partial class PeCompiler
     private readonly bool _normalBacking;
     private readonly int _normalBackingRuntimeOffset;
     private readonly int[] _normalBackingTemporarySlots;
+    private readonly int[] _normalBackingReferenceScratchSizes;
+    private readonly int[] _normalBackingCallPlanSlots;
+    private readonly int[] _normalBackingIncomingCallPlanSlots;
+    private readonly int[] _spillCounts;
     private readonly int _hostDataLength;
     private readonly bool _checkedExceptions;
     private readonly List<NativeExceptionScope>[] _scopes;
@@ -1014,6 +1019,12 @@ internal sealed partial class PeCompiler
             == CompilationOptions.WindowsX64NormalBackingAgreement;
         _normalBackingTemporarySlots = new int[program.Functions.Length];
         Array.Fill(_normalBackingTemporarySlots, -1);
+        _normalBackingReferenceScratchSizes = new int[program.Functions.Length];
+        _normalBackingCallPlanSlots = new int[program.Functions.Length];
+        Array.Fill(_normalBackingCallPlanSlots, -1);
+        _normalBackingIncomingCallPlanSlots = new int[program.Functions.Length];
+        Array.Fill(_normalBackingIncomingCallPlanSlots, -1);
+        _spillCounts = new int[program.Functions.Length];
         _sourceDependent = sourceDependent;
         _sourceSlots = sourceDependent is null ? [] : new int[program.Functions.Length];
         _checkedExceptions = program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions;
@@ -1044,9 +1055,11 @@ internal sealed partial class PeCompiler
         _initializationFlags = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
         _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
+        _normalBackingCallResultRoots = new HashSet<int>[program.Functions.Length];
         for (var index = 0; index < _managedRootFlags.Length; index++)
         {
             _managedRootFlags[index] = [];
+            _normalBackingCallResultRoots[index] = [];
         }
         _constructedFieldSlots = new int[program.Functions.Length][];
         _replacementSlots = new int[program.Functions.Length];
@@ -1126,7 +1139,11 @@ internal sealed partial class PeCompiler
             ? checked((writableAt + 7) & ~7) : -1;
         _managedRuntimeOffset = _managedNodes ? runtimeStateOffset : -1;
         _normalBackingRuntimeOffset = _normalBacking ? runtimeStateOffset : -1;
-        _data = runtimeStateOffset < 0 ? new byte[writableAt] : new byte[runtimeStateOffset + 24];
+        var runtimeStateSize = _normalBacking
+            ? NormalBackingRuntimeStateSize : _managedNodes ? 24 : 0;
+        _data = runtimeStateOffset < 0
+            ? new byte[writableAt]
+            : new byte[runtimeStateOffset + runtimeStateSize];
         for (var index = 0; index < program.NativeUtf16ZLiterals.Length; index++)
         {
             var literal = program.NativeUtf16ZLiterals[index];
@@ -1405,6 +1422,7 @@ internal sealed partial class PeCompiler
             var needsReturnSnapshot = false;
             var spillSlots = StatementSpills(function.Body, ref maximumArguments, ref needsReturnSnapshot,
                 _checkedExceptions && _managedNodes);
+            _spillCounts[i] = spillSlots;
             if (function.IndexedBody is TrRmScalarGraph indexedBody)
             {
                 foreach (var block in indexedBody.Blocks)
@@ -1523,6 +1541,13 @@ internal sealed partial class PeCompiler
                 var returnSnapshot = AlignOffset(_returnSlots[i]
                     + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16);
                 required = Math.Max(required, returnSnapshot + (long)ScratchSize(function.ReturnType));
+            }
+            if (_normalBacking
+                && ContainsNormalBackingReferenceValue(function.ReturnType, _program))
+            {
+                var returnValue = checked((int)AlignOffset(_returnSlots[i]
+                    + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16));
+                required = Math.Max(required, returnValue + (long)Size(function.ReturnType));
             }
             var live = new int[function.Variables.Length];
             Array.Fill(live, -1);
@@ -1700,6 +1725,38 @@ internal sealed partial class PeCompiler
                 required = _cleanupArgumentSlots[i] + (long)maximumIndirectCleanupSize;
             }
             required = PrepareManagedRoots(i, function, spillSlots, needsReturnSnapshot, required);
+            if (_normalBacking)
+            {
+                if (RequiresNormalBackingCallPlan(function, _program))
+                {
+                    required = (required + 7) & ~7L;
+                    _normalBackingIncomingCallPlanSlots[i] = checked((int)required);
+                    required += sizeof(ulong);
+                }
+
+                var maximumCallPlanSize = 0;
+                if (function.Body is not null
+                    && !BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+                    {
+                        if (expression is BoundCall call
+                            && RequiresNormalBackingCallPlan(
+                                _program.Functions[call.Function], _program))
+                        {
+                            maximumCallPlanSize = Math.Max(maximumCallPlanSize,
+                                NormalBackingCallPlanSize(call, _program));
+                        }
+                    }))
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed call-plan traversal is incomplete.");
+                }
+                if (maximumCallPlanSize != 0)
+                {
+                    required = (required + 15) & ~15L;
+                    _normalBackingCallPlanSlots[i] = checked((int)required);
+                    required = checked(required + maximumCallPlanSize);
+                }
+            }
             required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
             {
@@ -1865,6 +1922,10 @@ internal sealed partial class PeCompiler
                     _code.Store64(Slot(slot));
                 }
             }
+            if (_normalBackingIncomingCallPlanSlots[i] >= 0)
+            {
+                EmitValidateNormalBackingCallPlanEntry(i, function);
+            }
             for (var argument = 0; argument < function.ParameterCount; argument++)
             {
                 var slot = argument + (function.IsConstructor ? 1 : 0);
@@ -2001,12 +2062,20 @@ internal sealed partial class PeCompiler
                     SetManagedRoot(slot, active: false);
                 }
             }
+            if (_normalBackingCallPlanFunclets.TryGetValue(index, out var callPlan))
+            {
+                EmitAbortNormalBackingCallPlan(callPlan);
+            }
             if (_managedAbandonedFactories.TryGetValue(index, out var provisional))
             {
-                SetManagedRoot(provisional, active: false);
+                if (_normalBacking)
+                {
+                    EmitNormalBackingAbandon(provisional.Provisional, provisional.ClassIndex);
+                }
+                SetManagedRoot(provisional.Provisional, active: false);
                 if (!_normalBacking)
                 {
-                    EmitManagedAbandon(provisional);
+                    EmitManagedAbandon(provisional.Provisional);
                 }
             }
             if (_unwindRootFrames.Contains(index))
@@ -2153,7 +2222,8 @@ internal sealed partial class PeCompiler
             case BoundLifetimeEnd end:
                 return end.CleanupFunction >= 0 ? CleanupSpills(ref maximumArguments) : 0;
             case BoundFieldAssignment assignment:
-                return Math.Max(2, 1 + ExpressionSpills(assignment.Value, ref maximumArguments));
+                return Math.Max(_normalBacking ? 4 : 2,
+                    1 + ExpressionSpills(assignment.Value, ref maximumArguments));
             case BoundBufferAssignment assignment:
                 return Math.Max(ExpressionSpills(assignment.Index, ref maximumArguments),
                     1 + ExpressionSpills(assignment.Value, ref maximumArguments));
@@ -2195,6 +2265,16 @@ internal sealed partial class PeCompiler
 
     private int ExpressionSpills(BoundExpression expression, ref int maximumArguments)
     {
+        var requiredReferenceSpills = _normalBacking
+            && ContainsNormalBackingReferenceValue(expression.Type, _program)
+            ? (Size(expression.Type) + 15) / 16
+            : 0;
+        return Math.Max(requiredReferenceSpills,
+            ExpressionSpillsCore(expression, ref maximumArguments));
+    }
+
+    private int ExpressionSpillsCore(BoundExpression expression, ref int maximumArguments)
+    {
         switch (expression)
         {
             case BoundNativeFixedArrayInitialization fixedArray:
@@ -2227,6 +2307,13 @@ internal sealed partial class PeCompiler
                 return ExpressionSpills(reborrow.Descriptor, ref maximumArguments);
             case BoundReferenceRead referenceRead:
                 return ExpressionSpills(referenceRead.Descriptor, ref maximumArguments);
+            case BoundReferenceWrite referenceWrite
+                when _normalBacking && IsNormalBackingHandle(referenceWrite.Value.Type):
+                var descriptorSpills = ExpressionSpills(
+                    referenceWrite.Descriptor, ref maximumArguments);
+                var valueSpills = ExpressionSpills(
+                    referenceWrite.Value, ref maximumArguments);
+                return 5 + descriptorSpills + valueSpills;
             case BoundReferenceWrite referenceWrite:
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(referenceWrite.Descriptor, ref maximumArguments),
                     1 + ExpressionSpills(referenceWrite.Value, ref maximumArguments)));
@@ -5180,6 +5267,14 @@ internal sealed partial class PeCompiler
         {
             StoreNormalBackingHandle(offset);
         }
+        else if (_normalBacking && IsNormalBackingLocalReference(type, _program))
+        {
+            StoreNormalBackingReference(offset);
+        }
+        else if (_normalBacking && ContainsNormalBackingReferenceValue(type, _program))
+        {
+            StoreNormalBackingReferenceAggregate(offset, type);
+        }
         else if (IsIndirect(type))
         {
             CopyToFrame(offset, Size(type));
@@ -5557,8 +5652,17 @@ internal sealed partial class PeCompiler
         }
     }
 
-    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes other structured statement variants.")]
     private void Statement(BoundStatement statement)
+    {
+        StatementCore(statement);
+        if (_normalBacking && statement is not BoundReturn)
+        {
+            ClearNormalBackingSpillRoots(0, _spillCounts[_currentFunction]);
+        }
+    }
+
+    [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "The verifier excludes other structured statement variants.")]
+    private void StatementCore(BoundStatement statement)
     {
         _cancellationToken.ThrowIfCancellationRequested();
         if (_code.Position > MaximumText)
@@ -5572,6 +5676,8 @@ internal sealed partial class PeCompiler
                 break;
             case BoundRequire requirement:
                 Expression(requirement.Condition, 0);
+                ClearNormalBackingSpillRootsPreservingAccumulator(
+                    0, _spillCounts[_currentFunction]);
                 _code.Bytes(0x85, 0xC0);
                 RuntimeBranch(0x84, 2);
                 break;
@@ -5606,7 +5712,8 @@ internal sealed partial class PeCompiler
                 {
                     foreach (var retired in block.RetiredManagedLocals)
                     {
-                        SetManagedRoot(OwnerPlace(retired), active: false);
+                        var type = _program.Functions[_currentFunction].Variables[retired].Type;
+                        SetManagedValueRoots(OwnerPlace(retired), type, active: false);
                     }
                 }
                 if (!block.RetiredManagedLocals.IsEmpty)
@@ -5690,9 +5797,13 @@ internal sealed partial class PeCompiler
                     StoreValue(Slot(local.Variable), local.Initializer.Type);
                 }
                 SetInitializationFlag(local.Variable, initialized: true);
-                if (ManagedClassTypes.IsManaged(local.Initializer.Type))
+                if (ManagedClassTypes.IsManaged(local.Initializer.Type)
+                    || (_normalBacking
+                        && ContainsNormalBackingReferenceValue(
+                            local.Initializer.Type, _program)))
                 {
-                    SetManagedRoot(Slot(local.Variable), active: true);
+                    SetManagedValueRoots(Slot(local.Variable),
+                        local.Initializer.Type, active: true);
                 }
                 if (IsUnique(local.Initializer.Type))
                 {
@@ -5775,19 +5886,25 @@ internal sealed partial class PeCompiler
                 {
                     DropOwner(end.Variable);
                 }
-                else if (ManagedClassTypes.IsManaged(endedType))
+                else if (ManagedClassTypes.IsManaged(endedType)
+                    || (_normalBacking
+                        && ContainsNormalBackingReferenceValue(endedType, _program)))
                 {
-                    SetManagedRoot(Slot(end.Variable), active: false);
+                    SetManagedValueRoots(Slot(end.Variable), endedType, active: false);
                 }
                 SetInitializationFlag(end.Variable, initialized: false);
                 break;
             case BoundAssignment assignment:
                 Expression(assignment.Value, 0);
-                if (ManagedClassTypes.IsManaged(assignment.Value.Type))
+                if (ManagedClassTypes.IsManaged(assignment.Value.Type)
+                    || (_normalBacking
+                        && ContainsNormalBackingReferenceValue(
+                            assignment.Value.Type, _program)))
                 {
                     var managedDestination = OwnerPlace(assignment.Variable);
                     StoreValue(managedDestination, assignment.Value.Type);
-                    SetManagedRoot(managedDestination, active: true);
+                    SetManagedValueRoots(
+                        managedDestination, assignment.Value.Type, active: true);
                     break;
                 }
                 if (IsUnique(assignment.Value.Type))
@@ -5826,7 +5943,8 @@ internal sealed partial class PeCompiler
                     var localPresent = _code.JumpIf(0x85);
                     Expression(optionalAssignment.Value, 0);
                     StoreValue(optionalDestination, optionalLocal.Type);
-                    SetManagedRoot(optionalDestination, active: true);
+                    SetManagedValueRoots(
+                        optionalDestination, optionalLocal.Type, active: true);
                     _code.PatchRelative(localPresent, _code.Position);
                     break;
                 }
@@ -5836,9 +5954,21 @@ internal sealed partial class PeCompiler
                 SetManagedRoot(Spill(0), active: true);
                 var fieldDeclaration = _program.Classes[ManagedClassTypes.ClassIndex(optionalField.Receiver.Type)]
                     .Fields[optionalField.Field];
+                var isNormalBackingOptionalReferenceField =
+                    IsNormalBackingOptionalReference(optionalField.Type);
                 _code.LoadPointerField(32 + fieldDeclaration.Offset, 8);
                 _code.Bytes(0x48, 0x85, 0xC0);
                 var fieldPresent = _code.JumpIf(0x85);
+                if (isNormalBackingOptionalReferenceField)
+                {
+                    _code.Load64(Spill(0));
+                    _code.LoadPointerField(
+                        32 + fieldDeclaration.Offset + sizeof(ulong), sizeof(ulong));
+                    _code.Bytes(0x48, 0x85, 0xC0);
+                    var validAbsentReference = _code.JumpIf(0x84);
+                    EmitNormalBackingContractFailure();
+                    _code.PatchRelative(validAbsentReference, _code.Position);
+                }
                 var fallbackBegin = _code.Position;
                 var fallbackFunclet = -1;
                 if (_checkedExceptions && !_emittingFunclet)
@@ -5848,11 +5978,41 @@ internal sealed partial class PeCompiler
                     _managedStagedRoots.Add(fallbackFunclet, [Spill(0)]);
                 }
                 Expression(optionalAssignment.Value, 1);
-                _code.Bytes(0x48, 0x89, 0xC1);
-                _code.Load64(Spill(0));
-                _code.PointerOffset(32 + fieldDeclaration.Offset);
-                _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0x89, 0xC8);
-                _code.Bytes(0x48, 0x89, 0x02);
+                if (isNormalBackingOptionalReferenceField)
+                {
+                    var temporary = _normalBackingTemporarySlots[_currentFunction];
+                    var stagedReferenceValue = temporary + (4 * sizeof(ulong));
+                    var newMarker = temporary + (3 * sizeof(ulong));
+                    _code.Store64(temporary);
+                    _code.Load64(temporary);
+                    CopyToFrame(stagedReferenceValue, fieldDeclaration.Size);
+                    foreach (var leaf in NormalBackingReferenceLeaves(
+                        optionalField.Type, _program))
+                    {
+                        EmitNormalBackingRetain(
+                            stagedReferenceValue + leaf.Offset + sizeof(ulong));
+                    }
+                    _code.Bytes(0x31, 0xC0);
+                    _code.Store64(temporary);
+                    EmitNormalBackingReferenceMarker(
+                        stagedReferenceValue, optionalField.Type, newMarker);
+                    EmitNormalBackingRecordFieldStore(
+                        Spill(0), ManagedClassTypes.ClassIndex(optionalField.Receiver.Type),
+                        optionalField.Field, temporary, newMarker);
+                    _code.Load64(Spill(0));
+                    _code.PointerOffset(32 + fieldDeclaration.Offset);
+                    _code.Bytes(0x48, 0x89, 0xC2);
+                    _code.Address(stagedReferenceValue);
+                    _code.CopyMemory(fieldDeclaration.Size);
+                }
+                else
+                {
+                    _code.Bytes(0x48, 0x89, 0xC1);
+                    _code.Load64(Spill(0));
+                    _code.PointerOffset(32 + fieldDeclaration.Offset);
+                    _code.Bytes(0x48, 0x89, 0xC2, 0x48, 0x89, 0xC8);
+                    _code.Bytes(0x48, 0x89, 0x02);
+                }
                 if (fallbackFunclet >= 0)
                 {
                     _code.Byte(0x90);
@@ -5918,6 +6078,7 @@ internal sealed partial class PeCompiler
                 var fieldOwnerClassIndex = classField
                     ? ManagedClassTypes.ClassIndex(fieldType) : -1;
                 var fieldOrdinal = fieldAssignment.Field;
+                var fieldBaseOffset = classField ? field.Offset : 0;
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
                     + field.Offset;
                 if (!classField)
@@ -6024,6 +6185,7 @@ internal sealed partial class PeCompiler
                                 .Fields[nestedField];
                             fieldOwnerClassIndex = ManagedClassTypes.ClassIndex(containingType);
                             fieldOrdinal = nestedField;
+                            fieldBaseOffset = field.Offset;
                             inlineOffset = 0;
                         }
                         else
@@ -6045,9 +6207,31 @@ internal sealed partial class PeCompiler
                     Expression(fieldAssignment.Value, 1);
                     var normalBackingHandleField = _normalBacking
                         && IsNormalBackingHandle(field.Type);
+                    var normalBackingReferenceField = _normalBacking
+                        && !normalBackingHandleField
+                        && ContainsNormalBackingReferenceValue(field.Type, _program);
+                    var normalBackingReferenceLeaves = normalBackingReferenceField
+                        ? NormalBackingReferenceLeaves(field.Type, _program)
+                        : new List<(int Offset, PrimitiveType Type)>();
+                    var normalBackingTemporary = _normalBacking
+                        ? _normalBackingTemporarySlots[_currentFunction] : -1;
+                    var stagedReferenceValue = normalBackingTemporary + (4 * sizeof(ulong));
+                    var oldReferenceValue = stagedReferenceValue
+                        + _normalBackingReferenceScratchSizes[_currentFunction];
                     if (normalBackingHandleField)
                     {
                         StoreValue(Spill(1), field.Type);
+                    }
+                    else if (normalBackingReferenceField)
+                    {
+                        _code.Store64(normalBackingTemporary);
+                        _code.Load64(normalBackingTemporary);
+                        CopyToFrame(stagedReferenceValue, field.Size);
+                        foreach (var leaf in normalBackingReferenceLeaves)
+                        {
+                            EmitNormalBackingRetain(
+                                stagedReferenceValue + leaf.Offset + sizeof(ulong));
+                        }
                     }
                     else if (IsIndirect(field.Type))
                     {
@@ -6062,17 +6246,49 @@ internal sealed partial class PeCompiler
                     if (normalBackingHandleField)
                     {
                         _code.LoadPointerField(0, sizeof(ulong));
-                        StoreValue(Spill(2), field.Type);
+                        _code.Store64(normalBackingTemporary + sizeof(ulong));
                         EmitNormalBackingRecordFieldStore(Spill(0), fieldOwnerClassIndex,
-                            fieldOrdinal, Spill(2), Spill(1));
-                        EmitNormalBackingRelease(Spill(2));
-                        SetManagedRoot(Spill(2), active: false);
+                            fieldOrdinal, normalBackingTemporary + sizeof(ulong), Spill(1));
                         _code.Load64(Spill(0));
                         _code.PointerOffset(32 + inlineOffset + field.Offset);
                         _code.Bytes(0x48, 0x89, 0xC2);
                         LoadValue(Spill(1), field.Type);
                         _code.Bytes(0x48, 0x89, 0x02);
                         TransferManagedRoot(Spill(1));
+                        EmitNormalBackingRelease(normalBackingTemporary + sizeof(ulong));
+                    }
+                    else if (normalBackingReferenceField)
+                    {
+                        var trackedField = _program.Classes[fieldOwnerClassIndex]
+                            .Fields[fieldOrdinal];
+                        var trackedFieldType = trackedField.Type;
+                        var replacementFieldOffset = checked(
+                            inlineOffset + field.Offset - fieldBaseOffset);
+                        _code.Address(oldReferenceValue);
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        _code.Load64(Spill(0));
+                        _code.PointerOffset(32 + fieldBaseOffset);
+                        _code.CopyMemory(trackedField.Size);
+                        EmitNormalBackingReferenceMarker(
+                            oldReferenceValue, trackedFieldType, Spill(2));
+                        EmitNormalBackingReferenceMarkerWithReplacement(
+                            oldReferenceValue, trackedFieldType, replacementFieldOffset,
+                            field.Type, stagedReferenceValue, Spill(3));
+                        EmitNormalBackingRecordFieldStore(Spill(0), fieldOwnerClassIndex,
+                            fieldOrdinal, Spill(2), Spill(3));
+                        _code.Load64(Spill(0));
+                        _code.PointerOffset(32 + inlineOffset + field.Offset);
+                        _code.Bytes(0x48, 0x89, 0xC2);
+                        _code.Address(stagedReferenceValue);
+                        _code.CopyMemory(field.Size);
+                        for (var leafIndex = normalBackingReferenceLeaves.Count - 1;
+                            leafIndex >= 0; leafIndex--)
+                        {
+                            var leaf = normalBackingReferenceLeaves[leafIndex];
+                            EmitNormalBackingRelease(
+                                oldReferenceValue + replacementFieldOffset
+                                    + leaf.Offset + sizeof(ulong));
+                        }
                     }
                     else
                     {
@@ -6184,10 +6400,18 @@ internal sealed partial class PeCompiler
                 Expression(expression.Expression, 0);
                 break;
             case BoundReturn result:
+                var normalBackingReferenceReturn = result.Value is not null && _normalBacking
+                    && ContainsNormalBackingReferenceValue(result.Value.Type, _program);
                 if (result.Value is not null)
                 {
                     Expression(result.Value, 0);
-                    if (_cleanups.Count != 0 || result.Value.Type == PrimitiveType.Float128)
+                    if (IsFloatingCallCarrier(result.Value.Type))
+                    {
+                        _code.MoveFloatingReturnToAccumulator(
+                            result.Value.Type == PrimitiveType.Float64);
+                    }
+                    if (_cleanups.Count != 0 || result.Value.Type == PrimitiveType.Float128
+                        || normalBackingReferenceReturn)
                     {
                         StoreValue(PendingReturnSlot(), result.Value.Type);
                         if (ManagedClassTypes.IsManaged(result.Value.Type))
@@ -6195,6 +6419,8 @@ internal sealed partial class PeCompiler
                             SetManagedRoot(PendingReturnSlot(), active: true);
                         }
                     }
+                    ClearNormalBackingSpillRootsPreservingAccumulator(
+                        0, _spillCounts[_currentFunction]);
                 }
                 for (var index = _cleanups.Count - 1; index >= 0; index--)
                 {
@@ -6202,7 +6428,7 @@ internal sealed partial class PeCompiler
                 }
                 if (result.Value is not null)
                 {
-                    if (_cleanups.Count != 0)
+                    if (_cleanups.Count != 0 || normalBackingReferenceReturn)
                     {
                         LoadValue(PendingReturnSlot(), result.Value.Type);
                     }
@@ -6211,6 +6437,14 @@ internal sealed partial class PeCompiler
                         _code.Load64(_returnSlot, destinationRegister: true);
                         _code.CopyMemory(Size(result.Value.Type));
                         _code.Load64(_returnSlot);
+                        if (normalBackingReferenceReturn)
+                        {
+                            EmitPrepareNormalBackingCallResult(
+                                _currentFunction, result.Value.Type);
+                            TransferManagedValueRoots(
+                                PendingReturnSlot(), result.Value.Type);
+                            _code.Load64(_returnSlot);
+                        }
                     }
                 }
                 var hasOutParameter = false;
@@ -6317,6 +6551,8 @@ internal sealed partial class PeCompiler
                 break;
             case BoundIf conditional:
                 Expression(conditional.Condition, 0);
+                ClearNormalBackingSpillRootsPreservingAccumulator(
+                    0, _spillCounts[_currentFunction]);
                 _code.Bytes(0x85, 0xC0);
                 var falseBranch = _code.JumpIf(0x84);
                 Statement(conditional.Then);
@@ -6339,6 +6575,8 @@ internal sealed partial class PeCompiler
                 if (!loop.IsPostTested)
                 {
                     Expression(loop.Condition, 0);
+                    ClearNormalBackingSpillRootsPreservingAccumulator(
+                        0, _spillCounts[_currentFunction]);
                     _code.Bytes(0x85, 0xC0);
                     exit = _code.JumpIf(0x84);
                 }
@@ -6354,6 +6592,8 @@ internal sealed partial class PeCompiler
                 if (loop.IsPostTested)
                 {
                     Expression(loop.Condition, 0);
+                    ClearNormalBackingSpillRootsPreservingAccumulator(
+                        0, _spillCounts[_currentFunction]);
                     _code.Bytes(0x85, 0xC0);
                     exit = _code.JumpIf(0x84);
                 }
@@ -6628,27 +6868,78 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundNull:
-                _code.Bytes(0x31, 0xC0);
+                if (IsNormalBackingOptionalReference(expression.Type))
+                {
+                    var storage = _normalBackingTemporarySlots[_currentFunction]
+                        + (4 * sizeof(ulong));
+                    ZeroStruct(storage, Size(expression.Type));
+                    _code.Address(storage);
+                }
+                else
+                {
+                    _code.Bytes(0x31, 0xC0);
+                }
                 break;
             case BoundOptionalLift lift:
                 Expression(lift.Value, spill);
                 break;
             case BoundCoalesce coalesce:
-                Expression(coalesce.Optional, spill);
-                _code.Bytes(0x48, 0x85, 0xC0);
-                var present = _code.JumpIf(0x85);
-                Expression(coalesce.Fallback, spill);
-                _code.PatchRelative(present, _code.Position);
+            {
+                if (IsNormalBackingOptionalReference(coalesce.Optional.Type))
+                {
+                    var descriptor = _normalBackingTemporarySlots[_currentFunction];
+                    Expression(coalesce.Optional, spill);
+                    _code.Store64(descriptor);
+                    _code.Load64(descriptor);
+                    _code.Bytes(0x48, 0x8B, 0x00, 0x48, 0x85, 0xC0);
+                    var absent = _code.JumpIf(0x84);
+                    _code.Load64(descriptor);
+                    var coalesceDone = _code.Jump();
+                    _code.PatchRelative(absent, _code.Position);
+                    Expression(coalesce.Fallback, spill);
+                    _code.PatchRelative(coalesceDone, _code.Position);
+                }
+                else
+                {
+                    Expression(coalesce.Optional, spill);
+                    _code.Bytes(0x48, 0x85, 0xC0);
+                    var present = _code.JumpIf(0x85);
+                    Expression(coalesce.Fallback, spill);
+                    _code.PatchRelative(present, _code.Position);
+                }
                 break;
+            }
             case BoundReadonlyProjection projection:
                 Expression(projection.Value, spill);
                 break;
             case BoundIsNull test:
                 Expression(test.Value, spill);
+                if (IsNormalBackingOptionalReference(test.Value.Type))
+                {
+                    _code.Bytes(0x48, 0x8B, 0x00);
+                }
                 _code.Bytes(0x48, 0x85, 0xC0, 0x0F, 0x94, 0xC0, 0x0F, 0xB6, 0xC0);
                 break;
             case BoundIsSome pattern:
+            {
                 Expression(pattern.Value, spill);
+                if (IsNormalBackingOptionalReference(pattern.Value.Type))
+                {
+                    var descriptor = _normalBackingTemporarySlots[_currentFunction];
+                    _code.Store64(descriptor);
+                    _code.Load64(descriptor);
+                    _code.Bytes(0x48, 0x8B, 0x00, 0x48, 0x85, 0xC0);
+                    var optionalReferenceEmpty = _code.JumpIf(0x84);
+                    _code.Load64(descriptor);
+                    StoreValue(Slot(pattern.Variable),
+                        _program.Functions[_currentFunction].Variables[pattern.Variable].Type);
+                    _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+                    var optionalReferencePatternDone = _code.Jump();
+                    _code.PatchRelative(optionalReferenceEmpty, _code.Position);
+                    _code.Bytes(0x31, 0xC0);
+                    _code.PatchRelative(optionalReferencePatternDone, _code.Position);
+                    break;
+                }
                 _code.Bytes(0x48, 0x85, 0xC0);
                 var empty = _code.JumpIf(0x84);
                 _code.Store64(Slot(pattern.Variable));
@@ -6660,7 +6951,55 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x31, 0xC0);
                 _code.PatchRelative(patternDone, _code.Position);
                 break;
+            }
             case BoundIsVariablePattern pattern:
+            {
+                if (IsNormalBackingOptionalReference(pattern.Value.Type))
+                {
+                    var descriptor = _normalBackingTemporarySlots[_currentFunction];
+                    var optionalReferenceVacant = -1;
+                    if (pattern.Value is BoundRead optionalRead)
+                    {
+                        var optionalReferenceSourceSlot = OwnerPlace(optionalRead.Variable);
+                        var supportSlot = checked(optionalReferenceSourceSlot + sizeof(ulong));
+                        if (!_managedRootFlags[_currentFunction].TryGetValue(
+                            supportSlot, out var optionalReferenceInitializedFlag))
+                        {
+                            throw new InvalidOperationException(
+                                "Optional reference pattern source has no initialization flag.");
+                        }
+                        _code.Load(optionalReferenceInitializedFlag);
+                        _code.Bytes(0x85, 0xC0);
+                        optionalReferenceVacant = _code.JumpIf(0x84);
+                    }
+
+                    Expression(pattern.Value, spill);
+                    _code.Store64(descriptor);
+                    var optionalReferenceAbsent = -1;
+                    if (!pattern.IncludeNull)
+                    {
+                        _code.Load64(descriptor);
+                        _code.Bytes(0x48, 0x8B, 0x00, 0x48, 0x85, 0xC0);
+                        optionalReferenceAbsent = _code.JumpIf(0x84);
+                    }
+                    _code.Load64(descriptor);
+                    var patternType = _program.Functions[_currentFunction]
+                        .Variables[pattern.Variable].Type;
+                    StoreValue(Slot(pattern.Variable), patternType);
+                    _code.Bytes(0xB8, 0x01, 0x00, 0x00, 0x00);
+                    var optionalReferenceVariablePatternDone = _code.Jump();
+                    if (optionalReferenceVacant >= 0)
+                    {
+                        _code.PatchRelative(optionalReferenceVacant, _code.Position);
+                    }
+                    if (optionalReferenceAbsent >= 0)
+                    {
+                        _code.PatchRelative(optionalReferenceAbsent, _code.Position);
+                    }
+                    _code.Bytes(0x31, 0xC0);
+                    _code.PatchRelative(optionalReferenceVariablePatternDone, _code.Position);
+                    break;
+                }
                 if (!ManagedClassTypes.IsOptional(pattern.Value.Type))
                 {
                     Expression(pattern.Value, spill);
@@ -6707,6 +7046,7 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x31, 0xC0);
                 _code.PatchRelative(variablePatternDone, _code.Position);
                 break;
+            }
             case BoundIsInitialized initializationTest:
                 EmitInitializationTest(initializationTest.Variable);
                 break;
@@ -7531,6 +7871,16 @@ internal sealed partial class PeCompiler
                 }
                 break;
             case BoundCall call:
+                var targetFunction = _program.Functions[call.Function];
+                var hasNormalBackingCallPlan = _normalBacking
+                    && RequiresNormalBackingCallPlan(targetFunction, _program);
+                var normalBackingCallPlanSlot = hasNormalBackingCallPlan
+                    ? _normalBackingCallPlanSlots[_currentFunction] : -1;
+                if (hasNormalBackingCallPlan && normalBackingCallPlanSlot < 0)
+                {
+                    throw new InvalidOperationException(
+                        "A support-bearing call has no verified call-plan storage.");
+                }
                 var argumentsBase = spill + CallResultSpills(call);
                 var argumentSpills = new int[call.Arguments.Length];
                 var auxiliarySpills = new int[call.Arguments.Length];
@@ -7546,6 +7896,13 @@ internal sealed partial class PeCompiler
                     nextSpill += CallArgumentAuxiliarySpills(call.Arguments[i]);
                 }
                 var argumentExpressionSpillBase = nextSpill;
+                var argumentExpressionSpills = 0;
+                var ignoredMaximumArguments = 0;
+                foreach (var argument in call.Arguments)
+                {
+                    argumentExpressionSpills = Math.Max(argumentExpressionSpills,
+                        ExpressionSpills(argument, ref ignoredMaximumArguments));
+                }
                 List<(int Value, int Live, PrimitiveType Type)>? staged = null;
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
@@ -7577,12 +7934,42 @@ internal sealed partial class PeCompiler
                                 managedSlots.Add(Spill(auxiliarySpills[i]));
                             }
                         }
+                        var formal = call.ParameterIndex(i);
+                        var formalSlot = formal
+                            + (targetFunction.IsConstructor ? 1 : 0);
+                        var formalVariable = targetFunction.Variables[formalSlot];
+                        if (!formalVariable.IsImplicitRef && !formalVariable.IsOut
+                            && ContainsNormalBackingReferenceValue(
+                                formalVariable.Type, _program))
+                        {
+                            foreach (var leaf in NormalBackingReferenceLeaves(
+                                formalVariable.Type, _program))
+                            {
+                                managedSlots ??= [];
+                                managedSlots.Add(checked(
+                                    Spill(argumentSpills[i]) + leaf.Offset + sizeof(ulong)));
+                            }
+                        }
+                    }
+                    if (ContainsNormalBackingReferenceValue(call.Type, _program))
+                    {
+                        foreach (var leaf in NormalBackingReferenceLeaves(call.Type, _program))
+                        {
+                            managedSlots ??= [];
+                            managedSlots.Add(checked(
+                                Spill(spill) + leaf.Offset + sizeof(ulong)));
+                        }
                     }
                     if (managedSlots is not null)
                     {
                         managedFunclet = _funclets.Count;
                         _funclets.Add((new BoundBlock([], call.Span), _currentFunction, 0, 0));
                         _managedStagedRoots.Add(managedFunclet, managedSlots);
+                        if (hasNormalBackingCallPlan)
+                        {
+                            _normalBackingCallPlanFunclets.Add(
+                                managedFunclet, normalBackingCallPlanSlot);
+                        }
                     }
                 }
                 if (_checkedExceptions && staged is not null && !_emittingFunclet)
@@ -7633,7 +8020,21 @@ internal sealed partial class PeCompiler
                             {
                                 SetManagedRoot(Spill(argumentSpills[i]), active: true);
                             }
+                            var formal = call.ParameterIndex(i);
+                            var formalSlot = formal
+                                + (targetFunction.IsConstructor ? 1 : 0);
+                            var formalVariable = targetFunction.Variables[formalSlot];
+                            if (_normalBacking && !formalVariable.IsImplicitRef
+                                && !formalVariable.IsOut
+                                && ContainsNormalBackingReferenceValue(
+                                    formalVariable.Type, _program))
+                            {
+                                SetManagedValueRoots(
+                                    Spill(argumentSpills[i]), formalVariable.Type, active: true);
+                            }
                         }
+                        ClearNormalBackingSpillRoots(
+                            argumentExpressionSpillBase, argumentExpressionSpills);
                         if (staged is not null && IsUnique(call.Arguments[i].Type)
                             && call.Arguments[i] is not (BoundReceiverLoan or BoundMutableReceiverLoan
                                 or BoundFieldLoan or BoundMutableFieldLoan))
@@ -7670,7 +8071,6 @@ internal sealed partial class PeCompiler
                 var hiddenReturn = IsIndirectResult(call.Type) ? 1 : 0;
                 var sourceHidden = _sourceDependent?[call.Function] == true ? 2 : 0;
                 var hidden = hiddenReturn + sourceHidden;
-                var targetFunction = _program.Functions[call.Function];
                 if (targetFunction.DirectNativeImport is DirectNativeImport directImport)
                 {
                     NativeEmitter.EnsureNativeCallingConventionSupported(directImport.CallingConvention);
@@ -7683,6 +8083,11 @@ internal sealed partial class PeCompiler
                 }
                 var nativeAbi = targetFunction.DirectNativeImport is not null
                     || targetFunction.NativeFunctionPointerType is not null;
+                if (hasNormalBackingCallPlan)
+                {
+                    EmitBeginNormalBackingCallPlan(
+                        call, normalBackingCallPlanSlot, argumentSpills, spill);
+                }
                 for (var i = Math.Max(0, 4 - hidden); i < call.Arguments.Length; i++)
                 {
                     var argumentIndex = call.ArgumentIndex(i);
@@ -7853,6 +8258,11 @@ internal sealed partial class PeCompiler
                 {
                     _code.Store64(normalCallResultSlot);
                 }
+                if (hasNormalBackingCallPlan)
+                {
+                    EmitFinishNormalBackingCallPlan(
+                        normalBackingCallPlanSlot, call.Type);
+                }
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
@@ -7862,6 +8272,18 @@ internal sealed partial class PeCompiler
                         {
                             SetManagedRoot(Spill(auxiliarySpills[i]), active: false);
                         }
+                    }
+                    var formal = call.ParameterIndex(i);
+                    var formalSlot = formal
+                        + (targetFunction.IsConstructor ? 1 : 0);
+                    var formalVariable = targetFunction.Variables[formalSlot];
+                    if (_normalBacking && !formalVariable.IsImplicitRef
+                        && !formalVariable.IsOut
+                        && ContainsNormalBackingReferenceValue(
+                            formalVariable.Type, _program))
+                    {
+                        SetManagedValueRoots(
+                            Spill(argumentSpills[i]), formalVariable.Type, active: false);
                     }
                 }
                 if (preserveNormalCallResult)

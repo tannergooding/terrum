@@ -12,9 +12,10 @@ internal sealed partial class PeCompiler
 {
     private readonly int[] _managedRootFrames;
     private readonly Dictionary<int, int>[] _managedRootFlags;
+    private readonly HashSet<int>[] _normalBackingCallResultRoots;
     private readonly List<int> _managedCollectorCalls = [];
     private readonly List<(int Displacement, int Descriptor)> _managedDescriptorReferences = [];
-    private readonly Dictionary<int, int> _managedAbandonedFactories = [];
+    private readonly Dictionary<int, (int Provisional, int ClassIndex)> _managedAbandonedFactories = [];
     private int _managedCollectorStart;
     private int _managedCollectorEnd;
     private int RuntimeStateOffset => _managedNodes ? _managedRuntimeOffset : _normalBackingRuntimeOffset;
@@ -37,15 +38,72 @@ internal sealed partial class PeCompiler
                 _ = roots.TryAdd(variable.IsOut
                     ? _outSlots[functionIndex][i] : _slots[functionIndex][i], 0);
             }
+            if (_normalBacking && !variable.IsImplicitRef && !variable.IsOut)
+            {
+                var residence = variable.IsOut
+                    ? _outSlots[functionIndex][i] : _slots[functionIndex][i];
+                foreach (var leaf in NormalBackingReferenceLeaves(variable.Type, _program))
+                {
+                    _ = roots.TryAdd(
+                        checked(residence + leaf.Offset + sizeof(ulong)), 0);
+                }
+            }
+        }
+        if (_normalBacking
+            && ContainsNormalBackingReferenceValue(function.ReturnType, _program))
+        {
+            var returnValue = checked((int)AlignOffset(_returnSlots[functionIndex]
+                + (IsIndirectResult(function.ReturnType) ? 8 : 0), 16));
+            foreach (var leaf in NormalBackingReferenceLeaves(
+                function.ReturnType, _program))
+            {
+                _ = roots.TryAdd(
+                    checked(returnValue + leaf.Offset + sizeof(ulong)), 0);
+            }
         }
         // Large calls can otherwise spend more than the page-safe frame limit on
         // root descriptors for scalar-only staging slots.
-        var managedSpills = spillSlots > 64 ? ManagedSpillSlots(function) : null;
+        var referenceSpills = _normalBacking
+            ? new HashSet<(int Spill, int SupportOffset)>() : null;
+        var callResultSpills = _normalBacking
+            ? new HashSet<(int Spill, int SupportOffset)>() : null;
+        var managedSpills = spillSlots > 64
+            ? ManagedSpillSlots(function, referenceSpills, callResultSpills) : null;
+        if (referenceSpills is not null && managedSpills is null)
+        {
+            _ = ManagedSpillSlots(function, referenceSpills, callResultSpills);
+        }
+        if (callResultSpills is not null)
+        {
+            foreach (var (spill, supportOffset) in callResultSpills)
+            {
+                if ((uint)spill >= (uint)spillSlots)
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed call result exceeds its verified spill area.");
+                }
+                _ = _normalBackingCallResultRoots[functionIndex].Add(
+                    checked(_spillBases[functionIndex] + (16 * spill) + supportOffset));
+            }
+        }
         for (var spill = 0; spill < spillSlots; spill++)
         {
             if (managedSpills is null || managedSpills.Contains(spill))
             {
                 _ = roots.TryAdd(_spillBases[functionIndex] + (16 * spill), 0);
+            }
+        }
+        if (referenceSpills is not null)
+        {
+            foreach (var (spill, supportOffset) in referenceSpills)
+            {
+                if ((uint)spill >= (uint)spillSlots)
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed descriptor spill exceeds its verified frame.");
+                }
+                _ = roots.TryAdd(_spillBases[functionIndex]
+                    + (16 * spill) + supportOffset, 0);
             }
         }
         if (ManagedClassTypes.IsManaged(function.ReturnType) && needsReturnSnapshot)
@@ -65,17 +123,66 @@ internal sealed partial class PeCompiler
         }
         if (_normalBacking)
         {
+            var maximumReferenceValueSize = 0;
+            foreach (var variable in function.Variables)
+            {
+                if (ContainsNormalBackingReferenceValue(variable.Type, _program))
+                {
+                    maximumReferenceValueSize = Math.Max(
+                        maximumReferenceValueSize, Size(variable.Type));
+                }
+            }
+            for (var structureIndex = 0;
+                structureIndex < _program.Structures.Length; structureIndex++)
+            {
+                var type = (PrimitiveType)(100 + structureIndex);
+                if (ContainsNormalBackingReferenceValue(type, _program))
+                {
+                    maximumReferenceValueSize = Math.Max(
+                        maximumReferenceValueSize, Size(type));
+                }
+            }
+            foreach (var @class in _program.Classes)
+            {
+                foreach (var field in @class.Fields)
+                {
+                    if (ContainsNormalBackingReferenceValue(field.Type, _program))
+                    {
+                        maximumReferenceValueSize = Math.Max(
+                            maximumReferenceValueSize, field.Size);
+                    }
+                }
+            }
+            if (function.Body is not null
+                && !BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+                {
+                    if (ContainsNormalBackingReferenceValue(expression.Type, _program))
+                    {
+                        maximumReferenceValueSize = Math.Max(
+                            maximumReferenceValueSize, Size(expression.Type));
+                    }
+                }))
+            {
+                throw new InvalidOperationException(
+                    "A normal-backed function has an incomplete reference scratch traversal.");
+            }
+            _normalBackingReferenceScratchSizes[functionIndex] =
+                maximumReferenceValueSize;
             at = (at + 7) & ~7L;
             _normalBackingTemporarySlots[functionIndex] = checked((int)at);
-            at += sizeof(ulong);
+            at += checked((4 * sizeof(ulong)) + (2 * maximumReferenceValueSize));
         }
         return at;
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only expressions and statements with managed staging slots need descriptors.")]
-    private static HashSet<int> ManagedSpillSlots(BoundFunction function)
+    private HashSet<int> ManagedSpillSlots(
+        BoundFunction function,
+        HashSet<(int Spill, int SupportOffset)>? referenceSpills = null,
+        HashSet<(int Spill, int SupportOffset)>? callResultSpills = null)
     {
         var slots = new HashSet<int>();
+        var maximumArguments = 0;
         CollectStatement(function.Body);
         return slots;
 
@@ -121,7 +228,6 @@ internal sealed partial class PeCompiler
                     if (ManagedClassTypes.IsClass(function.Variables[assignment.Variable].Type))
                     {
                         _ = slots.Add(0);
-                        _ = slots.Add(2);
                         CollectExpression(assignment.Value, 1);
                     }
                     else
@@ -178,6 +284,29 @@ internal sealed partial class PeCompiler
 
         void CollectExpression(BoundExpression expression, int spill)
         {
+            if (_normalBacking && referenceSpills is not null)
+            {
+                foreach (var leaf in NormalBackingReferenceLeaves(
+                    expression.Type, _program))
+                {
+                    var supportOffset = leaf.Offset + sizeof(ulong);
+                    _ = referenceSpills.Add((
+                        spill + (supportOffset / 16),
+                        supportOffset % 16));
+                }
+            }
+            if (_normalBacking && callResultSpills is not null
+                && expression is BoundCall)
+            {
+                foreach (var leaf in NormalBackingReferenceLeaves(
+                    expression.Type, _program))
+                {
+                    var supportOffset = leaf.Offset + sizeof(ulong);
+                    _ = callResultSpills.Add((
+                        spill + (supportOffset / 16),
+                        supportOffset % 16));
+                }
+            }
             switch (expression)
             {
                 case BoundUnary unary:
@@ -267,22 +396,65 @@ internal sealed partial class PeCompiler
                 case BoundUnsafeExpression unsafeExpression:
                     CollectExpression(unsafeExpression.Expression, spill);
                     break;
+                case BoundReferenceWrite referenceWrite
+                    when _normalBacking && IsNormalBackingHandle(referenceWrite.Value.Type):
+                    var descriptorSpills = ExpressionSpills(
+                        referenceWrite.Descriptor, ref maximumArguments);
+                    CollectExpression(referenceWrite.Descriptor, spill + 4);
+                    CollectExpression(referenceWrite.Value,
+                        spill + 5 + descriptorSpills);
+                    break;
+                case BoundReferenceWrite referenceWrite:
+                    CollectExpression(referenceWrite.Descriptor, spill + 1);
+                    CollectExpression(referenceWrite.Value, spill + 1);
+                    break;
                 case BoundCall call:
-                    var argumentsBase = spill + 1;
+                    var argumentsBase = spill + CallResultSpills(call);
+                    var argumentSlots = new int[call.Arguments.Length];
+                    var auxiliarySlots = new int[call.Arguments.Length];
+                    var nextArgumentSlot = argumentsBase;
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        argumentSlots[i] = nextArgumentSlot;
+                        nextArgumentSlot += CallArgumentValueSpills(call, i);
+                    }
+                    for (var i = 0; i < call.Arguments.Length; i++)
+                    {
+                        auxiliarySlots[i] = nextArgumentSlot;
+                        nextArgumentSlot += CallArgumentAuxiliarySpills(call.Arguments[i]);
+                    }
                     for (var i = 0; i < call.Arguments.Length; i++)
                     {
                         var argument = call.Arguments[i];
                         if (ManagedClassTypes.IsManaged(argument.Type))
                         {
-                            _ = slots.Add(argumentsBase + i);
+                            _ = slots.Add(argumentSlots[i]);
                             if (argument is BoundOutArgument)
                             {
-                                _ = slots.Add(argumentsBase + call.Arguments.Length + i);
+                                _ = slots.Add(auxiliarySlots[i]);
+                            }
+                        }
+                        if (_normalBacking && argument is not BoundOutArgument)
+                        {
+                            var formal = call.ParameterIndex(i);
+                            var target = _program.Functions[call.Function];
+                            var parameterOffset = target.IsConstructor ? 1 : 0;
+                            var parameter = target.Variables[formal + parameterOffset];
+                            if (!parameter.IsImplicitRef && !parameter.IsOut)
+                            {
+                                foreach (var leaf in NormalBackingReferenceLeaves(
+                                    parameter.Type, _program))
+                                {
+                                    var supportOffset = leaf.Offset + sizeof(ulong);
+                                    _ = referenceSpills!.Add((
+                                        argumentSlots[i] + (supportOffset / 16),
+                                        supportOffset % 16));
+                                }
                             }
                         }
                         if (argument is not BoundOutArgument)
                         {
-                            CollectExpression(argument, argumentsBase + (call.Arguments.Length * 2));
+                            CollectExpression(argument, nextArgumentSlot);
                         }
                     }
                     break;
@@ -299,7 +471,8 @@ internal sealed partial class PeCompiler
     private void RegisterManagedRoots(int functionIndex)
     {
         var roots = _managedRootFlags[functionIndex];
-        if (roots.Count == 0)
+        if (roots.Count == 0
+            && _normalBackingIncomingCallPlanSlots[functionIndex] < 0)
         {
             return;
         }
@@ -335,6 +508,10 @@ internal sealed partial class PeCompiler
             {
                 SetManagedRoot(_slots[functionIndex][i], active: true);
             }
+        }
+        if (_normalBackingIncomingCallPlanSlots[functionIndex] >= 0)
+        {
+            EmitTransferNormalBackingCallInputs(functionIndex, function);
         }
     }
 
@@ -373,7 +550,12 @@ internal sealed partial class PeCompiler
         {
             return;
         }
-        if (!_managedRootFlags[_currentFunction].TryGetValue(slot, out var flag))
+        SetManagedRootAtAddress(GetManagedRootSlot(slot), active);
+    }
+
+    private void SetManagedRootAtAddress(int rootSlot, bool active)
+    {
+        if (!_managedRootFlags[_currentFunction].TryGetValue(rootSlot, out var flag))
         {
             throw new InvalidOperationException("Managed root has no verified frame slot.");
         }
@@ -384,13 +566,13 @@ internal sealed partial class PeCompiler
             var unchanged = _code.JumpIf(active ? (byte)0x85 : (byte)0x84);
             if (active)
             {
-                EmitNormalBackingRetain(slot);
+                EmitNormalBackingRetain(rootSlot);
                 _code.Set(flag);
             }
             else
             {
                 _code.Clear(flag);
-                EmitNormalBackingRelease(slot);
+                EmitNormalBackingRelease(rootSlot);
             }
             _code.PatchRelative(unchanged, _code.Position);
             return;
@@ -411,11 +593,133 @@ internal sealed partial class PeCompiler
         {
             return;
         }
-        if (!_managedRootFlags[_currentFunction].TryGetValue(slot, out var flag))
+        var rootSlot = GetManagedRootSlot(slot);
+        var flag = _managedRootFlags[_currentFunction][rootSlot];
+        _code.Clear(flag);
+    }
+
+    private int GetManagedRootSlot(int slot)
+    {
+        var roots = _managedRootFlags[_currentFunction];
+        if (roots.ContainsKey(slot))
+        {
+            return slot;
+        }
+        if (_normalBacking)
+        {
+            var supportSlot = checked(slot + sizeof(ulong));
+            if (roots.ContainsKey(supportSlot))
+            {
+                return supportSlot;
+            }
+        }
+        throw new InvalidOperationException("Managed root has no verified frame slot.");
+    }
+
+    private void SetManagedValueRoots(int slot, PrimitiveType type, bool active)
+    {
+        if (ManagedClassTypes.IsManaged(type)
+            && (!_normalBacking || IsNormalBackingHandle(type)))
+        {
+            SetManagedRoot(slot, active);
+            return;
+        }
+        if (!_normalBacking)
+        {
+            return;
+        }
+        var leaves = NormalBackingReferenceLeaves(type, _program);
+        for (var index = 0; index < leaves.Count; index++)
+        {
+            var leaf = leaves[active ? index : leaves.Count - index - 1];
+            SetManagedRootAtAddress(
+                checked(slot + leaf.Offset + sizeof(ulong)), active);
+        }
+    }
+
+    private void AdoptManagedValueRoots(int slot, PrimitiveType type)
+    {
+        if (!_normalBacking)
+        {
+            throw new InvalidOperationException(
+                "Only normal-backed values can adopt support-root residences.");
+        }
+        foreach (var leaf in NormalBackingReferenceLeaves(type, _program))
+        {
+            AdoptManagedRootAtAddress(
+                checked(slot + leaf.Offset + sizeof(ulong)));
+        }
+    }
+
+    private void TransferManagedValueRoots(int slot, PrimitiveType type)
+    {
+        if (!_normalBacking)
+        {
+            return;
+        }
+        if (IsNormalBackingHandle(type))
+        {
+            TransferManagedRoot(slot);
+            return;
+        }
+        foreach (var leaf in NormalBackingReferenceLeaves(type, _program))
+        {
+            var supportSlot = checked(slot + leaf.Offset + sizeof(ulong));
+            if (!_managedRootFlags[_currentFunction].TryGetValue(
+                supportSlot, out var flag))
+            {
+                throw new InvalidOperationException(
+                    "A transferred normal-backed value has no verified support slot.");
+            }
+            _code.Clear(flag);
+        }
+    }
+
+    private void AdoptManagedRootAtAddress(int rootSlot)
+    {
+        if (!_managedRootFlags[_currentFunction].TryGetValue(rootSlot, out var flag))
         {
             throw new InvalidOperationException("Managed root has no verified frame slot.");
         }
-        _code.Clear(flag);
+        _code.Set(flag);
+    }
+
+    private void ClearNormalBackingSpillRoots(int firstSpill, int spillCount)
+    {
+        if (!_normalBacking || spillCount == 0)
+        {
+            return;
+        }
+        if (firstSpill < 0 || spillCount < 0
+            || (long)firstSpill + spillCount > _spillCounts[_currentFunction])
+        {
+            throw new InvalidOperationException(
+                "A normal-backed temporary cleanup exceeds its verified spill area.");
+        }
+
+        var firstSlot = checked(_spillBases[_currentFunction] + (16 * firstSpill));
+        var endSlot = checked(firstSlot + (16 * spillCount));
+        var roots = _normalBackingCallResultRoots[_currentFunction]
+            .Where(slot => slot >= firstSlot && slot < endSlot)
+            .ToArray();
+        foreach (var slot in roots)
+        {
+            SetManagedRoot(slot, active: false);
+        }
+    }
+
+    private void ClearNormalBackingSpillRootsPreservingAccumulator(
+        int firstSpill, int spillCount)
+    {
+        if (!_normalBacking)
+        {
+            return;
+        }
+        var savedValue = _normalBackingTemporarySlots[_currentFunction]
+            + (3 * sizeof(ulong));
+        _code.Store64(savedValue);
+        ClearNormalBackingSpillRoots(firstSpill, spillCount);
+        _code.Load64(savedValue);
     }
 
     private void StoreNormalBackingHandle(int offset)
@@ -435,6 +739,67 @@ internal sealed partial class PeCompiler
         _code.Store64(offset);
         SetManagedRoot(offset, active: true);
         EmitNormalBackingRelease(temporary);
+    }
+
+    private void StoreNormalBackingReference(int offset)
+    {
+        var temporary = _normalBackingTemporarySlots[_currentFunction];
+        var supportOffset = checked(offset + sizeof(ulong));
+        if (temporary < 0 || temporary == offset || temporary == supportOffset
+            || !_managedRootFlags[_currentFunction].ContainsKey(supportOffset))
+        {
+            throw new InvalidOperationException(
+                "A normal-backed reference store has no verified temporary and support slot.");
+        }
+
+        _code.Store64(temporary);
+        _code.Load64(temporary);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _code.Store64(temporary + sizeof(ulong));
+        _code.Load64(temporary);
+        _code.LoadPointerField(sizeof(ulong), sizeof(ulong));
+        _code.Store64(temporary + (2 * sizeof(ulong)));
+        EmitNormalBackingRetain(temporary + (2 * sizeof(ulong)));
+        SetManagedRootAtAddress(supportOffset, active: false);
+        _code.Load64(temporary + sizeof(ulong));
+        _code.Store64(offset);
+        _code.Load64(temporary + (2 * sizeof(ulong)));
+        _code.Store64(supportOffset);
+        SetManagedRootAtAddress(supportOffset, active: true);
+        EmitNormalBackingRelease(temporary + (2 * sizeof(ulong)));
+    }
+
+    private void StoreNormalBackingReferenceAggregate(
+        int offset, PrimitiveType type)
+    {
+        var temporary = _normalBackingTemporarySlots[_currentFunction];
+        var size = Size(type);
+        var leaves = NormalBackingReferenceLeaves(type, _program);
+        if (temporary < 0 || size <= 0 || size > _normalBackingReferenceScratchSizes[_currentFunction]
+            || leaves.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "A normal-backed aggregate reference store has no verified staging layout.");
+        }
+
+        _code.Store64(temporary);
+        _code.Load64(temporary);
+        var staged = temporary + (4 * sizeof(ulong));
+        CopyToFrame(staged, size);
+        foreach (var leaf in leaves)
+        {
+            EmitNormalBackingRetain(
+                staged + leaf.Offset + sizeof(ulong));
+        }
+        for (var index = leaves.Count - 1; index >= 0; index--)
+        {
+            var leaf = leaves[index];
+            SetManagedRootAtAddress(
+                checked(offset + leaf.Offset + sizeof(ulong)), active: false);
+        }
+        _code.Address(staged);
+        CopyToFrame(offset, size);
+        AdoptManagedValueRoots(offset, type);
     }
 
     private void EmitManagedIntrinsic(BoundIntrinsic intrinsic)

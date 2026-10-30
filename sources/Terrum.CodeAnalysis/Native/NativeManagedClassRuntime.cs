@@ -9,6 +9,21 @@ namespace Terrum.CodeAnalysis.Native;
 internal sealed partial class PeCompiler
 {
     private const int NormalBackingControlSize = 32;
+    internal const int NormalBackingRuntimeStateSize = 32;
+    private const int NormalBackingCallPlanHeadOffset = 24;
+    private const int NormalBackingCallPlanHeaderSize = 40;
+    private const int NormalBackingCallParameterRecordSize = 16;
+    private const int NormalBackingCallPlanPreviousOffset = 0;
+    private const int NormalBackingCallPlanTargetOffset = 8;
+    private const int NormalBackingCallPlanStateOffset = 12;
+    private const int NormalBackingCallPlanInputCountOffset = 16;
+    private const int NormalBackingCallPlanResultCountOffset = 20;
+    private const int NormalBackingCallPlanResultOffset = 24;
+    private const int NormalBackingCallPlanResultFlagsOffset = 32;
+    private const int NormalBackingCallPlanPrepared = 1;
+    private const int NormalBackingCallPlanEntered = 2;
+    private const int NormalBackingCallPlanResultPrepared = 3;
+    private const int NormalBackingCallPlanClosed = 4;
     private const int NormalBackingConstructionMetadataSize = 8 + ManagedClassTypes.MaximumFields;
     private const int NormalBackingPublishedOffset = 0;
     private const int NormalBackingAcquiredCountOffset = 4;
@@ -99,10 +114,11 @@ internal sealed partial class PeCompiler
             {
                 var variable = function.Variables[variableIndex];
                 var isReference = CheckedReferenceTypes.IsType(variable.Type);
-                if (isReference && (variableIndex < function.ParameterCount || variable.IsOut))
+                var containsReference = ContainsNormalBackingReferenceValue(variable.Type, program);
+                if (containsReference && variable.IsOut)
                 {
                     throw new NotSupportedException(
-                        "The selected normal-backing runtime does not support reference call handoff.");
+                        "The selected normal-backing runtime does not support reference-bearing output parameters.");
                 }
                 if ((!IsNormalBackingHandle(variable.Type)
                         && !IsNormalBackingRuntimeValue(variable.Type, program, [])
@@ -129,7 +145,8 @@ internal sealed partial class PeCompiler
                         var isReceiver = (argument is BoundReceiverLoan or BoundMutableReceiverLoan)
                             || (index == 0 && !target.IsStatic && argument is BoundRead);
                         if ((IsNormalBackingHandle(argument.Type)
-                                || CheckedReferenceTypes.IsType(argument.Type))
+                                || (ContainsNormalBackingReferenceValue(argument.Type, program)
+                                    && argument is BoundOutArgument))
                             && !isReceiver
                             && !(target.Intrinsic == BoundIntrinsic.ClassTryCreate
                                 && argument is BoundOutArgument))
@@ -169,7 +186,7 @@ internal sealed partial class PeCompiler
         foreach (var structure in program.Structures)
         {
             if (structure.IsUnique || structure.CleanupMethod is not null
-                || !IsNormalBackingRuntimeValue(structure, program, []))
+                || !IsNormalBackingRuntimeValue(structure, program, [], []))
             {
                 throw new NotSupportedException(
                     "The selected normal-backing runtime requires scalar or inline-copy structure fields.");
@@ -180,8 +197,9 @@ internal sealed partial class PeCompiler
         {
             foreach (var field in @class.Fields)
             {
-                if (!IsNormalBackingHandle(field.Type)
-                    && !IsNormalBackingRuntimeValue(field.Type, program, []))
+                var unsupportedValue = !IsNormalBackingHandle(field.Type)
+                    && !IsNormalBackingRuntimeValue(field.Type, program, []);
+                if (unsupportedValue)
                 {
                     throw new NotSupportedException(
                         "The selected normal-backing runtime does not support this class field type.");
@@ -191,14 +209,22 @@ internal sealed partial class PeCompiler
     }
 
     private static bool IsNormalBackingRuntimeValue(PrimitiveType type, BoundProgram program,
-        HashSet<int> activeStructures)
+        HashSet<int> activeStructures) =>
+        IsNormalBackingRuntimeValue(type, program, activeStructures, []);
+
+    private static bool IsNormalBackingRuntimeValue(PrimitiveType type, BoundProgram program,
+        HashSet<int> activeStructures, HashSet<int> activeReferences)
     {
-        if (ManagedClassTypes.IsManaged(type) || CheckedReferenceTypes.IsType(type)
-            || BoundGenericNominalTypeTypes.IsType(type)
+        if (ManagedClassTypes.IsManaged(type) || BoundGenericNominalTypeTypes.IsType(type)
             || type is PrimitiveType.OwnedInt32Buffer or PrimitiveType.ReadonlyInt32BufferView
                 or PrimitiveType.MutableInt32BufferView or PrimitiveType.TokenSpan)
         {
             return false;
+        }
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return IsNormalBackingStoredReference(
+                type, program, activeStructures, activeReferences);
         }
         if (NativePointerTypes.IsType(type) || NativeFunctionPointerTypes.IsType(type)
             || BoundEnumTypes.IsType(type))
@@ -215,7 +241,8 @@ internal sealed partial class PeCompiler
             }
             var structure = program.Structures[index];
             var supported = !structure.IsUnique && structure.CleanupMethod is null
-                && IsNormalBackingRuntimeValue(structure, program, activeStructures);
+                && IsNormalBackingRuntimeValue(
+                    structure, program, activeStructures, activeReferences);
             _ = activeStructures.Remove(index);
             return supported;
         }
@@ -224,16 +251,116 @@ internal sealed partial class PeCompiler
     }
 
     private static bool IsNormalBackingRuntimeValue(BoundStruct structure, BoundProgram program,
-        HashSet<int> activeStructures)
+        HashSet<int> activeStructures, HashSet<int> activeReferences)
     {
         foreach (var field in structure.Fields)
         {
-            if (!IsNormalBackingRuntimeValue(field.Type, program, activeStructures))
+            if (!IsNormalBackingRuntimeValue(
+                field.Type, program, activeStructures, activeReferences))
             {
                 return false;
             }
         }
         return true;
+    }
+
+    private static bool IsNormalBackingStoredReference(PrimitiveType type,
+        BoundProgram program, HashSet<int> activeStructures,
+        HashSet<int> activeReferences)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes)
+            || !CheckedReferenceTypeContract.IsSupportedReferenceStoreValueType(
+                type, program.Structures, program.Classes,
+                program.EnumDefinitions.Length, program.CheckedReferenceTypes))
+        {
+            return false;
+        }
+        var index = CheckedReferenceTypes.Index(type);
+        if (!activeReferences.Add(index))
+        {
+            return true;
+        }
+
+        var reference = program.CheckedReferenceTypes[index];
+        var supported = !reference.IsGarbageCollected && !reference.IsInitialization
+            && (IsNormalBackingHandle(reference.ReferentType)
+                || IsNormalBackingRuntimeValue(
+                    reference.ReferentType, program, [], activeReferences));
+        _ = activeReferences.Remove(index);
+        return supported;
+    }
+
+    private static bool ContainsNormalBackingReferenceValue(
+        PrimitiveType type, BoundProgram program, HashSet<int>? activeStructures = null)
+    {
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            return IsNormalBackingStoredReference(
+                type, program, [], []);
+        }
+        if ((int)type is < 100 or >= ManagedClassTypes.First)
+        {
+            return false;
+        }
+        var structureIndex = (int)type - 100;
+        if ((uint)structureIndex >= (uint)program.Structures.Length)
+        {
+            return false;
+        }
+        activeStructures ??= [];
+        if (!activeStructures.Add(structureIndex))
+        {
+            return false;
+        }
+        var contains = false;
+        foreach (var field in program.Structures[structureIndex].Fields)
+        {
+            if (ContainsNormalBackingReferenceValue(field.Type, program, activeStructures))
+            {
+                contains = true;
+                break;
+            }
+        }
+        _ = activeStructures.Remove(structureIndex);
+        return contains;
+    }
+
+    private static List<(int Offset, PrimitiveType Type)> NormalBackingReferenceLeaves(
+        PrimitiveType type, BoundProgram program)
+    {
+        var result = new List<(int Offset, PrimitiveType Type)>();
+        Collect(type, 0, []);
+        return result;
+
+        void Collect(PrimitiveType current, int offset, HashSet<int> activeStructures)
+        {
+            if (CheckedReferenceTypes.IsType(current))
+            {
+                if (!IsNormalBackingStoredReference(current, program, [], []))
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed value contains an unsupported reference descriptor.");
+                }
+                result.Add((offset, current));
+                return;
+            }
+            if ((int)current is < 100 or >= ManagedClassTypes.First)
+            {
+                return;
+            }
+            var structureIndex = (int)current - 100;
+            if ((uint)structureIndex >= (uint)program.Structures.Length
+                || !activeStructures.Add(structureIndex))
+            {
+                throw new InvalidOperationException(
+                    "A normal-backed aggregate has an invalid or recursive inline layout.");
+            }
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                Collect(field.Type, checked(offset + field.Offset), activeStructures);
+            }
+            _ = activeStructures.Remove(structureIndex);
+        }
     }
 
     private static bool IsNormalBackingHandle(PrimitiveType type) =>
@@ -242,17 +369,491 @@ internal sealed partial class PeCompiler
             && ManagedClassTypes.IsClass(ManagedClassTypes.Required(type)));
 
     private static bool IsNormalBackingLocalReference(PrimitiveType type, BoundProgram program)
+        => IsNormalBackingStoredReference(type, program, [], []);
+
+    private static bool RequiresNormalBackingCallPlan(
+        BoundFunction function, BoundProgram program)
     {
-        if (!CheckedReferenceTypeContract.IsValidType(type, program.CheckedReferenceTypes))
+        if (ContainsNormalBackingReferenceValue(function.ReturnType, program))
         {
-            return false;
+            return true;
         }
 
-        var reference = program.CheckedReferenceTypes[CheckedReferenceTypes.Index(type)];
-        return !reference.IsGarbageCollected && !reference.IsInitialization
-            && !reference.IsOptional && !CheckedReferenceTypes.IsType(reference.ReferentType)
-            && IsNormalBackingRuntimeValue(reference.ReferentType, program, []);
+        var parameterOffset = function.IsConstructor ? 1 : 0;
+        for (var index = parameterOffset;
+            index < function.ParameterCount + parameterOffset; index++)
+        {
+            var parameter = function.Variables[index];
+            if (!parameter.IsImplicitRef && !parameter.IsOut
+                && ContainsNormalBackingReferenceValue(parameter.Type, program))
+            {
+                return true;
+            }
+        }
+        return false;
     }
+
+    private static int NormalBackingCallPlanSize(
+        BoundCall call, BoundProgram program)
+    {
+        var target = program.Functions[call.Function];
+        var inputCount = 0;
+        var parameterOffset = target.IsConstructor ? 1 : 0;
+        for (var index = parameterOffset;
+            index < target.ParameterCount + parameterOffset; index++)
+        {
+            var parameter = target.Variables[index];
+            if (!parameter.IsImplicitRef && !parameter.IsOut)
+            {
+                inputCount = checked(inputCount
+                    + NormalBackingReferenceLeaves(parameter.Type, program).Count);
+            }
+        }
+
+        var resultCount = NormalBackingReferenceLeaves(call.Type, program).Count;
+        return checked(NormalBackingCallPlanHeaderSize
+            + (NormalBackingCallParameterRecordSize * target.ParameterCount)
+            + (sizeof(ulong) * inputCount)
+            + (sizeof(ulong) * resultCount));
+    }
+
+    private void EmitBeginNormalBackingCallPlan(
+        BoundCall call, int planOffset, int[] argumentSpills, int resultSpill)
+    {
+        var target = _program.Functions[call.Function];
+        var parameterOffset = target.IsConstructor ? 1 : 0;
+        var inputCount = 0;
+        for (var formal = 0; formal < target.ParameterCount; formal++)
+        {
+            var parameter = target.Variables[formal + parameterOffset];
+            if (!parameter.IsImplicitRef && !parameter.IsOut)
+            {
+                inputCount = checked(inputCount
+                    + NormalBackingReferenceLeaves(parameter.Type, _program).Count);
+            }
+        }
+
+        var resultLeaves = NormalBackingReferenceLeaves(call.Type, _program);
+        var resultCount = resultLeaves.Count;
+        var planSize = NormalBackingCallPlanSize(call, _program);
+        ZeroStruct(planOffset, planSize);
+
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.Bytes(0x48, 0x8B, 0x02);
+        _code.Store64(planOffset + NormalBackingCallPlanPreviousOffset);
+        EmitStoreNormalBackingPlanImmediate(planOffset + NormalBackingCallPlanTargetOffset,
+            call.Function);
+        EmitStoreNormalBackingPlanImmediate(planOffset + NormalBackingCallPlanStateOffset,
+            NormalBackingCallPlanPrepared);
+        EmitStoreNormalBackingPlanImmediate(planOffset + NormalBackingCallPlanInputCountOffset,
+            inputCount);
+        EmitStoreNormalBackingPlanImmediate(planOffset + NormalBackingCallPlanResultCountOffset,
+            resultCount);
+
+        var recordsOffset = NormalBackingCallPlanHeaderSize;
+        var inputFlagsOffset = checked(recordsOffset
+            + (NormalBackingCallParameterRecordSize * target.ParameterCount));
+        var resultFlagsOffset = checked(inputFlagsOffset + (sizeof(ulong) * inputCount));
+        if (resultCount != 0)
+        {
+            EmitStoreNormalBackingPlanPointer(
+                planOffset, NormalBackingCallPlanResultOffset, Spill(resultSpill));
+            EmitStoreNormalBackingPlanPointer(
+                planOffset, NormalBackingCallPlanResultFlagsOffset,
+                planOffset + resultFlagsOffset);
+            for (var leafIndex = 0; leafIndex < resultLeaves.Count; leafIndex++)
+            {
+                var supportSlot = checked(Spill(resultSpill)
+                    + resultLeaves[leafIndex].Offset + sizeof(ulong));
+                if (!_managedRootFlags[_currentFunction].TryGetValue(
+                    supportSlot, out var rootFlag))
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed call result has no verified support flag.");
+                }
+                EmitStoreNormalBackingPlanPointer(
+                    planOffset, resultFlagsOffset + (sizeof(ulong) * leafIndex), rootFlag);
+            }
+        }
+
+        var inputLeafIndex = 0;
+        for (var formal = 0; formal < target.ParameterCount; formal++)
+        {
+            var parameter = target.Variables[formal + parameterOffset];
+            if (parameter.IsImplicitRef || parameter.IsOut)
+            {
+                continue;
+            }
+            var leaves = NormalBackingReferenceLeaves(parameter.Type, _program);
+            if (leaves.Count == 0)
+            {
+                continue;
+            }
+            var actual = call.ArgumentIndex(formal);
+            if ((uint)actual >= (uint)call.Arguments.Length
+                || call.Arguments[actual] is BoundOutArgument
+                    or BoundReceiverLoan or BoundMutableReceiverLoan
+                    or BoundFieldLoan or BoundMutableFieldLoan)
+            {
+                throw new InvalidOperationException(
+                    "A support-bearing call formal has no by-value staged argument.");
+            }
+
+            var stagedValue = Spill(argumentSpills[actual]);
+            var parameterRecord = recordsOffset
+                + (NormalBackingCallParameterRecordSize * formal);
+            EmitStoreNormalBackingPlanPointer(
+                planOffset, parameterRecord, stagedValue);
+            EmitStoreNormalBackingPlanPointer(
+                planOffset, parameterRecord + sizeof(ulong),
+                planOffset + inputFlagsOffset + (sizeof(ulong) * inputLeafIndex));
+            foreach (var leaf in leaves)
+            {
+                var supportSlot = checked(stagedValue + leaf.Offset + sizeof(ulong));
+                if (!_managedRootFlags[_currentFunction].TryGetValue(
+                    supportSlot, out var rootFlag))
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed call input has no verified support flag.");
+                }
+                EmitStoreNormalBackingPlanPointer(
+                    planOffset, inputFlagsOffset + (sizeof(ulong) * inputLeafIndex),
+                    rootFlag);
+                inputLeafIndex++;
+            }
+        }
+        if (inputLeafIndex != inputCount)
+        {
+            throw new InvalidOperationException(
+                "A normal-backed call plan has an inconsistent input map.");
+        }
+
+        _code.Address(planOffset);
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.StorePointerField(sizeof(ulong));
+    }
+
+    private void EmitValidateNormalBackingCallPlanEntry(
+        int functionIndex, BoundFunction function)
+    {
+        var planSlot = _normalBackingIncomingCallPlanSlots[functionIndex];
+        var temporary = _normalBackingTemporarySlots[functionIndex];
+        if (planSlot < 0 || temporary < 0)
+        {
+            throw new InvalidOperationException(
+                "A support-bearing function has no incoming call-plan storage.");
+        }
+
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.Bytes(0x48, 0x8B, 0x02);
+        _code.Store64(planSlot);
+        var failures = new List<int>();
+        _code.Load64(planSlot);
+        _code.Bytes(0x48, 0x85, 0xC0);
+        failures.Add(_code.JumpIf(0x84));
+        EmitCompareNormalBackingPlanField(planSlot,
+            NormalBackingCallPlanTargetOffset, functionIndex, failures);
+        EmitCompareNormalBackingPlanField(planSlot,
+            NormalBackingCallPlanStateOffset, NormalBackingCallPlanPrepared, failures);
+
+        var parameterOffset = function.IsConstructor ? 1 : 0;
+        var expectedInputCount = 0;
+        for (var formal = 0; formal < function.ParameterCount; formal++)
+        {
+            var parameter = function.Variables[formal + parameterOffset];
+            if (!parameter.IsImplicitRef && !parameter.IsOut)
+            {
+                expectedInputCount = checked(expectedInputCount
+                    + NormalBackingReferenceLeaves(parameter.Type, _program).Count);
+            }
+        }
+        var resultLeaves = NormalBackingReferenceLeaves(function.ReturnType, _program);
+        EmitCompareNormalBackingPlanField(planSlot,
+            NormalBackingCallPlanInputCountOffset, expectedInputCount, failures);
+        EmitCompareNormalBackingPlanField(planSlot,
+            NormalBackingCallPlanResultCountOffset, resultLeaves.Count, failures);
+
+        _code.Load64(planSlot);
+        _code.PointerOffset(NormalBackingCallPlanResultOffset);
+        _code.LoadPointerField(0, sizeof(ulong));
+        if (resultLeaves.Count == 0)
+        {
+            _code.Bytes(0x48, 0x85, 0xC0);
+            failures.Add(_code.JumpIf(0x85));
+        }
+        else
+        {
+            _code.Store64(temporary);
+            _code.Load64(_returnSlot);
+            _code.Bytes(0x48, 0x3B, 0x85);
+            _code.Int32(temporary);
+            failures.Add(_code.JumpIf(0x85));
+            _code.Load64(planSlot);
+            _code.PointerOffset(NormalBackingCallPlanResultFlagsOffset);
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Bytes(0x48, 0x85, 0xC0);
+            failures.Add(_code.JumpIf(0x84));
+        }
+
+        for (var formal = 0; formal < function.ParameterCount; formal++)
+        {
+            var slot = formal + parameterOffset;
+            var parameter = function.Variables[slot];
+            if (parameter.IsImplicitRef || parameter.IsOut)
+            {
+                continue;
+            }
+            var leaves = NormalBackingReferenceLeaves(parameter.Type, _program);
+            if (leaves.Count == 0)
+            {
+                continue;
+            }
+            var parameterRecord = NormalBackingCallPlanHeaderSize
+                + (NormalBackingCallParameterRecordSize * formal);
+            _code.Load64(planSlot);
+            _code.PointerOffset(parameterRecord);
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Store64(temporary);
+            _code.Load64(Slot(slot));
+            _code.Bytes(0x48, 0x3B, 0x85);
+            _code.Int32(temporary);
+            failures.Add(_code.JumpIf(0x85));
+            _code.Load64(planSlot);
+            _code.PointerOffset(parameterRecord + sizeof(ulong));
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Bytes(0x48, 0x85, 0xC0);
+            failures.Add(_code.JumpIf(0x84));
+        }
+
+        var complete = _code.Jump();
+        var failure = _code.Position;
+        foreach (var branch in failures)
+        {
+            _code.PatchRelative(branch, failure);
+        }
+        EmitNormalBackingContractFailure();
+        _code.PatchRelative(complete, _code.Position);
+    }
+
+    private void EmitTransferNormalBackingCallInputs(
+        int functionIndex, BoundFunction function)
+    {
+        var planSlot = _normalBackingIncomingCallPlanSlots[functionIndex];
+        if (planSlot < 0)
+        {
+            return;
+        }
+
+        var temporary = _normalBackingTemporarySlots[functionIndex];
+        var parameterOffset = function.IsConstructor ? 1 : 0;
+        for (var formal = 0; formal < function.ParameterCount; formal++)
+        {
+            var slot = formal + parameterOffset;
+            var parameter = function.Variables[slot];
+            if (parameter.IsImplicitRef || parameter.IsOut)
+            {
+                continue;
+            }
+            var leaves = NormalBackingReferenceLeaves(parameter.Type, _program);
+            if (leaves.Count == 0)
+            {
+                continue;
+            }
+
+            var parameterRecord = NormalBackingCallPlanHeaderSize
+                + (NormalBackingCallParameterRecordSize * formal);
+            _code.Load64(planSlot);
+            _code.PointerOffset(parameterRecord);
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Store64(temporary);
+            _code.Load64(planSlot);
+            _code.PointerOffset(parameterRecord + sizeof(ulong));
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Store64(temporary + sizeof(ulong));
+
+            for (var leafIndex = 0; leafIndex < leaves.Count; leafIndex++)
+            {
+                EmitZeroNormalBackingPointer(temporary, leaves[leafIndex].Offset);
+                EmitZeroNormalBackingPointer(
+                    temporary, leaves[leafIndex].Offset + sizeof(ulong));
+                _code.Load64(temporary + sizeof(ulong));
+                _code.PointerOffset(sizeof(ulong) * leafIndex);
+                _code.LoadPointerField(0, sizeof(ulong));
+                _code.Bytes(0xC7, 0x00);
+                _code.Int32(0);
+                AdoptManagedRootAtAddress(
+                    checked(Slot(slot) + leaves[leafIndex].Offset + sizeof(ulong)));
+            }
+        }
+
+        EmitStoreNormalBackingCallPointerField(planSlot,
+            NormalBackingCallPlanStateOffset, NormalBackingCallPlanEntered);
+    }
+
+    private void EmitPrepareNormalBackingCallResult(
+        int functionIndex, PrimitiveType resultType)
+    {
+        var leaves = NormalBackingReferenceLeaves(resultType, _program);
+        if (leaves.Count == 0)
+        {
+            return;
+        }
+
+        var planSlot = _normalBackingIncomingCallPlanSlots[functionIndex];
+        var temporary = _normalBackingTemporarySlots[functionIndex];
+        _code.Load64(planSlot);
+        _code.PointerOffset(NormalBackingCallPlanResultFlagsOffset);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _code.Store64(temporary);
+        for (var leafIndex = 0; leafIndex < leaves.Count; leafIndex++)
+        {
+            _code.Load64(temporary);
+            _code.PointerOffset(sizeof(ulong) * leafIndex);
+            _code.LoadPointerField(0, sizeof(ulong));
+            _code.Bytes(0xC7, 0x00);
+            _code.Int32(1);
+        }
+
+        EmitStoreNormalBackingCallPointerField(
+            planSlot, NormalBackingCallPlanStateOffset,
+            NormalBackingCallPlanResultPrepared);
+    }
+
+    private void EmitFinishNormalBackingCallPlan(int planOffset, PrimitiveType resultType)
+    {
+        var temporary = _normalBackingTemporarySlots[_currentFunction]
+            + (3 * sizeof(ulong));
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.Bytes(0x48, 0x8B, 0x02);
+        _code.Store64(temporary);
+        _code.Address(planOffset);
+        _code.Bytes(0x48, 0x3B, 0x85);
+        _code.Int32(temporary);
+        var failures = new List<int> { _code.JumpIf(0x85) };
+        var expectedState = NormalBackingReferenceLeaves(resultType, _program).Count != 0
+            ? NormalBackingCallPlanResultPrepared : NormalBackingCallPlanEntered;
+        EmitCompareNormalBackingFramePlanField(planOffset,
+            NormalBackingCallPlanStateOffset, expectedState, failures);
+
+        var complete = _code.Jump();
+        var failure = _code.Position;
+        foreach (var branch in failures)
+        {
+            _code.PatchRelative(branch, failure);
+        }
+        EmitNormalBackingContractFailure();
+        _code.PatchRelative(complete, _code.Position);
+
+        _code.Address(planOffset + NormalBackingCallPlanPreviousOffset);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.StorePointerField(sizeof(ulong));
+        EmitStoreNormalBackingFramePlanPointerField(
+            planOffset, NormalBackingCallPlanStateOffset, NormalBackingCallPlanClosed);
+    }
+
+    private void EmitAbortNormalBackingCallPlan(int planOffset)
+    {
+        var temporary = _normalBackingTemporarySlots[_currentFunction]
+            + (3 * sizeof(ulong));
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.Bytes(0x48, 0x8B, 0x02);
+        _code.Store64(temporary);
+        _code.Address(planOffset);
+        _code.Bytes(0x48, 0x3B, 0x85);
+        _code.Int32(temporary);
+        var noPlan = _code.JumpIf(0x85);
+
+        _code.Address(planOffset + NormalBackingCallPlanPreviousOffset);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(),
+            _normalBackingRuntimeOffset + NormalBackingCallPlanHeadOffset));
+        _code.StorePointerField(sizeof(ulong));
+        EmitStoreNormalBackingFramePlanPointerField(
+            planOffset, NormalBackingCallPlanStateOffset, NormalBackingCallPlanClosed);
+        _code.PatchRelative(noPlan, _code.Position);
+    }
+
+    private void EmitCompareNormalBackingPlanField(
+        int planOffset, int fieldOffset, int expected, List<int> failures)
+    {
+        _code.Load64(planOffset);
+        _code.PointerOffset(fieldOffset);
+        _code.LoadPointerField(0, sizeof(uint));
+        _code.Byte(0x3D);
+        _code.Int32(expected);
+        failures.Add(_code.JumpIf(0x85));
+    }
+
+    private void EmitCompareNormalBackingFramePlanField(
+        int planOffset, int fieldOffset, int expected, List<int> failures)
+    {
+        _code.Address(checked(planOffset + fieldOffset));
+        _code.LoadPointerField(0, sizeof(uint));
+        _code.Byte(0x3D);
+        _code.Int32(expected);
+        failures.Add(_code.JumpIf(0x85));
+    }
+
+    private void EmitStoreNormalBackingPlanImmediate(int frameOffset, int value)
+    {
+        if (!_code.UseFramePointer)
+        {
+            throw new InvalidOperationException(
+                "Normal-backed call plans require a frame-pointer-based source function.");
+        }
+        _code.Bytes(0xC7, 0x85);
+        _code.Int32(frameOffset);
+        _code.Int32(value);
+    }
+
+    private void EmitStoreNormalBackingPlanPointer(
+        int planOffset, int fieldOffset, int sourceOffset)
+    {
+        _code.Address(checked(planOffset + fieldOffset));
+        _code.Bytes(0x48, 0x89, 0xC2);
+        _code.Address(sourceOffset);
+        _code.StorePointerField(sizeof(ulong));
+    }
+
+    private void EmitStoreNormalBackingCallPointerField(
+        int planOffset, int fieldOffset, int value)
+    {
+        _code.Load64(planOffset);
+        _code.PointerOffset(fieldOffset);
+        _code.Bytes(0xC7, 0x00);
+        _code.Int32(value);
+    }
+
+    private void EmitStoreNormalBackingFramePlanPointerField(
+        int planOffset, int fieldOffset, int value)
+    {
+        _code.Address(checked(planOffset + fieldOffset));
+        _code.Bytes(0xC7, 0x00);
+        _code.Int32(value);
+    }
+
+    private void EmitZeroNormalBackingPointer(int baseSlot, int offset)
+    {
+        _code.Load64(baseSlot);
+        if (offset != 0)
+        {
+            _code.PointerOffset(offset);
+        }
+        _code.Bytes(0x48, 0x89, 0xC2, 0x31, 0xC0);
+        _code.StorePointerField(sizeof(ulong));
+    }
+
+    private bool IsNormalBackingOptionalReference(PrimitiveType type) =>
+        _normalBacking
+        && SourceOptionalTypes.IsOptionalReference(type, _program.CheckedReferenceTypes)
+        && IsNormalBackingLocalReference(type, _program);
 
     private void EmitManagedClassFactory(BoundFunction function)
     {
@@ -274,13 +875,24 @@ internal sealed partial class PeCompiler
         _code.Store64(Slot(provisional));
         foreach (var field in @class.Fields)
         {
-            if (!ManagedClassTypes.IsManaged(field.Type))
+            if (ManagedClassTypes.IsManaged(field.Type))
             {
-                continue;
+                _code.Bytes(0x48, 0xC7, 0x80);
+                _code.Int32(32 + field.Offset);
+                _code.Int32(0);
             }
-            _code.Bytes(0x48, 0xC7, 0x80);
-            _code.Int32(32 + field.Offset);
-            _code.Int32(0);
+            if (_normalBacking)
+            {
+                foreach (var leaf in NormalBackingReferenceLeaves(field.Type, _program))
+                {
+                    _code.Bytes(0x48, 0xC7, 0x80);
+                    _code.Int32(32 + field.Offset + leaf.Offset);
+                    _code.Int32(0);
+                    _code.Bytes(0x48, 0xC7, 0x80);
+                    _code.Int32(32 + field.Offset + leaf.Offset + sizeof(ulong));
+                    _code.Int32(0);
+                }
+            }
         }
         SetManagedRoot(Slot(provisional), active: true);
         var constructorBegin = _code.Position;
@@ -303,7 +915,7 @@ internal sealed partial class PeCompiler
             _code.Byte(0x90);
             var funclet = _funclets.Count;
             _funclets.Add((new BoundBlock([], function.Span), _currentFunction, 0, 0));
-            _managedAbandonedFactories.Add(funclet, Slot(provisional));
+            _managedAbandonedFactories.Add(funclet, (Slot(provisional), classIndex));
             _scopes[_currentFunction].Add(new NativeExceptionScope(constructorBegin,
                 _code.Position, -funclet - 1, 0));
         }
@@ -416,7 +1028,8 @@ internal sealed partial class PeCompiler
         _code.Bytes(0xFF, 0x48, NormalBackingAcquiredCountOffset);
         for (var index = 0; index < @class.Fields.Length; index++)
         {
-            if (index == fieldIndex || !IsNormalBackingHandle(@class.Fields[index].Type))
+            if (index == fieldIndex
+                || !IsNormalBackingTrackedField(@class.Fields[index].Type, _program))
             {
                 continue;
             }
@@ -470,6 +1083,64 @@ internal sealed partial class PeCompiler
         _code.PatchRelative(complete, done);
     }
 
+    private void EmitNormalBackingReferenceMarker(int valueSlot,
+        PrimitiveType valueType, int markerSlot)
+    {
+        _code.Bytes(0x31, 0xC0);
+        _code.Store64(markerSlot);
+        foreach (var leaf in NormalBackingReferenceLeaves(valueType, _program))
+        {
+            EmitNormalBackingAccumulateReferenceMarker(
+                valueSlot + leaf.Offset + sizeof(ulong), markerSlot);
+        }
+    }
+
+    private void EmitNormalBackingReferenceMarkerWithReplacement(
+        int oldValueSlot, PrimitiveType oldValueType, int replacementOffset,
+        PrimitiveType replacementType, int replacementValueSlot, int markerSlot)
+    {
+        _code.Bytes(0x31, 0xC0);
+        _code.Store64(markerSlot);
+        var replacementEnd = checked(replacementOffset + Size(replacementType));
+        var replacementLeaves = NormalBackingReferenceLeaves(
+            replacementType, _program);
+        foreach (var leaf in NormalBackingReferenceLeaves(oldValueType, _program))
+        {
+            var supportSlot = oldValueSlot + leaf.Offset + sizeof(ulong);
+            if (leaf.Offset >= replacementOffset && leaf.Offset < replacementEnd)
+            {
+                var replacementLeafOffset = leaf.Offset - replacementOffset;
+                var found = false;
+                foreach (var replacementLeaf in replacementLeaves)
+                {
+                    if (replacementLeaf.Offset == replacementLeafOffset)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    throw new InvalidOperationException(
+                        "A normal-backed field replacement changed descriptor leaves.");
+                }
+                supportSlot = replacementValueSlot
+                    + replacementLeafOffset + sizeof(ulong);
+            }
+            EmitNormalBackingAccumulateReferenceMarker(supportSlot, markerSlot);
+        }
+    }
+
+    private void EmitNormalBackingAccumulateReferenceMarker(
+        int supportSlot, int markerSlot)
+    {
+        _code.Load64(supportSlot);
+        _code.Bytes(0x48, 0x89, 0xC1);
+        _code.Load64(markerSlot);
+        _code.Bytes(0x48, 0x09, 0xC8);
+        _code.Store64(markerSlot);
+    }
+
     private void EmitNormalBackingRetain(int slot)
     {
         _code.Load64(slot);
@@ -493,6 +1164,41 @@ internal sealed partial class PeCompiler
         var done = _code.Position;
         _code.PatchRelative(absent, done);
         _code.PatchRelative(complete, done);
+    }
+
+    private void EmitNormalBackingValidateHandle(int slot, int expectedClassIndex)
+    {
+        if ((uint)expectedClassIndex >= (uint)_program.Classes.Length)
+        {
+            throw new InvalidOperationException("The normal-backed class identity is invalid.");
+        }
+
+        var @class = _program.Classes[expectedClassIndex];
+        _code.Load64(slot);
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var failures = new List<int> { _code.JumpIf(0x84) };
+        _code.Bytes(0x49, 0x89, 0xC0); // r8 = control
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _normalBackingRuntimeOffset));
+        _code.Bytes(0x49, 0x39, 0x10); // control.runtime == runtime
+        failures.Add(_code.JumpIf(0x85));
+        _code.Bytes(0x49, 0x83, 0x78, 0x08, 0x00);
+        failures.Add(_code.JumpIf(0x84));
+        _code.Bytes(0x49, 0x83, 0x78, 0x10, 0x00);
+        failures.Add(_code.JumpIf(0x84));
+        _code.Bytes(0x41, 0x81, 0x78, 0x18);
+        _code.Int32(expectedClassIndex);
+        failures.Add(_code.JumpIf(0x85));
+        _code.Bytes(0x41, 0x81, 0x78, 0x1C);
+        _code.Int32(@class.Size);
+        failures.Add(_code.JumpIf(0x85));
+        var complete = _code.Jump();
+        var failure = _code.Position;
+        foreach (var branch in failures)
+        {
+            _code.PatchRelative(branch, failure);
+        }
+        EmitNormalBackingContractFailure();
+        _code.PatchRelative(complete, _code.Position);
     }
 
     private void EmitNormalBackingRelease(int slot)
@@ -625,7 +1331,7 @@ internal sealed partial class PeCompiler
         for (var fieldIndex = 0; fieldIndex < @class.Fields.Length; fieldIndex++)
         {
             var field = @class.Fields[fieldIndex];
-            if (!IsNormalBackingHandle(field.Type))
+            if (!IsNormalBackingTrackedField(field.Type, _program))
             {
                 continue;
             }
@@ -639,8 +1345,8 @@ internal sealed partial class PeCompiler
             _code.Load64(NormalBackingHelperCurrentControlSlot);
             _code.PointerOffset(metadataOffset + NormalBackingFieldRankOffset + fieldIndex);
             _code.Bytes(0xC6, 0x00, 0xFF);
-            EmitNormalBackingQueueChildAtOffset(field.Offset,
-                ManagedClassTypes.ClassIndex(field.Type), failures);
+            EmitNormalBackingQueueFieldSupportAtOffset(
+                field.Offset, field.Type, failures);
             _code.Load(NormalBackingHelperRankSlot);
             _code.Bytes(0xFF, 0xC0);
             _code.Store(NormalBackingHelperRankSlot);
@@ -653,17 +1359,99 @@ internal sealed partial class PeCompiler
         var skipPublishedFields = _code.Jump();
         var publishedFields = _code.Position;
         _code.PatchRelative(published, publishedFields);
-        foreach (var field in @class.Fields)
+        for (var fieldIndex = @class.Fields.Length - 1; fieldIndex >= 0; fieldIndex--)
         {
-            if (IsNormalBackingHandle(field.Type))
-            {
-                EmitNormalBackingQueueChildAtOffset(field.Offset,
-                    ManagedClassTypes.ClassIndex(field.Type), failures);
-            }
+            var field = @class.Fields[fieldIndex];
+            EmitNormalBackingQueueFieldSupportAtOffset(
+                field.Offset, field.Type, failures);
         }
         var afterFields = _code.Position;
         _code.PatchRelative(acquisitionsDone, afterFields);
         _code.PatchRelative(skipPublishedFields, afterFields);
+    }
+
+    private void EmitNormalBackingAbandon(int provisionalSlot, int classIndex)
+    {
+        var @class = _program.Classes[classIndex];
+        var metadataOffset = NormalBackingConstructionMetadataOffset(@class.Size);
+        var temporarySupport = _normalBackingTemporarySlots[_currentFunction] + sizeof(ulong);
+
+        EmitNormalBackingValidateHandle(provisionalSlot, classIndex);
+        EmitNormalBackingRetain(provisionalSlot);
+
+        for (var rank = @class.Fields.Length - 1; rank >= 0; rank--)
+        {
+            _code.Load64(provisionalSlot);
+            _code.PointerOffset(metadataOffset + NormalBackingAcquiredCountOffset);
+            _code.LoadPointerField(0, sizeof(uint));
+            _code.Byte(0x3D);
+            _code.Int32(rank + 1);
+            var rankNotAcquired = _code.JumpIf(0x82);
+            var completedRank = new List<int>();
+            for (var fieldIndex = 0; fieldIndex < @class.Fields.Length; fieldIndex++)
+            {
+                var field = @class.Fields[fieldIndex];
+                if (!IsNormalBackingTrackedField(field.Type, _program))
+                {
+                    continue;
+                }
+
+                _code.Load64(provisionalSlot);
+                _code.PointerOffset(metadataOffset + NormalBackingFieldRankOffset + fieldIndex);
+                _code.LoadPointerField(0, sizeof(byte));
+                _code.Byte(0x3C);
+                _code.Byte((byte)rank);
+                var notThisRank = _code.JumpIf(0x85);
+
+                _code.Load64(provisionalSlot);
+                _code.PointerOffset(metadataOffset + NormalBackingFieldRankOffset + fieldIndex);
+                _code.Bytes(0xC6, 0x00, 0xFF);
+                _code.Load64(provisionalSlot);
+                _code.PointerOffset(metadataOffset + NormalBackingAcquiredCountOffset);
+                _code.Bytes(0xFF, 0x08);
+                if (IsNormalBackingHandle(field.Type))
+                {
+                    _code.Load64(provisionalSlot);
+                    _code.PointerOffset(NormalBackingControlSize + field.Offset);
+                    _code.LoadPointerField(0, sizeof(ulong));
+                    _code.Store64(temporarySupport);
+                    EmitNormalBackingRelease(temporarySupport);
+                }
+                else
+                {
+                    var leaves = NormalBackingReferenceLeaves(field.Type, _program);
+                    for (var leafIndex = leaves.Count - 1; leafIndex >= 0; leafIndex--)
+                    {
+                        var leaf = leaves[leafIndex];
+                        _code.Load64(provisionalSlot);
+                        _code.PointerOffset(NormalBackingControlSize
+                            + field.Offset + leaf.Offset + sizeof(ulong));
+                        _code.LoadPointerField(0, sizeof(ulong));
+                        _code.Store64(temporarySupport);
+                        EmitNormalBackingRelease(temporarySupport);
+                    }
+                }
+                completedRank.Add(_code.Jump());
+                _code.PatchRelative(notThisRank, _code.Position);
+            }
+
+            EmitNormalBackingContractFailure();
+            var rankComplete = _code.Position;
+            foreach (var branch in completedRank)
+            {
+                _code.PatchRelative(branch, rankComplete);
+            }
+            _code.PatchRelative(rankNotAcquired, rankComplete);
+        }
+
+        _code.Load64(provisionalSlot);
+        _code.PointerOffset(metadataOffset + NormalBackingAcquiredCountOffset);
+        _code.LoadPointerField(0, sizeof(uint));
+        _code.Bytes(0x85, 0xC0);
+        var countIsZero = _code.JumpIf(0x84);
+        EmitNormalBackingContractFailure();
+        _code.PatchRelative(countIsZero, _code.Position);
+        EmitNormalBackingRelease(provisionalSlot);
     }
 
     private void EmitNormalBackingQueueChildAtOffset(int fieldOffset, int expectedClassIndex,
@@ -675,6 +1463,36 @@ internal sealed partial class PeCompiler
         _code.Store64(NormalBackingHelperChildControlSlot);
         EmitNormalBackingEnqueueChildFromSlot(
             NormalBackingHelperChildControlSlot, expectedClassIndex, failures);
+    }
+
+    private void EmitNormalBackingQueueFieldSupportAtOffset(int fieldOffset,
+        PrimitiveType fieldType, List<int> failures)
+    {
+        if (IsNormalBackingHandle(fieldType))
+        {
+            EmitNormalBackingQueueChildAtOffset(fieldOffset,
+                ManagedClassTypes.ClassIndex(fieldType), failures);
+            return;
+        }
+
+        var leaves = NormalBackingReferenceLeaves(fieldType, _program);
+        for (var leafIndex = leaves.Count - 1; leafIndex >= 0; leafIndex--)
+        {
+            var leaf = leaves[leafIndex];
+            EmitNormalBackingQueueReferenceSupportAtOffset(
+                fieldOffset + leaf.Offset + sizeof(ulong), failures);
+        }
+    }
+
+    private void EmitNormalBackingQueueReferenceSupportAtOffset(int supportOffset,
+        List<int> failures)
+    {
+        _code.Load64(NormalBackingHelperCurrentControlSlot);
+        _code.PointerOffset(NormalBackingControlSize + supportOffset);
+        _code.LoadPointerField(0, sizeof(ulong));
+        _code.Store64(NormalBackingHelperChildControlSlot);
+        EmitNormalBackingEnqueueReferenceFromSlot(
+            NormalBackingHelperChildControlSlot, failures);
     }
 
     private void EmitNormalBackingEnqueueChildFromSlot(int slot, int expectedClassIndex,
@@ -706,6 +1524,38 @@ internal sealed partial class PeCompiler
         _code.PatchRelative(retained, done);
         _code.PatchRelative(complete, done);
     }
+
+    private void EmitNormalBackingEnqueueReferenceFromSlot(
+        int slot, List<int> failures)
+    {
+        _code.Load64(slot);
+        _code.Bytes(0x48, 0x85, 0xC0);
+        var absent = _code.JumpIf(0x84);
+        _code.Bytes(0x49, 0x89, 0xC0); // r8 = support control
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _normalBackingRuntimeOffset));
+        _code.Bytes(0x49, 0x39, 0x10); // support.runtime == runtime
+        failures.Add(_code.JumpIf(0x85));
+        _code.Bytes(0x49, 0x83, 0x78, 0x08, 0x00);
+        failures.Add(_code.JumpIf(0x84));
+        _code.Bytes(0x49, 0x83, 0x78, 0x10, 0x00);
+        failures.Add(_code.JumpIf(0x84));
+        _code.Bytes(0x49, 0xFF, 0x48, 0x10); // release descriptor support hold
+        _code.Bytes(0x49, 0x83, 0x78, 0x10, 0x00);
+        var retained = _code.JumpIf(0x85);
+        _code.Bytes(0x48, 0x8B, 0x42, 0x08); // worklist head
+        _code.Bytes(0x49, 0x89, 0x40, 0x08); // control.next = head
+        _code.Bytes(0x4C, 0x89, 0x42, 0x08); // head = control
+        var complete = _code.Jump();
+        var done = _code.Position;
+        _code.PatchRelative(absent, done);
+        _code.PatchRelative(retained, done);
+        _code.PatchRelative(complete, done);
+    }
+
+    private static bool IsNormalBackingTrackedField(
+        PrimitiveType type, BoundProgram program) =>
+        IsNormalBackingHandle(type)
+        || ContainsNormalBackingReferenceValue(type, program);
 
     private void EmitNormalBackingContractFailure()
     {
