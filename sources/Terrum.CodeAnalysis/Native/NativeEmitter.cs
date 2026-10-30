@@ -307,6 +307,11 @@ public static class NativeEmitter
             throw new NotSupportedException("JIT and low-level import binding do not support source native imports.");
         }
         SemanticVerifier.VerifyReferences(program);
+        if (BoundGenericNominalTypeContract.UsesAny(program))
+        {
+            throw new NotSupportedException(
+                "Generic nominal values do not have a supported native representation.");
+        }
         if (program.RuntimePolicy != (BoundRuntimePolicy)runtimePolicy)
         {
             throw new ArgumentException("Native and verified checked-failure policies differ.", nameof(program));
@@ -338,11 +343,6 @@ public static class NativeEmitter
         if (bindings.Count != externals.Count)
         {
             throw new ArgumentException("Every external function needs exactly one native import binding.", nameof(bindings));
-        }
-        if (BoundGenericNominalTypeContract.UsesAny(program))
-        {
-            throw new NotSupportedException(
-                "Generic nominal values do not have a supported native representation.");
         }
         var selected = new Dictionary<int, NativeImportBinding>(bindings.Count);
         foreach (var binding in bindings)
@@ -872,6 +872,13 @@ internal sealed partial class PeCompiler
         CreateBinary128Runtime, LazyThreadSafetyMode.ExecutionAndPublication);
     private static readonly Lazy<BidDecimalRuntime> s_bidDecimalRuntime = new(
         CreateBidDecimalRuntime, LazyThreadSafetyMode.ExecutionAndPublication);
+
+    private sealed class PartialFieldNode(int liveSlot, PartialFieldNode?[] fields)
+    {
+        internal int LiveSlot { get; } = liveSlot;
+        internal PartialFieldNode?[] Fields { get; } = fields;
+    }
+
     private readonly BoundProgram _program;
     private readonly bool _library;
     private readonly IReadOnlyDictionary<int, NativeImportBinding>? _nativeImports;
@@ -887,6 +894,7 @@ internal sealed partial class PeCompiler
     private readonly int[][] _edgeCopySlots;
     private readonly int[][] _liveSlots;
     private readonly int[][][] _partialFieldSlots;
+    private readonly PartialFieldNode?[][][] _partialFieldTrees;
     private readonly int[][] _initializationFlags;
     private readonly int[][] _constructedFieldSlots;
     private readonly int[] _replacementSlots;
@@ -976,6 +984,7 @@ internal sealed partial class PeCompiler
         }
         _liveSlots = new int[program.Functions.Length][];
         _partialFieldSlots = new int[program.Functions.Length][][];
+        _partialFieldTrees = new PartialFieldNode?[program.Functions.Length][][];
         _initializationFlags = new int[program.Functions.Length][];
         _managedRootFrames = new int[program.Functions.Length];
         _managedRootFlags = new Dictionary<int, int>[program.Functions.Length];
@@ -1442,9 +1451,9 @@ internal sealed partial class PeCompiler
                 && !BoundTreeTraversal.VisitExpressions(function.Body, expression =>
                 {
                     if (expression is BoundFieldMove move
-                        && move.Place.Receiver is BoundRead root)
+                        && TryGetFieldRootVariable(move.Place, out var rootVariable))
                     {
-                        _ = partialFieldOwners.Add(root.Variable);
+                        _ = partialFieldOwners.Add(rootVariable);
                     }
                 }))
             {
@@ -1454,7 +1463,6 @@ internal sealed partial class PeCompiler
                 && !BoundTreeTraversal.VisitStatements(function.Body, statement =>
                 {
                     if (statement is BoundFieldAssignment assignment
-                        && assignment.NestedFields.IsEmpty
                         && (uint)assignment.Variable < (uint)function.Variables.Length
                         && IsStruct(function.Variables[assignment.Variable].Type))
                     {
@@ -1466,6 +1474,20 @@ internal sealed partial class PeCompiler
                         {
                             var fieldType = _program.Structures[ownerIndex]
                                 .Fields[assignment.Field].Type;
+                            foreach (var nestedField in assignment.NestedFields)
+                            {
+                                var nestedOwnerIndex = (int)fieldType - 100;
+                                if (nestedOwnerIndex < 0
+                                    || nestedOwnerIndex >= _program.Structures.Length
+                                    || (uint)nestedField
+                                        >= (uint)_program.Structures[nestedOwnerIndex].Fields.Length)
+                                {
+                                    fieldType = PrimitiveType.Void;
+                                    break;
+                                }
+                                fieldType = _program.Structures[nestedOwnerIndex]
+                                    .Fields[nestedField].Type;
+                            }
                             if (IsUnique(fieldType))
                             {
                                 hasUniqueFieldReplacement = true;
@@ -1612,6 +1634,34 @@ internal sealed partial class PeCompiler
         }
     }
 
+    private PartialFieldNode AllocatePartialFieldNode(
+        PrimitiveType type, int liveSlot, ref long required, int depth = 0)
+    {
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            throw new NotSupportedException("Nested owner field layout exceeds the verifier depth limit.");
+        }
+        if (!IsStruct(type))
+        {
+            return new PartialFieldNode(liveSlot, []);
+        }
+
+        var fields = _program.Structures[(int)type - 100].Fields;
+        var children = new PartialFieldNode?[fields.Length];
+        for (var field = 0; field < fields.Length; field++)
+        {
+            if (!IsUnique(fields[field].Type))
+            {
+                continue;
+            }
+            var childLiveSlot = checked((int)required);
+            required += 8;
+            children[field] = AllocatePartialFieldNode(
+                fields[field].Type, childLiveSlot, ref required, depth + 1);
+        }
+        return new PartialFieldNode(liveSlot, children);
+    }
+
     private void EmitSourceFunctions()
     {
         for (var i = 0; i < _program.Functions.Length; i++)
@@ -1668,6 +1718,13 @@ internal sealed partial class PeCompiler
                     {
                         _code.Clear(field);
                     }
+                }
+            }
+            foreach (var variableTrees in _partialFieldTrees[i])
+            {
+                foreach (var fieldTree in variableTrees)
+                {
+                    SetPartialFieldTreeFlags(fieldTree, live: false);
                 }
             }
             foreach (var field in _constructedFieldSlots[i])
@@ -4441,7 +4498,9 @@ internal sealed partial class PeCompiler
         var function = _program.Functions[_currentFunction];
         return function.DeclaringStruct is not null && !function.IsConstructor && !function.IsCleanup
             && !function.IsStatic && (IsUnique(function.Variables[0].Type)
-                || (IsStruct(function.Variables[0].Type) && function.Variables[0].IsMutable));
+                || (IsStruct(function.Variables[0].Type)
+                    && (function.Variables[0].IsMutable
+                        || function.ResultDependencyIncludesReceiver)));
     }
 
     private void EmitUniqueFieldPlace(BoundExpression expression)
@@ -4553,8 +4612,9 @@ internal sealed partial class PeCompiler
                 _code.Bytes(0x85, 0xC0);
                 var fieldVacant = _code.JumpIf(0x84);
                 _code.Clear(fieldLive);
-                EmitDropValue(OwnerPlace(variable) + fields[field].Offset,
-                    fields[field].Type);
+                var fieldTree = _partialFieldTrees[_currentFunction][variable][field];
+                EmitDropFieldWithLiveness(OwnerPlace(variable) + fields[field].Offset,
+                    fields[field].Type, fieldTree);
                 _code.PatchRelative(fieldVacant, _code.Position);
             }
         }
@@ -4563,6 +4623,87 @@ internal sealed partial class PeCompiler
             EmitDropValue(OwnerPlace(variable), type);
         }
         _code.PatchRelative(vacant, _code.Position);
+    }
+
+    private void EmitDropFieldWithLiveness(
+        int place, PrimitiveType type, PartialFieldNode? fieldTree)
+    {
+        if (!IsStruct(type) || fieldTree is null)
+        {
+            EmitDropValue(place, type);
+            return;
+        }
+
+        if (HasDeclaredCleanup(type))
+        {
+            var partialBranches = new List<int>();
+            EmitPartialFieldGuards(fieldTree, partialBranches);
+            if (partialBranches.Count == 0)
+            {
+                EmitDropValue(place, type);
+                return;
+            }
+
+            EmitDropValue(place, type);
+            var complete = _code.Jump();
+            var partialStart = _code.Position;
+            foreach (var branch in partialBranches)
+            {
+                _code.PatchRelative(branch, partialStart);
+            }
+            EmitDropFieldsWithLiveness(place, type, fieldTree);
+            _code.PatchRelative(complete, _code.Position);
+            return;
+        }
+
+        EmitDropFieldsWithLiveness(place, type, fieldTree);
+    }
+
+    private void EmitPartialFieldGuards(
+        PartialFieldNode fieldTree, List<int> partialBranches)
+    {
+        foreach (var child in fieldTree.Fields)
+        {
+            if (child is null)
+            {
+                continue;
+            }
+            if (child.LiveSlot < 0)
+            {
+                throw new InvalidOperationException(
+                    "Verified nested owner cleanup has no field liveness slot.");
+            }
+            _code.Load(child.LiveSlot);
+            _code.Bytes(0x85, 0xC0);
+            partialBranches.Add(_code.JumpIf(0x84));
+            EmitPartialFieldGuards(child, partialBranches);
+        }
+    }
+
+    private void EmitDropFieldsWithLiveness(
+        int place, PrimitiveType type, PartialFieldNode fieldTree)
+    {
+        var fields = _program.Structures[(int)type - 100].Fields;
+        for (var field = fields.Length - 1; field >= 0; field--)
+        {
+            if (!IsUnique(fields[field].Type))
+            {
+                continue;
+            }
+            var child = fieldTree.Fields[field];
+            if (child is null || child.LiveSlot < 0)
+            {
+                throw new InvalidOperationException(
+                    "Verified nested owner cleanup has no field liveness slot.");
+            }
+            _code.Load(child.LiveSlot);
+            _code.Bytes(0x85, 0xC0);
+            var vacant = _code.JumpIf(0x84);
+            _code.Clear(child.LiveSlot);
+            EmitDropFieldWithLiveness(place + fields[field].Offset,
+                fields[field].Type, child);
+            _code.PatchRelative(vacant, _code.Position);
+        }
     }
 
     private void SetPartialFieldSlots(int variable, bool live)
@@ -4585,56 +4726,198 @@ internal sealed partial class PeCompiler
                 }
             }
         }
+        foreach (var fieldTree in _partialFieldTrees[_currentFunction][variable])
+        {
+            SetPartialFieldTreeFlags(fieldTree, live);
+        }
     }
 
     private int PartialFieldSlot(BoundFieldRead place)
     {
-        if (place is null || place.Receiver is not BoundRead root
-            || (uint)root.Variable >= (uint)_program.Functions[_currentFunction].Variables.Length)
+        if (!TryGetFieldPath(place, out var rootVariable, out var fields))
         {
             throw new InvalidOperationException("Verified partial field place is invalid.");
         }
         var function = _program.Functions[_currentFunction];
-        if (function.IsConstructor && root.Variable == 0)
+        if (function.IsConstructor && rootVariable == 0 && fields.Length == 1)
         {
             var constructed = _constructedFieldSlots[_currentFunction];
-            return (uint)place.Field < (uint)constructed.Length
-                ? constructed[place.Field] : -1;
+            return (uint)fields[0] < (uint)constructed.Length
+                ? constructed[fields[0]] : -1;
         }
-        var slots = _partialFieldSlots[_currentFunction][root.Variable];
-        return (uint)place.Field < (uint)slots.Length ? slots[place.Field] : -1;
+        if (fields.Length == 1)
+        {
+            var slots = _partialFieldSlots[_currentFunction][rootVariable];
+            return (uint)fields[0] < (uint)slots.Length ? slots[fields[0]] : -1;
+        }
+        return PartialFieldNodeForPath(rootVariable, fields)?.LiveSlot ?? -1;
     }
 
-    private int PartialFieldSlot(int variable, int field)
+    private static bool TryGetFieldRootVariable(
+        BoundFieldRead place, out int rootVariable)
+    {
+        rootVariable = -1;
+        if (place is null)
+        {
+            return false;
+        }
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            receiver = field.Receiver;
+        }
+        if (receiver is not BoundRead root)
+        {
+            return false;
+        }
+        rootVariable = root.Variable;
+        return true;
+    }
+
+    private static bool TryGetFieldPath(
+        BoundFieldRead place, out int rootVariable, out int[] fields)
+    {
+        rootVariable = -1;
+        fields = [];
+        if (place is null)
+        {
+            return false;
+        }
+
+        var path = new Stack<int>();
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            path.Push(field.Field);
+            receiver = field.Receiver;
+        }
+        if (receiver is not BoundRead root)
+        {
+            return false;
+        }
+        rootVariable = root.Variable;
+        fields = [.. path];
+        return fields.Length != 0;
+    }
+
+    private int PartialFieldSlot(int variable, int field) =>
+        PartialFieldSlot(variable, field, []);
+
+    private int PartialFieldSlot(
+        int variable, int field, ImmutableArray<int> nestedFields)
     {
         if ((uint)variable >= (uint)_program.Functions[_currentFunction].Variables.Length)
         {
             throw new InvalidOperationException("Verified partial field owner is invalid.");
         }
         var function = _program.Functions[_currentFunction];
-        if (function.IsConstructor && variable == 0)
+        if (function.IsConstructor && variable == 0 && nestedFields.IsEmpty)
         {
             var constructed = _constructedFieldSlots[_currentFunction];
             return (uint)field < (uint)constructed.Length ? constructed[field] : -1;
         }
-        var slots = _partialFieldSlots[_currentFunction][variable];
-        return (uint)field < (uint)slots.Length ? slots[field] : -1;
+        var path = new int[nestedFields.Length + 1];
+        path[0] = field;
+        for (var index = 0; index < nestedFields.Length; index++)
+        {
+            path[index + 1] = nestedFields[index];
+        }
+        return PartialFieldNodeForPath(variable, path)?.LiveSlot ?? -1;
     }
 
     private void SetPartialFieldSlot(BoundFieldRead place, bool live)
     {
         var slot = PartialFieldSlot(place);
-        if (slot < 0)
+        if (slot >= 0)
+        {
+            if (live)
+            {
+                _code.Set(slot);
+            }
+            else
+            {
+                _code.Clear(slot);
+            }
+        }
+        if (TryGetFieldPath(place, out var rootVariable, out var fields))
+        {
+            SetPartialFieldTreeFlags(
+                PartialFieldNodeForPath(rootVariable, fields), live);
+        }
+    }
+
+    private void SetPartialFieldState(
+        int variable, int field, ImmutableArray<int> nestedFields, bool live)
+    {
+        var path = new int[nestedFields.Length + 1];
+        path[0] = field;
+        for (var index = 0; index < nestedFields.Length; index++)
+        {
+            path[index + 1] = nestedFields[index];
+        }
+
+        var slot = path.Length == 1
+            ? PartialFieldSlot(variable, field)
+            : PartialFieldNodeForPath(variable, path)?.LiveSlot ?? -1;
+        if (slot >= 0)
+        {
+            if (live)
+            {
+                _code.Set(slot);
+            }
+            else
+            {
+                _code.Clear(slot);
+            }
+        }
+        SetPartialFieldTreeFlags(
+            PartialFieldNodeForPath(variable, path), live);
+    }
+
+    private PartialFieldNode? PartialFieldNodeForPath(int variable, int[] fields)
+    {
+        if ((uint)variable >= (uint)_partialFieldTrees[_currentFunction].Length
+            || fields.Length == 0)
+        {
+            return null;
+        }
+        var rootFields = _partialFieldTrees[_currentFunction][variable];
+        if ((uint)fields[0] >= (uint)rootFields.Length)
+        {
+            return null;
+        }
+        var node = rootFields[fields[0]];
+        for (var index = 1; index < fields.Length && node is not null; index++)
+        {
+            if ((uint)fields[index] >= (uint)node.Fields.Length)
+            {
+                return null;
+            }
+            node = node.Fields[fields[index]];
+        }
+        return node;
+    }
+
+    private void SetPartialFieldTreeFlags(PartialFieldNode? node, bool live)
+    {
+        if (node is null)
         {
             return;
         }
-        if (live)
+        if (node.LiveSlot >= 0)
         {
-            _code.Set(slot);
+            if (live)
+            {
+                _code.Set(node.LiveSlot);
+            }
+            else
+            {
+                _code.Clear(node.LiveSlot);
+            }
         }
-        else
+        foreach (var child in node.Fields)
         {
-            _code.Clear(slot);
+            SetPartialFieldTreeFlags(child, live);
         }
     }
 
@@ -5528,7 +5811,10 @@ internal sealed partial class PeCompiler
                     _code.Bytes(0x85, 0xC0);
                     var vacant = _code.JumpIf(0x84);
                     _code.Clear(live);
-                    EmitDropValue(Slot(0) + fields[fieldIndex].Offset, fields[fieldIndex].Type);
+                    var fieldTree = _partialFieldTrees[_currentFunction][0][fieldIndex];
+                    EmitDropFieldWithLiveness(
+                        Slot(0) + fields[fieldIndex].Offset,
+                        fields[fieldIndex].Type, fieldTree);
                     _code.PatchRelative(vacant, _code.Position);
                 }
                 _code.PatchRelative(completed, _code.Position);
@@ -5541,13 +5827,20 @@ internal sealed partial class PeCompiler
                     .Fields[fieldAssignment.Field] : _program.Structures[(int)fieldType - 100].Fields[fieldAssignment.Field];
                 var destination = (variable.IsOut ? OutSlot(fieldAssignment.Variable) : Slot(fieldAssignment.Variable))
                     + field.Offset;
-                if (!classField && IsUnique(field.Type)
-                    && fieldAssignment.NestedFields.IsEmpty)
+                if (!classField)
+                {
+                    foreach (var nestedField in fieldAssignment.NestedFields)
+                    {
+                        field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
+                        destination += field.Offset;
+                    }
+                }
+                if (!classField && IsUnique(field.Type))
                 {
                     var replacement = _replacementSlots[_currentFunction];
                     var oldReplacement = _oldReplacementSlots[_currentFunction];
                     var live = PartialFieldSlot(fieldAssignment.Variable,
-                        fieldAssignment.Field);
+                        fieldAssignment.Field, fieldAssignment.NestedFields);
                     var borrowedReceiver = fieldAssignment.Variable == 0
                         && _program.Functions[_currentFunction].DeclaringStruct is not null
                         && !_program.Functions[_currentFunction].IsStatic
@@ -5619,10 +5912,8 @@ internal sealed partial class PeCompiler
                             _code.StoreField(destination, field.Size);
                         }
                     }
-                    if (live >= 0)
-                    {
-                        _code.Set(live);
-                    }
+                    SetPartialFieldState(fieldAssignment.Variable,
+                        fieldAssignment.Field, fieldAssignment.NestedFields, live: true);
                     break;
                 }
                 if (classField)
@@ -5702,11 +5993,6 @@ internal sealed partial class PeCompiler
                 }
                 else
                 {
-                    foreach (var nestedField in fieldAssignment.NestedFields)
-                    {
-                        field = _program.Structures[(int)field.Type - 100].Fields[nestedField];
-                        destination += field.Offset;
-                    }
                     Expression(fieldAssignment.Value, 0);
                     if (fieldAssignment.Variable == 0 && IsBorrowedReceiver())
                     {

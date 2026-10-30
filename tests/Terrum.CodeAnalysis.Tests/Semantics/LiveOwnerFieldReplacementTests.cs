@@ -529,6 +529,141 @@ public sealed class LiveOwnerFieldReplacementTests
             }
             """, BoundRuntimePolicy.CheckedExceptions, 42);
 
+    [Test]
+    public Task FailedNestedConstructionSkipsIncompleteCleanupAsync() =>
+        RunAsync("""
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [Cleanup] public void Close() {
+                    Host.Trace[0] = Host.Trace[0] * 10 + Id;
+                }
+            }
+            unique struct Nested {
+                public mut Token First;
+                public mut Token Second;
+                public Nested(Token first, Token second, bool fail) {
+                    First = move first;
+                    if (fail) { require false; }
+                    Second = move second;
+                }
+                [Cleanup] public void Close() { Host.Trace[1] = 100; }
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        mut Nested nested = new Nested(
+                            new Token(40), new Token(2), true);
+                    } catch {
+                        return Host.Trace[0] == 402 && Host.Trace[1] == 0 ? 42 : 1;
+                    }
+                }
+                return 0;
+            }
+            """, BoundRuntimePolicy.CheckedExceptions, 42);
+
+    [Test]
+    public Task FailedConstructionRetiresAcquisitionsInReverseOrderAsync() =>
+        RunAsync("""
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [Cleanup] public void Close() {
+                    Host.Trace[0] = Host.Trace[0] * 10 + Id;
+                }
+            }
+            unique struct Owner {
+                public mut Token First;
+                public mut Token Second;
+                public Owner(Token first, Token second, bool fail) {
+                    First = move first;
+                    Second = move second;
+                    if (fail) { require false; }
+                }
+                [Cleanup] public void Close() { Host.Trace[1] = 100; }
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        mut Owner owner = new Owner(
+                            new Token(1), new Token(2), true);
+                    } catch {
+                        return Host.Trace[0] == 21 && Host.Trace[1] == 0 ? 42 : 1;
+                    }
+                }
+                return 0;
+            }
+            """, BoundRuntimePolicy.CheckedExceptions, 42);
+
+    [Test]
+    public Task FailedConstructionBeforeFirstFieldKeepsParametersOwnedAsync() =>
+        RunAsync("""
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [Cleanup] public void Close() {
+                    Host.Trace[0] = Host.Trace[0] * 10 + Id;
+                }
+            }
+            unique struct Owner {
+                public mut Token First;
+                public mut Token Second;
+                public Owner(Token first, Token second, bool fail) {
+                    if (fail) { require false; }
+                    First = move first;
+                    Second = move second;
+                }
+                [Cleanup] public void Close() { Host.Trace[1] = 100; }
+            }
+            int32 Main() {
+                unsafe {
+                    try {
+                        mut Owner owner = new Owner(
+                            new Token(1), new Token(2), true);
+                    } catch {
+                        return Host.Trace[0] == 21 && Host.Trace[1] == 0 ? 42 : 1;
+                    }
+                }
+                return 0;
+            }
+            """, BoundRuntimePolicy.CheckedExceptions, 42);
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public Task NestedPartialRetirementSkipsMovedChildAndPreservesOrderAsync(
+        BoundRuntimePolicy policy) =>
+        RunAsync("""
+            unique struct Token {
+                public int32 Id;
+                public Token(int32 id) { Id = id; }
+                [Cleanup] public void Close() {
+                    Host.Trace[0] = Host.Trace[0] * 10 + Id;
+                }
+            }
+            unique struct Child {
+                public mut Token Left;
+                public mut Token Right;
+                public Child(Token left, Token right) {
+                    Left = move left;
+                    Right = move right;
+                }
+            }
+            unique struct Owner {
+                public mut Child Nested;
+                public Owner(Child nested) { Nested = move nested; }
+            }
+            int32 Main() {
+                mut Owner owner = new Owner(
+                    new Child(new Token(1), new Token(2)));
+                {
+                    Token extracted = move owner.Nested.Left;
+                    owner = _;
+                    if (Host.Trace[0] != 2 || extracted.Id != 1) { return 1; }
+                }
+                return Host.Trace[0] == 21 ? 42 : 0;
+            }
+            """, policy, 42);
+
     private static async Task RunAsync(
         string source, BoundRuntimePolicy policy, int expected)
     {
