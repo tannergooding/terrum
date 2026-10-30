@@ -115,9 +115,12 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("NativeAddress formation requires bound unsafe authorization.");
         }
-        if (!IsAddressOnlyVoidBody(caller, selectedAddress))
+        var emitsIndirectCall = TryGetNativeAddressUnitCallHome(
+            caller, selectedAddress, out var callHomeIndex);
+        if (!emitsIndirectCall && !IsAddressOnlyVoidBody(caller, selectedAddress))
         {
-            throw Unsupported("The caller Body is outside the single discarded NativeAddress profile.");
+            throw Unsupported(
+                "The caller Body is outside the discarded-address or unit indirect-call profile.");
         }
 
         var targetMethodRow = targetIndex + 1;
@@ -343,14 +346,36 @@ public static partial class TrRmExecutableCompiler
             [0x1100_0001], [0x1600_0000u | (uint)targetMethodRow]);
         var entryState = new byte[8];
         entryState[0] = 0x01;
-        byte[] code = [0xE9, 0, 1, 0, 0x18, 0];
         var nativeAddress = TrRmRegisterBodyRecordWriter.EncodeNativeAddress(
-            1, 15, maps.GetMethodMapIndex(0x1600_0000u | (uint)targetMethodRow),
+            emitsIndirectCall ? (byte)2 : (byte)1,
+            emitsIndirectCall ? checked((ushort)callHomeIndex) : (ushort)15,
+            maps.GetMethodMapIndex(0x1600_0000u | (uint)targetMethodRow),
             maps.GetTypeMapIndex(0x1100_0001));
-        var body = TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
+        var homeMap = new byte[emitsIndirectCall ? 8 : 0];
+        if (emitsIndirectCall)
+        {
+            homeMap[0] = 0x03;
+            BinaryPrimitives.WriteUInt16LittleEndian(homeMap.AsSpan(2),
+                maps.GetTypeMapIndex(0x1100_0001));
+        }
+        var records = new List<ReadOnlyMemory<byte>>
+        {
+            entryState,
+            nativeAddress,
+        };
+        byte[] code = [0xE9, 0, 1, 0];
+        if (emitsIndirectCall)
+        {
+            records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
+                3, 0, checked((ushort)callHomeIndex), 0, [], []));
+            code = [.. code, 0xE0, 0, 2, 0];
+        }
+
+        code = [.. code, 0x18, 0];
+        var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
-            [entryState, nativeAddress], code, contractRows.Count,
+            records, code, contractRows.Count,
             TrRmArtifactSchema.ForeignInvocationDraft);
         var sections = new List<TrRmSection>
         {
@@ -449,6 +474,47 @@ public static partial class TrRmExecutableCompiler
                 isRead = true;
             }
         }) && !isRead;
+    }
+
+    private static bool TryGetNativeAddressUnitCallHome(
+        BoundFunction function, BoundNativeFunctionAddress address,
+        out int homeIndex)
+    {
+        homeIndex = -1;
+        var statements = new List<BoundStatement>();
+        if (!AppendStatements(function.Body, statements)
+            || statements.Count != 3
+            || statements[2] is not BoundReturn { Value: null }
+            || statements[0] is not BoundLocal
+                { Initializer: BoundNativeFunctionAddress localAddress } local
+            || localAddress != address
+            || statements[1] is not BoundExpressionStatement
+                { Expression: BoundIndirectCall call }
+            || (uint)local.Variable >= (uint)function.Variables.Length
+            || function.ParameterCount != 0
+            || function.Variables.Length != 1
+            || call.Target is not BoundRead targetRead
+            || targetRead.Variable != local.Variable
+            || targetRead.Type != address.Type
+            || call.Type != PrimitiveType.Void
+            || !call.Arguments.IsEmpty
+            || !call.IsUnsafeAuthorized
+            || !function.Body.RetiredManagedLocals.IsEmpty)
+        {
+            return false;
+        }
+
+        var variable = function.Variables[local.Variable];
+        if (variable.Type != address.Type || variable.IsOut || variable.IsInit
+            || variable.IsImplicitRef || variable.IsImplicitReferenceTemporary
+            || variable.IsInitializationLocal
+            || variable.NativeFixedArrayLayout is not null)
+        {
+            return false;
+        }
+
+        homeIndex = local.Variable;
+        return true;
     }
 
     private static bool AppendStatements(BoundBlock block,

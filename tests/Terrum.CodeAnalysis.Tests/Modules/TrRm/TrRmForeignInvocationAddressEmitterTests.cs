@@ -263,6 +263,75 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void EmitsIndirectUnitCallFromNativeAddress()
+    {
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void Observe();
+
+            internal void Form() {
+                unsafe {
+                    var callback = &Observe;
+                    callback();
+                }
+            }
+            """), core);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var form = program.Functions.Single(static function =>
+            function.Name == "Form");
+        var calls = new List<BoundIndirectCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(form.Body, expression =>
+        {
+            if (expression is BoundIndirectCall indirectCall)
+            {
+                calls.Add(indirectCall);
+            }
+        }), Is.True);
+        var call = calls.Single();
+        Assert.That(call.Target, Is.TypeOf<BoundRead>());
+
+        var artifact = TrRmExecutableCompiler
+            .EmitForeignInvocationDraftNativeAddressLibrary(
+                program, "native-address-indirect-call");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var caller = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Form")
+            {
+                caller = row;
+                break;
+            }
+        }
+
+        Assert.That(caller, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(caller);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(caller), tables.Contracts.Count);
+        Assert.That(body.RecordCount, Is.EqualTo(3));
+        Assert.That(body.GetRecord(1)[0], Is.EqualTo(0x0D));
+        Assert.That(body.GetRecord(1)[4], Is.EqualTo(2));
+        Assert.That(body.GetRecord(1)[6], Is.Zero);
+        Assert.That(body.HomeMap.Length, Is.EqualTo(8));
+        Assert.That(body.HomeMap[0], Is.EqualTo(3));
+        Assert.That(body.GetRecord(2)[0], Is.EqualTo(0x02));
+        Assert.That(body.GetRecord(2)[4], Is.EqualTo(3));
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0xE9, 0, 1, 0, 0xE0, 0, 2, 0, 0x18, 0,
+            }));
+    }
+
+    [Test]
     public void NativeParameterIndirectCallBindsThroughAnInferredAddress()
     {
         var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
