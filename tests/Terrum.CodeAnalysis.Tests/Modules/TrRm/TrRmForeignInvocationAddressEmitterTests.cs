@@ -134,6 +134,135 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void EmitsNativeParameterOnNativeImportAndSignatureAnchor()
+    {
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4294967295)]
+            internal extern void Observe(ptr<uint32> value);
+
+            internal void Form() {
+                unsafe { _ = &Observe; }
+            }
+            """), core);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler
+            .EmitForeignInvocationDraftNativeAddressLibrary(
+                compilation.Program!, "native-address-parameter");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var target = 0;
+        var caller = 0;
+        var anchor = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            var name = tables.Methods.GetName(row);
+            target = name == "Observe" ? row : target;
+            caller = name == "Form" ? row : caller;
+            anchor = name.StartsWith("__trrm_fnptr_anchor_",
+                StringComparison.Ordinal) ? row : anchor;
+        }
+
+        Assert.That(target, Is.GreaterThan(0));
+        Assert.That(caller, Is.GreaterThan(0));
+        Assert.That(anchor, Is.GreaterThan(0));
+        var signature = tables.Methods.GetSignature(target);
+        var (parameterStart, parameterCount)
+            = tables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var parameterTypeSpec = tables.Parameters.GetTypeSpec(parameterStart);
+        Assert.That(TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+            tables.TypeSpecs, parameterTypeSpec, 1, tables.Layouts,
+            out var pointeeType), Is.True);
+        Assert.That(pointeeType, Is.EqualTo(PrimitiveType.UInt32));
+
+        var targetContracts = tables.Contracts.GetNativeParameters(target);
+        var anchorContracts = tables.Contracts.GetNativeParameters(anchor);
+        Assert.That(targetContracts.Length, Is.EqualTo(1));
+        Assert.That(anchorContracts.Length, Is.EqualTo(1));
+        Assert.That(targetContracts[0], Is.EqualTo(anchorContracts[0]));
+        Assert.That(targetContracts[0].ParameterOrdinal, Is.Zero);
+        Assert.That(targetContracts[0].Access, Is.EqualTo(1));
+        Assert.That(targetContracts[0].Retention, Is.EqualTo(1));
+        Assert.That(targetContracts[0].ExtentKind, Is.EqualTo(1));
+        Assert.That(targetContracts[0].Extent, Is.EqualTo(uint.MaxValue));
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId,
+            TrRmArtifactSchema.ForeignInvocationDraft), Is.True);
+        Assert.That(tables.StandardNativeImports.HasImportForMethod(target),
+            Is.True);
+        tables.ValidateRegisterBodyMapsForMethod(caller);
+    }
+
+    [Test]
+    public void EmitsWritableNativeParameterPointerQualifier()
+    {
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 0)]
+            internal extern void Observe(write ptr<uint32> value);
+
+            internal void Form() {
+                unsafe { _ = &Observe; }
+            }
+            """), core);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler
+            .EmitForeignInvocationDraftNativeAddressLibrary(
+                compilation.Program!, "native-address-writable-parameter");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+        var target = 0;
+        var anchor = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            var name = tables.Methods.GetName(row);
+            target = name == "Observe" ? row : target;
+            anchor = name.StartsWith("__trrm_fnptr_anchor_",
+                StringComparison.Ordinal) ? row : anchor;
+        }
+
+        Assert.That(target, Is.GreaterThan(0));
+        Assert.That(anchor, Is.GreaterThan(0));
+        var signature = tables.Methods.GetSignature(target);
+        var (parameterStart, parameterCount)
+            = tables.Signatures.GetParamRange(signature);
+        Assert.That(parameterCount, Is.EqualTo(1));
+        var typeSpecRef = tables.Parameters.GetTypeSpec(parameterStart);
+        var typeSpec = tables.TypeSpecs.GetTypeSpecBytes(
+            typeSpecRef);
+        Assert.That(typeSpec.Length, Is.EqualTo(4));
+        Assert.That(typeSpec[1], Is.EqualTo(1));
+        Assert.That(typeSpec[2], Is.EqualTo(0x8C));
+        Assert.That(TrRmNativeImportTypeContract.TryGetNativeParameterPointee(
+            tables.TypeSpecs, typeSpecRef, 2, tables.Layouts,
+            out var pointeeType), Is.True);
+        Assert.That(pointeeType, Is.EqualTo(PrimitiveType.UInt32));
+        var targetContracts = tables.Contracts.GetNativeParameters(target);
+        var anchorContracts = tables.Contracts.GetNativeParameters(anchor);
+        Assert.That(targetContracts.Length, Is.EqualTo(1));
+        Assert.That(targetContracts[0], Is.EqualTo(anchorContracts[0]));
+        Assert.That(targetContracts[0].Access, Is.EqualTo(2));
+        Assert.That(targetContracts[0].ExtentKind, Is.Zero);
+        Assert.That(targetContracts[0].Extent, Is.Zero);
+    }
+
+    [Test]
     public void NativeParameterIndirectCallBindsThroughAnInferredAddress()
     {
         var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
