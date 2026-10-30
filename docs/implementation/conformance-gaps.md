@@ -1736,12 +1736,26 @@ commands. Under that explicit key, ordinary checked-reference fields have the
 candidate 16/8 size/alignment and nested inline layout is recomputed; regression
 coverage checks the changed field offset/aggregate size and confirms that
 omitting the key cannot verify or emit the candidate-bound program. Emission,
-direct native imports, JIT and AOT fail closed with an unsupported result
-rather than selecting today's 8-byte layout or a tracing profile. This is
-provisional agreement-selection/layout support only: no allocation control,
-hold acquisition/copy/drop, normal handle integration, support-bearing call
-ABI, runtime retirement or native execution has been implemented. The agreement
-is not persisted or accepted by module/graph/TRRM routes.
+direct native imports and unsupported JIT/AOT routes fail closed rather than
+selecting today's 8-byte layout or a tracing profile. A bounded source-bound
+runtime slice is now implemented: each allocation has a compiler-private
+32-byte control with exact runtime identity, nonreused generation, checked
+strong-hold count, class identity and payload size; a separate per-image/JIT
+24-byte runtime state supplies generation and live-allocation accounting.
+Normal class handles are retained/released across local copies, borrowed
+receiver calls, scope exit and checked construction failure, without joining
+the tracing allocation list. Both JIT and AOT execute scalar/inline-copy class
+payloads under FailFast and CheckedExceptions; checked constructor failure
+releases the unpublished provisional control before catch recovery.
+
+The current execution gate rejects reference-bearing values, managed class
+fields, Cleanup, tasks, foreign/native-callable routes, source grants, indexed
+semantic bodies, handle results and by-value handle arguments. `build-native-import`
+also remains fail-closed. Stored-reference descriptors, their 16-byte call
+ABI, typed nested-field Copy/drop, arbitrary result/owner provenance, module
+relowering and cross-instance exchange remain unimplemented; this is not full
+normal-backing conformance. The agreement is not persisted or accepted by
+module/graph/TRRM routes.
 
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
 from GC-backed `gc C`, `gc box<T>` and `gc ref<T>`. Carry exact backing

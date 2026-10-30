@@ -293,7 +293,8 @@ public static unsafe partial class NativeJit
         {
             throw new PlatformNotSupportedException("Native JIT requires a Windows x64 process.");
         }
-        if (!code.BufferOffsets.IsEmpty || code.HostDataLength != 0 || code.ReadOnlyDataLength != 0
+        if (code.NormalBackingRuntimeOffset >= 0
+            || !code.BufferOffsets.IsEmpty || code.HostDataLength != 0 || code.ReadOnlyDataLength != 0
             || (code.ManagedRuntimeOffset < 0
                 ? code.Data.Length != 0
                 : code.ManagedRuntimeOffset != 0 || code.Data.Length != 24
@@ -336,12 +337,21 @@ public static unsafe partial class NativeJit
         }
 
         var dataLength = checked(literalPrefixLength + (int)totalLength);
-        var runtimeOffset = code.ManagedRuntimeOffset < 0 ? dataLength
-            : checked((dataLength + 7) & ~7);
+        var hasManagedRuntime = code.ManagedRuntimeOffset >= 0;
+        var hasNormalBackingRuntime = code.NormalBackingRuntimeOffset >= 0;
+        if (hasManagedRuntime && hasNormalBackingRuntime)
+        {
+            throw new ArgumentException("Native code cannot combine managed-node and normal-backing state.",
+                nameof(code));
+        }
+        var hasRuntimeState = hasManagedRuntime || hasNormalBackingRuntime;
+        var runtimeOffset = hasRuntimeState ? checked((dataLength + 7) & ~7) : dataLength;
+        var declaredRuntimeOffset = hasManagedRuntime ? code.ManagedRuntimeOffset
+            : hasNormalBackingRuntime ? code.NormalBackingRuntimeOffset : -1;
         if (code.BufferOffsets.Length != buffers.Length || totalLength != code.HostDataLength
             || literalPrefixLength + readOnlyLength != code.ReadOnlyDataLength
-            || code.Data.Length != runtimeOffset + (code.ManagedRuntimeOffset < 0 ? 0 : 24)
-            || (code.ManagedRuntimeOffset >= 0 && code.ManagedRuntimeOffset != runtimeOffset))
+            || code.Data.Length != runtimeOffset + (hasRuntimeState ? 24 : 0)
+            || (hasRuntimeState && declaredRuntimeOffset != runtimeOffset))
         {
             throw new ArgumentException("Native buffer metadata does not match the bound program.", nameof(code));
         }

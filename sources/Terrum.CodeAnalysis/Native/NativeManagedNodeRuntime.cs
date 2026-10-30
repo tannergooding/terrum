@@ -17,11 +17,13 @@ internal sealed partial class PeCompiler
     private readonly Dictionary<int, int> _managedAbandonedFactories = [];
     private int _managedCollectorStart;
     private int _managedCollectorEnd;
+    private int RuntimeStateOffset => _managedNodes ? _managedRuntimeOffset : _normalBackingRuntimeOffset;
 
     private long PrepareManagedRoots(int functionIndex, BoundFunction function, int spillSlots,
         bool needsReturnSnapshot, long at)
     {
-        if (!_managedNodes || function.Intrinsic is not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate))
+        if ((!_managedNodes && !_normalBacking)
+            || function.Intrinsic is not (BoundIntrinsic.None or BoundIntrinsic.ClassTryCreate))
         {
             return at;
         }
@@ -29,7 +31,8 @@ internal sealed partial class PeCompiler
         for (var i = 0; i < function.Variables.Length; i++)
         {
             var variable = function.Variables[i];
-            if (ManagedClassTypes.IsManaged(variable.Type))
+            if (ManagedClassTypes.IsManaged(variable.Type)
+                && (!_normalBacking || IsNormalBackingHandle(variable.Type)))
             {
                 _ = roots.TryAdd(variable.IsOut
                     ? _outSlots[functionIndex][i] : _slots[functionIndex][i], 0);
@@ -49,18 +52,24 @@ internal sealed partial class PeCompiler
         {
             _ = roots.TryAdd((_returnSlots[functionIndex] + 15) & ~15, 0);
         }
-        if (roots.Count == 0)
+        if (roots.Count != 0)
         {
-            return at;
+            at = (at + 7) & ~7L;
+            _managedRootFrames[functionIndex] = checked((int)at);
+            var position = 0;
+            foreach (var slot in roots.Keys)
+            {
+                roots[slot] = checked((int)(at + 16 + (position++ * 16) + 8));
+            }
+            at += 16 + (roots.Count * 16L);
         }
-        at = (at + 7) & ~7L;
-        _managedRootFrames[functionIndex] = checked((int)at);
-        var position = 0;
-        foreach (var slot in roots.Keys)
+        if (_normalBacking)
         {
-            roots[slot] = checked((int)(at + 16 + (position++ * 16) + 8));
+            at = (at + 7) & ~7L;
+            _normalBackingTemporarySlots[functionIndex] = checked((int)at);
+            at += sizeof(ulong);
         }
-        return at + 16 + (roots.Count * 16L);
+        return at;
     }
 
     [SuppressMessage("Style", "IDE0010:Populate switch", Justification = "Only expressions and statements with managed staging slots need descriptors.")]
@@ -303,7 +312,7 @@ internal sealed partial class PeCompiler
         _code.Address(frame);
         _code.Bytes(0x48, 0xC7, 0x40, 0x08);
         _code.Int32(roots.Count);
-        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), RuntimeStateOffset));
         _code.Bytes(0x48, 0x8B, 0x4A, 0x08); // previous frame
         _code.Bytes(0x48, 0x89, 0x08); // frame.previous = old head
         _code.Bytes(0x48, 0x89, 0x42, 0x08); // head = frame
@@ -320,25 +329,58 @@ internal sealed partial class PeCompiler
 
     private void UnregisterManagedRoots(int functionIndex)
     {
-        if (!_managedNodes || _managedRootFlags[functionIndex].Count == 0)
+        var roots = _managedRootFlags[functionIndex];
+        if ((!_managedNodes && !_normalBacking) || roots.Count == 0)
         {
             return;
         }
+        var temporary = -1;
+        if (_normalBacking)
+        {
+            temporary = _normalBackingTemporarySlots[functionIndex];
+            _code.Store64(temporary);
+            foreach (var slot in roots.Keys)
+            {
+                SetManagedRoot(slot, active: false);
+            }
+        }
         _code.Bytes(0x48, 0x8B, 0x8D);
         _code.Int32(_managedRootFrames[functionIndex]);
-        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), _managedRuntimeOffset));
+        _dataFixups.Add(new NativeDataFixup(_code.DataAddress(), RuntimeStateOffset));
         _code.Bytes(0x48, 0x89, 0x4A, 0x08); // restore previous root frame without altering the result
+        if (_normalBacking)
+        {
+            _code.Load64(temporary);
+        }
     }
 
     private void SetManagedRoot(int slot, bool active)
     {
-        if (!_managedNodes)
+        if (!_managedNodes && !_normalBacking)
         {
             return;
         }
         if (!_managedRootFlags[_currentFunction].TryGetValue(slot, out var flag))
         {
             throw new InvalidOperationException("Managed root has no verified frame slot.");
+        }
+        if (_normalBacking)
+        {
+            _code.Load(flag);
+            _code.Bytes(0x85, 0xC0);
+            var unchanged = _code.JumpIf(active ? (byte)0x85 : (byte)0x84);
+            if (active)
+            {
+                EmitNormalBackingRetain(slot);
+                _code.Set(flag);
+            }
+            else
+            {
+                _code.Clear(flag);
+                EmitNormalBackingRelease(slot);
+            }
+            _code.PatchRelative(unchanged, _code.Position);
+            return;
         }
         if (active)
         {
@@ -348,6 +390,38 @@ internal sealed partial class PeCompiler
         {
             _code.Clear(flag);
         }
+    }
+
+    private void TransferManagedRoot(int slot)
+    {
+        if (!_normalBacking)
+        {
+            return;
+        }
+        if (!_managedRootFlags[_currentFunction].TryGetValue(slot, out var flag))
+        {
+            throw new InvalidOperationException("Managed root has no verified frame slot.");
+        }
+        _code.Clear(flag);
+    }
+
+    private void StoreNormalBackingHandle(int offset)
+    {
+        var temporary = _normalBackingTemporarySlots[_currentFunction];
+        if (temporary < 0 || temporary == offset
+            || !_managedRootFlags[_currentFunction].ContainsKey(offset))
+        {
+            throw new InvalidOperationException(
+                "A normal-backed handle store has no verified temporary and root slot.");
+        }
+
+        _code.Store64(temporary);
+        EmitNormalBackingRetain(temporary);
+        SetManagedRoot(offset, active: false);
+        _code.Load64(temporary);
+        _code.Store64(offset);
+        SetManagedRoot(offset, active: true);
+        EmitNormalBackingRelease(temporary);
     }
 
     private void EmitManagedIntrinsic(BoundIntrinsic intrinsic)

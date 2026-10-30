@@ -27,8 +27,11 @@ public sealed class NativeLoweringAgreementTests
         Assert.DoesNotThrow(() => SemanticVerifier.Verify(program, agreement));
         Assert.Throws<System.ArgumentException>(() =>
             SemanticVerifier.Verify(program, agreement.ToUpperInvariant()));
-        Assert.Throws<System.NotSupportedException>(() => NativeEmitter.EmitCode(program,
-            NativeRuntimePolicy.FailFast, nativeLoweringAgreement: agreement));
+        var code = NativeEmitter.EmitCode(program,
+            NativeRuntimePolicy.FailFast, nativeLoweringAgreement: agreement);
+        Assert.That(code.ManagedRuntimeOffset, Is.EqualTo(-1));
+        Assert.That(code.NormalBackingRuntimeOffset, Is.Zero);
+        Assert.That(code.Data.Length, Is.EqualTo(24));
         Assert.Throws<System.NotSupportedException>(() =>
             Compilation.GetNativeProfileVersion(program));
         Assert.Throws<System.ArgumentException>(() =>
@@ -73,6 +76,14 @@ public sealed class NativeLoweringAgreementTests
             selectedProgram, agreement));
         Assert.Throws<System.ArgumentException>(() =>
             SemanticVerifier.VerifyLibrary(selectedProgram));
+
+        var executable = Compilation.Create(SyntaxTree.Parse(
+            Source + "\nint32 Main() { return 42; }\n"),
+            new CompilationOptions { NativeLoweringAgreement = agreement });
+        Assert.That(executable.HasErrors, Is.False,
+            string.Join(Environment.NewLine, executable.Diagnostics));
+        Assert.Throws<System.NotSupportedException>(() => NativeEmitter.EmitCode(
+            executable.Program!, NativeRuntimePolicy.FailFast, agreement));
     }
 
     [TestCase("")]

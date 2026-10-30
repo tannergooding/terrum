@@ -44,10 +44,17 @@ output combinations reject it as a usage error. The choice is a host lowering
 selection, not a TargetProfile, semantic schema or persisted authorization.
 Analysis responses publish `"profile": null` and identify the selected key
 separately as `nativeLoweringAgreement`; they do not label it as one of the
-existing private native profiles. Native emission and JIT currently reject the
-recognized selection as not implemented, rather than silently using the
-existing address-only or tracing layouts. This provisional implementation
-follows the unapproved
+existing private native profiles. Native `build` and `jit` now execute the
+selected agreement for source-bound programs whose normal class payloads
+contain only scalar/native-address or inline-copy fields. This slice supports
+normal class creation, handle copies, borrowed receiver calls, scope retirement
+and checked construction rollback under both runtime policies. Reference
+descriptors, managed class fields, handle results/by-value handle parameters,
+Cleanup, foreign calls and source-independent indexed bodies remain
+unsupported and reject before emission. `build-native-import` accepts the
+selector but still rejects at its native-import lowering boundary. No route
+falls back to the address-only or tracing representation. This provisional
+implementation follows the unapproved
 [normal-backing proposal](../proposals/reference-normal-backing-support.md);
 it does not adopt or amend the selected `terrum.cli/1` protocol.
 

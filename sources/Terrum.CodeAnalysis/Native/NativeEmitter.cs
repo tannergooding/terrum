@@ -740,11 +740,12 @@ public static class NativeEmitter
         return (PeImage.BuildLibrary(code, [.. selected]), usedImports);
     }
 
-    internal static bool UsesManagedNodes(BoundProgram program) => !program.Classes.IsEmpty
-        || program.Functions.Any(static function =>
-        function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
-        || ManagedClassTypes.IsManaged(function.ReturnType)
-        || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type)));
+    internal static bool UsesManagedNodes(BoundProgram program) =>
+        program.NativeLoweringAgreement is null && (!program.Classes.IsEmpty
+            || program.Functions.Any(static function =>
+                function.Intrinsic is >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect
+                || ManagedClassTypes.IsManaged(function.ReturnType)
+                || function.Variables.Any(static variable => ManagedClassTypes.IsManaged(variable.Type))));
 
     private static bool Exportable(BoundProgram program, BoundFunction function, bool managedExports,
         IReadOnlyDictionary<string, bool> structureVisibility, Dictionary<PrimitiveType, bool> publicLayouts)
@@ -863,8 +864,7 @@ public static class NativeEmitter
         SemanticVerifier.Verify(program, nativeLoweringAgreement);
         if (nativeLoweringAgreement is not null)
         {
-            throw new NotSupportedException(
-                "The selected native lowering agreement is recognized but not implemented.");
+            PeCompiler.ValidateNormalBackingProgram(program);
         }
         if (program.Functions.Any(static function => function.DirectNativeImport is not null))
         {
@@ -949,6 +949,9 @@ internal sealed partial class PeCompiler
     private readonly byte[] _data;
     private readonly bool _managedNodes;
     private readonly int _managedRuntimeOffset;
+    private readonly bool _normalBacking;
+    private readonly int _normalBackingRuntimeOffset;
+    private readonly int[] _normalBackingTemporarySlots;
     private readonly int _hostDataLength;
     private readonly bool _checkedExceptions;
     private readonly List<NativeExceptionScope>[] _scopes;
@@ -984,6 +987,11 @@ internal sealed partial class PeCompiler
         CancellationToken cancellationToken = default)
     {
         _program = program;
+        _managedNodes = managedNodes;
+        _normalBacking = program.NativeLoweringAgreement
+            == CompilationOptions.WindowsX64NormalBackingAgreement;
+        _normalBackingTemporarySlots = new int[program.Functions.Length];
+        Array.Fill(_normalBackingTemporarySlots, -1);
         _sourceDependent = sourceDependent;
         _sourceSlots = sourceDependent is null ? [] : new int[program.Functions.Length];
         _checkedExceptions = program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions;
@@ -1026,6 +1034,11 @@ internal sealed partial class PeCompiler
         _bufferOffsets = sourceDependent is null ? new int[program.Buffers.Length] : [];
         if (sourceDependent is not null)
         {
+            if (_normalBacking)
+            {
+                throw new NotSupportedException(
+                    "Normal backing does not support invocation-scoped source grants.");
+            }
             if (!program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
             {
                 throw new NotSupportedException("Native UTF-NUL image literals require AOT native-import emission.");
@@ -1035,6 +1048,7 @@ internal sealed partial class PeCompiler
             _nativeUtf16ZOffsets = [];
             _nativeUtf8ZOffsets = [];
             _managedRuntimeOffset = -1;
+            _normalBackingRuntimeOffset = -1;
             return;
         }
         if (!NativeStringZPoolContract.IsValid(program.NativeUtf16ZLiterals, program.NativeUtf8ZLiterals))
@@ -1081,9 +1095,16 @@ internal sealed partial class PeCompiler
             }
         }
         _hostDataLength = checked(writableAt - literalPrefixBytes);
-        _managedNodes = managedNodes;
-        _managedRuntimeOffset = _managedNodes ? (writableAt + 7) & ~7 : -1;
-        _data = new byte[_managedNodes ? _managedRuntimeOffset + 24 : writableAt];
+        if (_managedNodes && _normalBacking)
+        {
+            throw new InvalidOperationException(
+                "Normal backing and managed-node runtime state cannot share an image.");
+        }
+        var runtimeStateOffset = _managedNodes || _normalBacking
+            ? checked((writableAt + 7) & ~7) : -1;
+        _managedRuntimeOffset = _managedNodes ? runtimeStateOffset : -1;
+        _normalBackingRuntimeOffset = _normalBacking ? runtimeStateOffset : -1;
+        _data = runtimeStateOffset < 0 ? new byte[writableAt] : new byte[runtimeStateOffset + 24];
         for (var index = 0; index < program.NativeUtf16ZLiterals.Length; index++)
         {
             var literal = program.NativeUtf16ZLiterals[index];
@@ -1252,8 +1273,10 @@ internal sealed partial class PeCompiler
         for (var i = 0; i < _program.Functions.Length; i++)
         {
             var function = _program.Functions[i];
-            sourceFunctionOffsets.Add(function.IsExternal ? -1 : _starts[i]);
-            if (!function.IsExternal)
+            var skipped = _normalBacking && function.Intrinsic is
+                >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect;
+            sourceFunctionOffsets.Add(function.IsExternal || skipped ? -1 : _starts[i]);
+            if (!function.IsExternal && !skipped)
             {
                 functionCount = checked(functionCount + 1);
             }
@@ -1273,7 +1296,7 @@ internal sealed partial class PeCompiler
         }
         for (var i = 0; i < _starts.Length; i++)
         {
-            if (!_program.Functions[i].IsExternal)
+            if (!_program.Functions[i].IsExternal && _starts[i] >= 0)
             {
                 functions.Add(new NativeFunctionRange(_starts[i], _ends[i], _frames[i]) {
                     UsesFramePointer = true,
@@ -1309,6 +1332,7 @@ internal sealed partial class PeCompiler
             DataFixups = [.. _dataFixups],
             NativeImports = [.. _nativeImportFixups],
             ManagedRuntimeOffset = _managedRuntimeOffset,
+            NormalBackingRuntimeOffset = _normalBackingRuntimeOffset,
             HostDataLength = _hostDataLength,
         };
     }
@@ -1343,8 +1367,10 @@ internal sealed partial class PeCompiler
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var function = _program.Functions[i];
-            if (function.IsExternal)
+            if (function.IsExternal || (_normalBacking && function.Intrinsic is
+                >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect))
             {
+                _starts[i] = -1;
                 continue;
             }
             var maximumArguments = 0;
@@ -1694,7 +1720,8 @@ internal sealed partial class PeCompiler
         {
             _cancellationToken.ThrowIfCancellationRequested();
             var function = _program.Functions[i];
-            if (function.IsExternal)
+            if (function.IsExternal || (_normalBacking && function.Intrinsic is
+                >= BoundIntrinsic.NodeTryCreate and <= BoundIntrinsic.NodeCollect))
             {
                 continue;
             }
@@ -1949,7 +1976,10 @@ internal sealed partial class PeCompiler
             if (_managedAbandonedFactories.TryGetValue(index, out var provisional))
             {
                 SetManagedRoot(provisional, active: false);
-                EmitManagedAbandon(provisional);
+                if (!_normalBacking)
+                {
+                    EmitManagedAbandon(provisional);
+                }
             }
             if (_unwindRootFrames.Contains(index))
             {
@@ -5116,7 +5146,11 @@ internal sealed partial class PeCompiler
     }
     private void StoreValue(int offset, PrimitiveType type)
     {
-        if (IsIndirect(type))
+        if (_normalBacking && IsNormalBackingHandle(type))
+        {
+            StoreNormalBackingHandle(offset);
+        }
+        else if (IsIndirect(type))
         {
             CopyToFrame(offset, Size(type));
         }
@@ -7470,7 +7504,7 @@ internal sealed partial class PeCompiler
                 var stagedBegin = _code.Position;
                 var stagedFunclet = -1;
                 var managedFunclet = -1;
-                if (_checkedExceptions && _managedNodes && !_emittingFunclet)
+                if (_checkedExceptions && (_managedNodes || _normalBacking) && !_emittingFunclet)
                 {
                     List<int>? managedSlots = null;
                     for (var i = 0; i < call.Arguments.Length; i++)
@@ -7753,6 +7787,13 @@ internal sealed partial class PeCompiler
                         }
                     }
                 }
+                var preserveNormalCallResult = _normalBacking && call.Type != PrimitiveType.Void;
+                var normalCallResultSlot = preserveNormalCallResult
+                    ? _normalBackingTemporarySlots[_currentFunction] : -1;
+                if (preserveNormalCallResult)
+                {
+                    _code.Store64(normalCallResultSlot);
+                }
                 for (var i = 0; i < call.Arguments.Length; i++)
                 {
                     if (ManagedClassTypes.IsManaged(call.Arguments[i].Type))
@@ -7763,6 +7804,10 @@ internal sealed partial class PeCompiler
                             SetManagedRoot(Spill(auxiliarySpills[i]), active: false);
                         }
                     }
+                }
+                if (preserveNormalCallResult)
+                {
+                    _code.Load64(normalCallResultSlot);
                 }
                 if (managedFunclet >= 0)
                 {
