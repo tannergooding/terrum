@@ -68,20 +68,24 @@ internal sealed class TrRmStandardNativeBindingPlan
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentNullException.ThrowIfNull(artifacts);
         ArgumentNullException.ThrowIfNull(schemaIdentities);
-        if (schemaIdentities.Count != artifacts.Length)
+        var schemaIdentityCount = schemaIdentities.Count;
+        if (schemaIdentityCount != artifacts.Length)
         {
             throw new ArgumentException(
                 "Standard schema selections do not match the owned artifacts.",
                 nameof(schemaIdentities));
         }
 
+        _a3LayoutResourceLedger = a3LayoutResourceLedger;
+        _a3LayoutResourceLedger?.ConsumeWork(checked(
+            (ulong)artifacts.Length + (ulong)schemaIdentityCount + 2UL
+            + (providerBinding is null ? 0UL : 2UL)));
         ModuleIdentity = moduleIdentity;
         _artifacts = [.. artifacts];
         _schemaIdentities = [.. schemaIdentities];
         _modules = modules;
         _providerBindings = providerBinding is null ? [] : [providerBinding];
         _typeProviderBindings = typeProviderBindings;
-        _a3LayoutResourceLedger = a3LayoutResourceLedger;
         RootModuleRow = rootModuleRow;
         Operation = operation;
         RuntimePolicy = runtimePolicy;
