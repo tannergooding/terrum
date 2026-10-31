@@ -60,6 +60,34 @@ public sealed class PublicFixedLayoutStorageTests
         Assert.That((global::System.Linq.Enumerable.Single(retained.Fields).Offset, retained.Fields[0].Size), Is.EqualTo((0, width)));
     }
 
+    [TestCase("char8", 1)]
+    [TestCase("int8", 1)]
+    [TestCase("uint8", 1)]
+    [TestCase("int16", 2)]
+    [TestCase("uint16", 2)]
+    [TestCase("char32", 4)]
+    [TestCase("rune", 4)]
+    [TestCase("int128", 16)]
+    [TestCase("uint128", 16)]
+    [TestCase("float16", 2)]
+    [TestCase("bfloat16", 2)]
+    [TestCase("float128", 16)]
+    [TestCase("decimal32", 4)]
+    [TestCase("decimal64", 8)]
+    [TestCase("decimal128", 16)]
+    public void FixedLayoutStorageAcceptsBinderSupportedScalarWidths(
+        string type, int width)
+    {
+        var program = CompileLibrary(
+            $"[Blittable] [Layout(LayoutKind.Sequential)] "
+            + $"public struct Box {{ public {type} Value; }}"
+            + " public int32 Check() { return 42; }");
+
+        Assert.That(FixedLayoutStorage.Validate(program.Structures),
+            Is.EqualTo([width]));
+        SemanticVerifier.VerifyLibrary(program);
+    }
+
     [Test]
     public void OpaquePointerFieldsRetainTheirRepresentationAcrossPrivateModules()
     {

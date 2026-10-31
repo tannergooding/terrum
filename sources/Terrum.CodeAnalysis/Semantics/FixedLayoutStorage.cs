@@ -130,12 +130,10 @@ public static class FixedLayoutStorage
                     width = (int)layout.ByteExtent;
                     fieldAlignment = (int)layout.Alignment;
                 }
-                else if (field.Type is PrimitiveType.Bool or PrimitiveType.Char16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt32
-                    or PrimitiveType.Int64 or PrimitiveType.UInt64
-                    or PrimitiveType.Float32 or PrimitiveType.Float64
-                    or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    or PrimitiveType.NativeRawPointer
+                else if (PrimitiveTypeFacts.ScalarWidth(field.Type) > 0
+                    || field.Type is PrimitiveType.NativeUtf16ZPointer
+                        or PrimitiveType.NativeUtf8ZPointer
+                        or PrimitiveType.NativeRawPointer
                     || NativePointerTypes.IsType(field.Type)
                     || NativeFunctionPointerTypes.IsType(field.Type))
                 {
