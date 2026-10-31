@@ -793,6 +793,53 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void StandardNativeBindingPlanRetainsAndRevalidatesA2TypeBindings()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        var consumerArtifact = CreateImportedArrayConsumerArtifact();
+        var providerArtifact = CreateCopyProviderArtifact(
+            prependUnrelatedType: true);
+        var artifacts = new[] { consumerArtifact, providerArtifact };
+        var schemaIdentities = new[] { schemaIdentity, schemaIdentity };
+        var rootTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        consumerArtifact));
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 0, 1, 1),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
+        var typeBindings = TrRmFixedArrayProviderBindingValidator.Validate(
+            rootTables, artifacts, schemaIdentities, modules, 1);
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 42; }"));
+        Assert.That(compilation.HasErrors, Is.False);
+        var rootProgram = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
+            artifacts, schemaIdentities, modules, 1,
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast, null, typeBindings, null);
+
+        var noImport = Assert.Throws<NotSupportedException>(() =>
+            plan.CreateLoweringInputs(
+                TrRmStandardNativeOperation.EmitExecutable));
+        Assert.That(noImport!.Message, Does.Contain("no direct NativeImport"));
+
+        var replacement = CreateCopyProviderArtifact(
+            prependUnrelatedType: true, providerPack: 8);
+        Assert.That(replacement.Length, Is.EqualTo(providerArtifact.Length));
+        Array.Copy(replacement, providerArtifact, providerArtifact.Length);
+        var mismatch = Assert.Throws<InvalidDataException>(() =>
+            plan.CreateLoweringInputs(
+                TrRmStandardNativeOperation.EmitExecutable));
+        Assert.That(mismatch!.Message,
+            Does.Contain("fixed-array TypeDef provider binding"));
+    }
+
+    [Test]
     public void A3ValueAndLayoutReadersUseTheRootResourceLedger()
     {
         var artifact = CreateA3GenericArrayConsumerArtifact(
