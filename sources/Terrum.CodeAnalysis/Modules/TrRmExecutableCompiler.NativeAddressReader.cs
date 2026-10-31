@@ -64,7 +64,14 @@ public static partial class TrRmExecutableCompiler
             index.GetSection(section, out var kind, out _, out _, out _);
             if (kind is not (0x0001 or 0x0002 or 0x0004 or 0x0010 or 0x0011
                 or 0x0016 or 0x0017 or 0x0018 or 0x001B or 0x001C
-                or 0x001D or 0x0020 or 0x0021))
+                or 0x001D or 0x0020 or 0x0021)
+                && !(kind == 0x0012
+                    && schema
+                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
+                && !(kind == 0x0048
+                    && tables.FixedArrayLayouts.Count != 0
+                    && schema
+                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft))
             {
                 throw Unsupported(
                     $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
@@ -361,6 +368,12 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("The caller result type is unsupported.");
         }
 
+        var nativeFixedArrayTypes = schema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                ? ReadForeignInvocationFixedArrayTypes(tables,
+                    selectedModuleRow, nativePointerTypeDefinitions,
+                    signatureIndexByAnchorMethod, structureTypeByTypeDef)
+                : [];
         var typeArray = nativePointerTypeDefinitions.ToImmutableArray();
         if (!NativePointerTypeContract.IsValidTable(typeArray, [],
                 functionPointerSignatures))
@@ -430,6 +443,7 @@ public static partial class TrRmExecutableCompiler
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             NativeFunctionPointerSignatures = functionPointerSignatures,
             NativePointerTypes = typeArray,
+            NativeFixedArrayTypes = nativeFixedArrayTypes,
         };
         if (verifySemantics)
         {
@@ -1550,6 +1564,118 @@ public static partial class TrRmExecutableCompiler
 
         return FromNativeValueRow(typeSpecs, typeSpecRef,
             nativePointerTypeDefinitions, structureTypeByTypeDef);
+    }
+
+    private static ImmutableArray<BoundNativeFixedArrayType>
+        ReadForeignInvocationFixedArrayTypes(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow,
+        List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+    {
+        if (tables.FixedArrayLayouts.Count == 0)
+        {
+            return [];
+        }
+
+        if (!tables.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw Invalid("The selected module has no Windows x64 array layout.");
+        }
+
+        var pendingLayouts = new List<TrRmFixedArrayLayoutRow>();
+        for (var row = 1; row <= tables.FixedArrayLayouts.Count; row++)
+        {
+            var layout = tables.FixedArrayLayouts.GetRow(row);
+            if (layout.OwnerModuleRow == selectedModuleRow
+                && layout.TargetProfileRef == (uint)profileRow)
+            {
+                pendingLayouts.Add(layout);
+            }
+        }
+
+        pendingLayouts.Sort(static (left, right)
+            => left.ArrayTypeSpecRow.CompareTo(right.ArrayTypeSpecRow));
+        if (pendingLayouts.Count == 0)
+        {
+            return [];
+        }
+
+        var fixedArrayTypes = new List<BoundNativeFixedArrayType>(
+            pendingLayouts.Count);
+        var arrayTypeByTypeSpecRow = new Dictionary<int, PrimitiveType>(
+            pendingLayouts.Count);
+        while (pendingLayouts.Count != 0)
+        {
+            var madeProgress = false;
+            for (var index = 0; index < pendingLayouts.Count; index++)
+            {
+                var layoutRow = pendingLayouts[index];
+                if (!tables.TypeSpecs.TryGetFixedInlineArray(
+                        (uint)layoutRow.ArrayTypeSpecRow,
+                        out var elementTypeSpecRef, out var elementCount))
+                {
+                    throw Invalid("A FixedArrayLayout row has no array TypeSpec.");
+                }
+
+                var elementTypeReference = tables.TypeSpecs.GetTypeSpecRef(
+                    elementTypeSpecRef);
+                PrimitiveType elementType;
+                if (elementTypeReference.IsRow
+                    && elementTypeReference.Form == 0x11)
+                {
+                    if (!arrayTypeByTypeSpecRow.TryGetValue(
+                            elementTypeReference.Row, out elementType))
+                    {
+                        continue;
+                    }
+                }
+                else
+                {
+                    elementType = ReadForeignInvocationType(
+                        tables.TypeSpecs, elementTypeSpecRef,
+                        nativePointerTypeDefinitions,
+                        signatureIndexByAnchorMethod,
+                        structureTypeByTypeDef);
+                }
+
+                if (!NativeFixedArrayContract.TryCreateType(elementType,
+                        elementCount, [], fixedArrayTypes, out var arrayType,
+                        out var computedLayout))
+                {
+                    throw Unsupported(
+                        "A fixed-array element type is outside the bounded source-free subset.");
+                }
+
+                if (computedLayout.ElementStride != layoutRow.ElementStride
+                    || computedLayout.ByteExtent != layoutRow.ByteExtent
+                    || computedLayout.Alignment != layoutRow.Alignment)
+                {
+                    throw Invalid(
+                        "A FixedArrayLayout row differs from the reconstructed array geometry.");
+                }
+
+                if (!arrayTypeByTypeSpecRow.TryAdd(
+                        layoutRow.ArrayTypeSpecRow, arrayType))
+                {
+                    throw Invalid("A fixed-array TypeSpec has duplicate layout rows.");
+                }
+
+                pendingLayouts.RemoveAt(index);
+                index--;
+                madeProgress = true;
+            }
+
+            if (!madeProgress)
+            {
+                throw Invalid("Fixed-array TypeSpec dependencies are cyclic.");
+            }
+        }
+
+        return [.. fixedArrayTypes];
     }
 
     private static bool IsForeignInvocationValueType(PrimitiveType type,

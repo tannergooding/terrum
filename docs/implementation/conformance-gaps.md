@@ -452,11 +452,16 @@ and same-layout nested replacement rejection, passed in the 27-test A2
 fixed-array layout/provider selection. The follow-up selection passed
 29/29, adding function-pointer anchor equivalence across relocated MethodDef
 rows and rejection of a different anchor signature. These are metadata/provider checks,
-not array source-free or runtime evidence. A2, its allocations and Copy bit
-remain unapproved. Compatible replacement and complete remapping,
-initialization, source-free reconstruction and A2 indexed native/runtime
-lowering remain open; the source-free loader still rejects Section `0x0012`
-and nonempty TypeDef tables. Closed constructed array elements remain incomplete. The exact
+not array runtime or full Body evidence. A2, its allocations and Copy bit
+remain unapproved. The public source-free NativeAddress reader now consumes
+A2 Section `0x0012` and TargetProfile rows for selected-Module scalar, unit,
+direct-pointer, function-pointer and nested-array types; it rebuilds bound
+array identities, checks target geometry and preserves wide counts. Its
+synthetic consumer and combined TRRM array suites passed 151/151 with zero
+skips. It still rejects nonempty TypeDef tables and does not construct array
+TypeMap entries or PlaceSelection/EC Bodies. Compatible provider replacement,
+complete remapping, initialization, and A2 indexed native/runtime lowering
+remain open. Closed constructed array elements remain incomplete. The exact
 uniqueness-amended A3 identity is
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`; the prior
 flag-free `...-3` identity is not accepted as an alias. Its provisional,

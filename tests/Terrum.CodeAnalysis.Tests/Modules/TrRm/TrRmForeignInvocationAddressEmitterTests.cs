@@ -200,6 +200,88 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2LoaderReconstructsNestedAndWideArrayTypes()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "native-address-array-types";
+        var artifact = CreateStorageAddressArtifact(moduleIdentity,
+            schemaIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        var firstArrayTypeSpecRow = tables.TypeSpecs.Count + 1;
+        var functionPointerTypeSpecRow = 0;
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            if (functionPointerTypeSpecRow == 0
+                && tables.NativeFunctionPointerAnchors
+                    .HasAnchorForTypeSpec(row))
+            {
+                functionPointerTypeSpecRow = row;
+            }
+        }
+        Assert.That(functionPointerTypeSpecRow, Is.GreaterThan(0));
+        var wideCount = 1UL << 32;
+        var arrayTypes = new (uint ElementTypeSpecRef, ulong ElementCount,
+            ulong ElementStride, ulong ByteExtent, ulong Alignment)[]
+        {
+            (0xF200_0008, 2, 4, 8, 4),
+            (0xF200_0008, wideCount, 4, wideCount * 4, 4),
+            ((uint)firstArrayTypeSpecRow, 3, 8, 24, 4),
+            (0xF200_0000, ulong.MaxValue, 0, 0, 1),
+            (0xF300_8C08, 2, 8, 16, 8),
+            ((uint)functionPointerTypeSpecRow, 2, 8, 16, 8),
+        };
+        artifact = AddA2FixedArrayTypes(artifact, arrayTypes);
+
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(loaded.NativeFixedArrayTypes, Has.Length.EqualTo(6));
+        Assert.That(loaded.NativeFixedArrayTypes[0].ElementType,
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(loaded.NativeFixedArrayTypes[0].ElementCount,
+            Is.EqualTo(2UL));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ElementCount,
+            Is.EqualTo(wideCount));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ByteExtent,
+            Is.EqualTo(wideCount * 4));
+        Assert.That(loaded.NativeFixedArrayTypes[2].ElementType,
+            Is.EqualTo(NativeFixedArrayTypes.Type(0)));
+        Assert.That(loaded.NativeFixedArrayTypes[3].ElementType,
+            Is.EqualTo(PrimitiveType.Void));
+        Assert.That(loaded.NativeFixedArrayTypes[3].ElementCount,
+            Is.EqualTo(ulong.MaxValue));
+        Assert.That(loaded.NativeFixedArrayTypes[3].ByteExtent, Is.Zero);
+        Assert.That(NativePointerTypes.IsType(
+            loaded.NativeFixedArrayTypes[4].ElementType), Is.True);
+        Assert.That(NativeFunctionPointerTypes.IsType(
+            loaded.NativeFixedArrayTypes[5].ElementType), Is.True);
+        Assert.That(NativeFixedArrayContract.MatchesProgram(loaded), Is.True);
+    }
+
+    [Test]
+    public void StandardA2LoaderRejectsInconsistentFixedArrayGeometry()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "native-address-invalid-array-types";
+        var artifact = CreateStorageAddressArtifact(moduleIdentity,
+            schemaIdentity);
+        artifact = AddA2FixedArrayTypes(artifact,
+        [
+            (0xF200_0008, 4UL, 4UL, 16UL, 4UL),
+        ], corruptFirstExtent: true);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                moduleIdentity, []));
+    }
+
+    [Test]
     public void EmitsInitializedLocalStorageAddressForNativeParameter()
     {
         const string schemaIdentity
@@ -2431,6 +2513,168 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
             moduleIdentity, schemaIdentity, 1);
+    }
+
+    private static byte[] AddA2FixedArrayTypes(byte[] artifact,
+        IReadOnlyList<(uint ElementTypeSpecRef, ulong ElementCount,
+            ulong ElementStride, ulong ByteExtent, ulong Alignment)> arrays,
+        bool corruptFirstExtent = false)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                index);
+        if (tables.Modules.Count != 1
+            || tables.FixedArrayLayouts.Count != 0
+            || tables.Features.TryGetFeature(
+                TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
+                out _))
+        {
+            throw new InvalidOperationException(
+                "The array augmentation requires an unmodified single-module A2 artifact.");
+        }
+
+        var (featureFirst, existingFeatureCount)
+            = tables.Modules.GetFeatureRange(1);
+        if (featureFirst != 1 || existingFeatureCount != tables.Features.Count)
+        {
+            throw new InvalidOperationException(
+                "The source artifact does not own its complete Feature range.");
+        }
+
+        var featureRows = new List<TrRmFeatureRow>(
+            tables.Features.Count + 1);
+        for (var row = 1; row <= tables.Features.Count; row++)
+        {
+            featureRows.Add(tables.Features.GetFeature(row));
+        }
+        featureRows.Add(TrRmFeatureRow.FixedInlineArrayStorageCandidate);
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = new TrRmFeatureTableReader(featureBytes,
+            featureRows.Count, schema);
+
+        if (!index.TryGetSection(0x0001, out var oldModuleBytes,
+                out var moduleCount)
+            || moduleCount != 1)
+        {
+            throw new InvalidOperationException(
+                "The source artifact has no single Module row.");
+        }
+        var moduleBytes = oldModuleBytes.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(moduleBytes.AsSpan(28),
+            checked((uint)featureRows.Count));
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            tables.Strings, tables.Modules.ModuleRefCount,
+            tables.TypeDefs.Count, tables.Methods.Count,
+            tables.Modules.SourceFileCount, featureRows.Count);
+        if (tables.TargetProfiles.Count != 0)
+        {
+            throw new InvalidOperationException(
+                "The source artifact already contains target profiles.");
+        }
+        var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
+            new TrRmTargetProfileRow(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision),
+        ], schema);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, 1, schema);
+
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>(
+            tables.TypeSpecs.Count + arrays.Count);
+        for (var row = 1; row <= tables.TypeSpecs.Count; row++)
+        {
+            typeSpecRows.Add(tables.TypeSpecs.GetRow(row).ToArray());
+        }
+
+        foreach (var array in arrays)
+        {
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.FixedInlineArray(
+                array.ElementTypeSpecRef, array.ElementCount));
+        }
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            tables.TypeDefs.Count, tables.Imports.Count,
+            tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+            typeSpecRows.Count, tables.TypeDefs.Count, tables.Imports.Count,
+            tables.GenericParams.Count,
+            tables.NativeFunctionPointerSignatures.Count, schema,
+            tables.Methods.Count);
+        if (!targetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw new InvalidOperationException(
+                "The source artifact has no Windows x64 target profile.");
+        }
+
+        var layoutRows = new TrRmFixedArrayLayoutRow[arrays.Count];
+        for (var indexInArray = 0; indexInArray < arrays.Count; indexInArray++)
+        {
+            var array = arrays[indexInArray];
+            layoutRows[indexInArray] = new TrRmFixedArrayLayoutRow(1,
+                tables.TypeSpecs.Count + indexInArray + 1,
+                (uint)profileRow, array.ElementStride, array.ByteExtent,
+                array.Alignment);
+        }
+        var fixedArrayLayoutBytes = TrRmFixedArrayLayoutTableWriter.Encode(
+            layoutRows, typeSpecs, targetProfiles, features, modules,
+            schema);
+        if (corruptFirstExtent)
+        {
+            var extent = BinaryPrimitives.ReadUInt64LittleEndian(
+                fixedArrayLayoutBytes.AsSpan(24));
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                fixedArrayLayoutBytes.AsSpan(24), checked(extent + 1));
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            switch (kind)
+            {
+                case 0x0001:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)moduleCount), moduleBytes));
+                    break;
+                case 0x0004:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)featureRows.Count), featureBytes));
+                    break;
+                case 0x0011:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)typeSpecRows.Count), typeSpecBytes));
+                    break;
+                case 0x0012:
+                    throw new InvalidOperationException(
+                        "The source artifact already contains FixedArrayLayout rows.");
+                case 0x0048:
+                    throw new InvalidOperationException(
+                        "The source artifact already contains target profiles.");
+                default:
+                    sections.Add(new TrRmSection(kind, flags,
+                        checked((uint)recordCount), section.ToArray()));
+                    break;
+            }
+        }
+
+        sections.Add(new TrRmSection(0x0048, 0, 1, targetProfileBytes));
+        sections.Add(new TrRmSection(0x0012, 0,
+            checked((uint)layoutRows.Length), fixedArrayLayoutBytes));
+        sections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     internal static byte[] RewriteStorageAddressArtifact(byte[] artifact,
