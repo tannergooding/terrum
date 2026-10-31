@@ -270,6 +270,52 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2DeclarationProducerEmitsNestedArrayTypeMetadata()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-array-field-declarations";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct ArrayHolder {
+                public [[int32; 2]; 3] Values;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.NativeFixedArrayTypes,
+            Has.Length.EqualTo(2));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(2));
+        var innerLayout = tables.FixedArrayLayouts.GetRow(1);
+        var outerLayout = tables.FixedArrayLayouts.GetRow(2);
+        Assert.That(tables.TypeSpecs.TryGetFixedInlineArray(
+            (uint)innerLayout.ArrayTypeSpecRow, out _, out var innerCount),
+            Is.True);
+        Assert.That(innerCount, Is.EqualTo(2UL));
+        Assert.That(tables.TypeSpecs.TryGetFixedInlineArray(
+            (uint)outerLayout.ArrayTypeSpecRow,
+            out var outerElementType, out var outerCount), Is.True);
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(outerElementType).Form,
+            Is.EqualTo((byte)0x11));
+        Assert.That(outerCount, Is.EqualTo(3UL));
+        Assert.That(innerLayout.ByteExtent, Is.EqualTo(8UL));
+        Assert.That(outerLayout.ByteExtent, Is.EqualTo(24UL));
+        Assert.That(tables.TypeDefs.HasDeclaredCopy(1), Is.True);
+        Assert.That(tables.Features.TryGetFeature(
+            TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
+            out var arrayFeature), Is.True);
+        Assert.That(arrayFeature.RuleRevision, Is.EqualTo(1));
+    }
+
+    [Test]
     public void StandardA2LoaderReconstructsNestedAndWideArrayTypes()
     {
         const string schemaIdentity

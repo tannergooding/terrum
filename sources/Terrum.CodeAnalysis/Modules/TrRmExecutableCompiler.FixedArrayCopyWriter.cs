@@ -15,11 +15,10 @@ public static partial class TrRmExecutableCompiler
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
         if (program.EntryPoint != -1 || !program.Functions.IsEmpty
-            || program.Structures.IsEmpty || !program.Classes.IsEmpty
+            || program.Structures.IsEmpty             || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || !program.NativePointerTypes.IsEmpty
-            || !program.NativeFixedArrayTypes.IsEmpty
             || !program.CheckedReferenceTypes.IsEmpty
             || !program.Interfaces.IsEmpty
             || !program.EnumDefinitions.IsEmpty
@@ -50,18 +49,32 @@ public static partial class TrRmExecutableCompiler
                     != FixedLayoutStorage.WindowsX64TargetRequirement
                 || structure.IsSequential == structure.IsTransparent
                 || structure.CleanupMethod is not null
-                || structure.Fields.IsDefaultOrEmpty
-                || structure.Fields.Any(field =>
-                    !DirectNativeImportContract.IsScalar(field.Type)
-                    && ((int)field.Type - 100 is < 0
-                        || (int)field.Type - 100 >= typeDefCount)))
+                || structure.Fields.IsDefaultOrEmpty)
             {
                 throw Unsupported(
-                    "A2 Copy declaration emission supports Blittable Sequential/Transparent structs with scalar or local struct fields.");
+                    "A2 Copy declaration emission supports Blittable Sequential/Transparent structs without Cleanup.");
+            }
+
+            foreach (var field in structure.Fields)
+            {
+                var structureIndex = (int)field.Type - 100;
+                var isStructure = structureIndex >= 0
+                    && structureIndex < typeDefCount;
+                var isArray = NativeFixedArrayTypes.IsType(field.Type);
+                var isValidArray = isArray
+                    && (uint)NativeFixedArrayTypes.Index(field.Type)
+                        < (uint)program.NativeFixedArrayTypes.Length;
+                if (!DirectNativeImportContract.IsScalar(field.Type)
+                    && !isStructure && !isValidArray)
+                {
+                    throw Unsupported(
+                        "A2 Copy declaration emission supports scalar, local struct, and fixed-array fields.");
+                }
             }
         }
 
-        _ = FixedLayoutStorage.Validate(program.Structures);
+        _ = FixedLayoutStorage.Validate(program.Structures,
+            program.NativeFixedArrayTypes);
         var hasFloatingTypes = program.Structures.Any(static structure
             => structure.Fields.Any(static field => IsFloat(field.Type)));
         var typeRows = (hasFloatingTypes ? s_typeRows : s_nonFloatTypeRows)
@@ -70,6 +83,11 @@ public static partial class TrRmExecutableCompiler
         var nativeFunctionPointerTypeRows
             = new Dictionary<PrimitiveType, int>();
         var nativePointerTypeRows = new Dictionary<PrimitiveType, int>();
+        var arrayTypeSpecRows
+            = new Dictionary<int, uint>(program.NativeFixedArrayTypes.Length);
+        var arrayTypeStates = new byte[program.NativeFixedArrayTypes.Length];
+        var fixedArrayLayoutRows = new List<TrRmFixedArrayLayoutRow>(
+            program.NativeFixedArrayTypes.Length);
         var structureNamespaceRows = new int[typeDefCount];
         var structureNameRows = new int[typeDefCount];
         var structureFieldNameRows = new int[typeDefCount][];
@@ -99,6 +117,49 @@ public static partial class TrRmExecutableCompiler
             return row;
         }
 
+        uint GetFieldTypeSpecRef(PrimitiveType type)
+        {
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                return GetArrayTypeSpecRow(NativeFixedArrayTypes.Index(type));
+            }
+
+            return checked((uint)NativeBlittableFieldTypeRow(typeRows,
+                typeDefTypeSpecRows, structureTypeDefRows, type, 0,
+                nativeFunctionPointerTypeRows, nativePointerTypeRows, []));
+        }
+
+        uint GetArrayTypeSpecRow(int arrayIndex)
+        {
+            if ((uint)arrayIndex >= (uint)program.NativeFixedArrayTypes.Length)
+            {
+                throw Unsupported("A fixed-array type is outside the checked program table.");
+            }
+            if (arrayTypeSpecRows.TryGetValue(arrayIndex,
+                    out var existingRow))
+            {
+                return existingRow;
+            }
+            if (arrayTypeStates[arrayIndex] != 0)
+            {
+                throw Unsupported("A fixed-array type identity is recursive.");
+            }
+
+            arrayTypeStates[arrayIndex] = 1;
+            var definition = program.NativeFixedArrayTypes[arrayIndex];
+            var elementTypeSpecRef
+                = GetFieldTypeSpecRef(definition.ElementType);
+            var row = checked((uint)typeRows.Count + 1);
+            typeRows.Add(TrRmTypeSpecTableWriter.FixedInlineArray(
+                elementTypeSpecRef, definition.ElementCount));
+            arrayTypeSpecRows.Add(arrayIndex, row);
+            arrayTypeStates[arrayIndex] = 2;
+            fixedArrayLayoutRows.Add(new TrRmFixedArrayLayoutRow(1,
+                checked((int)row), 1, definition.ElementStride,
+                definition.ByteExtent, definition.Alignment));
+            return row;
+        }
+
         var hasCopyEvidence = false;
         var typeDefRows = new TrRmTypeDefRow[typeDefCount];
         for (var index = 0; index < typeDefCount; index++)
@@ -122,10 +183,8 @@ public static partial class TrRmExecutableCompiler
             for (var field = 0; field < structure.Fields.Length; field++)
             {
                 var fieldDefinition = structure.Fields[field];
-                var fieldTypeSpecRow = NativeBlittableFieldTypeRow(typeRows,
-                    typeDefTypeSpecRows, structureTypeDefRows,
-                    fieldDefinition.Type, 0, nativeFunctionPointerTypeRows,
-                    nativePointerTypeRows, []);
+                var fieldTypeSpecRef = GetFieldTypeSpecRef(
+                    fieldDefinition.Type);
                 var visibility = fieldDefinition.IsPrivate ? 0u
                     : fieldDefinition.IsInternal ? 1u : 2u;
                 var fieldFlags = visibility
@@ -134,7 +193,7 @@ public static partial class TrRmExecutableCompiler
                     = GetStringRow(fieldDefinition.Name);
                 fieldRows.Add(new TrRmFieldDefRow(index + 1,
                     structureFieldNameRows[index][field],
-                    checked((uint)fieldTypeSpecRow), fieldFlags));
+                    fieldTypeSpecRef, fieldFlags));
             }
 
             layoutFirstByStructure[index] = layoutRows.Count + 1;
@@ -171,13 +230,29 @@ public static partial class TrRmExecutableCompiler
                 0, 0, layoutFirstByStructure[index], 2, 0, 0);
         }
 
+        for (var arrayIndex = 0;
+            arrayIndex < program.NativeFixedArrayTypes.Length; arrayIndex++)
+        {
+            _ = GetArrayTypeSpecRow(arrayIndex);
+        }
+
         var featureRows = new List<TrRmFeatureRow>();
         if (hasCopyEvidence)
         {
             featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
         }
+        if (fixedArrayLayoutRows.Count != 0)
+        {
+            featureRows.Add(TrRmFeatureRow.FixedInlineArrayStorageCandidate);
+            if (!hasCopyEvidence)
+            {
+                featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
+            }
+        }
         var featureBytes = featureRows.Count == 0
             ? [] : TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var features = new TrRmFeatureTableReader(featureBytes,
+            featureRows.Count, schema);
         var stringBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
         var strings = new TrRmStringTableReader(stringBytes,
             stringRows.Count);
@@ -230,6 +305,15 @@ public static partial class TrRmExecutableCompiler
                 layoutFieldBytes),
             new(0x0048, 0, 1, targetProfileBytes),
         };
+        if (fixedArrayLayoutRows.Count != 0)
+        {
+            var fixedArrayLayoutBytes
+                = TrRmFixedArrayLayoutTableWriter.Encode(
+                    fixedArrayLayoutRows, typeSpecs, targetProfiles, features,
+                    modules, schema);
+            sections.Add(new TrRmSection(0x0012, 0,
+                (uint)fixedArrayLayoutRows.Count, fixedArrayLayoutBytes));
+        }
         if (featureRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x0004, 0,

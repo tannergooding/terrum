@@ -456,8 +456,10 @@ not array runtime or full Body evidence. A2, its allocations and Copy bit
 remain unapproved. The A2 `EmitStandard` path emits declaration-only local
 Blittable Sequential/Transparent structs with `DeclaredCopy` `0x20` and
 Feature `2/1` for checked ordinary non-unique/no-Cleanup declarations; unique
-rows remain unmarked. It does not yet produce array TypeSpec/layout or Body
-rows from source. The public source-free NativeAddress reader now consumes
+rows remain unmarked. It also emits TypeSpec `0x11` and Module-owned
+FixedArrayLayout rows for scalar, unit and nested array fields in these
+declarations with exact Feature `20/1` and `2/1` closure. Array Body rows and
+operations are not produced. The public source-free NativeAddress reader now consumes
 A2 Section `0x0012` and TargetProfile rows for selected-Module scalar, unit,
 direct-pointer, function-pointer and nested-array types; it rebuilds bound
 array identities, checks target geometry and preserves wide counts. Its
