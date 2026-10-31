@@ -53,6 +53,9 @@ public sealed partial class CliTests
                 "--provider", middle, "--provider", leaf)).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "run-native-graph", root,
                 "--provider", leaf, "--provider", middle, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
+            Assert.That((await RunAsync([], "run-native-graph-jit", root,
+                "--provider", leaf, "--provider", middle,
+                "--runtime", "fail-fast")).ExitCode, Is.EqualTo(42));
 
             var badSource = Path.Combine(directory, "bad.terrum");
             await File.WriteAllTextAsync(badSource, "int32 Invalid() { return Missing; }");

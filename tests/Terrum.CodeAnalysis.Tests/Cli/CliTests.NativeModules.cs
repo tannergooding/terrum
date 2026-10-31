@@ -15,6 +15,37 @@ public sealed partial class CliTests
 {
     [TestCase("fail-fast")]
     [TestCase("checked-exceptions")]
+    public async Task BuildCompilesAndRunsFlatArraySourceAsync(
+        string runtimePolicy)
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-fixed-array-build-{Guid.NewGuid():N}");
+        var source = prefix + ".terrum";
+        var output = prefix + ".exe";
+        try
+        {
+            await File.WriteAllTextAsync(source,
+                "int32 Main() { mut [uint32; 3] values = [10, 20, 30]; "
+                + "values[1] = values[0] + 2; return int32(values[1]); }");
+            var (exitCode, json, error) = await RunAsync([], "build", source,
+                "-o", output, "--runtime", runtimePolicy, "--json");
+            Assert.That(exitCode, Is.Zero, json + error);
+            Assert.That(error, Is.Empty);
+            using var result = JsonDocument.Parse(json);
+            Assert.That(result.RootElement.GetProperty("success").GetBoolean(),
+                Is.True);
+            Assert.That(await ExecuteNativeImageAsync(output).ConfigureAwait(true),
+                Is.EqualTo(12));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(source).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(output).ConfigureAwait(true);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
     public async Task NativePackagesCompileAndRunFlatArrayProgramsAsync(
         string policy)
     {
@@ -57,6 +88,16 @@ public sealed partial class CliTests
                     policy, "--json");
             Assert.That(consumerExit, Is.Zero, consumerOutput);
             Assert.That(consumerError, Is.Empty);
+
+            var (validationExit, validationOutput, validationError) =
+                await RunAsync([], "validate-native", consumer, producer, "--json");
+            Assert.That(validationExit, Is.Zero, validationOutput + validationError);
+            Assert.That(validationError, Is.Empty);
+            using (var validation = JsonDocument.Parse(validationOutput))
+            {
+                Assert.That(validation.RootElement.GetProperty("success").GetBoolean(),
+                    Is.True);
+            }
 
             var (runExit, runOutput, runError) =
                 await RunAsync([], "run-native", consumer, producer,
