@@ -315,6 +315,7 @@ internal static class TrRmFixedArrayGenericProfileValidator
         TrRmImportTableReader imports,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork(2);
         var pending = new Stack<(uint Reference, bool AllowInitQualifier,
             ulong Depth)>();
         var visited = new Dictionary<(int Row, bool AllowInitQualifier),
@@ -339,12 +340,23 @@ internal static class TrRmFixedArrayGenericProfileValidator
             }
 
             var visitKey = (reference.Row, current.AllowInitQualifier);
-            if (visited.TryGetValue(visitKey, out var previousDepth)
-                && current.Depth <= previousDepth)
+            resourceLedger?.ConsumeWork(2);
+            if (visited.TryGetValue(visitKey, out var previousDepth))
             {
-                continue;
+                resourceLedger?.ConsumeWork();
+                if (current.Depth <= previousDepth)
+                {
+                    continue;
+                }
+
+                resourceLedger?.ConsumeWork();
+                visited[visitKey] = current.Depth;
             }
-            visited[visitKey] = current.Depth;
+            else
+            {
+                resourceLedger?.ConsumeWork();
+                visited.Add(visitKey, current.Depth);
+            }
 
             if (reference.Form is 0x04 or 0x05)
             {
@@ -397,6 +409,7 @@ internal static class TrRmFixedArrayGenericProfileValidator
         TrRmGenericParamTableReader genericParams,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork(2);
         var pending = new Stack<(uint Reference, ulong Depth)>();
         var visited = new Dictionary<int, ulong>();
         resourceLedger?.ReserveWorkAtDepth(1, 1);
@@ -410,12 +423,23 @@ internal static class TrRmFixedArrayGenericProfileValidator
             {
                 continue;
             }
-            if (visited.TryGetValue(reference.Row, out var previousDepth)
-                && current.Depth <= previousDepth)
+            resourceLedger?.ConsumeWork();
+            if (visited.TryGetValue(reference.Row, out var previousDepth))
             {
-                continue;
+                resourceLedger?.ConsumeWork();
+                if (current.Depth <= previousDepth)
+                {
+                    continue;
+                }
+
+                resourceLedger?.ConsumeWork();
+                visited[reference.Row] = current.Depth;
             }
-            visited[reference.Row] = current.Depth;
+            else
+            {
+                resourceLedger?.ConsumeWork();
+                visited.Add(reference.Row, current.Depth);
+            }
 
             resourceLedger?.ConsumeWork();
             var row = typeSpecs.GetRow(reference.Row);
@@ -431,10 +455,10 @@ internal static class TrRmFixedArrayGenericProfileValidator
                     break;
 
                 case 0x05:
-                    for (var ordinal = 0;
-                        ordinal < typeSpecs.GetConstructedArgumentCount(
-                            reference.Row);
-                        ordinal++)
+                    var argumentCount
+                        = typeSpecs.GetConstructedArgumentCount(reference.Row);
+                    for (var ordinal = argumentCount - 1; ordinal >= 0;
+                        ordinal--)
                     {
                         var childDepth = checked(current.Depth + 1);
                         resourceLedger?.ReserveWorkAtDepth(1, childDepth);

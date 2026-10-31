@@ -1715,7 +1715,7 @@ internal static class TrRmFixedArrayLayoutValidator
             var (first, count) = _typeDefs.GetContractRange(typeDef);
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
-                ConsumeWork();
+                ConsumeWork(sizeof(ushort) + 1UL);
                 if (BinaryPrimitives.ReadUInt16LittleEndian(
                         _contracts.GetRow(first + ordinal)[4..]) == 5)
                 {

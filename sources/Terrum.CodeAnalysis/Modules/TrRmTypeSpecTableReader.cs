@@ -195,7 +195,9 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         var isFamily = reference.TypeCode >= 0x80;
-        var bytes = new byte[isFamily ? 4 : 3];
+        var byteCount = isFamily ? 4 : 3;
+        _resourceLedger?.ConsumeWork(checked((ulong)byteCount + 1UL));
+        var bytes = new byte[byteCount];
         bytes[0] = 0x01;
         bytes[1] = reference.Qualifiers;
         bytes[2] = reference.TypeCode;
@@ -231,13 +233,27 @@ public readonly ref struct TrRmTypeSpecTableReader
         for (var row = 1; row <= _recordCount; row++)
         {
             var data = GetRowCore(row);
-            if (data.Length == 4 && data[0] == 0x01
-                && data[1] == reference.Qualifiers
-                && data[2] == reference.TypeCode
-                && data[3] == reference.ArgumentCode
-                && _compactValueTypeKeys[row] != 0)
+            _resourceLedger?.ConsumeWork();
+            if (data.Length != 4)
             {
-                return _compactValueTypeKeys[row];
+                continue;
+            }
+
+            _resourceLedger?.ConsumeWork(8);
+            var matches = (data[0] == 0x01)
+                & (data[1] == reference.Qualifiers)
+                & (data[2] == reference.TypeCode)
+                & (data[3] == reference.ArgumentCode);
+            if (!matches)
+            {
+                continue;
+            }
+
+            _resourceLedger?.ConsumeWork(2);
+            var compactKey = _compactValueTypeKeys[row];
+            if (compactKey != 0)
+            {
+                return compactKey;
             }
         }
 
@@ -247,12 +263,17 @@ public readonly ref struct TrRmTypeSpecTableReader
     internal bool AreEquivalentTypeSpecRefs(uint left, uint right)
     {
         var allowInitQualifier = false;
+        ulong depth = 1;
+        _resourceLedger?.ReserveWorkAtDepth(1, depth);
         while (true)
         {
+            _resourceLedger?.ConsumeWork();
+            _resourceLedger?.CheckDepthFromCurrent(depth);
             var leftReference = GetTypeSpecRef(left,
                 allowInitQualifier: allowInitQualifier);
             var rightReference = GetTypeSpecRef(right,
                 allowInitQualifier: allowInitQualifier);
+            _resourceLedger?.ConsumeWork(2);
             if (leftReference.Form != rightReference.Form
                 || leftReference.Qualifiers != rightReference.Qualifiers)
             {
@@ -264,53 +285,90 @@ public readonly ref struct TrRmTypeSpecTableReader
             switch (leftReference.Form)
             {
                 case 0x01:
+                    _resourceLedger?.ConsumeWork(2);
                     return leftReference.TypeCode == rightReference.TypeCode
                         && leftReference.ArgumentCode == rightReference.ArgumentCode;
 
                 case 0x02:
                 case 0x03:
                 case 0x04:
-                    return leftReference.IsRow && rightReference.IsRow
-                        && Read(leftRow, 2) == Read(rightRow, 2);
-
-                case 0x05:
-                    return leftReference.IsRow && rightReference.IsRow
-                        && leftRow.SequenceEqual(rightRow);
-
-                case >= 0x06 and <= 0x0B:
-                case 0x0E:
+                    _resourceLedger?.ConsumeWork(2);
                     if (!leftReference.IsRow || !rightReference.IsRow)
                     {
                         return false;
                     }
-                    left = Read(leftRow, 2);
-                    right = Read(rightRow, 2);
+
+                    var leftIdentity = Read(leftRow, 2);
+                    var rightIdentity = Read(rightRow, 2);
+                    _resourceLedger?.ConsumeWork();
+                    return leftIdentity == rightIdentity;
+
+                case 0x05:
+                    _resourceLedger?.ConsumeWork(2);
+                    return leftReference.IsRow && rightReference.IsRow
+                        && RowsEqual(leftRow, rightRow);
+
+                case >= 0x06 and <= 0x0B:
+                case 0x0E:
+                    _resourceLedger?.ConsumeWork(2);
+                    if (!leftReference.IsRow || !rightReference.IsRow)
+                    {
+                        return false;
+                    }
+
+                    var leftChild = Read(leftRow, 2);
+                    var rightChild = Read(rightRow, 2);
+                    var childDepth = checked(depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, childDepth);
+                    left = leftChild;
+                    right = rightChild;
+                    depth = childDepth;
                     allowInitQualifier = false;
                     break;
 
                 case 0x0C:
-                    if (!leftReference.IsRow || !rightReference.IsRow
-                        || leftRow[2] != rightRow[2])
+                    _resourceLedger?.ConsumeWork(2);
+                    if (!leftReference.IsRow || !rightReference.IsRow)
                     {
                         return false;
                     }
-                    left = Read(leftRow, 3);
-                    right = Read(rightRow, 3);
+
+                    _resourceLedger?.ConsumeWork(3);
+                    if (leftRow[2] != rightRow[2])
+                    {
+                        return false;
+                    }
+
+                    var leftFamilyChild = Read(leftRow, 3);
+                    var rightFamilyChild = Read(rightRow, 3);
+                    var familyChildDepth = checked(depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1,
+                        familyChildDepth);
+                    left = leftFamilyChild;
+                    right = rightFamilyChild;
+                    depth = familyChildDepth;
                     allowInitQualifier = leftRow[2] == 0x8A;
                     break;
 
                 case 0x0D:
-                    _resourceLedger?.ConsumeWork(
-                        checked((ulong)leftRow.Length * 3));
+                    _resourceLedger?.ConsumeWork(2);
                     return leftReference.IsRow && rightReference.IsRow
-                        && leftRow.SequenceEqual(rightRow);
+                        && RowsEqual(leftRow, rightRow);
 
                 case 0x0F:
                     return true;
 
                 case 0x10:
-                    return leftReference.IsRow && rightReference.IsRow
-                        && Read(leftRow, 2) == Read(rightRow, 2);
+                    _resourceLedger?.ConsumeWork(2);
+                    if (!leftReference.IsRow || !rightReference.IsRow)
+                    {
+                        return false;
+                    }
+
+                    var leftPredicateCapture = Read(leftRow, 2);
+                    var rightPredicateCapture = Read(rightRow, 2);
+                    _resourceLedger?.ConsumeWork();
+                    return leftPredicateCapture == rightPredicateCapture;
 
                 case 0x11:
                     _resourceLedger?.ConsumeWork(19);
@@ -320,8 +378,14 @@ public readonly ref struct TrRmTypeSpecTableReader
                     {
                         return false;
                     }
-                    left = Read(leftRow, 2);
-                    right = Read(rightRow, 2);
+
+                    var leftElement = Read(leftRow, 2);
+                    var rightElement = Read(rightRow, 2);
+                    var elementDepth = checked(depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, elementDepth);
+                    left = leftElement;
+                    right = rightElement;
+                    depth = elementDepth;
                     allowInitQualifier = false;
                     break;
 
@@ -335,16 +399,23 @@ public readonly ref struct TrRmTypeSpecTableReader
     {
         var hash = new HashCode();
         var allowInitQualifier = false;
+        ulong depth = 1;
+        _resourceLedger?.ReserveWorkAtDepth(1, depth);
         while (true)
         {
+            _resourceLedger?.ConsumeWork();
+            _resourceLedger?.CheckDepthFromCurrent(depth);
             var reference = GetTypeSpecRef(typeSpecRef,
                 allowInitQualifier: allowInitQualifier);
+            _resourceLedger?.ConsumeWork(2);
             hash.Add(reference.Form);
             hash.Add(reference.Qualifiers);
             if (!reference.IsRow)
             {
+                _resourceLedger?.ConsumeWork(2);
                 hash.Add(reference.TypeCode);
                 hash.Add(reference.ArgumentCode);
+                _resourceLedger?.ConsumeWork();
                 return hash.ToHashCode();
             }
 
@@ -352,50 +423,97 @@ public readonly ref struct TrRmTypeSpecTableReader
             switch (reference.Form)
             {
                 case 0x01:
+                    _resourceLedger?.ConsumeWork(2);
                     hash.Add(reference.TypeCode);
                     hash.Add(reference.ArgumentCode);
+                    _resourceLedger?.ConsumeWork();
                     return hash.ToHashCode();
 
                 case 0x02:
                 case 0x03:
                 case 0x04:
-                    hash.Add(Read(row, 2));
+                    var identity = Read(row, 2);
+                    _resourceLedger?.ConsumeWork();
+                    hash.Add(identity);
+                    _resourceLedger?.ConsumeWork();
                     return hash.ToHashCode();
 
                 case >= 0x06 and <= 0x0B:
                 case 0x0E:
-                    typeSpecRef = Read(row, 2);
+                    var unaryChild = Read(row, 2);
+                    var unaryDepth = checked(depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, unaryDepth);
+                    typeSpecRef = unaryChild;
+                    depth = unaryDepth;
                     allowInitQualifier = false;
                     break;
 
                 case 0x0C:
+                    _resourceLedger?.ConsumeWork(2);
                     hash.Add(row[2]);
-                    typeSpecRef = Read(row, 3);
+                    var indexedChild = Read(row, 3);
+                    var indexedDepth = checked(depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, indexedDepth);
+                    typeSpecRef = indexedChild;
+                    depth = indexedDepth;
                     allowInitQualifier = row[2] == 0x8A;
                     break;
 
                 case 0x0F:
+                    _resourceLedger?.ConsumeWork();
                     return hash.ToHashCode();
 
                 case 0x10:
-                    hash.Add(Read(row, 2));
+                    var predicateCapture = Read(row, 2);
+                    _resourceLedger?.ConsumeWork();
+                    hash.Add(predicateCapture);
+                    _resourceLedger?.ConsumeWork();
                     return hash.ToHashCode();
 
                 case 0x11:
                     _resourceLedger?.ConsumeWork(sizeof(ulong) + 1);
-                    hash.Add(BinaryPrimitives.ReadUInt64LittleEndian(row[6..]));
-                    typeSpecRef = Read(row, 2);
+                    var elementCount
+                        = BinaryPrimitives.ReadUInt64LittleEndian(row[6..]);
+                    _resourceLedger?.ConsumeWork();
+                    hash.Add(elementCount);
+                    var arrayElement = Read(row, 2);
+                    var arrayDepth = checked(depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, arrayDepth);
+                    typeSpecRef = arrayElement;
+                    depth = arrayDepth;
                     allowInitQualifier = false;
                     break;
 
                 default:
                     for (var index = 2; index < row.Length; index++)
                     {
+                        _resourceLedger?.ConsumeWork(2);
                         hash.Add(row[index]);
                     }
+                    _resourceLedger?.ConsumeWork();
                     return hash.ToHashCode();
             }
         }
+    }
+
+    private bool RowsEqual(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
+    {
+        _resourceLedger?.ConsumeWork();
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Length; index++)
+        {
+            _resourceLedger?.ConsumeWork(3);
+            if (left[index] != right[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     internal bool TryGetFixedInlineArray(uint typeSpecRef,
@@ -446,6 +564,7 @@ public readonly ref struct TrRmTypeSpecTableReader
             0x03 => imports.GetExpectedDefinitionForImportRow(checked((int)Read(data, 2))),
             _ => throw InvalidType(),
         };
+        _resourceLedger?.ConsumeWork(5);
         var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
         if ((definition >> 24) != 0x13 || typeDefRow <= 0 || typeDefRow > typeDefs.Count)
         {
@@ -460,12 +579,14 @@ public readonly ref struct TrRmTypeSpecTableReader
     public int NativeFunctionPointerSignatureCount => _nativeFunctionPointerSignatureCount;
     internal int NativeFunctionPointerTypeKeyCount => _nativeFunctionPointerTypeKeyCount;
     internal TrRmArtifactSchema Schema => _schema;
+    internal TrRmA3LayoutResourceLedger? ResourceLedger => _resourceLedger;
 
     internal bool TryGetNativeFunctionPointerAnchor(int typeSpecRow,
         out byte callingConvention, out int methodDefRow)
     {
         callingConvention = 0;
         methodDefRow = 0;
+        _resourceLedger?.ConsumeWork(2);
         if (_schema.IsDevelopmentProfile()
             || typeSpecRow <= 0 || typeSpecRow > _recordCount)
         {
@@ -473,12 +594,14 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         var type = GetRowCore(typeSpecRow);
-        if (type[0] != 0x0D || type.Length != 7)
+        var typeForm = ReadByte(type, 0);
+        _resourceLedger?.ConsumeWork();
+        if (typeForm != 0x0D || type.Length != 7)
         {
             return false;
         }
 
-        callingConvention = type[2];
+        callingConvention = ReadByte(type, 2);
         methodDefRow = checked((int)Read(type, 3));
         return true;
     }
@@ -525,18 +648,29 @@ public readonly ref struct TrRmTypeSpecTableReader
         TrRmTypeDefTableReader typeDefs, TrRmGenericParamTableReader genericParams,
         TrRmImportTableReader imports)
     {
-        var pending = new Stack<uint>();
+        _resourceLedger?.ConsumeWork(2);
+        _resourceLedger?.ReserveWorkAtDepth(1, 1);
+        var pending = new Stack<(uint TypeSpecRef, ulong Depth)>();
         var visitedRows = new HashSet<int>();
-        pending.Push(typeSpecRef);
+        pending.Push((typeSpecRef, 1));
         while (pending.TryPop(out var current))
         {
-            var reference = GetTypeSpecRef(current, allowInitQualifier: true);
+            _resourceLedger?.ConsumeWork();
+            _resourceLedger?.CheckDepthFromCurrent(current.Depth);
+            var reference = GetTypeSpecRef(current.TypeSpecRef,
+                allowInitQualifier: true);
             if (reference.Form == 0x0D)
             {
                 return true;
             }
 
-            if (!reference.IsRow || !visitedRows.Add(reference.Row))
+            if (!reference.IsRow)
+            {
+                continue;
+            }
+
+            _resourceLedger?.ConsumeWork(2);
+            if (!visitedRows.Add(reference.Row))
             {
                 continue;
             }
@@ -546,16 +680,26 @@ public readonly ref struct TrRmTypeSpecTableReader
             {
                 case >= 0x06 and <= 0x0B:
                 case 0x0E:
-                    pending.Push(Read(type, 2));
+                    var unaryChild = Read(type, 2);
+                    var unaryDepth = checked(current.Depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, unaryDepth);
+                    pending.Push((unaryChild, unaryDepth));
                     break;
                 case 0x0C:
-                    pending.Push(Read(type, 3));
+                    var indexedChild = Read(type, 3);
+                    var indexedDepth = checked(current.Depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, indexedDepth);
+                    pending.Push((indexedChild, indexedDepth));
                     break;
                 case 0x11:
-                    pending.Push(Read(type, 2));
+                    var arrayChild = Read(type, 2);
+                    var arrayDepth = checked(current.Depth + 1);
+                    _resourceLedger?.ReserveWorkAtDepth(1, arrayDepth);
+                    pending.Push((arrayChild, arrayDepth));
                     break;
                 case 0x05:
-                    var typeDef = GetNominalTypeDefRow(current, typeDefs, imports);
+                    var typeDef = GetNominalTypeDefRow(current.TypeSpecRef,
+                        typeDefs, imports);
                     var (formalFirst, formalCount) = typeDefs.GetGenericRange(typeDef);
                     var argumentCount = GetConstructedArgumentCount(reference.Row);
                     if (argumentCount != formalCount)
@@ -563,13 +707,18 @@ public readonly ref struct TrRmTypeSpecTableReader
                         throw InvalidType();
                     }
 
-                    for (var ordinal = 0; ordinal < argumentCount; ordinal++)
+                    for (var ordinal = argumentCount - 1; ordinal >= 0; ordinal--)
                     {
                         var formalKind = genericParams.GetFormalKind(
                             formalFirst + ordinal);
                         if (formalKind == 1)
                         {
-                            pending.Push(GetConstructedArgument(reference.Row, ordinal));
+                            var argument = GetConstructedArgument(reference.Row,
+                                ordinal);
+                            var argumentDepth = checked(current.Depth + 1);
+                            _resourceLedger?.ReserveWorkAtDepth(1,
+                                argumentDepth);
+                            pending.Push((argument, argumentDepth));
                         }
                         else if (formalKind != 2)
                         {
@@ -585,6 +734,7 @@ public readonly ref struct TrRmTypeSpecTableReader
 
     internal ushort GetCompactValueTypeKey(int row)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (row <= 0 || row >= _compactValueTypeKeys.Length
             || _compactValueTypeKeys[row] == 0)
         {
@@ -596,6 +746,7 @@ public readonly ref struct TrRmTypeSpecTableReader
 
     internal bool TryGetNativeFunctionPointerSignatureRow(ushort typeKey, out int signatureRow)
     {
+        _resourceLedger?.ConsumeWork(4);
         var index = (int)typeKey - NativeFunctionPointerTypeKeyStart;
         if (_schema.IsDevelopmentProfile()
             && index >= 0 && index < _nativeFunctionPointerSignatureCount
@@ -612,6 +763,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     internal bool TryGetNativeFunctionPointerTypeSpecRow(ushort typeKey,
         out int typeSpecRow)
     {
+        _resourceLedger?.ConsumeWork(4);
         if (!_schema.IsDevelopmentProfile())
         {
             var index = (int)typeKey - NativeFunctionPointerTypeKeyStart;
@@ -620,8 +772,11 @@ public readonly ref struct TrRmTypeSpecTableReader
             {
                 for (var row = 1; row <= _recordCount; row++)
                 {
-                    if (GetRowCore(row)[0] == 0x0D
-                        && _compactValueTypeKeys[row] == typeKey)
+                    var data = GetRowCore(row);
+                    _resourceLedger?.ConsumeWork(4);
+                    var isFunctionPointer = data[0] == 0x0D;
+                    var matchesTypeKey = _compactValueTypeKeys[row] == typeKey;
+                    if (isFunctionPointer && matchesTypeKey)
                     {
                         typeSpecRow = row;
                         return true;
@@ -635,11 +790,21 @@ public readonly ref struct TrRmTypeSpecTableReader
     }
 
     internal int NativeFunctionPointerTypeKeyEnd
-        => Math.Min(ushort.MaxValue + 1,
-            NativeFunctionPointerTypeKeyStart + _nativeFunctionPointerTypeKeyCount);
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork(3);
+            return Math.Min(ushort.MaxValue + 1,
+                NativeFunctionPointerTypeKeyStart
+                    + _nativeFunctionPointerTypeKeyCount);
+        }
+    }
 
     internal bool IsNativePointerTypeKey(ushort typeKey)
-        => typeKey == 0x8C || typeKey >= NativeFunctionPointerTypeKeyEnd;
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return typeKey == 0x8C || typeKey >= NativeFunctionPointerTypeKeyEnd;
+    }
 
     private ushort[] CreateCompactValueTypeKeys()
     {
@@ -874,35 +1039,47 @@ public readonly ref struct TrRmTypeSpecTableReader
     private void Validate(int row)
     {
         var bytes = GetRowCore(row);
-        if ((bytes[1] & ~7) != 0)
+        var qualifiers = ReadByte(bytes, 1);
+        _resourceLedger?.ConsumeWork();
+        if ((qualifiers & ~7) != 0)
         {
             throw InvalidType();
         }
 
-        switch (bytes[0])
+        var form = ReadByte(bytes, 0);
+        switch (form)
         {
             case 0x01:
-                var code = bytes[2];
+                var code = ReadByte(bytes, 2);
+                _resourceLedger?.ConsumeWork();
                 if (code <= 0x19)
                 {
                     RequireLength(bytes, 3);
-                    if ((bytes[1] & ~0x04) != 0)
-                    {
-                        throw InvalidType();
-                    }
-                }
-                else if (IsAssignedInlineFamily(code))
-                {
-                    RequireLength(bytes, 4);
-                    if (bytes[3] > 0x19
-                        || ((bytes[1] & 0x02) != 0 && code is not (0x8B or 0x8D)))
+                    _resourceLedger?.ConsumeWork();
+                    if ((qualifiers & ~0x04) != 0)
                     {
                         throw InvalidType();
                     }
                 }
                 else
                 {
-                    throw InvalidType();
+                    _resourceLedger?.ConsumeWork();
+                    if (IsAssignedInlineFamily(code))
+                    {
+                        RequireLength(bytes, 4);
+                        var argumentCode = ReadByte(bytes, 3);
+                        _resourceLedger?.ConsumeWork(2);
+                        if (argumentCode > 0x19
+                            || ((qualifiers & 0x02) != 0
+                                && code is not (0x8B or 0x8D)))
+                        {
+                            throw InvalidType();
+                        }
+                    }
+                    else
+                    {
+                        throw InvalidType();
+                    }
                 }
                 break;
 
@@ -916,27 +1093,34 @@ public readonly ref struct TrRmTypeSpecTableReader
                 ValidateTypedReference(bytes, _genericParamCount);
                 break;
             case 0x05:
+                _resourceLedger?.ConsumeWork(2);
                 if (bytes.Length < 10 || (bytes.Length - 6) % sizeof(uint) != 0)
                 {
                     throw InvalidType();
                 }
                 var generic = Read(bytes, 2);
                 RequireEarlier(generic, row);
-                if (GetRowCore((int)generic)[0] is not (0x02 or 0x03))
+                var genericType = ReadByte(GetRowCore((int)generic), 0);
+                _resourceLedger?.ConsumeWork();
+                if (genericType is not (0x02 or 0x03))
                 {
                     throw InvalidType();
                 }
 
                 for (var offset = 6; offset < bytes.Length; offset += sizeof(uint))
                 {
+                    _resourceLedger?.ConsumeWork();
                     var argumentWord = Read(bytes, offset);
+                    _resourceLedger?.ConsumeWork();
                     if (argumentWord == 0)
                     {
                         throw InvalidType();
                     }
 
+                    _resourceLedger?.ConsumeWork();
                     if ((argumentWord & 0xFF00_0000) != 0)
                     {
+                        _resourceLedger?.ConsumeWork();
                         if ((argumentWord & 0xFF00_0000) is not (0xF200_0000 or 0xF300_0000))
                         {
                             throw InvalidType();
@@ -961,13 +1145,15 @@ public readonly ref struct TrRmTypeSpecTableReader
                 break;
             case 0x0C:
                 RequireLength(bytes, 7);
-                if (!IsIndexedFamily(bytes[2]))
+                var familyCode = ReadByte(bytes, 2);
+                _resourceLedger?.ConsumeWork();
+                if (!IsIndexedFamily(familyCode))
                 {
                     throw InvalidType();
                 }
                 var argument = Read(bytes, 3);
                 var familyArgument = GetTypeSpecRef(argument,
-                    allowInitQualifier: bytes[2] == 0x8A);
+                    allowInitQualifier: familyCode == 0x8A);
                 if (familyArgument.IsRow)
                 {
                     RequireEarlier(argument, row);
@@ -979,7 +1165,8 @@ public readonly ref struct TrRmTypeSpecTableReader
                 break;
             case 0x0E:
                 RequireLength(bytes, 6);
-                if ((bytes[1] & ~1) != 0)
+                _resourceLedger?.ConsumeWork();
+                if ((qualifiers & ~1) != 0)
                 {
                     throw InvalidType();
                 }
@@ -992,7 +1179,8 @@ public readonly ref struct TrRmTypeSpecTableReader
                 break;
             case 0x0F:
                 RequireLength(bytes, 2);
-                if (bytes[1] != 0)
+                _resourceLedger?.ConsumeWork();
+                if (qualifiers != 0)
                 {
                     throw InvalidType();
                 }
@@ -1000,7 +1188,8 @@ public readonly ref struct TrRmTypeSpecTableReader
             case 0x10:
                 RequireLength(bytes, 6);
                 var capture = Read(bytes, 2);
-                if (!_schema.UsesGeneralPredicateGraphs() || bytes[1] != 0
+                _resourceLedger?.ConsumeWork(5);
+                if (!_schema.UsesGeneralPredicateGraphs() || qualifiers != 0
                     || capture is 0 or > 0xFF_FFFF
                     || capture > (uint)_predicateCaptureCount)
                 {
@@ -1009,8 +1198,9 @@ public readonly ref struct TrRmTypeSpecTableReader
                 break;
             case 0x11:
                 RequireLength(bytes, 14);
+                _resourceLedger?.ConsumeWork(2);
                 if (!_schema.UsesForeignInvocationStorageFixedArrays()
-                    || bytes[1] != 0)
+                    || qualifiers != 0)
                 {
                     throw InvalidType();
                 }
@@ -1022,7 +1212,8 @@ public readonly ref struct TrRmTypeSpecTableReader
                 }
                 break;
             case 0x0D:
-                if (bytes[1] != 0)
+                _resourceLedger?.ConsumeWork(1);
+                if (qualifiers != 0)
                 {
                     throw InvalidType();
                 }
@@ -1040,7 +1231,9 @@ public readonly ref struct TrRmTypeSpecTableReader
                 {
                     RequireLength(bytes, 7);
                     var methodDef = Read(bytes, 3);
-                    if (bytes[2] > 4 || methodDef == 0
+                    var convention = ReadByte(bytes, 2);
+                    _resourceLedger?.ConsumeWork(3);
+                    if (convention > 4 || methodDef == 0
                         || methodDef > _methodDefCount)
                     {
                         throw InvalidType();
@@ -1057,7 +1250,9 @@ public readonly ref struct TrRmTypeSpecTableReader
         var count = 0;
         for (var row = 1; row <= _recordCount; row++)
         {
-            if (GetRowCore(row)[0] == 0x0D)
+            var data = GetRowCore(row);
+            _resourceLedger?.ConsumeWork(2);
+            if (data[0] == 0x0D)
             {
                 count++;
             }
@@ -1071,6 +1266,7 @@ public readonly ref struct TrRmTypeSpecTableReader
     {
         RequireLength(bytes, 6);
         var reference = Read(bytes, 2);
+        _resourceLedger?.ConsumeWork(2);
         if (reference == 0 || reference > tableCount)
         {
             throw InvalidType();
@@ -1080,12 +1276,16 @@ public readonly ref struct TrRmTypeSpecTableReader
     private static bool IsIndexedFamily(byte familyCode)
         => IsAssignedInlineFamily(familyCode);
 
-    private static bool IsNoncanonicalAtomic(TrRmTypeSpecRefInfo reference)
-        => reference.IsRow && reference.Form == 0x01
-            && reference.TypeCode < 0x80 && reference.Qualifiers == 0;
-
-    private static void RequireEarlier(uint reference, int row)
+    private bool IsNoncanonicalAtomic(TrRmTypeSpecRefInfo reference)
     {
+        _resourceLedger?.ConsumeWork(4);
+        return reference.IsRow && reference.Form == 0x01
+            && reference.TypeCode < 0x80 && reference.Qualifiers == 0;
+    }
+
+    private void RequireEarlier(uint reference, int row)
+    {
+        _resourceLedger?.ConsumeWork(2);
         if (reference == 0 || reference >= row)
         {
             throw InvalidType();
@@ -1099,8 +1299,15 @@ public readonly ref struct TrRmTypeSpecTableReader
             bytes.Slice(offset, sizeof(uint)));
     }
 
-    private static void RequireLength(ReadOnlySpan<byte> bytes, int length)
+    private byte ReadByte(ReadOnlySpan<byte> bytes, int offset)
     {
+        _resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return bytes[offset];
+    }
+
+    private void RequireLength(ReadOnlySpan<byte> bytes, int length)
+    {
+        _resourceLedger?.ConsumeWork();
         if (bytes.Length != length)
         {
             throw InvalidType();

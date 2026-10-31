@@ -10,6 +10,9 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmTypeSpecTableReaderTests
 {
+    private const TrRmArtifactSchema s_a3Schema
+        = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
     [Test]
     public void DecodesWorkedInt32RowWithDirectIndex()
     {
@@ -61,6 +64,135 @@ public sealed class TrRmTypeSpecTableReaderTests
             out var convention, out var methodDefRow), Is.True);
         Assert.That(convention, Is.EqualTo(0));
         Assert.That(methodDefRow, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void A3FunctionPointerValueSearchChargesItsTraversalAtExactBoundary()
+    {
+        var section = CreateA3FunctionPointerChain(4);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            var typeSpecs = new TrRmTypeSpecTableReader(section, 4,
+                0, 0, 0, 0, s_a3Schema, methodDefCount: 1,
+                resourceLedger: resourceLedger);
+            Assert.That(typeSpecs.ContainsNativeFunctionPointerValue(4,
+                default, default, default), Is.True);
+        });
+    }
+
+    [Test]
+    public void A3FunctionPointerValueSearchEnforcesLogicalDepth()
+    {
+        var maximumDepth = checked((int)TrRmA3LayoutResourceLedger.DepthLimit);
+        var atLimitSection = CreateA3FunctionPointerChain(maximumDepth);
+        var atLimitLedger = new TrRmA3LayoutResourceLedger();
+        var atLimitTypeSpecs = new TrRmTypeSpecTableReader(atLimitSection,
+            maximumDepth, 0, 0, 0, 0, s_a3Schema, methodDefCount: 1,
+            resourceLedger: atLimitLedger);
+        Assert.That(atLimitTypeSpecs.ContainsNativeFunctionPointerValue(
+            (uint)maximumDepth, default, default, default), Is.True);
+
+        var overLimitDepth = maximumDepth + 1;
+        var overLimitSection = CreateA3FunctionPointerChain(overLimitDepth);
+        var overLimitLedger = new TrRmA3LayoutResourceLedger();
+        var overLimitTypeSpecs = new TrRmTypeSpecTableReader(overLimitSection,
+            overLimitDepth, 0, 0, 0, 0, s_a3Schema, methodDefCount: 1,
+            resourceLedger: overLimitLedger);
+        TrRmResourceLimitException? exception = null;
+        try
+        {
+            _ = overLimitTypeSpecs.ContainsNativeFunctionPointerValue(
+                (uint)overLimitDepth, default, default, default);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception, Is.Not.Null);
+        Assert.That(exception!.Dimension, Is.EqualTo("depth"));
+        Assert.That(exception.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.DepthLimit + 1)));
+    }
+
+    [Test]
+    public void A3TypeSpecIdentityAndByteOperationsChargeAtExactBoundary()
+    {
+        var rows = new ReadOnlyMemory<byte>[]
+        {
+            TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 1),
+            new byte[] { 0x06, 0, 1, 0, 0, 0 },
+            new byte[] { 0x06, 0, 2, 0, 0, 0 },
+            new byte[] { 0x01, 0, 0x8C, 8 },
+        };
+        var section = TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0,
+            schema: s_a3Schema, methodDefCount: 1);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            var typeSpecs = new TrRmTypeSpecTableReader(section, rows.Length,
+                0, 0, 0, 0, s_a3Schema, methodDefCount: 1,
+                resourceLedger: resourceLedger);
+            Assert.That(typeSpecs.GetTypeSpecBytes(0xF200_0001).Length,
+                Is.EqualTo(3));
+            Assert.That(typeSpecs.AreEquivalentTypeSpecRefs(2, 2), Is.True);
+            _ = typeSpecs.GetTypeSpecStructuralHash(3);
+            var pointerKey
+                = typeSpecs.GetCompactValueTypeKey(0xF300_8C08);
+            Assert.That(pointerKey, Is.Not.Zero);
+            Assert.That(typeSpecs.TryGetNativeFunctionPointerTypeSpecRow(
+                typeSpecs.GetCompactValueTypeKey(1),
+                out var functionPointerRow), Is.True);
+            Assert.That(functionPointerRow, Is.EqualTo(1));
+        });
+    }
+
+    [Test]
+    public void A3TypeSpecIdentityWalksEnforceLogicalDepth()
+    {
+        var depth = checked((int)TrRmA3LayoutResourceLedger.DepthLimit + 1);
+        var section = CreateA3FunctionPointerChain(depth);
+        var typeSpecs = new TrRmTypeSpecTableReader(section, depth,
+            0, 0, 0, 0, s_a3Schema, methodDefCount: 1,
+            resourceLedger: new TrRmA3LayoutResourceLedger());
+
+        TrRmResourceLimitException? comparisonException = null;
+        try
+        {
+            _ = typeSpecs.AreEquivalentTypeSpecRefs(
+                (uint)depth, (uint)depth);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            comparisonException = caught;
+        }
+
+        Assert.That(comparisonException, Is.Not.Null);
+        Assert.That(comparisonException!.Dimension, Is.EqualTo("depth"));
+        Assert.That(comparisonException.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.DepthLimit + 1)));
+
+        var hashTypeSpecs = new TrRmTypeSpecTableReader(section, depth,
+            0, 0, 0, 0, s_a3Schema, methodDefCount: 1,
+            resourceLedger: new TrRmA3LayoutResourceLedger());
+        TrRmResourceLimitException? hashException = null;
+        try
+        {
+            _ = hashTypeSpecs.GetTypeSpecStructuralHash((uint)depth);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            hashException = caught;
+        }
+
+        Assert.That(hashException, Is.Not.Null);
+        Assert.That(hashException!.Dimension, Is.EqualTo("depth"));
+        Assert.That(hashException.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.DepthLimit + 1)));
     }
 
     [Test]
@@ -292,6 +424,23 @@ public sealed class TrRmTypeSpecTableReaderTests
         var reader = new TrRmTypeSpecTableReader(bytes, count, 0, 0, 0,
             nativeFunctionPointerSignatureCount, TrRmArtifactSchema.Development);
         return reader.GetCompactValueTypeKey(row);
+    }
+
+    private static byte[] CreateA3FunctionPointerChain(int depth)
+    {
+        var rows = new ReadOnlyMemory<byte>[depth];
+        rows[0] = TrRmTypeSpecTableWriter.NativeFunctionPointer(0, 1);
+        for (var index = 1; index < depth; index++)
+        {
+            var row = new byte[6];
+            row[0] = 0x06;
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                row.AsSpan(2), (uint)index);
+            rows[index] = row;
+        }
+
+        return TrRmTypeSpecTableWriter.Encode(rows, 0, 0, 0, 0,
+            schema: s_a3Schema, methodDefCount: 1);
     }
 
     private static TrRmTypeSpecRefInfo GetTypeSpecRef(byte[] bytes, int count, uint value)
