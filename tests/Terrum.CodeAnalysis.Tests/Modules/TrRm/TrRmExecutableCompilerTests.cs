@@ -71,6 +71,42 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void StandardSourceEmitterSelectsTheExactBaselineAndPreservesDevelopmentDefault()
+    {
+        var program = Compile("""
+            int32 Main() {
+                mut int32 value = int32(20);
+                value = value + int32(22);
+                return value;
+            }
+            """);
+        var standard = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            "trrm/1-draft-layout-queries-1",
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var standardIndex = new TrRmArtifactIndex(standard);
+        Assert.That(standardIndex.Schema, Is.EqualTo(TrRmArtifactSchema.Standard));
+        Assert.That(NativeJit.Execute(TrRmExecutableCompiler.Load(standard),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+
+        var noTargetProgram = Compile("int32 Main() { return 42; }");
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(noTargetProgram, "portable",
+                "trrm/1-draft-layout-queries-1", 0));
+
+        var development = TrRmExecutableCompiler.Emit(program, "sample");
+        Assert.That(TrRmArtifactIndex.ForDevelopment(development).Schema,
+            Is.EqualTo(TrRmArtifactSchema.Development));
+
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "sample",
+                "TRRM/1-draft-layout-queries-1",
+                TrRmModuleTableReader.WindowsX64NativeTargetRequirement));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "sample",
+                "trrm/1-draft-layout-queries-1", 2));
+    }
+
+    [Test]
     public void ExecutesStandardRegisterScalarReturnsWithoutDevelopmentFallback()
     {
         foreach (var (register, expected) in new (byte Register, int Expected)[] {

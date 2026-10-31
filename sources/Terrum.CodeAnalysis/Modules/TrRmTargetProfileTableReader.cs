@@ -16,8 +16,13 @@ public readonly record struct TrRmTargetProfileRow(uint ProfileId, uint RuleRevi
 /// <remarks>The borrowed section must remain unchanged while this reader is in use.</remarks>
 public readonly ref struct TrRmTargetProfileTableReader
 {
+    internal const uint WindowsX64NativeProfileId = 1;
+    internal const uint WindowsX64NativeProfileRuleRevision = 1;
+    internal const uint WindowsX64RootPinProfileId = 2;
+    internal const uint WindowsX64RootPinProfileRuleRevision = 1;
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly TrRmArtifactSchema _schema;
 
     /// <summary>Gets the number of validated TargetProfile rows.</summary>
     public int Count { get; }
@@ -26,14 +31,33 @@ public readonly ref struct TrRmTargetProfileTableReader
     /// <param name="section">The borrowed TargetProfile section bytes.</param>
     /// <param name="recordCount">The number of eight-byte TargetProfile rows.</param>
     public TrRmTargetProfileTableReader(ReadOnlySpan<byte> section, int recordCount)
+        : this(section, recordCount, TrRmArtifactSchema.Standard)
+    {
+    }
+
+    internal TrRmTargetProfileTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmArtifactSchema schema)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
-            || (long)recordCount * RowSize != section.Length)
+            || (long)recordCount * RowSize != section.Length
+            || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+                or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                or TrRmArtifactSchema.ScalarFrozenValuesDraft
+                or TrRmArtifactSchema.NominalEnumsDraft
+                or TrRmArtifactSchema.RootPinRuntimeDraft
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
         {
             throw InvalidProfile();
         }
 
         _rows = section;
+        _schema = schema;
         Count = recordCount;
         var profiles = new HashSet<(uint ProfileId, uint RuleRevision)>();
         for (var row = 0; row < recordCount; row++)
@@ -68,7 +92,8 @@ public readonly ref struct TrRmTargetProfileTableReader
         for (var candidate = 1; candidate <= Count; candidate++)
         {
             var profile = GetProfile(candidate);
-            if (profile.ProfileId == profileId && profile.RuleRevision == ruleRevision)
+            if (profile.ProfileId == profileId && profile.RuleRevision == ruleRevision
+                && IsAssigned(profileId, ruleRevision, _schema))
             {
                 row = candidate;
                 return true;
@@ -80,7 +105,26 @@ public readonly ref struct TrRmTargetProfileTableReader
     }
 
     internal static bool IsAssigned(uint profileId, uint ruleRevision)
-        => profileId == 1 && ruleRevision == 1;
+        => profileId == WindowsX64NativeProfileId
+            && ruleRevision == WindowsX64NativeProfileRuleRevision;
+
+    internal static bool IsAssigned(uint profileId, uint ruleRevision,
+        TrRmArtifactSchema schema)
+        => IsAssigned(profileId, ruleRevision)
+            || (schema.UsesRootPinRuntime()
+                && profileId == WindowsX64RootPinProfileId
+                && ruleRevision == WindowsX64RootPinProfileRuleRevision);
+
+    internal bool IsAssignedProfileReference(uint profileRow)
+    {
+        if (profileRow == 0 || profileRow > (uint)Count)
+        {
+            return false;
+        }
+
+        var profile = GetProfile(checked((int)profileRow));
+        return IsAssigned(profile.ProfileId, profile.RuleRevision, _schema);
+    }
 
     private uint Read(int row, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(

@@ -86,6 +86,245 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StorageAddressSchemaSelectionPreservesForeignInvocationLoading()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+        const string moduleIdentity = "native-address-storage-schema";
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            public extern void Observe();
+
+            internal void Form() {
+                unsafe { _ = &Observe; }
+            }
+            """), core);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageAddressDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index);
+        Assert.That(tables.Schema, Is.EqualTo(
+            TrRmArtifactSchema.ForeignInvocationStorageAddressDraft));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Observe").DirectNativeImport, Is.Not.Null);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Form").Body, Is.Not.Null);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(reference.Functions.Single(static function =>
+            function.Name == "Observe").ModuleImport?.ProducerIdentity,
+            Is.EqualTo(moduleIdentity));
+    }
+
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2",
+        false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
+        true)]
+    public void FixedArraySchemaSelectionPreservesStorageAddressLoading(
+        string schemaIdentity, bool usesGenericSchema)
+    {
+        const string moduleIdentity = "native-address-fixed-array-schema";
+        var expectedSchema = usesGenericSchema
+            ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            : TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var artifact = CreateStorageAddressArtifact(moduleIdentity,
+            schemaIdentity);
+        var index = expectedSchema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+            : TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        var tables = expectedSchema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    index)
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    index);
+        Assert.That(tables.Schema, Is.EqualTo(expectedSchema));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.Zero);
+        var caller = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                caller = row;
+                break;
+            }
+        }
+        Assert.That(caller, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(caller);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(caller), tables.Contracts.Count);
+        var hasStorageAddressRecord = false;
+        for (var record = 0; record < body.RecordCount; record++)
+        {
+            hasStorageAddressRecord |= body.GetRecord(record)[0] == 0x0E;
+        }
+        Assert.That(hasStorageAddressRecord, Is.True);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "GetSystemTimeAdjustment").DirectNativeImport,
+            Is.Not.Null);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Main").Body, Is.Not.Null);
+    }
+
+    [Test]
+    public void EmitsInitializedLocalStorageAddressForNativeParameter()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+        const string moduleIdentity = "native-storage-address";
+        var artifact = CreateStorageAddressArtifact(moduleIdentity);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageAddressDraft(artifact));
+        var caller = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                caller = row;
+                break;
+            }
+        }
+        Assert.That(caller, Is.GreaterThan(0));
+        var module = tables.Methods.GetOwnerModule(caller);
+        Assert.That(tables.Features.Count, Is.EqualTo(2));
+        var featureIds = new uint[tables.Features.Count];
+        for (var index = 0; index < featureIds.Length; index++)
+        {
+            featureIds[index] = tables.Features.GetFeature(index + 1).FeatureId;
+        }
+        Assert.That(featureIds, Is.EquivalentTo(new uint[] { 4, 16 }));
+        foreach (var featureId in new uint[] { 1, 2, 3, 4, 16 })
+        {
+            Assert.That(TrRmFeatureManifestValidator.Requires(
+                tables.Features, tables.Modules, module, featureId,
+                tables.Schema), Is.True);
+        }
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            tables.Features, tables.Modules, module,
+            TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+            tables.Schema), Is.False);
+        tables.ValidateRegisterBodyMapsForMethod(caller);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(caller), tables.Contracts.Count);
+
+        Assert.That(body.MapMask, Is.EqualTo((byte)0x07));
+        Assert.That(body.HomeMap.Length, Is.EqualTo(56));
+        Assert.That(body.GetRecord(2)[0], Is.EqualTo(0x0E));
+        Assert.That(body.GetRecord(2)[4], Is.EqualTo(2));
+        Assert.That(body.GetRecord(2)[5], Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(2)[6..]), Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(2)[8..]), Is.EqualTo(4));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            body.GetRecord(2)[12..]), Is.EqualTo(1));
+        Assert.That(body.GetRecord(3)[0], Is.EqualTo(0x0E));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(3)[6..]), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(3)[8..]), Is.EqualTo(5));
+        Assert.That(body.GetRecord(4)[0], Is.EqualTo(0x0E));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(4)[6..]), Is.EqualTo(2));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(4)[8..]), Is.EqualTo(6));
+        Assert.That(body.GetBlockCode(0).ToArray(),
+            Is.EqualTo(new byte[] {
+                0x14, 0xE0, 0x14, 0xE1, 0x14, 0xF2,
+                0xE9, 0, 1, 0,
+                0xEC, 0, 2, 0, 0xEC, 0, 3, 0, 0xEC, 0, 4, 0,
+                0xE0, 0, 5, 0,
+                0xB8, 2,
+            }));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var storageAddresses = new List<BoundNativeStorageAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress storageAddress)
+                {
+                    storageAddresses.Add(storageAddress);
+                }
+            }), Is.True);
+        Assert.That(storageAddresses, Has.Count.EqualTo(3));
+        Assert.That(storageAddresses.Select(address =>
+            loadedMain.Variables[address.Variable].Type),
+            Is.EquivalentTo(new[] {
+                PrimitiveType.UInt32, PrimitiveType.UInt32, PrimitiveType.Int32,
+            }));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-invocation-contracts-1", artifact),
+                moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(1));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [TestCase("missing-write-authority")]
+    [TestCase("oversized-scalar-extent")]
+    public void StorageAddressConsumerRejectsInvalidLocalAuthorityOrExtent(
+        string defect)
+    {
+        var artifact = CreateStorageAddressArtifact("invalid-storage-address");
+        var malformed = RewriteStorageAddressArtifact(artifact, defect);
+
+        void Validate()
+        {
+            var index = TrRmArtifactIndex
+                .ForForeignInvocationStorageAddressDraft(malformed);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+                    index);
+            var caller = 0;
+            for (var row = 1; row <= tables.Methods.Count; row++)
+            {
+                if (tables.Methods.GetName(row) == "Main")
+                {
+                    caller = row;
+                    break;
+                }
+            }
+            Assert.That(caller, Is.GreaterThan(0));
+            tables.ValidateRegisterBodyMapsForMethod(caller);
+        }
+
+        _ = Assert.Throws<InvalidDataException>(Validate);
+    }
+
+    [Test]
     public void EmitsParameterizedScalarNativeAddressSignature()
     {
         var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
@@ -2144,5 +2383,111 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         Assert.That(compilation.HasErrors, Is.True,
             "The inferred pointer signature must retain the target's pointee type.");
+    }
+
+    internal static byte[] CreateStorageAddressArtifact(string moduleIdentity,
+        string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-addresses-1")
+    {
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetSystemTimeAdjustment",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
+            internal extern int32 GetSystemTimeAdjustment(
+                write ptr<uint32> adjustment,
+                write ptr<uint32> increment,
+                write ptr<int32> disabled);
+
+            int32 Main() {
+                mut uint32 adjustment = 0;
+                mut uint32 increment = 0;
+                mut int32 disabled = -1;
+                unsafe {
+                    var callback = &GetSystemTimeAdjustment;
+                    callback(&adjustment, &increment, &disabled);
+                }
+                return disabled;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+            moduleIdentity, schemaIdentity, 1);
+    }
+
+    internal static byte[] RewriteStorageAddressArtifact(byte[] artifact,
+        string defect)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageAddressDraft;
+        var index = TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(
+            artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind != 0x0020)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
+                contractCount, schema);
+            var homeMap = body.HomeMap.ToArray();
+            if (defect == "missing-write-authority")
+            {
+                homeMap[1] = 0;
+            }
+
+            var records = new List<byte[]>(body.RecordCount);
+            for (var recordIndex = 0; recordIndex < body.RecordCount;
+                recordIndex++)
+            {
+                records.Add(body.GetRecord(recordIndex).ToArray());
+            }
+            if (defect == "oversized-scalar-extent")
+            {
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    records[2].AsSpan(12), 2);
+            }
+
+            var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+            for (var blockIndex = 0; blockIndex < body.BlockCount;
+                blockIndex++)
+            {
+                var block = body.GetBlock(blockIndex);
+                blocks[blockIndex] = new TrRmRegisterBodyBlock(
+                    BinaryPrimitives.ReadUInt32LittleEndian(block),
+                    BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                    BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+            }
+
+            var rewrittenBody = TrRmRegisterBodyWriter.Encode(homeMap,
+                body.TypeMap.ToArray(), body.MethodMap.ToArray(),
+                body.FieldMap.ToArray(), body.ConstantMap.ToArray(), blocks,
+                records.Select(static record => (ReadOnlyMemory<byte>)record)
+                    .ToArray(),
+                body.Code.ToArray(), contractCount, schema);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                TrRmVariableTableWriter.EncodeBodies([rewrittenBody])));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 }

@@ -19,13 +19,29 @@ internal static class TrRmRegisterBodyWriter
         ReadOnlyMemory<byte> fieldMap, ReadOnlyMemory<byte> constantMap,
         IReadOnlyList<TrRmRegisterBodyBlock> blocks,
         IReadOnlyList<ReadOnlyMemory<byte>> records, ReadOnlyMemory<byte> code,
-        int contractCount = 0)
+        int contractCount = 0,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
         ArgumentNullException.ThrowIfNull(blocks);
         ArgumentNullException.ThrowIfNull(records);
         if (contractCount is < 0 or > 0xFF_FFFF)
         {
             throw new ArgumentOutOfRangeException(nameof(contractCount));
+        }
+        if (schema is not (TrRmArtifactSchema.Standard
+            or TrRmArtifactSchema.Development
+            or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+            or TrRmArtifactSchema.CopyOriginDraft
+            or TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            or TrRmArtifactSchema.ScalarFrozenValuesDraft
+            or TrRmArtifactSchema.NominalEnumsDraft
+            or TrRmArtifactSchema.RootPinRuntimeDraft
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+        {
+            throw new ArgumentOutOfRangeException(nameof(schema));
         }
         if (blocks.Count is < 1 or > 65_536)
         {
@@ -143,7 +159,7 @@ internal static class TrRmRegisterBodyWriter
             throw new InvalidOperationException("Register Body framing size did not match its encoded extents.");
         }
 
-        _ = new TrRmRegisterBodyReader(result, contractCount);
+        _ = new TrRmRegisterBodyReader(result, contractCount, schema);
         return result;
     }
 

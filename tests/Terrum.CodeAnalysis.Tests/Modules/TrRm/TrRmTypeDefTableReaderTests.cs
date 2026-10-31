@@ -42,6 +42,32 @@ public sealed class TrRmTypeDefTableReaderTests
     }
 
     [Test]
+    public void NominalEnumKindRequiresItsSelectedDraftSchema()
+    {
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 0, 0);
+        var bytes = new byte[44];
+        Write(bytes, 0, 1);
+        Write(bytes, 4, 2);
+        Write(bytes, 8, 0x12);
+        Write(bytes, 28, 1);
+        Write(bytes, 32, 1);
+
+        Assert.Throws<InvalidDataException>(() => CreateStandardEnumType(bytes));
+        var enums = new TrRmTypeDefTableReader(bytes, 1, names, modules,
+            0, 0, 1, 0, TrRmArtifactSchema.NominalEnumsDraft);
+        Assert.That(enums.GetKind(1), Is.EqualTo(4));
+        Assert.That(enums.GetFlags(1), Is.EqualTo(0x12));
+    }
+
+    private static void CreateStandardEnumType(byte[] bytes)
+    {
+        var names = new TrRmStringTableReader(Names(), 2);
+        var modules = new TrRmModuleTableReader(Module(), 1, names, 0, 1, 0, 0);
+        _ = new TrRmTypeDefTableReader(bytes, 1, names, modules, 0, 0, 1, 0);
+    }
+
+    [Test]
     public void RejectsTruncatedRowsAndMismatchedOwnerCounts()
     {
         Assert.Throws<InvalidDataException>(() => Create(Type()[..^1]));

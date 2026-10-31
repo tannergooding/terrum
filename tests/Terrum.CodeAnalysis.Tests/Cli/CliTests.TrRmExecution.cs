@@ -98,6 +98,37 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task CompileTrRmRejectsFlagFreeA3IdentityWithoutReplacingOutputAsync()
+    {
+        var artifact = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-flag-free-a3-selection-{Guid.NewGuid():N}.trrm");
+        byte[] retained = [0xAA, 0x55];
+        await File.WriteAllBytesAsync(artifact, retained).ConfigureAwait(true);
+        try
+        {
+            var (exit, output, error) = await RunAsync(
+                Encoding.UTF8.GetBytes("public int32 GetValue() { return 42; }"),
+                "compile-trrm", "-", "--identity", "scalar-module",
+                "--trrm-schema",
+                "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3",
+                "--library", "-o", artifact, "--runtime", "fail-fast",
+                "--json");
+            Assert.That(exit, Is.EqualTo(2), $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM2000"));
+            Assert.That(await File.ReadAllBytesAsync(artifact).ConfigureAwait(true),
+                Is.EqualTo(retained));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task CompileTrRmSchemaOptionRejectsMalformedAndWrongCommandUseAsync()
     {
         async Task AssertUsageAsync(params string[] arguments)
@@ -244,7 +275,8 @@ public sealed partial class CliTests
 
             var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
                 artifact, "--runtime", "fail-fast", "--trrm-schema",
-                schemaIdentity, "--trrm-module", moduleIdentity, "--json");
+                schemaIdentity, "--trrm-module", moduleIdentity, "--json")
+                .ConfigureAwait(true);
             Assert.That(ran, Is.GreaterThan(0),
                 $"{runOutput}{Environment.NewLine}{runError}");
             Assert.That(runOutput, Is.Empty);
@@ -253,7 +285,8 @@ public sealed partial class CliTests
             var (built, buildOutput, buildError) = await RunAsync([],
                 "build-trrm", artifact, "-o", executable, "--runtime",
                 "fail-fast", "--trrm-schema", schemaIdentity,
-                "--trrm-module", moduleIdentity, "--json");
+                "--trrm-module", moduleIdentity, "--json")
+                .ConfigureAwait(true);
             Assert.That(built, Is.Zero,
                 $"{buildOutput}{Environment.NewLine}{buildError}");
             Assert.That(buildError, Is.Empty);
@@ -306,6 +339,181 @@ public sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(executable)
                 .ConfigureAwait(true);
             await TestFileCleanup.DeleteWithRetryAsync(library)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [TestCase("trrm/1-draft-foreign-invocation-storage-addresses-1")]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2")]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1")]
+    public async Task SelectedStorageProfileRunsAndBuildsNativeParameterMutationAsync(
+        string schemaIdentity)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "cli-native-storage-address";
+        var core = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetSystemTimeAdjustment",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
+            internal extern int32 GetSystemTimeAdjustment(
+                write ptr<uint32> adjustment,
+                write ptr<uint32> increment,
+                write ptr<int32> disabled);
+
+            int32 Main() {
+                mut uint32 adjustment = 0;
+                mut uint32 increment = 0;
+                mut int32 disabled = 0;
+                unsafe {
+                    var callback = &GetSystemTimeAdjustment;
+                    callback(&adjustment, &increment, &disabled);
+                }
+                return disabled;
+            }
+            """), core, BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-plus-storage-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        var malformedArtifact = prefix + "-malformed.trrm";
+        var retainedOutput = prefix + "-retained.exe";
+        byte[] retainedBytes = [0xA5, 0x5A, 0xC3, 0x3C];
+        try
+        {
+            await File.WriteAllBytesAsync(artifact,
+                TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                    moduleIdentity, schemaIdentity, 1)).ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                artifact, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", moduleIdentity, "--json");
+            Assert.That(ran, Is.EqualTo(1),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", artifact, "-o", executable, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", moduleIdentity, "--json");
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            using var document = JsonDocument.Parse(buildOutput);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.True);
+            Assert.That(await ExecuteTrRmImageAsync(executable)
+                .ConfigureAwait(true),
+                Is.EqualTo(1));
+
+            var malformed = TrRmForeignInvocationAddressEmitterTests
+                .RewriteStorageAddressArtifact(
+                    await File.ReadAllBytesAsync(artifact).ConfigureAwait(true),
+                    "oversized-scalar-extent");
+            await File.WriteAllBytesAsync(malformedArtifact, malformed)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(retainedOutput, retainedBytes)
+                .ConfigureAwait(true);
+            var (rejected, rejectedOutput, rejectedError) = await RunAsync([],
+                "build-trrm", malformedArtifact, "-o", retainedOutput,
+                "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", moduleIdentity, "--json")
+                .ConfigureAwait(true);
+            Assert.That(rejected, Is.Not.Zero,
+                $"{rejectedOutput}{Environment.NewLine}{rejectedError}");
+            Assert.That(rejectedError, Is.Empty);
+            using (var rejection = JsonDocument.Parse(rejectedOutput))
+            {
+                Assert.That(rejection.RootElement.GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            }
+            Assert.That(await File.ReadAllBytesAsync(retainedOutput)
+                .ConfigureAwait(true), Is.EqualTo(retainedBytes));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            File.Delete(malformedArtifact);
+            await TestFileCleanup.DeleteWithRetryAsync(retainedOutput)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(executable)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [TestCase("invalid", "TRM5001", 1)]
+    [TestCase("unsupported", "TRM5006", 1)]
+    [TestCase("overflow", "TRM5005", 1)]
+    [TestCase("resource", "TRM5007", 2)]
+    public async Task A3LayoutAdmissionFailureMapsToItsDedicatedCliCodeAsync(
+        string failure, string expectedCode, int expectedExitCode)
+    {
+        var artifactBytes = failure switch
+        {
+            "invalid" => TrRmFixedArrayLayoutTableTests
+                .CreateA3DirectCycleArtifact(),
+            "unsupported" => TrRmFixedArrayLayoutTableTests
+                .CreateA3UnsupportedConstraintArtifact(),
+            "overflow" => TrRmFixedArrayLayoutTableTests
+                .CreateA3NestedClosedArrayExtentOverflowArtifact(),
+            "resource" => TrRmFixedArrayLayoutTableTests
+                .CreateA3GrowingRecursiveLayoutArtifact(),
+            _ => throw new ArgumentOutOfRangeException(nameof(failure))
+        };
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-a3-failure-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+        try
+        {
+            await File.WriteAllBytesAsync(artifact, artifactBytes)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(executable, retainedOutput)
+                .ConfigureAwait(true);
+            var (exit, output, error) = await RunAsync([], "build-trrm",
+                artifact, "-o", executable, "--runtime", "fail-fast",
+                "--trrm-schema",
+                "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
+                "--trrm-module", "Module", "--json");
+
+            Assert.That(exit, Is.EqualTo(expectedExitCode),
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.False);
+            Assert.That(document.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo(expectedCode));
+            Assert.That(await File.ReadAllBytesAsync(executable)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+
+            var (runExit, runOutput, runError) = await RunAsync([],
+                "run-trrm", artifact, "--runtime", "fail-fast",
+                "--trrm-schema",
+                "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
+                "--trrm-module", "Module", "--json");
+            Assert.That(runExit, Is.EqualTo(expectedExitCode),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runError, Is.Empty);
+            using var runDocument = JsonDocument.Parse(runOutput);
+            Assert.That(runDocument.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo(expectedCode));
+        }
+        finally
+        {
+            File.Delete(artifact);
+            await TestFileCleanup.DeleteWithRetryAsync(executable)
                 .ConfigureAwait(true);
         }
     }

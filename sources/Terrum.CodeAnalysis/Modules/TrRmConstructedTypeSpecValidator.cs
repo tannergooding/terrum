@@ -218,6 +218,11 @@ internal static class TrRmConstructedTypeSpecValidator
                 allowInitQualifier: bytes[2] == 0x8A).IsRow ? 1 : 0;
         }
 
+        if (bytes[0] == 0x11)
+        {
+            return typeSpecs.GetTypeSpecRef(Read(bytes, 2)).IsRow ? 1 : 0;
+        }
+
         return 0;
     }
 

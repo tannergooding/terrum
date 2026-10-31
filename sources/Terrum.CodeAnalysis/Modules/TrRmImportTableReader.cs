@@ -32,16 +32,20 @@ public readonly ref struct TrRmImportTableReader
     /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
     /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
     /// <param name="fields">The validated FieldDef table, or default when unsupported.</param>
+    /// <param name="associatedConstDefs">The validated AssociatedConstDef table, or default when unsupported.</param>
     public TrRmImportTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleRefTableReader references,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
         TrRmPropertyDefTableReader properties,
         TrRmInterfaceDefTableReader interfaces = default,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
-        TrRmFieldDefTableReader fields = default)
+        TrRmFieldDefTableReader fields = default,
+        TrRmAssociatedConstDefTableReader associatedConstDefs = default)
         : this(section, recordCount, strings, references, types, methods,
-            properties, interfaces, associatedTypeDefs, fields, default, default,
-            TrRmArtifactSchema.Standard, profileAware: false)
+            properties, interfaces, associatedTypeDefs, fields, associatedConstDefs,
+            default, default, TrRmArtifactSchema.Standard,
+            default, default, default,
+            profileAware: false)
     {
     }
 
@@ -53,10 +57,16 @@ public readonly ref struct TrRmImportTableReader
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmFieldDefTableReader fields,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmAssociatedConstDefTableReader associatedConstDefs = default,
+        TrRmStaticFieldTableReader staticFields = default,
+        TrRmStaticFieldContractTableReader staticFieldContracts = default,
+        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations = default)
         : this(section, recordCount, strings, references, types, methods,
-            properties, interfaces, associatedTypeDefs, fields, features, modules,
-            schema, profileAware: true)
+            properties, interfaces, associatedTypeDefs, fields, associatedConstDefs,
+            features, modules, schema, staticFields, staticFieldContracts,
+            intrinsicRegistrations,
+            profileAware: true)
     {
     }
 
@@ -67,8 +77,13 @@ public readonly ref struct TrRmImportTableReader
         TrRmInterfaceDefTableReader interfaces,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmFieldDefTableReader fields,
+        TrRmAssociatedConstDefTableReader associatedConstDefs,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
-        TrRmArtifactSchema schema, bool profileAware)
+        TrRmArtifactSchema schema,
+        TrRmStaticFieldTableReader staticFields,
+        TrRmStaticFieldContractTableReader staticFieldContracts,
+        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
+        bool profileAware)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -95,7 +110,9 @@ public readonly ref struct TrRmImportTableReader
             }
 
             var (module, visibility, owner, body) = TrRmDefinitionResolver.Resolve(expected,
-                types, fields, methods, properties, interfaces, associatedTypeDefs);
+                types, fields, methods, properties, interfaces, associatedTypeDefs,
+                associatedConstDefs, schema, staticFields, staticFieldContracts,
+                intrinsicRegistrations);
             var moduleRefRow = (int)moduleRef;
             if (moduleRefRow != lastModuleRefRow)
             {
@@ -146,14 +163,35 @@ public readonly ref struct TrRmImportTableReader
         {
             var expected = Read(section.Slice(row * RowSize, RowSize), 8);
             var kind = expected >> 24;
-            if (kind is 0x14 or 0x20)
+            if (kind == 0x26)
+            {
+                var registrationRow = checked((int)(expected & 0x00FF_FFFF));
+                if (intrinsicRegistrations.GetDeclarationRole(registrationRow) != 2)
+                {
+                    throw InvalidImport();
+                }
+
+                continue;
+            }
+
+            if (kind is 0x14 or 0x20 or 0x24 or 0x25)
             {
                 var referenceRow = (int)(expected & 0xFF_FFFF);
+                if (kind == 0x24
+                    && staticFieldContracts.GetDeclarationRole(
+                        staticFieldContracts.GetRowForStaticField(referenceRow)) != 2)
+                {
+                    throw InvalidImport();
+                }
+
                 var ownerType = kind switch
                 {
                     0x14 => fields.GetOwnerTypeDef(referenceRow),
                     0x20 => interfaces.GetOwnerTypeDef(
                         associatedTypeDefs.GetOwnerInterfaceDef(referenceRow)),
+                    0x24 => staticFields.GetOwnerTypeDefRow(referenceRow),
+                    0x25 => interfaces.GetOwnerTypeDef(
+                        associatedConstDefs.GetOwnerInterfaceDef(referenceRow)),
                     _ => throw InvalidImport(),
                 };
                 if (!_expected.ContainsKey(0x1300_0000u | (uint)ownerType))

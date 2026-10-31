@@ -114,6 +114,21 @@ public sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
+    public void AllowsInitQualifierOnAtomicTypeOnlyAsSpanElement()
+    {
+        var section = Rows(
+            [0x01, 0x04, 0x08],
+            [0x0C, 0, 0x8A, 1, 0, 0, 0]);
+        var reader = new TrRmTypeSpecTableReader(section, 2, 0, 0, 0, 0);
+
+        Assert.That(reader.GetTypeSpecRef(1, allowInitQualifier: true)
+            .Qualifiers, Is.EqualTo((byte)0x04));
+        Assert.That(reader.GetTypeSpecRef(2).Form, Is.EqualTo((byte)0x0C));
+        Assert.Throws<InvalidDataException>(() =>
+            GetTypeSpecRef(section, 2, 1));
+    }
+
+    [Test]
     public void ValidatesExistentialAndNestedTypeSpecRefForms()
     {
         var section = Rows(

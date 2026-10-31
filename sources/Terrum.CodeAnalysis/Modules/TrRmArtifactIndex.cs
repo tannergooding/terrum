@@ -13,6 +13,13 @@ internal enum TrRmArtifactSchema
     DevelopmentFunctionPointerEffectsDraft,
     CopyOriginDraft,
     ForeignInvocationDraft,
+    ForeignInvocationStorageAddressDraft,
+    ForeignInvocationStorageFixedArrayCopyDraft,
+    ForeignInvocationStorageFixedArrayGenericCopyDraft,
+    ScalarFrozenValuesDraft,
+    NominalEnumsDraft,
+    RootPinRuntimeDraft,
+    GeneralPredicateGraphsDraft,
 }
 
 internal static class TrRmArtifactSchemaFacts
@@ -24,6 +31,47 @@ internal static class TrRmArtifactSchemaFacts
     internal static bool UsesDevelopmentFunctionPointerEffects(
         this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft;
+
+    internal static bool SupportsNominalEnums(this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.NominalEnumsDraft;
+
+    internal static bool SupportsDeclaredCopyEvidence(
+        this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool SupportsDeclaredUniqueEvidence(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool UsesRootPinRuntime(this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.RootPinRuntimeDraft;
+
+    internal static bool UsesScalarFrozenValues(this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.ScalarFrozenValuesDraft
+            or TrRmArtifactSchema.NominalEnumsDraft
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft;
+
+    internal static bool UsesGeneralPredicateGraphs(this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.GeneralPredicateGraphsDraft;
+
+    internal static bool UsesForeignInvocationContracts(
+        this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool UsesForeignInvocationStorageAddresses(
+        this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+
+    internal static bool UsesForeignInvocationStorageFixedArrays(
+        this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
 }
 
 /// <summary>Validates TRRM (1, 0) framing and indexes present sections without binding them.</summary>
@@ -48,7 +96,14 @@ public readonly ref struct TrRmArtifactIndex
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.CopyOriginDraft
-            or TrRmArtifactSchema.ForeignInvocationDraft)
+            or TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            or TrRmArtifactSchema.ScalarFrozenValuesDraft
+            or TrRmArtifactSchema.NominalEnumsDraft
+            or TrRmArtifactSchema.RootPinRuntimeDraft
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
             || artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
             || ReadU16(artifact, 4) != 1 || ReadU16(artifact, 6) != 0
             || ReadU32(artifact, 8) != 32 || ReadU32(artifact, 16) != artifact.Length
@@ -66,7 +121,7 @@ public readonly ref struct TrRmArtifactIndex
         }
 
         var entryCount = ReadU32(artifact, 12);
-        var directoryEnd = 32L + entryCount * 16L;
+        var directoryEnd = 32L + (entryCount * 16L);
         if (entryCount is 0 or > 32790 || directoryEnd > artifact.Length)
         {
             throw InvalidArtifact();
@@ -76,7 +131,7 @@ public readonly ref struct TrRmArtifactIndex
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
         _schema = schema;
-        Span<uint> sectionCounts = stackalloc uint[0x4B + 1];
+        Span<uint> sectionCounts = stackalloc uint[0x5E + 1];
         sectionCounts.Clear();
         var previousKind = 0;
         // Keep directory-ordered payloads allocation-free while retaining support for alternate layouts.
@@ -86,10 +141,10 @@ public readonly ref struct TrRmArtifactIndex
         for (var entry = 0; entry < _entryCount; entry++)
         {
             var kind = Kind(entry);
-            var flags = ReadU16(_directory, entry * 16 + 2);
-            var count = ReadU32(_directory, entry * 16 + 4);
-            var start = ReadU32(_directory, entry * 16 + 8);
-            var length = ReadU32(_directory, entry * 16 + 12);
+            var flags = ReadU16(_directory, (entry * 16) + 2);
+            var count = ReadU32(_directory, (entry * 16) + 4);
+            var start = ReadU32(_directory, (entry * 16) + 8);
+            var length = ReadU32(_directory, (entry * 16) + 12);
             if (kind <= previousKind || count is 0 or > 0xFF_FFFF || length == 0
                 || start < directoryEnd || (long)start + length > artifact.Length)
             {
@@ -118,7 +173,7 @@ public readonly ref struct TrRmArtifactIndex
                     $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
             }
 
-            if (kind <= 0x004B)
+            if (kind <= 0x005E)
             {
                 sectionCounts[kind] = count;
             }
@@ -162,8 +217,8 @@ public readonly ref struct TrRmArtifactIndex
         {
             for (var entry = 0; entry < _entryCount; entry++)
             {
-                var start = ReadU32(_directory, entry * 16 + 8);
-                var length = ReadU32(_directory, entry * 16 + 12);
+                var start = ReadU32(_directory, (entry * 16) + 8);
+                var length = ReadU32(_directory, (entry * 16) + 12);
                 if (start < cursor)
                 {
                     throw InvalidArtifact();
@@ -182,8 +237,8 @@ public readonly ref struct TrRmArtifactIndex
             var extents = new (uint Start, uint End)[_entryCount];
             for (var entry = 0; entry < _entryCount; entry++)
             {
-                var start = ReadU32(_directory, entry * 16 + 8);
-                var length = ReadU32(_directory, entry * 16 + 12);
+                var start = ReadU32(_directory, (entry * 16) + 8);
+                var length = ReadU32(_directory, (entry * 16) + 12);
                 extents[entry] = (start, start + length);
             }
 
@@ -211,11 +266,11 @@ public readonly ref struct TrRmArtifactIndex
 
         for (var entry = 0; entry < _entryCount; entry++)
         {
-            if (ReadU16(_directory, entry * 16 + 2) == 2)
+            if (ReadU16(_directory, (entry * 16) + 2) == 2)
             {
-                var start = ReadU32(_directory, entry * 16 + 8);
-                var length = ReadU32(_directory, entry * 16 + 12);
-                var count = ReadU32(_directory, entry * 16 + 4);
+                var start = ReadU32(_directory, (entry * 16) + 8);
+                var length = ReadU32(_directory, (entry * 16) + 12);
+                var count = ReadU32(_directory, (entry * 16) + 4);
                 ValidateSlots(artifact.Slice((int)start, (int)length), Kind(entry),
                     count, sectionCounts, schema);
             }
@@ -235,13 +290,41 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForForeignInvocationDraft(ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.ForeignInvocationDraft);
 
+    internal static TrRmArtifactIndex
+        ForForeignInvocationStorageAddressDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.ForeignInvocationStorageAddressDraft);
+
+    internal static TrRmArtifactIndex
+        ForForeignInvocationStorageFixedArrayCopyDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+
+    internal static TrRmArtifactIndex
+        ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft);
+
+    internal static TrRmArtifactIndex ForNominalEnumsDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.NominalEnumsDraft);
+
+    internal static TrRmArtifactIndex ForScalarFrozenValuesDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.ScalarFrozenValuesDraft);
+
+    internal static TrRmArtifactIndex ForRootPinRuntimeDraft(ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.RootPinRuntimeDraft);
+
+    internal static TrRmArtifactIndex ForGeneralPredicateGraphsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+
     public bool TryGetSection(ushort kind, out ReadOnlySpan<byte> section, out int recordCount)
     {
         var low = 0;
         var high = _entryCount;
         while (low < high)
         {
-            var middle = low + (high - low) / 2;
+            var middle = low + ((high - low) / 2);
             if (Kind(middle) < kind)
             {
                 low = middle + 1;
@@ -254,10 +337,10 @@ public readonly ref struct TrRmArtifactIndex
 
         if (low < _entryCount && Kind(low) == kind)
         {
-            var start = ReadU32(_directory, low * 16 + 8);
-            var length = ReadU32(_directory, low * 16 + 12);
+            var start = ReadU32(_directory, (low * 16) + 8);
+            var length = ReadU32(_directory, (low * 16) + 12);
             section = _artifact.Slice((int)start, (int)length);
-            recordCount = (int)ReadU32(_directory, low * 16 + 4);
+            recordCount = (int)ReadU32(_directory, (low * 16) + 4);
             return true;
         }
 
@@ -295,16 +378,16 @@ public readonly ref struct TrRmArtifactIndex
         }
 
         var slotCount = ReadU32(section, 0);
-        var preludeEnd = 4L + slotCount * 16L;
+        var preludeEnd = 4L + (slotCount * 16L);
         if (preludeEnd > section.Length
-            || (kind == 0x7F00 && preludeEnd + recordCount * 16L != section.Length))
+            || (kind == 0x7F00 && preludeEnd + (recordCount * 16L) != section.Length))
         {
             throw InvalidArtifact();
         }
 
         for (var slot = 0; slot < slotCount; slot++)
         {
-            var offset = 4 + (int)slot * 16;
+            var offset = 4 + ((int)slot * 16);
             var targetKind = ReadU16(section, offset);
             var selector = ReadU16(section, offset + 2);
             var row = ReadU32(section, offset + 4);
@@ -336,7 +419,12 @@ public readonly ref struct TrRmArtifactIndex
     private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
         => !schema.IsDevelopmentProfile()
             ? kind is >= 0x0001 and <= 0x004B
-            : kind is >= 0x0001 and <= 0x0020 && kind != 0x0004;
+                || (schema.SupportsNominalEnums()
+                    && (kind is 0x0053 or 0x0054))
+                || (schema.UsesGeneralPredicateGraphs()
+                    && (kind is (>= 0x004D and <= 0x0052)
+                        or (>= 0x0055 and <= 0x005E)))
+            : kind is >= 0x0001 and <= 0x0020 and not 0x0004;
 
     private static int FixedStride(int kind, TrRmArtifactSchema schema)
     {
@@ -374,6 +462,7 @@ public readonly ref struct TrRmArtifactIndex
             0x0001 => 48,
             0x0002 or 0x0003 or 0x0011 or 0x001B or 0x0020
                 or 0x004B or 0x7F00 => 0,
+            0x0012 when schema.UsesForeignInvocationStorageFixedArrays() => 40,
             0x0004 => 8,
             0x0010 => 12,
             0x0013 => 44,
@@ -414,6 +503,21 @@ public readonly ref struct TrRmArtifactIndex
             0x0048 => 8,
             0x0049 => 16,
             0x004A => 4,
+            0x004D => schema.UsesGeneralPredicateGraphs() ? 4 : -1,
+            0x004E => schema.UsesGeneralPredicateGraphs() ? 0 : -1,
+            0x004F => schema.UsesGeneralPredicateGraphs() ? 4 : -1,
+            0x0050 => schema.UsesGeneralPredicateGraphs() ? 8 : -1,
+            0x0051 => schema.UsesGeneralPredicateGraphs() ? 12 : -1,
+            0x0052 => schema.UsesGeneralPredicateGraphs() ? 0 : -1,
+            0x0053 or 0x0054 when schema.SupportsNominalEnums() => 20,
+            0x0055 or 0x0056 or 0x0057 when schema.UsesGeneralPredicateGraphs() => 20,
+            0x0058 when schema.UsesGeneralPredicateGraphs() => 16,
+            0x0059 when schema.UsesGeneralPredicateGraphs() => 8,
+            0x005A when schema.UsesGeneralPredicateGraphs() => 12,
+            0x005B when schema.UsesGeneralPredicateGraphs() => 16,
+            0x005C when schema.UsesGeneralPredicateGraphs() => 24,
+            0x005D when schema.UsesGeneralPredicateGraphs() => 16,
+            0x005E when schema.UsesGeneralPredicateGraphs() => 8,
             _ => -1,
         };
     }

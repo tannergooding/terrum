@@ -344,7 +344,8 @@ public static partial class TrRmExecutableCompiler
 
                         valueExpressions[operation.Result - 1] = new BoundNativeStorageAddress(
                             variable, new BoundConstant(0, PrimitiveType.Int32, default),
-                            type, type, PrimitiveType.NativeStorageAddress, 1, extent, extent,
+                            type, type, PrimitiveType.NativeStorageAddress, 1,
+                            (ulong)extent, (ulong)extent,
                             IsReadonly: !isOutputPointer, default);
                         break;
                     }

@@ -12,10 +12,18 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class TrRmExecutableCompiler
 {
     internal static byte[] EmitForeignInvocationDraftNativeAddressLibrary(
-        BoundProgram program, string moduleIdentity)
+        BoundProgram program, string moduleIdentity,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
+        {
+            throw new ArgumentOutOfRangeException(nameof(schema));
+        }
         if (program.EntryPoint < 0)
         {
             SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
@@ -134,9 +142,27 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported("NativeAddress formation requires bound unsafe authorization.");
         }
-        var indirectCall = TryGetNativeAddressCall(
-            caller, selectedAddress, signature, out var callHomeIndex,
-            out var callResultHomeIndex);
+        NativeAddressStorageCallPlan? storageCall = null;
+        BoundIndirectCall? indirectCall;
+        int callHomeIndex;
+        int callResultHomeIndex;
+        if (schema.UsesForeignInvocationStorageAddresses()
+            && TryGetNativeAddressStorageCall(program, caller,
+                selectedAddress, signature, out var storageAddressCall)
+            && storageAddressCall is not null)
+        {
+            storageCall = storageAddressCall;
+            indirectCall = storageAddressCall.Call;
+            callHomeIndex = storageAddressCall.TargetVariable
+                - caller.ParameterCount;
+            callResultHomeIndex = -1;
+        }
+        else
+        {
+            indirectCall = TryGetNativeAddressCall(
+                caller, selectedAddress, signature, out callHomeIndex,
+                out callResultHomeIndex);
+        }
         var emitsIndirectCall = indirectCall is not null;
         if (!emitsIndirectCall && caller.ParameterCount != 0)
         {
@@ -217,6 +243,11 @@ public static partial class TrRmExecutableCompiler
             .Take(caller.ParameterCount)
             .Select(static variable => variable.Type)
             .Select(GetSignatureTypeSpecRef).ToArray();
+        var callerLocalTypeSpecRefs = caller.Variables
+            .Skip(caller.ParameterCount)
+            .Select(variable => NativeFunctionPointerTypes.IsType(variable.Type)
+                ? 0u : GetSignatureTypeSpecRef(variable.Type))
+            .ToArray();
         var targetParameterTypeSpecRefs
             = signature.ParameterTypes.Select(GetSignatureTypeSpecRef).ToArray();
         const int callerSignatureRow = 1;
@@ -254,10 +285,9 @@ public static partial class TrRmExecutableCompiler
             featureRows.Add(TrRmFeatureRow.ForeignInvocationContractsCandidate);
         }
 
-        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows,
-            TrRmArtifactSchema.ForeignInvocationDraft);
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
         var featureReader = new TrRmFeatureTableReader(featureBytes,
-            featureRows.Count, TrRmArtifactSchema.ForeignInvocationDraft);
+            featureRows.Count, schema);
 
         var stringRows = new List<(string Text, int Encoding)> { ("", 0) };
         var stringIndexes = new Dictionary<(string Text, int Encoding), int>
@@ -306,11 +336,10 @@ public static partial class TrRmExecutableCompiler
             : new TrRmModuleRefTableReader(moduleRefBytes,
                 moduleRefRows.Count, strings, modules);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
-            0, 0, 0, 0, TrRmArtifactSchema.ForeignInvocationDraft,
+            0, 0, 0, 0, schema,
             methodDefCount: program.Functions.Length + 1);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeSpecRows.Count, 0, 0, 0, 0,
-            TrRmArtifactSchema.ForeignInvocationDraft,
+            typeSpecRows.Count, 0, 0, 0, 0, schema,
             methodDefCount: program.Functions.Length + 1);
         var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
             typeSpecs, parameterRows.Count, 0);
@@ -318,13 +347,11 @@ public static partial class TrRmExecutableCompiler
             signatureRows.Length, typeSpecs, parameterRows.Count, 0);
         var paramBytes = parameterRows.Count == 0
             ? []
-            : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs,
-                TrRmArtifactSchema.ForeignInvocationDraft);
+            : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs, schema);
         var parameters = parameterRows.Count == 0
             ? default
             : new TrRmParamTableReader(paramBytes, parameterRows.Count,
-                signatures, typeSpecs,
-                TrRmArtifactSchema.ForeignInvocationDraft);
+                signatures, typeSpecs, schema);
         var nativeParameters = import.Parameters
             .OrderBy(static parameter => parameter.ParameterIndex).ToArray();
         var targetContractCount = nativeParameters.Length + 1;
@@ -406,20 +433,20 @@ public static partial class TrRmExecutableCompiler
             : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
                 typeDefs, methods, default, default, default, default,
                 featureReader, modules,
-                TrRmArtifactSchema.ForeignInvocationDraft);
+                schema);
         var imports = importRows.Count == 0
             ? default
             : new TrRmImportTableReader(importBytes, importRows.Count,
                 strings, moduleRefs, typeDefs, methods, default, default,
                 default, default, featureReader, modules,
-                TrRmArtifactSchema.ForeignInvocationDraft);
+                schema);
         var contractBytes = TrRmContractTableWriter.EncodeForeignInvocationDraft(
             contractRows, typeDefs, methods, signatures, parameters, typeSpecs,
-            featureReader, modules, predicateGraphCount: 0);
+            featureReader, modules, predicateGraphCount: 0, schema: schema);
         var contracts = new TrRmContractTableReader(contractBytes,
             contractRows.Count, typeDefs, methods, signatures, parameters,
             typeSpecs, 0, featureReader, modules,
-            TrRmArtifactSchema.ForeignInvocationDraft);
+            schema);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
         var layouts = new TrRmLayoutTableReader([], 0, typeDefs, targetProfiles, 0);
         var nativeImportBytes = TrRmNativeImportTableWriter.Encode([
@@ -461,12 +488,41 @@ public static partial class TrRmExecutableCompiler
         {
             typeMapTokens.Add(0x1100_0000u | typeSpecRef);
         }
+        if (storageCall is not null)
+        {
+            for (var localOrdinal = 0;
+                localOrdinal < callerLocalTypeSpecRefs.Length; localOrdinal++)
+            {
+                var variable = caller.Variables[
+                    caller.ParameterCount + localOrdinal];
+                typeMapTokens.Add(NativeFunctionPointerTypes.IsType(variable.Type)
+                    ? 0x1100_0001u
+                    : 0x1100_0000u
+                        | callerLocalTypeSpecRefs[localOrdinal]);
+            }
+
+            foreach (var storageArgument in storageCall.StorageArguments)
+            {
+                typeMapTokens.Add(0x1100_0000u
+                    | GetSignatureTypeSpecRef(signature.ParameterTypes[
+                        storageArgument.ParameterOrdinal]));
+            }
+        }
 
         var targetMethodMapToken = moduleImport is null
             ? 0x1600_0000u | (uint)targetMethodRow
             : 0x1C00_0001u;
         var maps = TrRmRegisterBodyMapBuilder.Create(typeMapTokens,
             [targetMethodMapToken]);
+        byte[] body;
+        if (storageCall is not null)
+        {
+            body = EncodeForeignInvocationStorageAddressBody(caller,
+                storageCall, signature, maps, targetMethodMapToken,
+                contractRows.Count, GetSignatureTypeSpecRef, schema);
+        }
+        else
+        {
         var entryState = new byte[8];
         entryState[0] = 0x01;
         var nativeAddress = TrRmRegisterBodyRecordWriter.EncodeNativeAddress(
@@ -610,11 +666,12 @@ public static partial class TrRmExecutableCompiler
             code.Add(0);
         }
         var codeBytes = code.ToArray();
-        var body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+        body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)codeBytes.Length, 0)],
             records, codeBytes, contractRows.Count,
-            TrRmArtifactSchema.ForeignInvocationDraft);
+            schema);
+        }
         var sections = new List<TrRmSection>
         {
             new(0x0001, 0, 1, moduleBytes),
@@ -646,7 +703,7 @@ public static partial class TrRmExecutableCompiler
                 TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
                     methods, default, imports, default, default, default,
                     featureReader, modules,
-                    TrRmArtifactSchema.ForeignInvocationDraft)));
+                    schema)));
         }
         sections.Add(new TrRmSection(0x0020, 0, 1,
             TrRmVariableTableWriter.EncodeBodies([body])));
@@ -655,10 +712,29 @@ public static partial class TrRmExecutableCompiler
             => left.Kind.CompareTo(right.Kind));
 
         var artifact = TrRmArtifactWriter.Encode(sections,
-            TrRmArtifactSchema.ForeignInvocationDraft);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationDraftAndGetExecutionTables(
-                TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+            schema);
+        var artifactIndex = schema.UsesForeignInvocationStorageFixedArrays()
+            ? schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+                : TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)
+            : schema.UsesForeignInvocationStorageAddresses()
+                ? TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact)
+                : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = schema.UsesForeignInvocationStorageFixedArrays()
+            ? schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(artifactIndex)
+                : TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(artifactIndex)
+            : schema.UsesForeignInvocationStorageAddresses()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(artifactIndex)
+                : TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationDraftAndGetExecutionTables(artifactIndex);
         tables.ValidateRegisterBodyMapsForMethod(callerMethodRow);
         return artifact;
 
@@ -675,6 +751,475 @@ public static partial class TrRmExecutableCompiler
             stringRows.Add(key);
             return row;
         }
+    }
+
+    private readonly record struct NativeAddressStorageArgument(
+        int ParameterOrdinal, BoundNativeStorageAddress Address);
+
+    private sealed record NativeAddressStorageCallPlan(
+        BoundIndirectCall Call, int TargetVariable, int ReturnVariable,
+        ImmutableArray<NativeAddressStorageArgument> StorageArguments);
+
+    private static bool TryGetNativeAddressStorageCall(BoundProgram program,
+        BoundFunction function, BoundNativeFunctionAddress address,
+        NativeFunctionPointerSignatureDefinition signature,
+        out NativeAddressStorageCallPlan? plan)
+    {
+        plan = null;
+        var statements = new List<BoundStatement>();
+        if (!AppendStatements(function.Body, statements)
+            || statements.Count < 4
+            || statements[^1] is not BoundReturn
+                { Value: BoundRead returnRead }
+            || returnRead.Type != function.ReturnType
+            || (uint)returnRead.Variable >= (uint)function.Variables.Length)
+        {
+            return false;
+        }
+
+        var callStatements = statements
+            .Select((statement, index) => (statement, index))
+            .Where(static item => item.statement is BoundExpressionStatement
+                { Expression: BoundIndirectCall })
+            .ToArray();
+        if (callStatements.Length != 1
+            || callStatements[0].statement is not BoundExpressionStatement
+                { Expression: BoundIndirectCall call }
+            || callStatements[0].index != statements.Count - 2
+            || call.Target is not BoundRead targetRead
+            || (uint)targetRead.Variable >= (uint)function.Variables.Length
+            || targetRead.Type != address.Type
+            || call.Arguments.Length != signature.ParameterTypes.Length
+            || !call.IsUnsafeAuthorized
+            || call.Type != signature.ReturnType
+            || !NativeFunctionPointerTypes.IsType(address.Type))
+        {
+            return false;
+        }
+
+        var targetLocals = statements
+            .Select(static statement => statement as BoundLocal)
+            .Where(static local => local is not null
+                && local.Initializer is BoundNativeFunctionAddress)
+            .Cast<BoundLocal>()
+            .ToArray();
+        if (targetLocals.Length != 1
+            || targetLocals[0].Initializer is not BoundNativeFunctionAddress
+                { } localAddress
+            || localAddress != address
+            || targetLocals[0].Variable != targetRead.Variable
+            || targetRead.Variable < function.ParameterCount
+            || targetRead.Variable >= function.Variables.Length
+            || call.Arguments.Any(static argument =>
+                argument is BoundNativeOutputReservation))
+        {
+            return false;
+        }
+
+        var localDeclarations = statements
+            .Take(callStatements[0].index)
+            .OfType<BoundLocal>()
+            .ToArray();
+        if (localDeclarations.Length
+                != function.Variables.Length - function.ParameterCount
+            || statements.Take(callStatements[0].index)
+                .Any(static statement => statement is not BoundLocal))
+        {
+            return false;
+        }
+
+        var localVariables = new HashSet<int>();
+        foreach (var declaration in localDeclarations)
+        {
+            if (declaration.Variable < function.ParameterCount
+                || declaration.Variable >= function.Variables.Length
+                || !localVariables.Add(declaration.Variable))
+            {
+                return false;
+            }
+
+            var variable = function.Variables[declaration.Variable];
+            if (variable.IsOut || variable.IsInit || variable.IsImplicitRef
+                || variable.IsImplicitReferenceTemporary
+                || variable.IsInitializationLocal
+            || NativeFixedArrayTypes.IsType(variable.Type))
+            {
+                return false;
+            }
+
+            if (declaration.Variable == targetRead.Variable)
+            {
+                if (declaration.Initializer is not BoundNativeFunctionAddress
+                    { } nativeAddress
+                    || nativeAddress != address
+                    || variable.Type != address.Type)
+                {
+                    return false;
+                }
+            }
+            else if (declaration.Initializer is not BoundConstant constant
+                || constant.Type != variable.Type
+                || !TryGetContextualInitializationRegister(constant,
+                    variable.Type, out _))
+            {
+                return false;
+            }
+        }
+
+        if (returnRead.Variable < function.ParameterCount
+            || !localVariables.Contains(returnRead.Variable)
+            || returnRead.Variable == targetRead.Variable
+            || function.Variables[returnRead.Variable].Type != function.ReturnType)
+        {
+            return false;
+        }
+
+        var storageArguments = ImmutableArray.CreateBuilder<
+            NativeAddressStorageArgument>();
+        for (var ordinal = 0; ordinal < call.Arguments.Length; ordinal++)
+        {
+            var argument = call.Arguments[ordinal];
+            if (argument is BoundNativeStorageAddress storageAddress)
+            {
+                var nativeParameter = signature.NativeParameters
+                    .FirstOrDefault(parameter => parameter.ParameterIndex == ordinal);
+                if (storageAddress.Variable < function.ParameterCount
+                    || !localVariables.Contains(storageAddress.Variable)
+                    || storageAddress.Variable == targetRead.Variable
+                    || storageAddress.CarrierType != storageAddress.ElementType
+                    || storageAddress.ElementCount != 1
+                    || storageAddress.ElementStride <= 0
+                    || storageAddress.ByteExtent != storageAddress.ElementStride
+                    || nativeParameter is null
+                    || !DirectNativeImportContract.MatchesAddress(
+                        storageAddress, nativeParameter, function, program)
+                    || !NativePointerTypes.IsType(signature.ParameterTypes[ordinal]))
+                {
+                    return false;
+                }
+
+                storageArguments.Add(new NativeAddressStorageArgument(
+                    ordinal, storageAddress));
+            }
+            else if (argument is BoundRead read
+                && (uint)read.Variable < (uint)function.Variables.Length
+                && read.Type == function.Variables[read.Variable].Type
+                && read.Type == signature.ParameterTypes[ordinal])
+            {
+            }
+            else
+            {
+                return false;
+            }
+        }
+
+        if (storageArguments.Count == 0
+            || !storageArguments.Any(argument =>
+                argument.Address.Variable == returnRead.Variable))
+        {
+            return false;
+        }
+
+        plan = new NativeAddressStorageCallPlan(call, targetRead.Variable,
+            returnRead.Variable, storageArguments.ToImmutable());
+        return true;
+    }
+
+    private static bool TryGetContextualInitializationRegister(
+        BoundConstant constant, PrimitiveType type, out byte register)
+    {
+        register = 0;
+        if (constant.Type != type || !DirectNativeImportContract.IsScalar(type))
+        {
+            return false;
+        }
+
+        if (constant.Bits.Low == 0 && constant.Bits.High == 0)
+        {
+            register = 14;
+            return true;
+        }
+
+        var width = PrimitiveTypeFacts.ScalarWidth(type);
+        if (constant.Bits.High != 0 || width is not (1 or 2 or 4 or 8))
+        {
+            return false;
+        }
+
+        var allBitsSet = width == sizeof(ulong)
+            ? ulong.MaxValue
+            : (1UL << (width * 8)) - 1;
+        var isAllBitsConstant = type switch
+        {
+            PrimitiveType.Bool => constant.Bits.Low == 1,
+            PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32
+                or PrimitiveType.Int64 or PrimitiveType.UInt8
+                or PrimitiveType.UInt16 or PrimitiveType.UInt32
+                or PrimitiveType.UInt64 or PrimitiveType.Float32
+                or PrimitiveType.Float64 => constant.Bits.Low == allBitsSet,
+            _ => false,
+        };
+        if (!isAllBitsConstant)
+        {
+            return false;
+        }
+
+        register = 15;
+        return true;
+    }
+
+    private static byte[] EncodeForeignInvocationStorageAddressBody(
+        BoundFunction caller, NativeAddressStorageCallPlan storageCall,
+        NativeFunctionPointerSignatureDefinition signature,
+        TrRmRegisterBodyMaps maps, uint targetMethodMapToken,
+        int contractCount, Func<PrimitiveType, uint> getSignatureTypeSpecRef,
+        TrRmArtifactSchema schema)
+    {
+        var localCount = caller.Variables.Length - caller.ParameterCount;
+        var storageResultHomeStart = localCount;
+        var formalHomeStart = storageResultHomeStart
+            + storageCall.StorageArguments.Length;
+        var homeCount = formalHomeStart + caller.ParameterCount;
+        if (localCount <= 0 || homeCount > 65_536)
+        {
+            throw Unsupported(
+                "The F+S Body has too many Homes for its local and storage-address results.");
+        }
+
+        var homeIndexByVariable = new int[caller.Variables.Length];
+        Array.Fill(homeIndexByVariable, -1);
+        var homeMap = new byte[homeCount * 8];
+        for (var localOrdinal = 0; localOrdinal < localCount; localOrdinal++)
+        {
+            var variableIndex = caller.ParameterCount + localOrdinal;
+            var variable = caller.Variables[variableIndex];
+            var home = localOrdinal;
+            homeIndexByVariable[variableIndex] = home;
+            var offset = home * 8;
+            homeMap[offset] = 3;
+            homeMap[offset + 1] = variable.IsMutable ? (byte)1 : (byte)0;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2),
+                maps.GetTypeMapIndex(NativeFunctionPointerTypes.IsType(
+                        variable.Type)
+                    ? 0x1100_0001u
+                    : 0x1100_0000u
+                        | getSignatureTypeSpecRef(variable.Type)));
+        }
+
+        var storageHomeByParameter = new Dictionary<int, int>();
+        for (var index = 0;
+            index < storageCall.StorageArguments.Length; index++)
+        {
+            var storageArgument = storageCall.StorageArguments[index];
+            var home = storageResultHomeStart + index;
+            storageHomeByParameter.Add(storageArgument.ParameterOrdinal, home);
+            var offset = home * 8;
+            homeMap[offset] = 3;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2),
+                maps.GetTypeMapIndex(0x1100_0000u
+                    | getSignatureTypeSpecRef(
+                        signature.ParameterTypes[
+                            storageArgument.ParameterOrdinal])));
+        }
+
+        for (var ordinal = 0; ordinal < caller.ParameterCount; ordinal++)
+        {
+            var home = formalHomeStart + ordinal;
+            var variable = caller.Variables[ordinal];
+            var offset = home * 8;
+            homeMap[offset] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2),
+                maps.GetTypeMapIndex(0x1100_0000u
+                    | getSignatureTypeSpecRef(variable.Type)));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 4), checked((ushort)ordinal));
+        }
+
+        var targetHome = homeIndexByVariable[storageCall.TargetVariable];
+        if (targetHome < 0)
+        {
+            throw Unsupported("The F+S target pointer has no local Home.");
+        }
+
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        var records = new List<ReadOnlyMemory<byte>>
+        {
+            entryState,
+            TrRmRegisterBodyRecordWriter.EncodeNativeAddress(2,
+                checked((ushort)targetHome),
+                maps.GetMethodMapIndex(targetMethodMapToken),
+                maps.GetTypeMapIndex(0x1100_0001)),
+        };
+        var code = new List<byte>();
+        var statements = new List<BoundStatement>();
+        if (!AppendStatements(caller.Body, statements))
+        {
+            throw Unsupported("The F+S caller Body cannot be flattened.");
+        }
+
+        var storageArguments = storageCall.StorageArguments
+            .ToDictionary(static argument => argument.ParameterOrdinal);
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case BoundLocal local:
+                    var homeIndex = homeIndexByVariable[local.Variable];
+                    if (homeIndex < 0)
+                    {
+                        throw Unsupported("The F+S local has no Home.");
+                    }
+
+                    if (local.Variable == storageCall.TargetVariable)
+                    {
+                        code.Add(0xE9);
+                        code.Add(0);
+                        code.Add(1);
+                        code.Add(0);
+                        break;
+                    }
+
+                    if (local.Initializer is not BoundConstant constant
+                        || !TryGetContextualInitializationRegister(constant,
+                            caller.Variables[local.Variable].Type,
+                            out var sourceRegister))
+                    {
+                        throw Unsupported(
+                            "F+S local initialization requires an admitted typed contextual constant.");
+                    }
+
+                    AppendHomeStore(code, sourceRegister, homeIndex);
+                    break;
+
+                case BoundExpressionStatement
+                    { Expression: BoundIndirectCall call }:
+                    var callInputs = new List<TrRmRegisterBodyCallInput>(
+                        call.Arguments.Length);
+                    for (var ordinal = 0; ordinal < call.Arguments.Length;
+                        ordinal++)
+                    {
+                        switch (call.Arguments[ordinal])
+                        {
+                            case BoundNativeStorageAddress storageAddress:
+                                if (!storageArguments.TryGetValue(ordinal,
+                                        out var storageArgument)
+                                    || storageArgument.Address != storageAddress
+                                    || homeIndexByVariable[
+                                        storageAddress.Variable] < 0)
+                                {
+                                    throw Unsupported(
+                                        "The F+S storage-address argument does not match its checked local place.");
+                                }
+
+                                var storageRecordIndex
+                                    = checked((ushort)records.Count);
+                                records.Add(
+                                    TrRmRegisterBodyRecordWriter
+                                        .EncodeStorageAddress(2, 2,
+                                            checked((ushort)homeIndexByVariable[
+                                                storageAddress.Variable]),
+                                            checked((ushort)
+                                                storageHomeByParameter[ordinal]),
+                                            maps.GetTypeMapIndex(
+                                                0x1100_0000u
+                                                    | getSignatureTypeSpecRef(
+                                                        signature.ParameterTypes[
+                                                            ordinal])),
+                                            1));
+                                code.Add(0xEC);
+                                code.Add(0);
+                                code.Add((byte)storageRecordIndex);
+                                code.Add((byte)(storageRecordIndex >> 8));
+                                callInputs.Add(new TrRmRegisterBodyCallInput(2, 1,
+                                    checked((ushort)storageHomeByParameter[ordinal])));
+                                break;
+
+                            case BoundRead read:
+                                var inputHome = read.Variable < caller.ParameterCount
+                                    ? formalHomeStart + read.Variable
+                                    : homeIndexByVariable[read.Variable];
+                                if (inputHome < 0)
+                                {
+                                    throw Unsupported(
+                                        "The F+S CallSite input has no completed Home.");
+                                }
+
+                                callInputs.Add(new TrRmRegisterBodyCallInput(2, 1,
+                                    checked((ushort)inputHome)));
+                                break;
+
+                            default:
+                                throw Unsupported(
+                                    "The F+S CallSite supports local storage addresses and completed Home reads.");
+                        }
+                    }
+
+                    var callResultKind = call.Type == PrimitiveType.Void
+                        ? (byte)0 : (byte)1;
+                    var callSiteIndex = checked((ushort)records.Count);
+                    records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
+                        3, callResultKind, checked((ushort)targetHome), 0,
+                        callInputs, []));
+                    AppendCallSiteInstruction(code, callSiteIndex);
+                    break;
+
+                case BoundReturn { Value: BoundRead read }:
+                    var returnHome = read.Variable < caller.ParameterCount
+                        ? formalHomeStart + read.Variable
+                        : homeIndexByVariable[read.Variable];
+                    if (returnHome < 0 || read.Variable != storageCall.ReturnVariable)
+                    {
+                        throw Unsupported(
+                            "The F+S return must read the storage local after the native call.");
+                    }
+                    if (returnHome > byte.MaxValue)
+                    {
+                        throw Unsupported(
+                            "The assigned ReturnHome form supports only one-byte Home indexes.");
+                    }
+
+                    code.Add(0xB8);
+                    code.Add(checked((byte)returnHome));
+                    break;
+
+                default:
+                    throw Unsupported(
+                        "The F+S caller Body contains an unsupported operation.");
+            }
+        }
+
+        var codeBytes = code.ToArray();
+        return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
+            maps.MethodMap, default, default,
+            [new TrRmRegisterBodyBlock(0, (uint)codeBytes.Length, 0)],
+            records, codeBytes, contractCount,
+            schema);
+    }
+
+    private static void AppendHomeStore(List<byte> code, byte sourceRegister,
+        int homeIndex)
+    {
+        if (sourceRegister is not (14 or 15)
+            || (uint)homeIndex > ushort.MaxValue)
+        {
+            throw Unsupported("The F+S Home initialization operand is invalid.");
+        }
+
+        if (homeIndex < 16)
+        {
+            code.Add(0x14);
+            code.Add((byte)((sourceRegister << 4) | homeIndex));
+            return;
+        }
+
+        code.Add(0xD6);
+        code.Add((byte)(0x10 | sourceRegister));
+        code.Add((byte)homeIndex);
+        code.Add((byte)(homeIndex >> 8));
     }
 
     private static bool IsAddressOnlyVoidBody(BoundFunction function,
@@ -709,7 +1254,7 @@ public static partial class TrRmExecutableCompiler
             || variable.IsMutable || variable.IsOut || variable.IsInit
             || variable.IsInitializationLocal || variable.IsImplicitRef
             || variable.IsImplicitReferenceTemporary
-            || variable.NativeFixedArrayLayout is not null)
+            || NativeFixedArrayTypes.IsType(variable.Type))
         {
             return false;
         }
@@ -793,7 +1338,7 @@ public static partial class TrRmExecutableCompiler
                 || resultVariable.IsImplicitRef
                 || resultVariable.IsImplicitReferenceTemporary
                 || resultVariable.IsInitializationLocal
-                || resultVariable.NativeFixedArrayLayout is not null)
+                || NativeFixedArrayTypes.IsType(resultVariable.Type))
             {
                 return null;
             }
@@ -825,7 +1370,7 @@ public static partial class TrRmExecutableCompiler
         if (variable.Type != address.Type || variable.IsOut || variable.IsInit
             || variable.IsImplicitRef || variable.IsImplicitReferenceTemporary
             || variable.IsInitializationLocal
-            || variable.NativeFixedArrayLayout is not null)
+            || NativeFixedArrayTypes.IsType(variable.Type))
         {
             return null;
         }
@@ -839,7 +1384,7 @@ public static partial class TrRmExecutableCompiler
                 || formal.IsOut || formal.IsInit || formal.IsImplicitRef
                 || formal.IsImplicitReferenceTemporary
                 || formal.IsInitializationLocal
-                || formal.NativeFixedArrayLayout is not null
+                || NativeFixedArrayTypes.IsType(formal.Type)
                 || call.Arguments[ordinal].Type != signature.ParameterTypes[ordinal])
             {
                 return null;

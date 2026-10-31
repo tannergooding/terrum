@@ -10,7 +10,12 @@ internal static class TrRmDefinitionResolver
         uint reference, TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
         TrRmMethodDefTableReader methods,
         TrRmPropertyDefTableReader properties, TrRmInterfaceDefTableReader interfaces,
-        TrRmAssociatedTypeDefTableReader associatedTypeDefs)
+        TrRmAssociatedTypeDefTableReader associatedTypeDefs,
+        TrRmAssociatedConstDefTableReader associatedConstDefs,
+        TrRmArtifactSchema schema,
+        TrRmStaticFieldTableReader staticFields = default,
+        TrRmStaticFieldContractTableReader staticFieldContracts = default,
+        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations = default)
     {
         var row = (int)(reference & 0xFF_FFFF);
         return (reference >> 24) switch
@@ -21,6 +26,18 @@ internal static class TrRmDefinitionResolver
                 => ResolveField(row, types, fields),
             0x20 when row > 0 && row <= associatedTypeDefs.Count
                 => ResolveAssociatedType(row, types, interfaces, associatedTypeDefs),
+            0x25 when schema.UsesGeneralPredicateGraphs()
+                && row > 0 && row <= associatedConstDefs.Count
+                    => ResolveAssociatedConstant(row, types, interfaces,
+                        associatedConstDefs),
+            0x24 when schema.UsesGeneralPredicateGraphs()
+                && row > 0 && row <= staticFields.Count
+                    => ResolveStaticField(row, types, staticFields,
+                        staticFieldContracts),
+            0x26 when schema.UsesGeneralPredicateGraphs()
+                && row > 0 && row <= intrinsicRegistrations.Count
+                    => ResolveIntrinsicRegistration(
+                        row, intrinsicRegistrations),
             0x16 when row > 0 && row <= methods.Count
                 => (methods.GetOwnerModule(row), methods.GetFlags(row) & 3,
                     methods.GetOwnerType(row), methods.GetBodyRow(row)),
@@ -51,4 +68,32 @@ internal static class TrRmDefinitionResolver
         return (types.GetOwnerModule(ownerType), types.GetFlags(ownerType) & 3,
             ownerType, 0);
     }
+
+    private static (int Module, uint Visibility, int OwnerType, int Body)
+        ResolveAssociatedConstant(int row, TrRmTypeDefTableReader types,
+            TrRmInterfaceDefTableReader interfaces,
+            TrRmAssociatedConstDefTableReader associatedConstDefs)
+    {
+        var ownerInterface = associatedConstDefs.GetOwnerInterfaceDef(row);
+        var ownerType = interfaces.GetOwnerTypeDef(ownerInterface);
+        return (types.GetOwnerModule(ownerType), types.GetFlags(ownerType) & 3,
+            ownerType, 0);
+    }
+
+    private static (int Module, uint Visibility, int OwnerType, int Body)
+        ResolveStaticField(int row, TrRmTypeDefTableReader types,
+            TrRmStaticFieldTableReader staticFields,
+            TrRmStaticFieldContractTableReader staticFieldContracts)
+    {
+        var ownerType = staticFields.GetOwnerTypeDefRow(row);
+        var contract = staticFieldContracts.GetRowForStaticField(row);
+        return (types.GetOwnerModule(ownerType),
+            staticFieldContracts.GetVisibility(contract), ownerType, 0);
+    }
+
+    private static (int Module, uint Visibility, int OwnerType, int Body)
+        ResolveIntrinsicRegistration(int row,
+            TrRmIntrinsicRegistrationTableReader registrations)
+        => (registrations.GetOwnerModuleRow(row),
+            registrations.GetVisibility(row), 0, 0);
 }

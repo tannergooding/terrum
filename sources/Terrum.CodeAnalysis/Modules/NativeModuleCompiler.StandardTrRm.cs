@@ -18,6 +18,10 @@ public static partial class NativeModuleCompiler
     /// <param name="runtimePolicy">The selected fail-fast runtime policy.</param>
     /// <param name="cancellationToken">A token that cancels native image emission.</param>
     /// <returns>The complete Windows x64 PE32+ executable image.</returns>
+    /// <exception cref="InvalidDataException">A selected artifact or root Module is invalid.</exception>
+    /// <exception cref="NotSupportedException">The selected schema, operation or runtime target is unsupported.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
     public static byte[] EmitStandardExecutable(
         TrRmStandardArtifactInput input, string moduleIdentity,
         IReadOnlyList<TrRmStandardArtifactInput> providers,
@@ -32,8 +36,11 @@ public static partial class NativeModuleCompiler
             TrRmStandardNativeOperation.EmitExecutable, runtimePolicy);
         if (plan.RootProgram.EntryPoint < 0)
         {
-            throw new InvalidDataException(
+            var exception = new InvalidDataException(
                 "The selected Standard root Module has no executable entry.");
+            plan.A3AdmissionScope?.Mark(exception,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw exception;
         }
 
         var (program, bindings) = plan.CreateLoweringInputs(
@@ -51,6 +58,10 @@ public static partial class NativeModuleCompiler
     /// <param name="runtimePolicy">The selected fail-fast runtime policy.</param>
     /// <param name="cancellationToken">A token that cancels native image emission.</param>
     /// <returns>The complete Windows x64 PE32+ DLL image.</returns>
+    /// <exception cref="InvalidDataException">A selected artifact or root Module is invalid.</exception>
+    /// <exception cref="NotSupportedException">The selected schema, operation or runtime target is unsupported.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
     public static byte[] EmitStandardLibrary(
         TrRmStandardArtifactInput input, string moduleIdentity,
         IReadOnlyList<TrRmStandardArtifactInput> providers,
@@ -73,8 +84,11 @@ public static partial class NativeModuleCompiler
             TrRmStandardNativeOperation.EmitLibrary, runtimePolicy);
         if (plan.RootProgram.EntryPoint >= 0)
         {
-            throw new InvalidDataException(
+            var exception = new InvalidDataException(
                 "The selected Standard root Module has an executable entry.");
+            plan.A3AdmissionScope?.Mark(exception,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw exception;
         }
 
         plan.ValidateLibraryExports(exportSnapshot);
@@ -93,6 +107,10 @@ public static partial class NativeModuleCompiler
     /// <param name="runtimePolicy">The selected fail-fast runtime policy.</param>
     /// <param name="registrarAssembly">The trusted registrar used by the existing JIT contract.</param>
     /// <returns>The root entry's raw int32 result.</returns>
+    /// <exception cref="InvalidDataException">A selected artifact or root Module is invalid.</exception>
+    /// <exception cref="NotSupportedException">The selected schema, operation or runtime target is unsupported.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
     public static int ExecuteStandard(
         TrRmStandardArtifactInput input, string moduleIdentity,
         IReadOnlyList<TrRmStandardArtifactInput> providers,
@@ -105,8 +123,11 @@ public static partial class NativeModuleCompiler
             TrRmStandardNativeOperation.Execute, runtimePolicy);
         if (plan.RootProgram.EntryPoint < 0)
         {
-            throw new InvalidDataException(
+            var exception = new InvalidDataException(
                 "The selected Standard root Module has no executable entry.");
+            plan.A3AdmissionScope?.Mark(exception,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw exception;
         }
 
         return NativeJit.ExecuteStandard(plan, runtimePolicy,

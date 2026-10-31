@@ -17,6 +17,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmFeatureTableReader features,
             TrRmModuleTableReader modules, TrRmModuleRefTableReader moduleRefs,
             TrRmTypeDefTableReader typeDefs,
+            TrRmEnumDefTableReader enumDefs,
+            TrRmEnumMemberDefTableReader enumMembers,
             TrRmTypeSpecTableReader typeSpecs,
             TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
             TrRmGenericParamTableReader genericParams,
@@ -26,10 +28,12 @@ public static class TrRmStructuralMetadataValidator
             TrRmInterfaceWitnessTableReader interfaceWitnesses,
             TrRmWitnessMemberTableReader witnessMembers,
             TrRmWitnessAssociatedTypeTableReader witnessAssociatedTypes,
+            TrRmWitnessAssociatedConstTableReader witnessAssociatedConsts,
             TrRmInterfaceBaseTableReader interfaceBases,
             TrRmInterfaceMethodTableReader interfaceMethods,
             TrRmInterfaceConstDefTableReader interfaceConstDefs,
             TrRmAssociatedConstDefTableReader associatedConstDefs,
+            TrRmImmutableDataTableReader immutableData,
             TrRmAssociatedRelationTableReader associatedRelations,
             TrRmUnionCaseDefTableReader unionCaseDefs,
             TrRmUnionCaseFieldTableReader unionCaseFields,
@@ -42,15 +46,42 @@ public static class TrRmStructuralMetadataValidator
             TrRmPredicateChildEdgeTableReader predicateChildEdges,
             TrRmPredicateReadFootprintTableReader predicateReadFootprints,
             TrRmPredicateCaptureTableReader predicateCaptures,
+            TrRmPredicateNodeTableReader predicateNodes,
+            TrRmPredicateNodeOperandTableReader predicateNodeOperands,
+            TrRmPredicateReadRootTableReader predicateReadRoots,
+            TrRmPredicateReadDependencyTableReader predicateReadDependencies,
+            TrRmPredicateOperationTableReader predicateOperations,
+            TrRmPredicateCallTableReader predicateCalls,
+            TrRmPredicateTypeUseTableReader predicateTypeUses,
+            TrRmPredicateControlTableReader predicateControls,
+            TrRmEvaluationReadBoundTableReader evaluationReadBounds,
+            TrRmPredicateTypePatternTableReader predicateTypePatterns,
             TrRmBlobTableReader blobs,
             TrRmFrozenValueNodeTableReader frozenValueNodes,
             TrRmConstantSourceTableReader constantSources,
+            TrRmConstantExecutionSubstitutionTableReader constantExecutionSubstitutions,
+            TrRmConstantExecutionArgumentTableReader constantExecutionArguments,
+            TrRmConstantExecutionDependencyTableReader constantExecutionDependencies,
+            TrRmLogicalInputViewTableReader logicalInputViews,
+            TrRmLogicalViewPathEntryTableReader logicalViewPathEntries,
+            TrRmConstantExecutionTableReader constantExecutions,
+            List<TrRmConstantExecutionUse> constantExecutionUses,
             TrRmTargetLayoutDependencyTableReader targetLayoutDependencies,
             TrRmTargetLayoutDependencyFieldTableReader targetLayoutDependencyFields,
             TrRmFieldPathTableReader fieldPaths,
             TrRmFieldDefTableReader fields,
+            TrRmStaticFieldTableReader staticFields,
+            TrRmEagerGroupTableReader eagerGroups,
+            TrRmStaticFieldContractTableReader staticFieldContracts,
+            TrRmEagerInitializerTableReader eagerInitializers,
+            TrRmLazyUnitTableReader lazyUnits,
+            TrRmStaticImmutablePublicationTableReader staticPublications,
+            TrRmStaticDependencyTableReader staticDependencies,
+            TrRmStaticAccessTableReader staticAccesses,
+            TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
             TrRmLayoutTableReader layouts, TrRmLayoutFieldTableReader layoutFields,
             TrRmTargetProfileTableReader targetProfiles,
+            TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
             TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
             TrRmMethodDefTableReader methods, TrRmBodyTableReader bodies,
             TrRmContractTableReader contracts,
@@ -60,13 +91,17 @@ public static class TrRmStructuralMetadataValidator
             TrRmNativeCallableTableReader nativeCallables,
             TrRmNativeFunctionPointerSignatureTableReader nativeFunctionPointerSignatures,
             TrRmNativeVTableTableReader nativeVTables, TrRmImportTableReader imports,
-            TrRmArtifactSchema schema)
+            TrRmExportTableReader exports,
+            TrRmArtifactSchema schema,
+            TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
         {
             Strings = strings;
             Features = features;
             Modules = modules;
             ModuleRefs = moduleRefs;
             TypeDefs = typeDefs;
+            EnumDefs = enumDefs;
+            EnumMembers = enumMembers;
             TypeSpecs = typeSpecs;
             NativeFunctionPointerAnchors = nativeFunctionPointerAnchors;
             GenericParams = genericParams;
@@ -76,10 +111,12 @@ public static class TrRmStructuralMetadataValidator
             InterfaceWitnesses = interfaceWitnesses;
             WitnessMembers = witnessMembers;
             WitnessAssociatedTypes = witnessAssociatedTypes;
+            WitnessAssociatedConsts = witnessAssociatedConsts;
             InterfaceBases = interfaceBases;
             InterfaceMethods = interfaceMethods;
             InterfaceConstDefs = interfaceConstDefs;
             AssociatedConstDefs = associatedConstDefs;
+            ImmutableData = immutableData;
             AssociatedRelations = associatedRelations;
             UnionCaseDefs = unionCaseDefs;
             UnionCaseFields = unionCaseFields;
@@ -92,16 +129,43 @@ public static class TrRmStructuralMetadataValidator
             PredicateChildEdges = predicateChildEdges;
             PredicateReadFootprints = predicateReadFootprints;
             PredicateCaptures = predicateCaptures;
+            PredicateNodes = predicateNodes;
+            PredicateNodeOperands = predicateNodeOperands;
+            PredicateReadRoots = predicateReadRoots;
+            PredicateReadDependencies = predicateReadDependencies;
+            PredicateOperations = predicateOperations;
+            PredicateCalls = predicateCalls;
+            PredicateTypeUses = predicateTypeUses;
+            PredicateControls = predicateControls;
+            EvaluationReadBounds = evaluationReadBounds;
+            PredicateTypePatterns = predicateTypePatterns;
             Blobs = blobs;
             FrozenValueNodes = frozenValueNodes;
             ConstantSources = constantSources;
+            ConstantExecutionSubstitutions = constantExecutionSubstitutions;
+            ConstantExecutionArguments = constantExecutionArguments;
+            ConstantExecutionDependencies = constantExecutionDependencies;
+            LogicalInputViews = logicalInputViews;
+            LogicalViewPathEntries = logicalViewPathEntries;
+            ConstantExecutions = constantExecutions;
+            ConstantExecutionUses = constantExecutionUses;
             TargetLayoutDependencies = targetLayoutDependencies;
             TargetLayoutDependencyFields = targetLayoutDependencyFields;
             FieldPaths = fieldPaths;
             Fields = fields;
+            StaticFields = staticFields;
+            EagerGroups = eagerGroups;
+            StaticFieldContracts = staticFieldContracts;
+            EagerInitializers = eagerInitializers;
+            LazyUnits = lazyUnits;
+            StaticPublications = staticPublications;
+            StaticDependencies = staticDependencies;
+            StaticAccesses = staticAccesses;
+            IntrinsicRegistrations = intrinsicRegistrations;
             Layouts = layouts;
             LayoutFields = layoutFields;
             TargetProfiles = targetProfiles;
+            FixedArrayLayouts = fixedArrayLayouts;
             Signatures = signatures;
             Parameters = parameters;
             Methods = methods;
@@ -114,7 +178,9 @@ public static class TrRmStructuralMetadataValidator
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures;
             NativeVTables = nativeVTables;
             Imports = imports;
+            Exports = exports;
             Schema = schema;
+            A3LayoutResourceLedger = a3LayoutResourceLedger;
         }
 
         internal TrRmStringTableReader Strings { get; }
@@ -122,6 +188,8 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmModuleTableReader Modules { get; }
         internal TrRmModuleRefTableReader ModuleRefs { get; }
         internal TrRmTypeDefTableReader TypeDefs { get; }
+        internal TrRmEnumDefTableReader EnumDefs { get; }
+        internal TrRmEnumMemberDefTableReader EnumMembers { get; }
         internal TrRmTypeSpecTableReader TypeSpecs { get; }
         internal TrRmNativeFunctionPointerAnchorTableReader NativeFunctionPointerAnchors { get; }
         internal TrRmGenericParamTableReader GenericParams { get; }
@@ -131,10 +199,12 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmInterfaceWitnessTableReader InterfaceWitnesses { get; }
         internal TrRmWitnessMemberTableReader WitnessMembers { get; }
         internal TrRmWitnessAssociatedTypeTableReader WitnessAssociatedTypes { get; }
+        internal TrRmWitnessAssociatedConstTableReader WitnessAssociatedConsts { get; }
         internal TrRmInterfaceBaseTableReader InterfaceBases { get; }
         internal TrRmInterfaceMethodTableReader InterfaceMethods { get; }
         internal TrRmInterfaceConstDefTableReader InterfaceConstDefs { get; }
         internal TrRmAssociatedConstDefTableReader AssociatedConstDefs { get; }
+        internal TrRmImmutableDataTableReader ImmutableData { get; }
         internal TrRmAssociatedRelationTableReader AssociatedRelations { get; }
         internal TrRmUnionCaseDefTableReader UnionCaseDefs { get; }
         internal TrRmUnionCaseFieldTableReader UnionCaseFields { get; }
@@ -147,16 +217,43 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmPredicateChildEdgeTableReader PredicateChildEdges { get; }
         internal TrRmPredicateReadFootprintTableReader PredicateReadFootprints { get; }
         internal TrRmPredicateCaptureTableReader PredicateCaptures { get; }
+        internal TrRmPredicateNodeTableReader PredicateNodes { get; }
+        internal TrRmPredicateNodeOperandTableReader PredicateNodeOperands { get; }
+        internal TrRmPredicateReadRootTableReader PredicateReadRoots { get; }
+        internal TrRmPredicateReadDependencyTableReader PredicateReadDependencies { get; }
+        internal TrRmPredicateOperationTableReader PredicateOperations { get; }
+        internal TrRmPredicateCallTableReader PredicateCalls { get; }
+        internal TrRmPredicateTypeUseTableReader PredicateTypeUses { get; }
+        internal TrRmPredicateControlTableReader PredicateControls { get; }
+        internal TrRmEvaluationReadBoundTableReader EvaluationReadBounds { get; }
+        internal TrRmPredicateTypePatternTableReader PredicateTypePatterns { get; }
         internal TrRmBlobTableReader Blobs { get; }
         internal TrRmFrozenValueNodeTableReader FrozenValueNodes { get; }
         internal TrRmConstantSourceTableReader ConstantSources { get; }
+        internal TrRmConstantExecutionSubstitutionTableReader ConstantExecutionSubstitutions { get; }
+        internal TrRmConstantExecutionArgumentTableReader ConstantExecutionArguments { get; }
+        internal TrRmConstantExecutionDependencyTableReader ConstantExecutionDependencies { get; }
+        internal TrRmLogicalInputViewTableReader LogicalInputViews { get; }
+        internal TrRmLogicalViewPathEntryTableReader LogicalViewPathEntries { get; }
+        internal TrRmConstantExecutionTableReader ConstantExecutions { get; }
+        internal List<TrRmConstantExecutionUse> ConstantExecutionUses { get; }
         internal TrRmTargetLayoutDependencyTableReader TargetLayoutDependencies { get; }
         internal TrRmTargetLayoutDependencyFieldTableReader TargetLayoutDependencyFields { get; }
         internal TrRmFieldPathTableReader FieldPaths { get; }
         internal TrRmFieldDefTableReader Fields { get; }
+        internal TrRmStaticFieldTableReader StaticFields { get; }
+        internal TrRmEagerGroupTableReader EagerGroups { get; }
+        internal TrRmStaticFieldContractTableReader StaticFieldContracts { get; }
+        internal TrRmEagerInitializerTableReader EagerInitializers { get; }
+        internal TrRmLazyUnitTableReader LazyUnits { get; }
+        internal TrRmStaticImmutablePublicationTableReader StaticPublications { get; }
+        internal TrRmStaticDependencyTableReader StaticDependencies { get; }
+        internal TrRmStaticAccessTableReader StaticAccesses { get; }
+        internal TrRmIntrinsicRegistrationTableReader IntrinsicRegistrations { get; }
         internal TrRmLayoutTableReader Layouts { get; }
         internal TrRmLayoutFieldTableReader LayoutFields { get; }
         internal TrRmTargetProfileTableReader TargetProfiles { get; }
+        internal TrRmFixedArrayLayoutTableReader FixedArrayLayouts { get; }
         internal TrRmMethodSigTableReader Signatures { get; }
         internal TrRmParamTableReader Parameters { get; }
         internal TrRmMethodDefTableReader Methods { get; }
@@ -169,12 +266,21 @@ public static class TrRmStructuralMetadataValidator
         internal TrRmNativeFunctionPointerSignatureTableReader NativeFunctionPointerSignatures { get; }
         internal TrRmNativeVTableTableReader NativeVTables { get; }
         internal TrRmImportTableReader Imports { get; }
+        internal TrRmExportTableReader Exports { get; }
         internal TrRmArtifactSchema Schema { get; }
+        internal TrRmA3LayoutResourceLedger? A3LayoutResourceLedger { get; }
 
         internal void ValidateRegisterBodyMapsForMethod(int methodDefRow)
         {
             if (Schema is not (TrRmArtifactSchema.Standard
-                    or TrRmArtifactSchema.ForeignInvocationDraft)
+                    or TrRmArtifactSchema.ForeignInvocationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                    or TrRmArtifactSchema.ScalarFrozenValuesDraft
+                    or TrRmArtifactSchema.NominalEnumsDraft
+                    or TrRmArtifactSchema.RootPinRuntimeDraft
+                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
                 || methodDefRow <= 0 || methodDefRow > Methods.Count)
             {
                 throw InvalidMetadata();
@@ -189,15 +295,16 @@ public static class TrRmStructuralMetadataValidator
             var body = Bodies.GetRegisterBody(bodyRow, Contracts.Count);
             TrRmRegisterBodyMapValidator.Validate(body,
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
-                Modules, TypeDefs, TypeSpecs, GenericParams, Methods, Signatures,
+                Modules, TypeDefs, EnumDefs, TypeSpecs, GenericParams, Methods, Signatures,
                 Parameters, Fields, FieldPaths, ConstantSources, FrozenValueNodes,
                 Blobs, Contracts, Imports, NativeFunctionPointerAnchors,
-                StandardNativeImports, ModuleRefs);
+                StandardNativeImports, ModuleRefs, Layouts, FixedArrayLayouts,
+                TargetProfiles);
         }
 
         internal void ValidateNonBodyTypeSpecModuleContexts()
         {
-            if (Schema != TrRmArtifactSchema.Standard)
+            if (Schema.IsDevelopmentProfile())
             {
                 return;
             }
@@ -211,6 +318,44 @@ public static class TrRmStructuralMetadataValidator
                 {
                     ValidateTypeSpecModuleContext(Fields.GetTypeSpecRef(field),
                         ownerModule, visitedTypeSpecRows);
+                }
+            }
+
+            for (var staticField = 1; staticField <= StaticFields.Count; staticField++)
+            {
+                var ownerType = StaticFields.GetOwnerTypeDefRow(staticField);
+                ValidateTypeSpecModuleContext(StaticFields.GetTypeSpecRef(staticField),
+                    TypeDefs.GetOwnerModule(ownerType), visitedTypeSpecRows);
+            }
+
+            for (var execution = 1; execution <= ConstantExecutions.Count; execution++)
+            {
+                var (first, count)
+                    = ConstantExecutions.GetSubstitutionRange(execution);
+                var ownerModule = ConstantExecutions.GetOwnerModule(execution);
+                for (var ordinal = 0; ordinal < count; ordinal++)
+                {
+                    var substitution = first + ordinal;
+                    if (ConstantExecutionSubstitutions.GetKind(substitution) == 1)
+                    {
+                        ValidateTypeSpecModuleContext(
+                            ConstantExecutionSubstitutions
+                                .GetTypeSpecRef(substitution),
+                            ownerModule, visitedTypeSpecRows);
+                    }
+                    else
+                    {
+                        var source = checked((int)
+                            ConstantExecutionSubstitutions.GetReference(substitution));
+                        if (ConstantSources.GetKind(source) == 2)
+                        {
+                            ConstantExecutionUses.Add(
+                                new TrRmConstantExecutionUse(
+                                    checked((int)ConstantSources
+                                        .GetPayloadReference(source)),
+                                    ownerModule, 0));
+                        }
+                    }
                 }
             }
 
@@ -350,6 +495,7 @@ public static class TrRmStructuralMetadataValidator
                 return;
             }
 
+            ValidateFixedArrayLayoutContext(typeSpecRef, ownerModule);
             var visited = visitedTypeSpecRows[ownerModule];
             if (visited is null)
             {
@@ -358,9 +504,83 @@ public static class TrRmStructuralMetadataValidator
             }
 
             TrRmConstantSourceValueValidator.ValidateConstructedTypeSpecValues(
-                typeSpecRef, ownerModule, TypeSpecs, TypeDefs, GenericParams,
-                Imports, ConstantSources, FrozenValueNodes, Blobs, Features,
-                Modules, visited);
+                typeSpecRef, ownerModule, TypeSpecs, TypeDefs, EnumDefs,
+                GenericParams, Imports, ConstantSources, FrozenValueNodes,
+                Blobs, Features, Modules, visited, ConstantExecutionUses);
+        }
+
+        private void ValidateFixedArrayLayoutContext(uint typeSpecRef,
+            int ownerModule)
+        {
+            if (!Schema.UsesForeignInvocationStorageFixedArrays())
+            {
+                return;
+            }
+
+            uint profileReference = 0;
+            var pending = new Stack<uint>();
+            var visited = new HashSet<int>();
+            pending.Push(typeSpecRef);
+            while (pending.TryPop(out var current))
+            {
+                var reference = TypeSpecs.GetTypeSpecRef(current);
+                if (!reference.IsRow || !visited.Add(reference.Row))
+                {
+                    continue;
+                }
+
+                var row = TypeSpecs.GetRow(reference.Row);
+                switch (row[0])
+                {
+                    case 0x05:
+                        var typeDef = TypeSpecs.GetNominalTypeDefRow(
+                            BinaryPrimitives.ReadUInt32LittleEndian(row[2..]),
+                            TypeDefs, Imports);
+                        var (firstFormal, formalCount)
+                            = TypeDefs.GetGenericRange(typeDef);
+                        for (var ordinal = 0; ordinal < formalCount; ordinal++)
+                        {
+                            if (GenericParams.GetFormalKind(firstFormal + ordinal) == 1)
+                            {
+                                pending.Push(TypeSpecs.GetConstructedArgument(
+                                    reference.Row, ordinal));
+                            }
+                        }
+                        break;
+
+                    case >= 0x06 and <= 0x0B:
+                    case 0x0E:
+                        pending.Push(BinaryPrimitives.ReadUInt32LittleEndian(
+                            row[2..]));
+                        break;
+
+                    case 0x0C:
+                        pending.Push(BinaryPrimitives.ReadUInt32LittleEndian(
+                            row[3..]));
+                        break;
+
+                    case 0x11:
+                        if (profileReference == 0)
+                        {
+                            profileReference = TargetProfiles.TryGetProfile(
+                                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
+                                out var profileRow)
+                                    ? checked((uint)profileRow)
+                                    : throw InvalidMetadata();
+                        }
+
+                        if (FixedArrayLayouts.FindRow(ownerModule,
+                                (uint)reference.Row, profileReference) == 0)
+                        {
+                            throw InvalidMetadata();
+                        }
+
+                        pending.Push(BinaryPrimitives.ReadUInt32LittleEndian(
+                            row[2..]));
+                        break;
+                }
+            }
         }
 
         private int GetGenericParamOwnerModule(int formal)
@@ -426,6 +646,127 @@ public static class TrRmStructuralMetadataValidator
         TrRmArtifactIndex index)
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
             foreignInvocationDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationStorageAddressDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+        TrRmArtifactIndex index,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationStorageFixedArrayDraft: true,
+            a3LayoutResourceLedger: a3LayoutResourceLedger);
+
+    internal static ValidatedExecutionTables
+        ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+        TrRmArtifactIndex index,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
+        bool createA3ResourceLedger = true)
+    {
+        var resourceLedger = a3LayoutResourceLedger
+            ?? (createA3ResourceLedger
+                ? new TrRmA3LayoutResourceLedger() : null);
+        try
+        {
+            return ValidateCore(index, BodyInspection.None,
+                developmentProfile: false,
+                foreignInvocationStorageFixedArrayGenericDraft: true,
+                a3LayoutResourceLedger: resourceLedger);
+        }
+        catch (TrRmResourceLimitException)
+        {
+            throw;
+        }
+        catch (OverflowException exception)
+        {
+            if (resourceLedger is null)
+            {
+                throw;
+            }
+
+            if (TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
+                    out var kind)
+                && kind
+                    == TrRmA3AdmissionFailureKind.TargetLayoutOverflow)
+            {
+                throw;
+            }
+
+            var invalid = new InvalidDataException(
+                "Invalid TRRM structural metadata.", exception);
+            resourceLedger.AdmissionScope.Mark(invalid,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw invalid;
+        }
+        catch (InvalidDataException exception)
+        {
+            if (resourceLedger is not null
+                && !TrRmA3AdmissionFailureMarkers.TryGet(exception, out _))
+            {
+                resourceLedger.AdmissionScope.Mark(exception,
+                    TrRmA3AdmissionFailureKind.InvalidArtifact);
+            }
+
+            throw;
+        }
+        catch (NotSupportedException exception)
+        {
+            if (resourceLedger is not null
+                && !TrRmA3AdmissionFailureMarkers.TryGet(exception, out _))
+            {
+                resourceLedger.AdmissionScope.Mark(exception,
+                    TrRmA3AdmissionFailureKind.UnsupportedAdmission);
+            }
+
+            throw;
+        }
+    }
+
+    internal static ValidatedExecutionTables ValidateNominalEnumsDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            nominalEnumsDraft: true);
+
+    internal static void ValidateNominalEnumsDraftProviderBindings(
+        ReadOnlySpan<byte> consumerArtifact,
+        IReadOnlyList<byte[]> providerArtifacts)
+    {
+        ArgumentNullException.ThrowIfNull(providerArtifacts);
+        var consumer = ValidateNominalEnumsDraftAndGetExecutionTables(
+            TrRmArtifactIndex.ForNominalEnumsDraft(consumerArtifact));
+        TrRmEnumProviderBindingValidator.Validate(consumer, providerArtifacts);
+    }
+
+    internal static ValidatedExecutionTables
+        ValidateScalarFrozenValuesDraftAndGetExecutionTables(TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            scalarFrozenValuesDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateRootPinRuntimeDraftAndGetExecutionTables(TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            rootPinRuntimeDraft: true);
+
+    internal static ValidatedExecutionTables
+        ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            generalPredicateGraphsDraft: true);
+
+    internal static void ValidateGeneralPredicateGraphsDraftProviderBindings(
+        ReadOnlySpan<byte> consumerArtifact,
+        IReadOnlyList<byte[]> providerArtifacts)
+    {
+        ArgumentNullException.ThrowIfNull(providerArtifacts);
+        var consumer = ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+            TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(consumerArtifact));
+        TrRmIntrinsicRegistrationProviderBindingValidator.Validate(
+            consumer, providerArtifacts);
+    }
 
     public static void ValidateCompactLinear(ReadOnlySpan<byte> artifact)
         => _ = ValidateCore(new TrRmArtifactIndex(artifact,
@@ -660,7 +1001,13 @@ public static class TrRmStructuralMetadataValidator
     private static ValidatedExecutionTables ValidateCore(TrRmArtifactIndex index,
         BodyInspection inspection, bool developmentProfile,
         bool copyOriginDraft = false, bool foreignInvocationDraft = false,
-        bool developmentFunctionPointerEffectsDraft = false)
+        bool developmentFunctionPointerEffectsDraft = false,
+        bool nominalEnumsDraft = false, bool scalarFrozenValuesDraft = false,
+        bool rootPinRuntimeDraft = false, bool generalPredicateGraphsDraft = false,
+        bool foreignInvocationStorageAddressDraft = false,
+        bool foreignInvocationStorageFixedArrayDraft = false,
+        bool foreignInvocationStorageFixedArrayGenericDraft = false,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
     {
         var selectedSchema = developmentFunctionPointerEffectsDraft
             ? TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
@@ -668,13 +1015,31 @@ public static class TrRmStructuralMetadataValidator
             ? TrRmArtifactSchema.Development
             : copyOriginDraft
                 ? TrRmArtifactSchema.CopyOriginDraft
+                : foreignInvocationStorageFixedArrayDraft
+                    ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                : foreignInvocationStorageFixedArrayGenericDraft
+                    ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                : foreignInvocationStorageAddressDraft
+                    ? TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 : foreignInvocationDraft
                     ? TrRmArtifactSchema.ForeignInvocationDraft
-                    : TrRmArtifactSchema.Standard;
+                    : nominalEnumsDraft
+                        ? TrRmArtifactSchema.NominalEnumsDraft
+                    : scalarFrozenValuesDraft
+                        ? TrRmArtifactSchema.ScalarFrozenValuesDraft
+                    : rootPinRuntimeDraft
+                        ? TrRmArtifactSchema.RootPinRuntimeDraft
+                    : generalPredicateGraphsDraft
+                        ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                        : TrRmArtifactSchema.Standard;
         if (index.Schema != selectedSchema)
         {
             throw InvalidMetadata();
         }
+        var selectedA3LayoutResourceLedger = a3LayoutResourceLedger;
+        foreignInvocationDraft |= foreignInvocationStorageAddressDraft
+            || foreignInvocationStorageFixedArrayDraft
+            || foreignInvocationStorageFixedArrayGenericDraft;
         developmentProfile |= developmentFunctionPointerEffectsDraft;
 
         if (!index.TryGetSection(0x0001, out var moduleBytes, out var moduleCount)
@@ -687,6 +1052,9 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x0010, out var moduleRefBytes, out var moduleRefCount);
         _ = index.TryGetSection(0x0011, out var typeSpecBytes, out var typeSpecCount);
         _ = index.TryGetSection(0x0013, out var typeDefBytes, out var typeDefCount);
+        _ = index.TryGetSection(0x0053, out var enumDefBytes, out var enumDefCount);
+        _ = index.TryGetSection(0x0054, out var enumMemberDefBytes,
+            out var enumMemberDefCount);
         _ = index.TryGetSection(0x0014, out var fieldDefBytes, out var fieldDefCount);
         _ = index.TryGetSection(0x0024, out var interfaceMethodBytes,
             out var interfaceMethodCount);
@@ -716,7 +1084,8 @@ public static class TrRmStructuralMetadataValidator
             out var predicateReadFootprintCount);
         _ = index.TryGetSection(0x0039, out var predicateReadRootBytes,
             out var predicateReadRootCount);
-        _ = index.TryGetSection(0x003A, out _, out var predicateReadDependencyCount);
+        _ = index.TryGetSection(0x003A, out var predicateReadDependencyBytes,
+            out var predicateReadDependencyCount);
         _ = index.TryGetSection(0x003B, out var predicateNodeBytes,
             out var predicateNodeCount);
         _ = index.TryGetSection(0x003C, out var predicateNodeOperandBytes,
@@ -725,13 +1094,48 @@ public static class TrRmStructuralMetadataValidator
             out var predicateChildEdgeCount);
         _ = index.TryGetSection(0x003E, out var predicateCaptureBytes,
             out var predicateCaptureCount);
+        _ = index.TryGetSection(0x0041, out var immutableDataBytes,
+            out var immutableDataCount);
+        _ = index.TryGetSection(0x004D, out var predicateOperationBytes,
+            out var predicateOperationCount);
+        _ = index.TryGetSection(0x004E, out var predicateCallBytes,
+            out var predicateCallCount);
+        _ = index.TryGetSection(0x004F, out var predicateTypeUseBytes,
+            out var predicateTypeUseCount);
+        _ = index.TryGetSection(0x0050, out var predicateControlBytes,
+            out var predicateControlCount);
+        _ = index.TryGetSection(0x0051, out var evaluationReadBoundBytes,
+            out var evaluationReadBoundCount);
+        _ = index.TryGetSection(0x0052, out var predicateTypePatternBytes,
+            out var predicateTypePatternCount);
+        _ = index.TryGetSection(0x0055, out var staticFieldBytes,
+            out var staticFieldCount);
+        _ = index.TryGetSection(0x0056, out var staticFieldContractBytes,
+            out var staticFieldContractCount);
+        _ = index.TryGetSection(0x0057, out var eagerGroupBytes,
+            out var eagerGroupCount);
+        _ = index.TryGetSection(0x0058, out var eagerInitializerBytes,
+            out var eagerInitializerCount);
+        _ = index.TryGetSection(0x0059, out var lazyUnitBytes,
+            out var lazyUnitCount);
+        _ = index.TryGetSection(0x005A, out var staticAccessBytes,
+            out var staticAccessCount);
+        _ = index.TryGetSection(0x005B, out var staticDependencyBytes,
+            out var staticDependencyCount);
+        _ = index.TryGetSection(0x005C, out var staticPublicationBytes,
+            out var staticPublicationCount);
+        _ = index.TryGetSection(0x005D, out var intrinsicRegistrationBytes,
+            out var intrinsicRegistrationCount);
+        _ = index.TryGetSection(0x005E, out var constantExecutionSubstitutionBytes,
+            out var constantExecutionSubstitutionCount);
         _ = index.TryGetSection(0x0030, out var constantSourceBytes,
             out var constantSourceCount);
         _ = index.TryGetSection(0x0031, out var interfaceConstBytes,
             out var interfaceConstCount);
         _ = index.TryGetSection(0x0032, out var associatedConstBytes,
             out var associatedConstCount);
-        _ = index.TryGetSection(0x0033, out _, out var witnessAssociatedConstCount);
+        _ = index.TryGetSection(0x0033, out var witnessAssociatedConstBytes,
+            out var witnessAssociatedConstCount);
         _ = index.TryGetSection(0x0034, out var unionCaseDefBytes, out var unionCaseDefCount);
         _ = index.TryGetSection(0x0035, out var unionCaseFieldBytes, out var unionCaseFieldCount);
         _ = index.TryGetSection(0x0036, out var associatedRelationBytes,
@@ -739,7 +1143,16 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x003F, out var frozenValueNodeBytes,
             out var frozenValueNodeCount);
         _ = index.TryGetSection(0x0040, out _, out var frozenValueChildCount);
-        _ = index.TryGetSection(0x0042, out _, out var constantExecutionCount);
+        _ = index.TryGetSection(0x0042, out var constantExecutionBytes,
+            out var constantExecutionCount);
+        _ = index.TryGetSection(0x0043, out var constantExecutionArgumentBytes,
+            out var constantExecutionArgumentCount);
+        _ = index.TryGetSection(0x0044, out var constantExecutionDependencyBytes,
+            out var constantExecutionDependencyCount);
+        _ = index.TryGetSection(0x0046, out var logicalInputViewBytes,
+            out var logicalInputViewCount);
+        _ = index.TryGetSection(0x0047, out var logicalViewPathEntryBytes,
+            out var logicalViewPathEntryCount);
         _ = index.TryGetSection(0x0049, out _, out var targetValueBindingCount);
         _ = index.TryGetSection(0x0045, out var targetLayoutDependencyBytes,
             out var targetLayoutDependencyCount);
@@ -748,6 +1161,8 @@ public static class TrRmStructuralMetadataValidator
         _ = index.TryGetSection(0x004B, out var fieldPathBytes, out var fieldPathCount);
         _ = index.TryGetSection(0x0015, out var layoutBytes, out var layoutCount);
         _ = index.TryGetSection(0x0023, out var layoutFieldBytes, out var layoutFieldCount);
+        _ = index.TryGetSection(0x0012, out var fixedArrayLayoutBytes,
+            out var fixedArrayLayoutCount);
         _ = index.TryGetSection(0x0048, out var targetProfileBytes, out var targetProfileCount);
         _ = index.TryGetSection(0x0016, out var methodDefBytes, out var methodDefCount);
         _ = index.TryGetSection(0x0017, out var methodSigBytes, out var methodSigCount);
@@ -783,12 +1198,13 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmBlobTableReader(blobBytes, blobCount);
 
         var bodies = bodyCount == 0 ? default
-            : new TrRmBodyTableReader(bodyBytes, bodyCount);
+            : new TrRmBodyTableReader(bodyBytes, bodyCount, index.Schema,
+                selectedA3LayoutResourceLedger);
 
         var strings = new TrRmStringTableReader(stringBytes, stringCount);
         strings.ValidateShapes(stringCount);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount,
-            index.Schema);
+            index.Schema, selectedA3LayoutResourceLedger);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
             moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount);
         for (var module = 1; module <= modules.Count; module++)
@@ -802,6 +1218,25 @@ public static class TrRmStructuralMetadataValidator
         {
             TrRmFeatureManifestValidator.Validate(features, modules, index.Schema);
         }
+        var intrinsicRegistrations = index.Schema.UsesGeneralPredicateGraphs()
+            ? new TrRmIntrinsicRegistrationTableReader(
+                intrinsicRegistrationBytes, intrinsicRegistrationCount,
+                modules, index.Schema)
+            : default;
+        if (index.Schema.UsesGeneralPredicateGraphs())
+        {
+            for (var registration = 1;
+                registration <= intrinsicRegistrations.Count; registration++)
+            {
+                if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                        intrinsicRegistrations.GetOwnerModuleRow(registration),
+                        TrRmFeatureTableReader.ConstantExecutionFeatureId,
+                        index.Schema))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,
             strings, modules);
         var selectedNativeFunctionPointerSignatureCount = developmentProfile
@@ -811,23 +1246,99 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmTypeSpecTableReader(typeSpecBytes, typeSpecCount,
                 typeDefCount, importCount, genericParamCount,
                 selectedNativeFunctionPointerSignatureCount, index.Schema,
-                methodDefCount);
+                methodDefCount, predicateCaptureCount,
+                selectedA3LayoutResourceLedger);
         var frozenValueNodes = !developmentProfile && frozenValueNodeCount != 0
             ? new TrRmFrozenValueNodeTableReader(frozenValueNodeBytes,
                 frozenValueNodeCount, typeSpecs, blobCount, frozenValueChildCount,
                 unionCaseDefCount)
             : default;
         var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
-            strings, modules, fieldDefCount, genericParamCount, layoutCount, contractCount);
+            strings, modules, fieldDefCount, genericParamCount, layoutCount,
+            contractCount, index.Schema);
+        if (index.Schema.SupportsDeclaredCopyEvidence())
+        {
+            for (var typeDef = 1; typeDef <= types.Count; typeDef++)
+            {
+                if ((types.HasDeclaredCopy(typeDef)
+                        || types.HasDeclaredUnique(typeDef))
+                    && !TrRmFeatureManifestValidator.Requires(features, modules,
+                        types.GetOwnerModule(typeDef),
+                        TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+                        index.Schema))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
+
         var targetProfiles = new TrRmTargetProfileTableReader(
-            targetProfileBytes, targetProfileCount);
+            targetProfileBytes, targetProfileCount, index.Schema);
+        if (index.Schema.UsesRootPinRuntime())
+        {
+            for (var module = 1; module <= modules.Count; module++)
+            {
+                if (TrRmFeatureManifestValidator.Requires(features, modules,
+                        module, TrRmFeatureTableReader.RootPinRuntimeFeatureId,
+                        index.Schema)
+                    && !targetProfiles.TryGetProfile(
+                        TrRmTargetProfileTableReader.WindowsX64RootPinProfileId,
+                        TrRmTargetProfileTableReader.WindowsX64RootPinProfileRuleRevision,
+                        out _))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
         var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
             types, targetProfiles, layoutFieldCount);
+        if (index.Schema.UsesRootPinRuntime()
+            && targetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64RootPinProfileId,
+                TrRmTargetProfileTableReader.WindowsX64RootPinProfileRuleRevision,
+                out var rootPinProfileRow))
+        {
+            for (var layoutRow = 1; layoutRow <= layouts.Count; layoutRow++)
+            {
+                if (layouts.GetTargetProfileRef(layoutRow) != (uint)rootPinProfileRow)
+                {
+                    continue;
+                }
+
+                var ownerTypeDef = layouts.GetOwnerTypeDef(layoutRow);
+                var ownerModule = types.GetOwnerModule(ownerTypeDef);
+                if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                    ownerModule, TrRmFeatureTableReader.RootPinRuntimeFeatureId,
+                    index.Schema))
+                {
+                    throw new NotSupportedException(
+                        "A RootPin TargetProfile layout requires RootPinRuntime revision 1 in its owning Module.");
+                }
+            }
+        }
+        var enumMembers = index.Schema.SupportsNominalEnums()
+            ? new TrRmEnumMemberDefTableReader(enumMemberDefBytes,
+                enumMemberDefCount, strings, types)
+            : default;
+        var enumDefs = index.Schema.SupportsNominalEnums()
+            ? new TrRmEnumDefTableReader(enumDefBytes, enumDefCount, types,
+                typeSpecs, layouts, targetProfiles, enumMembers)
+            : default;
+        if (index.Schema.SupportsNominalEnums())
+        {
+            ValidateNominalEnumFeatureAssignments(enumDefs, types, features,
+                modules, index.Schema);
+        }
         var fields = fieldDefCount == 0 ? default
             : new TrRmFieldDefTableReader(fieldDefBytes, fieldDefCount, strings, types,
                 typeSpecs);
         var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
             layoutFieldCount, layouts, types, fields);
+        var fixedArrayLayouts = index.Schema.UsesForeignInvocationStorageFixedArrays()
+            ? new TrRmFixedArrayLayoutTableReader(fixedArrayLayoutBytes,
+                fixedArrayLayoutCount, typeSpecs, targetProfiles, features,
+                modules, index.Schema, selectedA3LayoutResourceLedger)
+            : default;
         var signatures = methodSigCount == 0 ? default
             : new TrRmMethodSigTableReader(methodSigBytes, methodSigCount,
                 typeSpecs, paramCount, genericParamCount);
@@ -836,9 +1347,33 @@ public static class TrRmStructuralMetadataValidator
                 typeSpecs, index.Schema);
         var methods = new TrRmMethodDefTableReader(methodDefBytes, methodDefCount,
             strings, modules, types, signatures, contractCount, bodyCount);
+        var eagerGroups = index.Schema.UsesGeneralPredicateGraphs()
+            ? new TrRmEagerGroupTableReader(eagerGroupBytes, eagerGroupCount,
+                typeDefCount, eagerInitializerCount, methodDefCount, index.Schema)
+            : default;
+        var staticFields = index.Schema.UsesGeneralPredicateGraphs()
+            ? new TrRmStaticFieldTableReader(staticFieldBytes, staticFieldCount,
+                strings, types, typeSpecs, eagerGroups, index.Schema)
+            : default;
+        var staticFieldContracts = index.Schema.UsesGeneralPredicateGraphs()
+            ? new TrRmStaticFieldContractTableReader(staticFieldContractBytes,
+                staticFieldContractCount, staticFieldCount, lazyUnitCount,
+                staticPublicationCount, staticFields, index.Schema)
+            : default;
+        var eagerInitializers = index.Schema.UsesGeneralPredicateGraphs()
+            ? new TrRmEagerInitializerTableReader(eagerInitializerBytes,
+                eagerInitializerCount, eagerGroups, staticFields,
+                staticFieldContracts, methodDefCount, index.Schema)
+            : default;
+        var lazyUnits = index.Schema.UsesGeneralPredicateGraphs()
+            ? new TrRmLazyUnitTableReader(lazyUnitBytes, lazyUnitCount,
+                eagerGroups, eagerInitializers, staticFields,
+                staticFieldContracts, methodDefCount, index.Schema)
+            : default;
         var properties = propertyCount == 0 ? default
             : new TrRmPropertyDefTableReader(propertyBytes, propertyCount,
-                strings, types, typeSpecs, methods, signatures);
+                strings, types, typeSpecs, methods, signatures,
+                deferGetterTypeIdentity: !developmentProfile);
         var selectedConstantSourceCount = developmentProfile ? 0 : constantSourceCount;
         var generics = new TrRmGenericParamTableReader(genericParamBytes, genericParamCount,
             strings, types, methods, signatures, typeSpecs, constraintCount,
@@ -848,10 +1383,12 @@ public static class TrRmStructuralMetadataValidator
         var interfaceWitnesses = default(TrRmInterfaceWitnessTableReader);
         var witnessMembers = default(TrRmWitnessMemberTableReader);
         var witnessAssociatedTypes = default(TrRmWitnessAssociatedTypeTableReader);
+        var witnessAssociatedConsts = default(TrRmWitnessAssociatedConstTableReader);
         var interfaceBases = default(TrRmInterfaceBaseTableReader);
         var interfaceMethods = default(TrRmInterfaceMethodTableReader);
         var interfaceConstDefs = default(TrRmInterfaceConstDefTableReader);
         var associatedConstDefs = default(TrRmAssociatedConstDefTableReader);
+        var immutableData = default(TrRmImmutableDataTableReader);
         var associatedRelations = default(TrRmAssociatedRelationTableReader);
         var unionCaseDefs = default(TrRmUnionCaseDefTableReader);
         var unionCaseFields = default(TrRmUnionCaseFieldTableReader);
@@ -864,10 +1401,35 @@ public static class TrRmStructuralMetadataValidator
         var predicateChildEdges = default(TrRmPredicateChildEdgeTableReader);
         var predicateReadFootprints = default(TrRmPredicateReadFootprintTableReader);
         var predicateCaptures = default(TrRmPredicateCaptureTableReader);
+        var predicateNodes = default(TrRmPredicateNodeTableReader);
+        var predicateNodeOperands = default(TrRmPredicateNodeOperandTableReader);
+        var predicateReadRoots = default(TrRmPredicateReadRootTableReader);
+        var predicateReadDependencies = default(TrRmPredicateReadDependencyTableReader);
+        var predicateOperations = default(TrRmPredicateOperationTableReader);
+        var predicateCalls = default(TrRmPredicateCallTableReader);
+        var predicateTypeUses = default(TrRmPredicateTypeUseTableReader);
+        var predicateControls = default(TrRmPredicateControlTableReader);
+        var evaluationReadBounds = default(TrRmEvaluationReadBoundTableReader);
+        var predicateTypePatterns = default(TrRmPredicateTypePatternTableReader);
         var constantSources = default(TrRmConstantSourceTableReader);
+        var constantExecutionSubstitutions
+            = default(TrRmConstantExecutionSubstitutionTableReader);
         var targetLayoutDependencies = default(TrRmTargetLayoutDependencyTableReader);
         var targetLayoutDependencyFields = default(TrRmTargetLayoutDependencyFieldTableReader);
         var fieldPaths = default(TrRmFieldPathTableReader);
+        var staticPublications
+            = default(TrRmStaticImmutablePublicationTableReader);
+        var staticDependencies = default(TrRmStaticDependencyTableReader);
+        var staticAccesses = default(TrRmStaticAccessTableReader);
+        var constantExecutionArguments
+            = default(TrRmConstantExecutionArgumentTableReader);
+        var constantExecutionDependencies
+            = default(TrRmConstantExecutionDependencyTableReader);
+        var logicalInputViews = default(TrRmLogicalInputViewTableReader);
+        var logicalViewPathEntries = default(TrRmLogicalViewPathEntryTableReader);
+        var constantExecutions = default(TrRmConstantExecutionTableReader);
+        var constantExecutionUses = new List<TrRmConstantExecutionUse>();
+        var imports = default(TrRmImportTableReader);
         if (!developmentProfile)
         {
             builderRegistrations = new TrRmBuilderRegistrationTableReader(
@@ -892,6 +1454,47 @@ public static class TrRmStructuralMetadataValidator
             predicateCaptures = new TrRmPredicateCaptureTableReader(
                 predicateCaptureBytes, predicateCaptureCount,
                 predicateGraphCount, typeSpecs);
+            predicateReadRoots = new TrRmPredicateReadRootTableReader(
+                predicateReadRootBytes, predicateReadRootCount,
+                immutableDataCount, predicateCaptureCount, index.Schema);
+            predicateReadDependencies = new TrRmPredicateReadDependencyTableReader(
+                predicateReadDependencyBytes, predicateReadDependencyCount,
+                methodDefCount, constraintCount, interfaceWitnessCount,
+                witnessProjectionCount: 0);
+            predicateNodes = new TrRmPredicateNodeTableReader(
+                predicateNodeBytes, predicateNodeCount,
+                predicateNodeOperandCount, typeSpecs, index.Schema);
+            var predicateOperandCounts = new TrRmPredicateTableRowCounts(
+                predicateReadRootCount, frozenValueNodeCount, predicateCaptureCount,
+                predicateOperationCount, predicateCallCount,
+                predicateTypeUseCount, fieldPathCount, propertyCount,
+                unionCaseDefCount, predicateControlCount,
+                predicateTypePatternCount);
+            predicateNodeOperands = new TrRmPredicateNodeOperandTableReader(
+                predicateNodeOperandBytes, predicateNodeOperandCount,
+                predicateOperandCounts, index.Schema);
+            if (index.Schema.UsesGeneralPredicateGraphs())
+            {
+                predicateOperations = new TrRmPredicateOperationTableReader(
+                    predicateOperationBytes, predicateOperationCount, index.Schema);
+                predicateCalls = new TrRmPredicateCallTableReader(
+                    predicateCallBytes, predicateCallCount,
+                    predicateReadDependencyCount, methodDefCount,
+                    constantSourceCount, predicateReadDependencies, typeSpecs,
+                    index.Schema);
+                predicateTypeUses = new TrRmPredicateTypeUseTableReader(
+                    predicateTypeUseBytes, predicateTypeUseCount,
+                    typeSpecs, index.Schema);
+                predicateControls = new TrRmPredicateControlTableReader(
+                    predicateControlBytes, predicateControlCount, index.Schema);
+                evaluationReadBounds = new TrRmEvaluationReadBoundTableReader(
+                    evaluationReadBoundBytes, evaluationReadBoundCount,
+                    methodDefCount, predicateReadFootprintCount, index.Schema);
+                predicateTypePatterns = new TrRmPredicateTypePatternTableReader(
+                    predicateTypePatternBytes, predicateTypePatternCount,
+                    predicateCaptureCount, constantSourceCount,
+                    predicateTypeUseCount, index.Schema);
+            }
             unionCaseDefs = new TrRmUnionCaseDefTableReader(
                 unionCaseDefBytes, unionCaseDefCount, strings, types,
                 unionCaseFieldCount);
@@ -910,9 +1513,36 @@ public static class TrRmStructuralMetadataValidator
                 interfaceConstCount, strings, typeSpecs, interfaces, constantSourceCount);
             associatedConstDefs = new TrRmAssociatedConstDefTableReader(
                 associatedConstBytes, associatedConstCount, strings, typeSpecs, interfaces);
+            if (index.Schema.UsesGeneralPredicateGraphs())
+            {
+                immutableData = new TrRmImmutableDataTableReader(
+                    immutableDataBytes, immutableDataCount, interfaceConstCount,
+                    witnessAssociatedConstCount, staticFields.Count,
+                    typeSpecs, index.Schema);
+            }
             constantSources = new TrRmConstantSourceTableReader(constantSourceBytes,
                 constantSourceCount, frozenValueNodeCount, constantExecutionCount,
                 targetValueBindingCount);
+            if (index.Schema.UsesGeneralPredicateGraphs())
+            {
+                constantExecutionSubstitutions
+                    = new TrRmConstantExecutionSubstitutionTableReader(
+                        constantExecutionSubstitutionBytes,
+                        constantExecutionSubstitutionCount, constantSourceCount,
+                        typeSpecs, index.Schema);
+                staticPublications = new TrRmStaticImmutablePublicationTableReader(
+                    staticPublicationBytes, staticPublicationCount,
+                    staticFields, staticFieldContracts, typeSpecs, lazyUnits,
+                    constantSources, index.Schema, deferTypeIdentity: true);
+            }
+            associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
+                associatedTypeBytes, associatedTypeCount, strings, typeSpecs,
+                interfaces);
+            imports = new TrRmImportTableReader(importBytes, importCount,
+                strings, moduleRefs, types, methods, properties,
+                interfaces, associatedTypeDefs, fields, features, modules,
+                index.Schema, associatedConstDefs, staticFields,
+                staticFieldContracts, intrinsicRegistrations);
             for (var formal = 1; formal <= generics.Count; formal++)
             {
                 if (generics.GetFormalKind(formal) != 2
@@ -929,24 +1559,54 @@ public static class TrRmStructuralMetadataValidator
                     0x16 => methods.GetOwnerModule(ownerRow),
                     _ => throw InvalidMetadata(),
                 };
-                TrRmConstantSourceValueValidator.ValidateFrozenScalar(
-                    checked((int)generics.GetDefaultArgumentRef(formal)),
-                    generics.GetConstantTypeSpecRef(formal), ownerModule,
-                    constantSources, frozenValueNodes, blobs, typeSpecs,
-                    features, modules);
+                var sourceRow = checked((int)generics.GetDefaultArgumentRef(formal));
+                if (constantSources.GetKind(sourceRow) == 2)
+                {
+                    if (!index.Schema.UsesGeneralPredicateGraphs())
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    constantExecutionUses.Add(new TrRmConstantExecutionUse(
+                        checked((int)constantSources.GetPayloadReference(sourceRow)),
+                        ownerModule, generics.GetConstantTypeSpecRef(formal)));
+                }
+                else
+                {
+                    TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+                        sourceRow, generics.GetConstantTypeSpecRef(formal),
+                        ownerModule, constantSources, frozenValueNodes, blobs,
+                        typeSpecs, features, modules, types, enumDefs, imports);
+                }
             }
             for (var row = 1; row <= interfaceConstDefs.Count; row++)
             {
                 var ownerInterface = interfaceConstDefs.GetOwnerInterfaceDef(row);
                 var ownerTypeDef = interfaces.GetOwnerTypeDef(ownerInterface);
-                TrRmConstantSourceValueValidator.ValidateFrozenScalar(
-                    interfaceConstDefs.GetConstantSourceRow(row),
-                    interfaceConstDefs.GetConstantTypeSpecRef(row),
-                    types.GetOwnerModule(ownerTypeDef), constantSources,
-                    frozenValueNodes, blobs, typeSpecs, features, modules);
+                var sourceRow = interfaceConstDefs.GetConstantSourceRow(row);
+                var ownerModule = types.GetOwnerModule(ownerTypeDef);
+                if (constantSources.GetKind(sourceRow) == 2)
+                {
+                    if (!index.Schema.UsesGeneralPredicateGraphs())
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    constantExecutionUses.Add(new TrRmConstantExecutionUse(
+                        checked((int)constantSources.GetPayloadReference(sourceRow)),
+                        ownerModule,
+                        interfaceConstDefs.GetConstantTypeSpecRef(row)));
+                }
+                else
+                {
+                    TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+                        sourceRow,
+                        interfaceConstDefs.GetConstantTypeSpecRef(row),
+                        ownerModule, constantSources, frozenValueNodes,
+                        blobs, typeSpecs, features, modules, types, enumDefs,
+                        imports);
+                }
             }
-            associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
-                associatedTypeBytes, associatedTypeCount, strings, typeSpecs, interfaces);
             interfaceWitnesses = new TrRmInterfaceWitnessTableReader(
                 interfaceWitnessBytes, interfaceWitnessCount, typeSpecs,
                 witnessMemberCount, witnessAssociatedTypeCount,
@@ -964,22 +1624,97 @@ public static class TrRmStructuralMetadataValidator
                 index.Schema)
             : new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs, fieldPathCount,
-                features, modules, index.Schema, predicateGraphs.Count);
+                features, modules, index.Schema, predicateGraphs.Count,
+                eagerGroups, staticFields, staticFieldContracts,
+                eagerInitializers, lazyUnits);
+        if (index.Schema.SupportsDeclaredCopyEvidence())
+        {
+            for (var typeDef = 1; typeDef <= types.Count; typeDef++)
+            {
+                var hasCleanup = false;
+                var (first, count) = types.GetContractRange(typeDef);
+                for (var offset = 0; offset < count; offset++)
+                {
+                    if (BinaryPrimitives.ReadUInt16LittleEndian(
+                            contracts.GetRow(first + offset)[4..]) == 5)
+                    {
+                        hasCleanup = true;
+                        break;
+                    }
+                }
+
+                if ((types.HasDeclaredCopy(typeDef) && hasCleanup)
+                    || (index.Schema.SupportsDeclaredUniqueEvidence()
+                        && hasCleanup
+                        && !types.HasDeclaredUnique(typeDef)))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+        }
+
         var predicateSelectorKinds = Array.Empty<byte>();
         if (!developmentProfile)
         {
-            predicateSelectorKinds = TrRmPublishedPredicateSelectorValidator.Validate(
-                predicateReadRootBytes, predicateReadRootCount,
-                predicateNodeBytes, predicateNodeCount,
-                predicateNodeOperandBytes, predicateNodeOperandCount,
-                predicateReadDependencyCount, predicateGraphs,
-                predicateReadFootprints, predicateChildEdges, predicateCaptures,
-                methods, signatures, typeSpecs, contracts);
+            predicateSelectorKinds = index.Schema.UsesGeneralPredicateGraphs()
+                ? TrRmGeneralPredicateGraphValidator.Validate(index.Schema,
+                    features, modules, methods, signatures, contracts, typeSpecs,
+                    types, enumDefs, generics, imports, frozenValueNodes, blobs,
+                    immutableData,
+                    predicateGraphs, predicateReadFootprints, predicateReadRoots,
+                    predicateReadDependencies, predicateNodes, predicateNodeOperands,
+                    predicateChildEdges, predicateCaptures, predicateCalls,
+                    predicateOperations, predicateTypeUses, predicateControls,
+                    predicateTypePatterns, evaluationReadBounds,
+                    constantSources, constantExecutionUses)
+                : TrRmPublishedPredicateSelectorValidator.Validate(
+                    predicateReadRootBytes, predicateReadRootCount,
+                    predicateNodeBytes, predicateNodeCount,
+                    predicateNodeOperandBytes, predicateNodeOperandCount,
+                    predicateReadDependencyCount, predicateGraphs,
+                    predicateReadFootprints, predicateChildEdges, predicateCaptures,
+                    methods, signatures, typeSpecs, contracts);
         }
-        var imports = new TrRmImportTableReader(importBytes, importCount,
-            strings, moduleRefs, types, methods, properties,
-            interfaces, associatedTypeDefs, fields, features, modules,
-            index.Schema);
+        if (index.Schema.UsesGeneralPredicateGraphs())
+        {
+            for (var field = 1; field <= staticFields.Count; field++)
+            {
+                var contract = staticFieldContracts.GetRowForStaticField(field);
+                var role = staticFieldContracts.GetDeclarationRole(contract);
+                var ownerType = staticFields.GetOwnerTypeDefRow(field);
+                var hasOwnerImport = imports.IsExpectedDefinition(
+                    0x1300_0000u | (uint)ownerType);
+                var hasFieldImport = imports.IsExpectedDefinition(
+                    0x2400_0000u | (uint)field);
+                if ((role == 1 && (hasOwnerImport || hasFieldImport))
+                    || (role == 2 && (!hasOwnerImport || !hasFieldImport))
+                    || (role == 3 && (!hasOwnerImport || hasFieldImport)))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            for (var registration = 1;
+                registration <= intrinsicRegistrations.Count; registration++)
+            {
+                var role = intrinsicRegistrations.GetDeclarationRole(registration);
+                var hasImport = imports.IsExpectedDefinition(
+                    0x2600_0000u | (uint)registration);
+                if ((role == 1 && hasImport) || (role == 2 && !hasImport))
+                {
+                    throw InvalidMetadata();
+                }
+            }
+
+            staticDependencies = new TrRmStaticDependencyTableReader(
+                staticDependencyBytes, staticDependencyCount, imports,
+                staticFields, staticFieldContracts, eagerGroups,
+                staticPublicationCount, typeSpecs, types, index.Schema);
+            staticAccesses = new TrRmStaticAccessTableReader(
+                staticAccessBytes, staticAccessCount, staticFields,
+                staticFieldContracts, staticDependencies, typeSpecs, types,
+                imports, index.Schema);
+        }
         if (!developmentProfile)
         {
             associatedRelations = new TrRmAssociatedRelationTableReader(
@@ -993,12 +1728,76 @@ public static class TrRmStructuralMetadataValidator
         }
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
             generics, imports, selectedConstantSourceCount);
+        if (index.Schema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft)
+        {
+            TrRmFixedArrayGenericProfileValidator.ValidateA3(typeSpecs,
+                types, generics, constraints, imports, methods, signatures,
+                parameters, bodies, contracts, features, modules,
+                fixedArrayLayouts, targetProfiles,
+                selectedA3LayoutResourceLedger);
+        }
+        if (index.Schema.UsesForeignInvocationStorageFixedArrays())
+        {
+            TrRmFixedArrayLayoutValidator.Validate(fixedArrayLayouts,
+                typeSpecs, types, fields, layouts, layoutFields,
+                targetProfiles, imports, contracts, generics, constraints,
+                index.Schema, selectedA3LayoutResourceLedger);
+        }
+
         if (!developmentProfile)
         {
             witnessAssociatedTypes = new TrRmWitnessAssociatedTypeTableReader(
                 witnessAssociatedTypeBytes, witnessAssociatedTypeCount,
                 interfaceWitnesses, typeSpecs, types, interfaces, interfaceBases,
                 associatedTypeDefs, imports);
+            if (index.Schema.UsesGeneralPredicateGraphs())
+            {
+                witnessAssociatedConsts = new TrRmWitnessAssociatedConstTableReader(
+                    witnessAssociatedConstBytes, witnessAssociatedConstCount,
+                    interfaceWitnesses, typeSpecs, types, interfaces, interfaceBases,
+                    associatedConstDefs, imports, constantSources, index.Schema,
+                    deferAnchorIdentity: true);
+                for (var binding = 1;
+                    binding <= witnessAssociatedConsts.Count; binding++)
+                {
+                    var sourceRow = witnessAssociatedConsts.GetConstantSourceRow(binding);
+                    if (constantSources.GetKind(sourceRow) != 2)
+                    {
+                        continue;
+                    }
+                    if (!index.Schema.UsesGeneralPredicateGraphs())
+                    {
+                        throw InvalidMetadata();
+                    }
+
+                    var reference
+                        = witnessAssociatedConsts.GetAssociatedConstDefReference(binding);
+                    var definition = (reference >> 24) switch
+                    {
+                        0x25 => reference,
+                        0x1C => imports.GetExpectedDefinitionForImportRow(
+                            checked((int)(reference & 0x00FF_FFFF))),
+                        _ => throw InvalidMetadata(),
+                    };
+                    var definitionRow
+                        = checked((int)(definition & 0x00FF_FFFF));
+                    var valueType
+                        = associatedConstDefs.GetConstantTypeSpecRef(definitionRow);
+                    var witness = witnessAssociatedConsts.GetWitnessRow(binding);
+                    var implementingType
+                        = interfaceWitnesses.GetImplementingTypeSpecRef(witness);
+                    var implementingTypeDef = typeSpecs.GetNominalTypeDefRow(
+                        implementingType, types, imports);
+                    constantExecutionUses.Add(new TrRmConstantExecutionUse(
+                        checked((int)constantSources.GetPayloadReference(sourceRow)),
+                        types.GetOwnerModule(implementingTypeDef), valueType));
+                }
+                immutableData.ValidateOwnerBindings(typeSpecs, types, imports,
+                    interfaces, interfaceConstDefs, interfaceWitnesses,
+                    witnessAssociatedConsts, staticFields, staticFieldContracts,
+                    staticPublications, staticDependencies);
+            }
             targetLayoutDependencyFields = new TrRmTargetLayoutDependencyFieldTableReader(
                 targetLayoutDependencyFieldBytes, targetLayoutDependencyFieldCount,
                 fields, imports);
@@ -1008,6 +1807,40 @@ public static class TrRmStructuralMetadataValidator
             fieldPaths = fieldPathCount == 0 ? default
                 : new TrRmFieldPathTableReader(fieldPathBytes, fieldPathCount,
                     typeSpecs, fields, imports);
+            if (index.Schema.UsesGeneralPredicateGraphs())
+            {
+                constantExecutionArguments =
+                    new TrRmConstantExecutionArgumentTableReader(
+                        constantExecutionArgumentBytes,
+                        constantExecutionArgumentCount, frozenValueNodeCount,
+                        logicalInputViewCount, constantExecutionCount);
+                constantExecutionDependencies =
+                    new TrRmConstantExecutionDependencyTableReader(
+                        constantExecutionDependencyBytes,
+                        constantExecutionDependencyCount, methods.Count,
+                        constraints.Count, interfaceWitnesses.Count,
+                        witnessProjectionCount: 0,
+                            intrinsicRegistrationCount: intrinsicRegistrations.Count,
+                            immutableDataCount: immutableData.Count,
+                            fieldDefCount: fields.Count,
+                            propertyDefCount: properties.Count,
+                            unionCaseDefCount: unionCaseDefs.Count);
+                logicalViewPathEntries = new TrRmLogicalViewPathEntryTableReader(
+                    logicalViewPathEntryBytes, logicalViewPathEntryCount,
+                    fields, unionCaseFields, imports);
+                logicalInputViews = new TrRmLogicalInputViewTableReader(
+                    logicalInputViewBytes, logicalInputViewCount,
+                    frozenValueNodeCount, immutableData.Count,
+                    constantExecutionCount, typeSpecs, logicalViewPathEntries);
+                constantExecutions = new TrRmConstantExecutionTableReader(
+                    constantExecutionBytes, constantExecutionCount,
+                    bodyCount, constantExecutionSubstitutions, constantSources,
+                    constantExecutionArguments, logicalInputViews,
+                    constantExecutionDependencies,
+                    targetLayoutDependencies, methods, types, signatures, generics,
+                    contracts, typeSpecs, targetProfiles, intrinsicRegistrations,
+                    imports, features, modules, index.Schema);
+            }
         }
         else if (importCount != 0)
         {
@@ -1027,7 +1860,8 @@ public static class TrRmStructuralMetadataValidator
         var exports = new TrRmExportTableReader(exportBytes, exportCount,
             strings, types, methods, properties, imports,
             interfaces, associatedTypeDefs, fields, features, modules,
-            index.Schema);
+            index.Schema, associatedConstDefs, staticFields, staticFieldContracts,
+            intrinsicRegistrations);
         var nativeImports = developmentProfile
             ? new TrRmDevelopmentNativeImportTableReader(nativeImportBytes,
                 nativeImportCount, strings, methods, signatures, parameters,
@@ -1045,12 +1879,24 @@ public static class TrRmStructuralMetadataValidator
             : default;
         var nativeFunctionPointerAnchors = !developmentProfile
             ? new TrRmNativeFunctionPointerAnchorTableReader(typeSpecs, types,
-                generics, methods, signatures, parameters, contracts, imports,
+                enumDefs, generics, methods, signatures, parameters, contracts, imports,
                 constantSources, frozenValueNodes, blobs, features, index.Schema,
                 predicateSelectorKinds, modules,
                 exports, properties, interfaceMethods, standardNativeImports,
                 nativeExports)
             : default;
+        if (!developmentProfile)
+        {
+            properties.ValidateGetterTypeIdentity(methods, signatures,
+                nativeFunctionPointerAnchors);
+            if (index.Schema.UsesGeneralPredicateGraphs())
+            {
+                staticPublications.ValidateTypeIdentity(staticFields,
+                    nativeFunctionPointerAnchors);
+                witnessAssociatedConsts.ValidateAnchorIdentity(
+                    nativeFunctionPointerAnchors);
+            }
+        }
         var nativeFunctionPointerSignatures = developmentProfile
             ? new TrRmNativeFunctionPointerSignatureTableReader(
                 nativeFunctionPointerSignatureBytes,
@@ -1095,7 +1941,9 @@ public static class TrRmStructuralMetadataValidator
                 features, modules, methods, types, fields, index.Schema);
             ValidateStandardNativeFunctionPointerValueFeatureAssignments(
                 typeSpecs, signatures, parameters, methods, types, fields,
-                generics, imports, features, modules, index.Schema);
+                staticFields, unionCaseDefs, unionCaseFields, textContentShapes,
+                textCaptureShapes, predicateGraphs, predicateCaptures,
+                contracts, generics, imports, features, modules, index.Schema);
             if (!copyOriginDraft)
             {
                 ValidateStandardNativeImportFeatureAssignments(standardNativeImports,
@@ -1185,34 +2033,69 @@ public static class TrRmStructuralMetadataValidator
         _ = layouts;
         _ = parameters;
         _ = contracts;
-        _ = exports;
         _ = sourceFiles;
         _ = sourceMaps;
         var executionTables = new ValidatedExecutionTables(strings, features,
             modules, moduleRefs,
-            types, typeSpecs,
+            types, enumDefs, enumMembers, typeSpecs,
             nativeFunctionPointerAnchors,
             generics,
             constraints,
             interfaces, associatedTypeDefs, interfaceWitnesses, witnessMembers,
-            witnessAssociatedTypes,
+            witnessAssociatedTypes, witnessAssociatedConsts,
             interfaceBases, interfaceMethods,
-            interfaceConstDefs, associatedConstDefs, associatedRelations,
+            interfaceConstDefs, associatedConstDefs, immutableData, associatedRelations,
             unionCaseDefs, unionCaseFields, builderRegistrations, textTargets,
             textContentShapes, textCaptureShapes, textFragmentShapes,
             predicateGraphs, predicateChildEdges, predicateReadFootprints,
-            predicateCaptures,
+            predicateCaptures, predicateNodes, predicateNodeOperands,
+            predicateReadRoots, predicateReadDependencies, predicateOperations,
+            predicateCalls, predicateTypeUses, predicateControls,
+            evaluationReadBounds, predicateTypePatterns,
             blobs, frozenValueNodes,
             constantSources,
+            constantExecutionSubstitutions,
+            constantExecutionArguments, constantExecutionDependencies,
+            logicalInputViews, logicalViewPathEntries, constantExecutions,
+            constantExecutionUses,
             targetLayoutDependencies, targetLayoutDependencyFields, fieldPaths,
-            fields, layouts, layoutFields,
-            targetProfiles, signatures, parameters, methods, bodies, contracts, nativeImports,
+            fields, staticFields, eagerGroups, staticFieldContracts,
+            eagerInitializers, lazyUnits, staticPublications,
+            staticDependencies, staticAccesses,
+            intrinsicRegistrations,
+            layouts, layoutFields,
+            targetProfiles, fixedArrayLayouts, signatures, parameters, methods,
+            bodies, contracts, nativeImports,
             standardNativeImports, nativeExports, nativeCallables,
             nativeFunctionPointerSignatures,
-            nativeVTables, imports,
-            index.Schema);
+            nativeVTables, imports, exports,
+            index.Schema, selectedA3LayoutResourceLedger);
         executionTables.ValidateNonBodyTypeSpecModuleContexts();
+        if (index.Schema.UsesGeneralPredicateGraphs())
+        {
+            TrRmConstantExecutionFeatureUseValidator.Validate(
+                constantExecutions, constantExecutionArguments,
+                constantExecutionDependencies, logicalInputViews,
+                constantExecutionUses, features, modules, index.Schema);
+        }
         return executionTables;
+    }
+
+    private static void ValidateNominalEnumFeatureAssignments(
+        TrRmEnumDefTableReader enumDefs, TrRmTypeDefTableReader typeDefs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmArtifactSchema schema)
+    {
+        for (var row = 1; row <= enumDefs.Count; row++)
+        {
+            var ownerTypeDef = enumDefs.GetOwnerTypeDef(row);
+            var ownerModule = typeDefs.GetOwnerModule(ownerTypeDef);
+            if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule, 18, schema))
+            {
+                throw InvalidMetadata();
+            }
+        }
     }
 
     private static void ValidateNativeBoundaryFeatureAssignments(
@@ -1399,13 +2282,87 @@ public static class TrRmStructuralMetadataValidator
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmMethodDefTableReader methods,
         TrRmTypeDefTableReader typeDefs, TrRmFieldDefTableReader fields,
+        TrRmStaticFieldTableReader staticFields,
+        TrRmUnionCaseDefTableReader unionCaseDefs,
+        TrRmUnionCaseFieldTableReader unionCaseFields,
+        TrRmTextContentShapeTableReader textContentShapes,
+        TrRmTextCaptureShapeTableReader textCaptureShapes,
+        TrRmPredicateGraphTableReader predicateGraphs,
+        TrRmPredicateCaptureTableReader predicateCaptures,
+        TrRmContractTableReader contracts,
         TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         TrRmArtifactSchema schema)
     {
+        var containsFunctionPointerValueByModule = new bool[modules.Count + 1];
+        for (var field = 1; field <= staticFields.Count; field++)
+        {
+            var ownerType = staticFields.GetOwnerTypeDefRow(field);
+            var ownerModule = typeDefs.GetOwnerModule(ownerType);
+            containsFunctionPointerValueByModule[ownerModule] |=
+                typeSpecs.ContainsNativeFunctionPointerValue(
+                    staticFields.GetTypeSpecRef(field), typeDefs,
+                    genericParams, imports);
+        }
+
+        for (var field = 1; field <= unionCaseFields.Count; field++)
+        {
+            var caseDef = unionCaseFields.GetOwnerUnionCaseDef(field);
+            var ownerType = unionCaseDefs.GetOwnerTypeDef(caseDef);
+            var ownerModule = typeDefs.GetOwnerModule(ownerType);
+            containsFunctionPointerValueByModule[ownerModule] |=
+                typeSpecs.ContainsNativeFunctionPointerValue(
+                    unionCaseFields.GetTypeSpecRef(field), typeDefs,
+                    genericParams, imports);
+        }
+
+        for (var capture = 1; capture <= textCaptureShapes.Count; capture++)
+        {
+            var shape = textCaptureShapes.GetShapeRow(capture);
+            var ownerType = textContentShapes.GetGeneratedTypeDef(shape);
+            var ownerModule = typeDefs.GetOwnerModule(ownerType);
+            containsFunctionPointerValueByModule[ownerModule] |=
+                typeSpecs.ContainsNativeFunctionPointerValue(
+                    textCaptureShapes.GetTypeSpecRef(capture), typeDefs,
+                    genericParams, imports);
+        }
+
+        var predicateGraphOwnerModules = new int[predicateGraphs.Count + 1];
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            foreach (var predicate in contracts.GetPredicateGraphContracts(method))
+            {
+                var graph = predicate.PredicateGraphRow;
+                if (graph > 0 && graph < predicateGraphOwnerModules.Length)
+                {
+                    predicateGraphOwnerModules[graph]
+                        = methods.GetOwnerModule(method);
+                }
+            }
+        }
+
+        for (var capture = 1; capture <= predicateCaptures.Count; capture++)
+        {
+            if (predicateCaptures.GetRole(capture) is not (1 or 2))
+            {
+                continue;
+            }
+
+            var graph = predicateCaptures.GetGraphRow(capture);
+            var ownerModule = predicateGraphOwnerModules[graph];
+            if (ownerModule != 0)
+            {
+                containsFunctionPointerValueByModule[ownerModule] |=
+                    typeSpecs.ContainsNativeFunctionPointerValue(
+                        predicateCaptures.GetCapturedTypeSpecRef(capture),
+                        typeDefs, genericParams, imports);
+            }
+        }
+
         for (var module = 1; module <= modules.Count; module++)
         {
-            var containsFunctionPointerValue = false;
+            var containsFunctionPointerValue
+                = containsFunctionPointerValueByModule[module];
             var (methodStart, methodEnd) = modules.GetMethodDefRange(module);
             for (var method = methodStart; method < methodEnd; method++)
             {

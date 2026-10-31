@@ -14,6 +14,30 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>Emits and audits root-free fail-fast scalar compact TRRM bodies.</summary>
 public static partial class TrRmExecutableCompiler
 {
+    /// <summary>Classifies an exception marked at an A3 admission failure origin.</summary>
+    /// <param name="exception">The exception to inspect.</param>
+    /// <param name="kind">The marked A3 failure kind, or <see cref="TrRmA3AdmissionFailureKind.None"/>.</param>
+    /// <returns>Whether the exact exception instance carries an A3 pre-execution admission marker.</returns>
+    public static bool TryGetA3AdmissionFailure(Exception exception,
+        out TrRmA3AdmissionFailureKind kind)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+        return TrRmA3AdmissionFailureMarkers.TryGet(exception, out kind);
+    }
+
+    private const string StandardLayoutQueriesSchemaIdentity
+        = "trrm/1-draft-layout-queries-1";
+    private const string StandardNominalEnumsSchemaIdentity
+        = "trrm/1-draft-nominal-enums-1";
+    private const string StandardForeignInvocationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-contracts-1";
+    private const string StandardForeignInvocationStorageAddressSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+    private const string StandardForeignInvocationStorageFixedArraySchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+    private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+
     private static readonly PrimitiveType[] s_types =
     [
         PrimitiveType.Void, PrimitiveType.Bool, PrimitiveType.Char8, PrimitiveType.Char16,
@@ -41,13 +65,81 @@ public static partial class TrRmExecutableCompiler
     public static byte[] Emit(BoundProgram program, string moduleIdentity)
         => EmitDevelopment(program, moduleIdentity, TrRmArtifactSchema.Development);
 
+    /// <summary>Emits an executable TRRM artifact under one exact Standard schema.</summary>
+    /// <param name="program">The checked program to serialize.</param>
+    /// <param name="moduleIdentity">The output Module identity.</param>
+    /// <param name="schemaIdentity">The exact out-of-band Standard schema identity.</param>
+    /// <param name="moduleTargetRequirement">The selected Module target requirement.</param>
+    /// <returns>The complete validated TRRM artifact.</returns>
+    /// <exception cref="ArgumentNullException">An argument is null.</exception>
+    /// <exception cref="ArgumentException">An identity is empty or not selected by this emitter.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The target requirement is unassigned.</exception>
+    /// <exception cref="NotSupportedException">The selected schema cannot represent the program.</exception>
+    public static byte[] EmitStandard(BoundProgram program, string moduleIdentity,
+        string schemaIdentity, uint moduleTargetRequirement)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(
+            moduleTargetRequirement,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        if (schemaIdentity == StandardLayoutQueriesSchemaIdentity
+            && moduleTargetRequirement
+                != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
+        {
+            throw Unsupported(
+                "The current Standard executable source emitter requires the Windows x64 target.");
+        }
+        if ((schemaIdentity is StandardForeignInvocationSchemaIdentity
+                or StandardForeignInvocationStorageAddressSchemaIdentity
+                or StandardForeignInvocationStorageFixedArraySchemaIdentity
+                or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
+            && moduleTargetRequirement
+                != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
+        {
+            throw Unsupported(
+                "The foreign-invocation source emitter requires the Windows x64 target.");
+        }
+
+        return schemaIdentity switch
+        {
+            StandardLayoutQueriesSchemaIdentity
+                => EmitDevelopment(program, moduleIdentity,
+                    TrRmArtifactSchema.Standard, moduleTargetRequirement),
+            StandardNominalEnumsSchemaIdentity
+                => EmitNominalEnumsDraftSource(program, moduleIdentity,
+                    moduleTargetRequirement),
+            StandardForeignInvocationSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(
+                    program, moduleIdentity),
+            StandardForeignInvocationStorageAddressSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema.ForeignInvocationStorageAddressDraft),
+            StandardForeignInvocationStorageFixedArraySchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft),
+            StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft),
+            _ => throw new ArgumentException(
+                "The exact Standard TRRM schema identity is not supported by this emitter.",
+                nameof(schemaIdentity)),
+        };
+    }
+
     internal static byte[] EmitDevelopmentFunctionPointerEffectsDraft(
         BoundProgram program, string moduleIdentity)
         => EmitDevelopment(program, moduleIdentity,
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
 
     private static byte[] EmitDevelopment(BoundProgram program, string moduleIdentity,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        uint moduleTargetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (BoundGenericNominalTypeContract.UsesAny(program))
@@ -730,6 +822,11 @@ public static partial class TrRmExecutableCompiler
         {
             featureRows.Add(TrRmDevelopmentFeatureRow.NativeVTableCalls);
         }
+        if (!schema.IsDevelopmentProfile() && featureRows.Count != 0)
+        {
+            throw Unsupported(
+                "The selected Standard schema does not support these development-only features.");
+        }
         var featureCount = featureRows.Count;
         var featureBytes = featureCount == 0
             ? [] : TrRmDevelopmentFeatureTableWriter.Encode(featureRows);
@@ -750,7 +847,7 @@ public static partial class TrRmExecutableCompiler
             moduleReferenceRowByIdentity.Add(moduleImportIdentities[index], index + 1);
         }
         var moduleBytes = TrRmModuleTableWriter.Encode(
-            [new TrRmModuleRow(1, 1, 0, program.EntryPoint + 1, 1, 1, 1, 1,
+            [new TrRmModuleRow(1, moduleTargetRequirement, 0, program.EntryPoint + 1, 1, 1, 1, 1,
                 featureCount == 0 ? 0 : 1, featureCount)],
             strings, moduleRefRows.Count, typeDefCount, methods.Count, 0, featureCount);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings, moduleRefRows.Count, typeDefCount,

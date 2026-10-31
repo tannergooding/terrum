@@ -9,7 +9,7 @@ namespace Terrum.CodeAnalysis.Modules;
 /// <summary>A TypeDef's names, flags and owned table ranges.</summary>
 /// <param name="NamespaceStringRow">The one-based namespace String row.</param>
 /// <param name="NameStringRow">The one-based name String row.</param>
-/// <param name="Flags">The assigned visibility and nominal-kind flags.</param>
+/// <param name="Flags">The assigned visibility, nominal-kind and exact-schema flags.</param>
 /// <param name="FieldFirst">The first owned FieldDef row, or zero when empty.</param>
 /// <param name="FieldCount">The number of owned FieldDef rows.</param>
 /// <param name="GenericFirst">The first owned GenericParam row, or zero when empty.</param>
@@ -38,6 +38,13 @@ public static class TrRmTypeDefTableWriter
     public static byte[] Encode(IReadOnlyList<TrRmTypeDefRow> rows,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         int fieldCount, int genericParamCount, int layoutCount, int contractCount)
+        => Encode(rows, strings, modules, fieldCount, genericParamCount,
+            layoutCount, contractCount, TrRmArtifactSchema.Standard);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmTypeDefRow> rows,
+        TrRmStringTableReader strings, TrRmModuleTableReader modules,
+        int fieldCount, int genericParamCount, int layoutCount, int contractCount,
+        TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -64,7 +71,7 @@ public static class TrRmTypeDefTableWriter
         }
 
         _ = new TrRmTypeDefTableReader(result, rows.Count, strings, modules,
-            fieldCount, genericParamCount, layoutCount, contractCount);
+            fieldCount, genericParamCount, layoutCount, contractCount, schema);
         return result;
     }
 

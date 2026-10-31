@@ -15,6 +15,19 @@ public static class TrRmTypeSpecTableWriter
     public static byte[] InlineFamily(byte familyCode, byte argumentCode, byte qualifiers = 0)
         => [0x01, qualifiers, familyCode, argumentCode];
 
+    internal static byte[] PredicateCapturedType(uint captureRow)
+    {
+        if (captureRow is 0 or > 0xFF_FFFF)
+        {
+            throw new ArgumentOutOfRangeException(nameof(captureRow));
+        }
+
+        var bytes = new byte[6];
+        bytes[0] = 0x10;
+        Write(bytes, 2, captureRow);
+        return bytes;
+    }
+
     public static byte[] Reference(byte form, uint row, byte qualifiers = 0)
     {
         if (form is not (0x02 or 0x03 or 0x04))
@@ -110,6 +123,19 @@ public static class TrRmTypeSpecTableWriter
         return bytes;
     }
 
+    internal static byte[] FixedInlineArray(uint elementTypeSpecRef,
+        ulong elementCount)
+    {
+        ArgumentOutOfRangeException.ThrowIfZero(elementTypeSpecRef);
+
+        var bytes = new byte[14];
+        bytes[0] = 0x11;
+        Write(bytes, 2, elementTypeSpecRef);
+        BinaryPrimitives.WriteUInt64LittleEndian(bytes.AsSpan(6),
+            elementCount);
+        return bytes;
+    }
+
     /// <summary>Encodes TypeSpec rows and validates their referenced table counts.</summary>
     public static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows,
         int typeDefCount, int importCount, int genericParamCount,
@@ -120,13 +146,14 @@ public static class TrRmTypeSpecTableWriter
     internal static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows,
         int typeDefCount, int importCount, int genericParamCount,
         int nativeFunctionPointerSignatureCount, TrRmArtifactSchema schema,
-        int methodDefCount = 0)
+        int methodDefCount = 0, int predicateCaptureCount = 0)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var result = TrRmVariableTableWriter.EncodeBlobs(rows);
         _ = new TrRmTypeSpecTableReader(result, rows.Count,
             typeDefCount, importCount, genericParamCount,
-            nativeFunctionPointerSignatureCount, schema, methodDefCount);
+            nativeFunctionPointerSignatureCount, schema, methodDefCount,
+            predicateCaptureCount);
         return result;
     }
 

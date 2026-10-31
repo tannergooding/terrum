@@ -16,6 +16,9 @@ namespace Terrum.Tools;
 
 internal static partial class Program
 {
+    private const string A3FixedArraySchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+
     private static int RunTrRmExecutionCommand(string[] args, bool json)
     {
         var command = args[0];
@@ -38,6 +41,7 @@ internal static partial class Program
         var exports = new List<string>();
         var providers = new List<(string SchemaIdentity, string Path)>();
         var uniqueExports = new HashSet<string>(StringComparer.Ordinal);
+        var a3AdmissionCallFailed = false;
         var isArtifactCommand = command is "run-trrm" or "build-trrm"
             or "build-trrm-library";
         try
@@ -124,10 +128,17 @@ internal static partial class Program
                 return 2;
             }
             if (isArtifactCommand && schemaIdentity is not null
-                && (schemaIdentity != "trrm/1-draft-foreign-invocation-contracts-1"
+                && (schemaIdentity is not (
+                        "trrm/1-draft-foreign-invocation-contracts-1"
+                        or "trrm/1-draft-foreign-invocation-storage-addresses-1"
+                        or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
+                        or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1")
                     || providers.Exists(static provider =>
-                        provider.SchemaIdentity
-                            != "trrm/1-draft-foreign-invocation-contracts-1")))
+                        provider.SchemaIdentity is not (
+                            "trrm/1-draft-foreign-invocation-contracts-1"
+                            or "trrm/1-draft-foreign-invocation-storage-addresses-1"
+                            or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
+                            or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"))))
             {
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
@@ -255,29 +266,91 @@ internal static partial class Program
                     artifact);
                 if (command == "run-trrm")
                 {
-                    return NativeModuleCompiler.ExecuteStandard(rootInput,
-                        moduleIdentity!, providerInputs,
-                        NativeRuntimePolicy.FailFast,
-                        GraphJitRegistrarAssemblyPath());
+                    try
+                    {
+                        return NativeModuleCompiler.ExecuteStandard(rootInput,
+                            moduleIdentity!, providerInputs,
+                            NativeRuntimePolicy.FailFast,
+                            GraphJitRegistrarAssemblyPath());
+                    }
+                    catch (Exception exception)
+                        when (StringComparer.Ordinal.Equals(schemaIdentity,
+                                A3FixedArraySchemaIdentity)
+                            && exception is (InvalidDataException
+                                or OverflowException or NotSupportedException))
+                    {
+                        a3AdmissionCallFailed = true;
+                        throw;
+                    }
                 }
 
                 if (command == "build-trrm-library")
                 {
-                    image = NativeModuleCompiler.EmitStandardLibrary(rootInput,
-                        moduleIdentity!, providerInputs, exports,
-                        NativeRuntimePolicy.FailFast);
+                    try
+                    {
+                        image = NativeModuleCompiler.EmitStandardLibrary(
+                            rootInput, moduleIdentity!, providerInputs, exports,
+                            NativeRuntimePolicy.FailFast);
+                    }
+                    catch (Exception exception)
+                        when (StringComparer.Ordinal.Equals(schemaIdentity,
+                                A3FixedArraySchemaIdentity)
+                            && exception is (InvalidDataException
+                                or OverflowException or NotSupportedException))
+                    {
+                        a3AdmissionCallFailed = true;
+                        throw;
+                    }
                 }
                 else
                 {
-                    image = NativeModuleCompiler.EmitStandardExecutable(
-                        rootInput, moduleIdentity!, providerInputs,
-                        NativeRuntimePolicy.FailFast);
+                    try
+                    {
+                        image = NativeModuleCompiler.EmitStandardExecutable(
+                            rootInput, moduleIdentity!, providerInputs,
+                            NativeRuntimePolicy.FailFast);
+                    }
+                    catch (Exception exception)
+                        when (StringComparer.Ordinal.Equals(schemaIdentity,
+                                A3FixedArraySchemaIdentity)
+                            && exception is (InvalidDataException
+                                or OverflowException or NotSupportedException))
+                    {
+                        a3AdmissionCallFailed = true;
+                        throw;
+                    }
                 }
             }
             var imagePath = output ?? throw new InvalidOperationException("Missing native output path.");
             WriteArtifact(imagePath, image);
             WriteTrRmSuccess(command, imagePath, image.Length, json);
             return 0;
+        }
+        catch (Exception exception)
+            when (TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
+                out _))
+        {
+            _ = TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
+                out var failureKind);
+            var (code, status) = failureKind switch
+            {
+                TrRmA3AdmissionFailureKind.InvalidArtifact
+                    => ("TRM5001", 1),
+                TrRmA3AdmissionFailureKind.TargetLayoutOverflow
+                    => ("TRM5005", 1),
+                TrRmA3AdmissionFailureKind.UnsupportedAdmission
+                    => ("TRM5006", 1),
+                TrRmA3AdmissionFailureKind.ResourceLimit
+                    => ("TRM5007", 2),
+                _ => throw new InvalidOperationException(
+                    "The A3 admission failure kind is not supported.")
+            };
+            WriteInputError(json, code, exception.Message);
+            return status;
+        }
+        catch (Exception) when (a3AdmissionCallFailed)
+        {
+            throw;
         }
         catch (Exception exception) when (exception is InvalidDataException or ArgumentException and not DecoderFallbackException
             or NotSupportedException)

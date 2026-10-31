@@ -22,18 +22,42 @@ internal readonly ref struct TrRmRegisterBodyReader
     private readonly ReadOnlySpan<byte> _code;
     private readonly int _recordCount;
     private readonly int _contractCount;
+    private readonly TrRmArtifactSchema _schema;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
-    internal TrRmRegisterBodyReader(ReadOnlySpan<byte> body, int contractCount = 0)
+    internal TrRmRegisterBodyReader(ReadOnlySpan<byte> body, int contractCount = 0,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        if (body.Length < 17)
+        {
+            throw InvalidBody();
+        }
+
+        resourceLedger?.ConsumeWork(checked((ulong)body.Length + 7UL));
         if (contractCount is < 0 or > 0xFF_FFFF
             || body.Length < 17 || body[0] != 0x01 || body[1] != 0x01
-            || (body[2] & 0xE0) != 0 || ReadUInt16(body, 3) != 0)
+            || (body[2] & 0xE0) != 0 || ReadUInt16(body, 3) != 0
+            || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+                or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                or TrRmArtifactSchema.ScalarFrozenValuesDraft
+                or TrRmArtifactSchema.NominalEnumsDraft
+                or TrRmArtifactSchema.RootPinRuntimeDraft
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
         {
             throw InvalidBody();
         }
 
         MapMask = body[2];
         _contractCount = contractCount;
+        _schema = schema;
+        _resourceLedger = resourceLedger;
         var position = 5;
         var homeCount = ReadMapCount(body, ref position, MapMask, 0);
         var typeCount = ReadMapCount(body, ref position, MapMask, 1);
@@ -55,6 +79,10 @@ internal readonly ref struct TrRmRegisterBodyReader
         MethodCount = methodCount;
         FieldCount = fieldCount;
         ConstantCount = constantCount;
+        resourceLedger?.ConsumeWork(checked(1UL
+            + (ulong)homeCount + (ulong)typeCount + (ulong)methodCount
+            + (ulong)fieldCount + (ulong)constantCount
+            + (ulong)BlockCount + 2UL * (ulong)_recordCount + 1));
 
         var mapStart = position;
         var blockStart = AddExtent(mapStart,
@@ -87,6 +115,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var previousOffset = 0u;
         for (var record = 1; record <= _recordCount; record++)
         {
+            resourceLedger?.ConsumeWork();
             var nextOffset = ReadUInt32(_recordOffsets, record * sizeof(uint));
             if (nextOffset < previousOffset + RecordHeaderSize
                 || nextOffset > body.Length - recordDataStart)
@@ -107,6 +136,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         _code = body.Slice(codeStart, CodeByteLength);
         for (var record = 0; record < _recordCount; record++)
         {
+            resourceLedger?.ConsumeWork();
             ValidateRecord(GetRecord(record));
         }
         ValidateBlocks();
@@ -118,9 +148,33 @@ internal readonly ref struct TrRmRegisterBodyReader
     internal int MethodCount { get; }
     internal int FieldCount { get; }
     internal int ConstantCount { get; }
+    internal TrRmArtifactSchema Schema => _schema;
+    internal TrRmA3LayoutResourceLedger? ResourceLedger => _resourceLedger;
     internal int BlockCount { get; }
     internal int RecordCount => _recordCount;
     internal int CodeByteLength { get; }
+    internal bool HasRootPinOperations
+    {
+        get
+        {
+            var position = 0;
+            while (position < _code.Length)
+            {
+                _resourceLedger?.ConsumeWork(2);
+                var opcode = _code[position];
+                if (opcode == 0xF0)
+                {
+                    return true;
+                }
+
+                _resourceLedger?.ConsumeWork();
+                position += InstructionLength(opcode, _schema);
+            }
+
+            return false;
+        }
+    }
+
     internal ReadOnlySpan<byte> HomeMap => _homeMap;
     internal ReadOnlySpan<byte> TypeMap => _typeMap;
     internal ReadOnlySpan<byte> MethodMap => _methodMap;
@@ -130,6 +184,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     internal ReadOnlySpan<byte> GetBlock(int blockIndex)
     {
+        _resourceLedger?.ConsumeWork();
         if ((uint)blockIndex >= (uint)BlockCount)
         {
             throw InvalidBody();
@@ -140,6 +195,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     internal ReadOnlySpan<byte> GetRecord(int recordIndex)
     {
+        _resourceLedger?.ConsumeWork();
         if ((uint)recordIndex >= (uint)_recordCount)
         {
             throw InvalidBody();
@@ -155,6 +211,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var block = GetBlock(blockIndex);
         var start = ReadUInt32(block, 0);
         var length = ReadUInt32(block, 4);
+        _resourceLedger?.ConsumeWork();
         return _code.Slice((int)start, (int)length);
     }
 
@@ -163,6 +220,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         uint codeCursor = 0;
         for (var blockIndex = 0; blockIndex < BlockCount; blockIndex++)
         {
+            _resourceLedger?.ConsumeWork();
             var block = _blocks.Slice(blockIndex * BlockSize, BlockSize);
             var codeOffset = ReadUInt32(block, 0);
             var codeLength = ReadUInt32(block, 4);
@@ -192,19 +250,23 @@ internal readonly ref struct TrRmRegisterBodyReader
         var lastOpcode = -1;
         while (position < block.Length)
         {
+            _resourceLedger?.ConsumeWork(2);
             var opcode = block[position];
             if (opcode is 0xB6 or 0xEA)
             {
                 throw InvalidBody();
             }
 
-            var instructionLength = InstructionLength(opcode);
+            _resourceLedger?.ConsumeWork();
+            var instructionLength = InstructionLength(opcode, _schema);
             if (instructionLength > block.Length - position)
             {
                 throw InvalidBody();
             }
 
-            ValidateInstructionReferences(opcode, block.Slice(position, instructionLength));
+            _resourceLedger?.ConsumeWork();
+            ValidateInstructionReferences(opcode,
+                block.Slice(position, instructionLength));
             position += instructionLength;
             if (IsDefiniteTerminator(opcode) && position != block.Length)
             {
@@ -335,7 +397,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         ValidateShortRegisterRoles(opcode, x, y);
     }
 
-    private static void ValidateLongControlSelector(byte opcode, byte control)
+    private void ValidateLongControlSelector(byte opcode, byte control)
     {
         var isAssigned = opcode switch
         {
@@ -343,7 +405,11 @@ internal readonly ref struct TrRmRegisterBodyReader
             0xC1 => control is >= 0x01 and <= 0x07,
             0xC2 => control <= 0x02,
             0xC3 or 0xC4 or 0xC5 => control <= 0x0F,
-            0xE9 => control == 0,
+            0xE9 => _schema.UsesForeignInvocationContracts()
+                && control == 0,
+            0xEC => _schema.UsesForeignInvocationStorageAddresses()
+                && control == 0,
+            0xF0 => _schema.UsesRootPinRuntime() && control is >= 1 and <= 7,
             _ => true,
         };
         if (!isAssigned)
@@ -352,7 +418,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private static void ValidateLongRegisterFamilyPayload(byte opcode,
+    private void ValidateLongRegisterFamilyPayload(byte opcode,
         ReadOnlySpan<byte> instruction)
     {
         if (opcode is < 0xC0 or > 0xCC)
@@ -408,7 +474,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private static void ValidateArithmeticRecipePayload(byte opcode,
+    private void ValidateArithmeticRecipePayload(byte opcode,
         ReadOnlySpan<byte> instruction)
     {
         var control = instruction[1];
@@ -565,11 +631,29 @@ internal readonly ref struct TrRmRegisterBodyReader
                 ValidateRecordReference(reference, 0x09);
                 break;
             case 0xE9:
-                if (control != 0)
+                if (!_schema.UsesForeignInvocationContracts()
+                    || control != 0)
                 {
                     throw InvalidBody();
                 }
                 ValidateRecordReference(reference, 0x0D);
+                break;
+            case 0xEC:
+                if (!_schema.UsesForeignInvocationStorageAddresses()
+                    || control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x0E);
+                break;
+            case 0xF0:
+                if (!_schema.UsesRootPinRuntime()
+                    || control is < 1 or > 7)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x0D);
+                ValidateRootPinAction(control, GetRecord(reference)[RecordHeaderSize..]);
                 break;
             case 0xEB:
                 if (control != 0)
@@ -641,7 +725,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private static void ValidateLongRegisterRoles(byte opcode,
+    private void ValidateLongRegisterRoles(byte opcode,
         ReadOnlySpan<byte> instruction)
     {
         var control = instruction[1];
@@ -716,10 +800,13 @@ internal readonly ref struct TrRmRegisterBodyReader
         var position = 0;
         while (position < block.Length)
         {
+            _resourceLedger?.ConsumeWork(2);
             var opcode = block[position];
-            var length = InstructionLength(opcode);
+            _resourceLedger?.ConsumeWork();
+            var length = InstructionLength(opcode, _schema);
             if (position + length == block.Length)
             {
+                _resourceLedger?.ConsumeWork();
                 return opcode switch
                 {
                     0x90 => block[position + 1] == recordIndex,
@@ -735,6 +822,9 @@ internal readonly ref struct TrRmRegisterBodyReader
     }
 
     internal static int InstructionLength(byte opcode)
+        => InstructionLength(opcode, TrRmArtifactSchema.Standard);
+
+    internal static int InstructionLength(byte opcode, TrRmArtifactSchema schema)
     {
         if (opcode <= 0x0F)
         {
@@ -756,10 +846,15 @@ internal readonly ref struct TrRmRegisterBodyReader
             return 2;
         }
 
-        if (opcode is >= 0xC0 and <= 0xCC
-            or >= 0xD0 and <= 0xDE
-            or >= 0xE0 and <= 0xE9
+        if ((opcode is (>= 0xC0 and <= 0xCC)
+            or (>= 0xD0 and <= 0xDE)
+            or (>= 0xE0 and <= 0xE8)
             or 0xEA or 0xEB)
+            || (opcode == 0xE9
+                && schema.UsesForeignInvocationContracts())
+            || (opcode == 0xEC
+                && schema.UsesForeignInvocationStorageAddresses())
+            || (opcode == 0xF0 && schema.UsesRootPinRuntime()))
         {
             return 4;
         }
@@ -784,9 +879,10 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or >= 0xE3 and <= 0xE6
                 or 0xE8 or 0xEA or 0xEB;
 
-    private static int ReadMapCount(ReadOnlySpan<byte> body, ref int position,
+    private int ReadMapCount(ReadOnlySpan<byte> body, ref int position,
         byte mapMask, int bit)
     {
+        _resourceLedger?.ConsumeWork(2);
         if ((mapMask & (1 << bit)) == 0)
         {
             return 0;
@@ -801,8 +897,9 @@ internal readonly ref struct TrRmRegisterBodyReader
         return count;
     }
 
-    private static int ReadCount(ReadOnlySpan<byte> body, ref int position)
+    private int ReadCount(ReadOnlySpan<byte> body, ref int position)
     {
+        _resourceLedger?.ConsumeWork(3);
         if (position < 0 || position > body.Length - sizeof(uint))
         {
             throw InvalidBody();
@@ -818,8 +915,9 @@ internal readonly ref struct TrRmRegisterBodyReader
         return (int)value;
     }
 
-    private static int AddExtent(int start, long length, int limit)
+    private int AddExtent(int start, long length, int limit)
     {
+        _resourceLedger?.ConsumeWork(5);
         var end = start + length;
         if (start < 0 || length < 0 || end > limit || end > int.MaxValue)
         {
@@ -831,7 +929,10 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     private void ValidateRecord(ReadOnlySpan<byte> record)
     {
-        if (record.Length < RecordHeaderSize || record[0] is < 0x01 or > 0x0D
+        var maximumRecordKind = _schema.UsesForeignInvocationStorageAddresses()
+            ? 0x0E : 0x0D;
+        if (record.Length < RecordHeaderSize || record[0] is < 0x01
+            || record[0] > maximumRecordKind
             || record[1] != 0 || ReadUInt16(record, 2) != 0)
         {
             throw InvalidBody();
@@ -867,7 +968,12 @@ internal readonly ref struct TrRmRegisterBodyReader
                 if (payload.Length != 20
                     || payload[0] is < 1 or > 4 || payload[1] is < 1 or > 5
                     || payload[2] > 2 || payload[3] > 2
-                    || payload[8] > 2 || payload[9] > 2
+                    || payload[8] > 2
+                    || payload[9] > (_schema.UsesForeignInvocationStorageFixedArrays()
+                        ? 3 : 2)
+                    || (payload[9] == 3
+                        && (!_schema.UsesForeignInvocationStorageFixedArrays()
+                            || payload[0] != 3))
                     || !IsValidSelector(payload[2], ReadUInt16(payload, 4))
                     || !IsValidSelector(payload[3], ReadUInt16(payload, 6))
                     || !IsValidSelector(payload[8], ReadUInt16(payload, 10))
@@ -944,8 +1050,116 @@ internal readonly ref struct TrRmRegisterBodyReader
             case 0x0C:
                 throw InvalidBody();
             case 0x0D:
-                ValidateNativeAddress(payload);
+                if (_schema.UsesForeignInvocationContracts())
+                {
+                    ValidateNativeAddress(payload);
+                }
+                else if (_schema.UsesRootPinRuntime())
+                {
+                    ValidateRootPinReferenceSupport(payload);
+                }
+                else
+                {
+                    throw InvalidBody();
+                }
                 break;
+            case 0x0E:
+                if (!_schema.UsesForeignInvocationStorageAddresses())
+                {
+                    throw InvalidBody();
+                }
+                ValidateStorageAddress(payload);
+                break;
+        }
+    }
+
+    private void ValidateStorageAddress(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != 12)
+        {
+            throw InvalidBody();
+        }
+
+        var sourceKind = payload[0];
+        var resultKind = payload[1];
+        var sourceIndex = ReadUInt16(payload, 2);
+        var resultIndex = ReadUInt16(payload, 4);
+        var pointerTypeMapIndex = ReadUInt16(payload, 6);
+        var requiredElementCount = ReadUInt32(payload, 8);
+        if (sourceKind is not (1 or 2) || resultKind is not (1 or 2)
+            || (sourceKind == 1
+                ? sourceIndex > 13
+                : sourceIndex >= HomeCount)
+            || (resultKind == 1
+                ? resultIndex is > 15 or 14
+                : resultIndex >= HomeCount)
+            || pointerTypeMapIndex >= TypeCount
+            || requiredElementCount == 0
+            || (sourceKind == 2 && resultKind == 2
+                && sourceIndex == resultIndex))
+        {
+            throw InvalidBody();
+        }
+
+        if (resultKind == 2)
+        {
+            var home = HomeMap.Slice(resultIndex * 8, 8);
+            if (home[0] != 3 || ReadUInt16(home, 2) != pointerTypeMapIndex)
+            {
+                throw InvalidBody();
+            }
+        }
+    }
+
+    private void ValidateRootPinReferenceSupport(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length != 12)
+        {
+            throw InvalidBody();
+        }
+
+        var sourceKind = payload[0];
+        var resultCarrier = payload[1];
+        var sourceIndex = ReadUInt16(payload, 2);
+        var resultRegister = payload[4];
+        var sourceMode = payload[5];
+        var sourceTypeMapIndex = ReadUInt16(payload, 6);
+        var resultTypeMapIndex = ReadUInt16(payload, 8);
+        if (sourceKind is not (1 or 2)
+            || resultCarrier > 2
+            || (sourceKind == 1
+                ? sourceIndex > 13
+                : sourceIndex >= HomeCount)
+            || (resultCarrier == 0
+                ? resultRegister != 15 || resultTypeMapIndex != 0
+                : resultRegister > 13 || resultTypeMapIndex >= TypeCount)
+            || sourceMode is < 1 or > 3
+            || sourceTypeMapIndex >= TypeCount
+            || ReadUInt16(payload, 10) != 0)
+        {
+            throw InvalidBody();
+        }
+    }
+
+    private static void ValidateRootPinAction(byte action,
+        ReadOnlySpan<byte> payload)
+    {
+        var sourceKind = payload[0];
+        var resultCarrier = payload[1];
+        var sourceMode = payload[5];
+        var valid = action switch
+        {
+            1 => sourceKind == 1 && resultCarrier == 1 && sourceMode == 1,
+            2 => resultCarrier == 2 && sourceMode == 1,
+            3 or 4 => resultCarrier == 1 && sourceMode == 1,
+            5 => resultCarrier == 1 && sourceMode == 2,
+            6 => resultCarrier == 0 && sourceMode == 3,
+            7 => resultCarrier == 1 && sourceMode == 1,
+            _ => false,
+        };
+        if (!valid)
+        {
+            throw InvalidBody();
         }
     }
 
@@ -986,6 +1200,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var previousRegister = -1;
         for (var row = 0; row < registerCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var offset = 4 + row * 5;
             var register = payload[offset];
             var carrier = payload[offset + 1];
@@ -1031,6 +1246,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         var inputOffset = 16;
         for (var input = 0; input < inputCount; input++)
         {
+            _resourceLedger?.ConsumeWork();
             var selectorKind = payload[inputOffset];
             var sourceUse = payload[inputOffset + 1];
             var selectorIndex = ReadUInt16(payload, inputOffset + 2);
@@ -1047,6 +1263,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
         for (var preparation = 0; preparation < preparationCount; preparation++)
         {
+            _resourceLedger?.ConsumeWork();
             var recordIndex = ReadUInt16(payload, inputOffset + preparation * 2);
             if (recordIndex >= _recordCount || GetRecord(recordIndex)[0] != 0x03)
             {
@@ -1074,6 +1291,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
         for (var item = 0; item < caseCount; item++)
         {
+            _resourceLedger?.ConsumeWork();
             var offset = 12 + item * 4;
             if (ReadUInt16(payload, offset) >= ConstantCount
                 || ReadUInt16(payload, offset + 2) >= BlockCount)
@@ -1107,6 +1325,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
         for (var binding = 0; binding < bindingCount; binding++)
         {
+            _resourceLedger?.ConsumeWork();
             var offset = 16 + binding * 8;
             var formalOrdinal = ReadUInt32(payload, offset);
             var bindingKind = payload[offset + 4];
@@ -1155,13 +1374,17 @@ internal readonly ref struct TrRmRegisterBodyReader
             1 => referenceKind == 0 && reference < (uint)HomeCount,
             2 or 4 => referenceKind == 1 && reference != 0
                 && (reference & 0xFF00_0000) == 0,
-            3 => referenceKind == 2 && reference < (uint)MethodCount,
+            3 => (referenceKind == 2 && reference < (uint)MethodCount)
+                || (_schema.UsesForeignInvocationStorageFixedArrays()
+                    && referenceKind == 3 && reference != 0
+                    && (reference & 0xFF00_0000) == 0),
             _ => false,
         };
     }
 
-    private static ushort ReadUInt16(ReadOnlySpan<byte> bytes, int offset)
+    private ushort ReadUInt16(ReadOnlySpan<byte> bytes, int offset)
     {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
         if (offset < 0 || offset > bytes.Length - sizeof(ushort))
         {
             throw InvalidBody();
@@ -1170,8 +1393,9 @@ internal readonly ref struct TrRmRegisterBodyReader
         return BinaryPrimitives.ReadUInt16LittleEndian(bytes.Slice(offset, sizeof(ushort)));
     }
 
-    private static uint ReadUInt32(ReadOnlySpan<byte> bytes, int offset)
+    private uint ReadUInt32(ReadOnlySpan<byte> bytes, int offset)
     {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
         if (offset < 0 || offset > bytes.Length - sizeof(uint))
         {
             throw InvalidBody();
@@ -1186,8 +1410,11 @@ internal readonly ref struct TrRmRegisterBodyReader
 
 internal static class TrRmBodyImplementationReader
 {
-    internal static void Validate(ReadOnlySpan<byte> body, int contractCount)
+    internal static void Validate(ReadOnlySpan<byte> body, int contractCount,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork((ulong)body.Length);
         if (body.IsEmpty)
         {
             throw InvalidBody();
@@ -1196,7 +1423,8 @@ internal static class TrRmBodyImplementationReader
         switch (body[0])
         {
             case 0x01:
-                _ = new TrRmRegisterBodyReader(body, contractCount);
+                _ = new TrRmRegisterBodyReader(body, contractCount, schema,
+                    resourceLedger);
                 break;
             case 0x02:
                 if (body.Length != 8 || body[1] != 0 || ReadUInt16(body, 2) != 0

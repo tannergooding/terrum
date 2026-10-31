@@ -11,135 +11,306 @@ namespace Terrum.CodeAnalysis.Modules;
 public static partial class TrRmExecutableCompiler
 {
     internal static BoundProgram LoadStandardScalarReturn(ReadOnlySpan<byte> artifact)
+        => LoadScalarReturn(artifact, TrRmArtifactSchema.Standard);
+
+    internal static BoundProgram LoadScalarFrozenValuesDraft(ReadOnlySpan<byte> artifact)
+        => LoadScalarReturn(artifact, TrRmArtifactSchema.ScalarFrozenValuesDraft);
+
+    internal static BoundProgram LoadNominalEnumsDraftScalarReturns(
+        ReadOnlySpan<byte> artifact)
+        => LoadScalarReturn(artifact, TrRmArtifactSchema.NominalEnumsDraft);
+
+    internal static BoundProgram LoadNominalEnumsDraftIdentityLibrary(
+        ReadOnlySpan<byte> artifact)
+        => LoadScalarReturn(artifact, TrRmArtifactSchema.NominalEnumsDraft,
+            allowNominalEnumsDraftIdentity: true);
+
+    private static BoundProgram LoadScalarReturn(ReadOnlySpan<byte> artifact,
+        TrRmArtifactSchema schema,
+        bool allowNominalEnumsDraftIdentity = false)
     {
-        var index = new TrRmArtifactIndex(artifact, TrRmArtifactSchema.Standard);
-        var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(index);
+        var index = new TrRmArtifactIndex(artifact, schema);
+        var tables = schema switch
+        {
+            TrRmArtifactSchema.Standard =>
+                TrRmStructuralMetadataValidator
+                    .ValidateAndGetExecutionTables(index),
+            TrRmArtifactSchema.ScalarFrozenValuesDraft =>
+                TrRmStructuralMetadataValidator
+                    .ValidateScalarFrozenValuesDraftAndGetExecutionTables(index),
+            TrRmArtifactSchema.NominalEnumsDraft =>
+                TrRmStructuralMetadataValidator
+                    .ValidateNominalEnumsDraftAndGetExecutionTables(index),
+            _ => throw Unsupported(
+                "The selected scalar-return loader requires an explicit supported schema."),
+        };
+        var nominalEnumsDraft
+            = schema == TrRmArtifactSchema.NominalEnumsDraft;
         _ = index.TryGetSection(0x0004, out _, out var featureCount);
         for (var section = 0; section < index.SectionCount; section++)
         {
             index.GetSection(section, out var kind, out _, out _, out _);
-            if (kind is not (0x0001 or 0x0002 or 0x0003 or 0x0004 or 0x0011
-                or 0x0016 or 0x0017 or 0x0020 or 0x0030 or 0x003F))
+            var supported = nominalEnumsDraft
+                ? kind is 0x0001 or 0x0002 or 0x0003 or 0x0004 or 0x0010
+                    or 0x0011 or 0x0013 or 0x0015 or 0x0016 or 0x0017
+                    or 0x0018 or 0x001C or 0x001D or 0x0020 or 0x0030 or 0x003F
+                    or 0x0048 or 0x0053 or 0x0054
+                : kind is 0x0001 or 0x0002 or 0x0003 or 0x0004 or 0x0011
+                    or 0x0016 or 0x0017 or 0x001D or 0x0020 or 0x0030
+                    or 0x003F;
+            if (!supported)
             {
                 throw Unsupported($"Section 0x{kind:X4} is outside the standard scalar-return profile.");
             }
         }
 
-        if (tables.Modules.Count != 1 || tables.Methods.Count != 1
-            || tables.Signatures.Count != 1 || tables.Bodies.Count != 1
+        var methodCount = tables.Methods.Count;
+        var enumDefinitions = nominalEnumsDraft
+            ? LoadNominalEnumsDraftDefinitions(tables)
+            : [];
+        var featureRange = tables.Modules.GetFeatureRange(1);
+        var hasRequiredFeatures = nominalEnumsDraft
+            ? (allowNominalEnumsDraftIdentity
+                ? HasNominalEnumsDraftIdentityFeatureSet(tables.Features,
+                    featureCount)
+                : HasNominalEnumsDraftFeatureSet(tables.Features, featureCount)
+                    && TrRmFeatureManifestValidator.Requires(tables.Features,
+                        tables.Modules, 1,
+                        TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+                        schema))
+                && (tables.EnumDefs.Count == 0
+                    || TrRmFeatureManifestValidator.Requires(tables.Features,
+                        tables.Modules, 1, 18, schema))
+            : featureCount <= 1
+                && (featureCount == 0
+                    || tables.Features.GetFeature(1)
+                        == TrRmFeatureRow.TypedFrozenValues);
+        if (tables.Modules.Count != 1 || methodCount == 0
+            || methodCount > SemanticVerifier.MaximumFunctions
+            || tables.Signatures.Count != methodCount || tables.Bodies.Count != methodCount
             || tables.Contracts.Count != 0
-            || tables.Imports.Count != 0 || tables.TypeDefs.Count != 0
+            || (!nominalEnumsDraft
+                && (tables.Imports.Count != 0 || tables.TypeDefs.Count != 0))
+            || (nominalEnumsDraft
+                && (tables.TypeDefs.Count != tables.EnumDefs.Count
+                    || tables.TypeSpecs.Count != tables.EnumDefs.Count))
             || tables.Modules.GetRequirements(1) != (1u, 0u)
             || tables.Modules.GetGoverningRuleEdition(1) != 1
-            || tables.Modules.GetFeatureRange(1).Count > 1
-            || featureCount > 1
-            || (featureCount == 1
-                && tables.Features.GetFeature(1) != TrRmFeatureRow.TypedFrozenValues))
+            || !hasRequiredFeatures
+            || (nominalEnumsDraft
+                ? featureRange != (1, featureCount)
+                : featureRange.Count != featureCount))
         {
-            throw Unsupported("Standard scalar-return execution requires one feature-free Windows x64 module and one local callable.");
+            throw Unsupported("Scalar-return execution requires one Windows x64 module and local scalar callables.");
+        }
+        if (nominalEnumsDraft)
+        {
+            ValidateNominalEnumsDraftScalarReturnReferences(
+                tables, index, methodCount);
         }
 
-        if (!index.TryGetSection(0x0001, out var moduleBytes, out _)
-            || !index.TryGetSection(0x0016, out var methodBytes, out _)
-            || BinaryPrimitives.ReadUInt32LittleEndian(methodBytes) != 0
-            || tables.Methods.GetBodyRow(1) != 1)
+        if (!index.TryGetSection(0x0001, out var moduleBytes, out _))
         {
-            throw Unsupported("Standard scalar-return execution requires the local method to own the selected Body.");
+            throw Unsupported("Scalar-return execution requires a Module row.");
         }
         var moduleEntryPoint = BinaryPrimitives.ReadUInt32LittleEndian(
             moduleBytes.Slice(16, sizeof(uint)));
-        if (moduleEntryPoint is not (0 or 1))
+        if (moduleEntryPoint > (uint)methodCount)
         {
-            throw Unsupported("Standard scalar-return execution requires an absent entry point or the selected local method.");
+            throw Unsupported("Scalar-return execution requires an absent or local entry point.");
         }
 
-        var signature = tables.Methods.GetSignature(1);
-        if (tables.Signatures.GetReceiverTypeSpec(signature) != 0
-            || tables.Signatures.GetParamRange(signature).Count != 0
-            || tables.Signatures.GetGenericCount(signature) != 0)
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(methodCount);
+        var usedBodies = new bool[methodCount];
+        var hasConstantBody = false;
+        var hasIdentityBody = false;
+        for (var methodRow = 1; methodRow <= methodCount; methodRow++)
         {
-            throw Unsupported("Standard scalar-return execution requires a top-level non-generic int32(void) entry.");
-        }
-
-        var resultTypeRef = tables.Signatures.GetResultTypeSpec(signature);
-        var resultTypeInfo = tables.TypeSpecs.GetTypeSpecRef(resultTypeRef);
-        if (resultTypeInfo.Form != 0x01 || resultTypeInfo.Qualifiers != 0
-            || !TrRmConstantSourceValueValidator.TryGetBoundScalarType(
-                resultTypeInfo.TypeCode, out var resultType)
-            || resultType == PrimitiveType.Void
-            || (moduleEntryPoint != 0 && resultType != PrimitiveType.Int32))
-        {
-            throw Unsupported("Standard scalar-return execution requires a materializable scalar result and an int32 module entry point.");
-        }
-
-        var bodyRow = tables.Methods.GetBodyRow(1);
-        tables.Bodies.ValidateSelectedImplementation(bodyRow, tables.Contracts.Count);
-        tables.ValidateRegisterBodyMapsForMethod(1);
-        var body = tables.Bodies.GetRegisterBody(bodyRow, tables.Contracts.Count);
-        if (body.MapMask is not (0 or 0x10)
-            || body.BlockCount != 1 || body.RecordCount != 1)
-        {
-            throw Unsupported("Standard scalar-return execution requires one bounded Block, result record and optional ConstantMap.");
-        }
-
-        var constantBody = body.MapMask == 0x10;
-        if (constantBody
-            ? featureCount != 1 || tables.Modules.GetFeatureRange(1) != (1, 1)
-            : featureCount != 0 || tables.Modules.GetFeatureRange(1) != (0, 0))
-        {
-            throw Unsupported("Standard scalar-return execution requires the exact Feature manifest for its selected Body.");
-        }
-
-        var entryState = body.GetRecord(0);
-        if (entryState[0] != 0x01
-            || BinaryPrimitives.ReadUInt32LittleEndian(entryState[4..]) != 0)
-        {
-            throw Unsupported("Standard scalar-return execution requires an empty BlockEntryState.");
-        }
-
-        var code = body.GetBlockCode(0);
-        BoundConstant result;
-        if (constantBody)
-        {
-            if (body.ConstantCount != 1 || code.Length != 2
-                || code[0] != 0x09 || code[1] != 0)
+            if (tables.Methods.GetOwnerType(methodRow) != 0
+                || tables.Methods.GetFlags(methodRow) > 2)
             {
-                throw Unsupported("Standard scalar-return execution supports one exact ConstantMap load and tiny Return R0.");
+                throw Unsupported("Scalar-return execution requires top-level methods with assigned visibility.");
             }
 
-            var typeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(body.ConstantMap);
-            var constantSourceRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
-                body.ConstantMap[sizeof(uint)..]));
-            result = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
-                constantSourceRow, typeSpecRef, 1,
-                tables.Modules.GetRequirements(1).TargetRequirement,
-                tables.ConstantSources, tables.FrozenValueNodes, tables.Blobs,
-                tables.TypeSpecs, tables.Features, tables.Modules);
-            if (result.Type != resultType)
+            var signature = tables.Methods.GetSignature(methodRow);
+            var (parameterStart, parameterCount)
+                = tables.Signatures.GetParamRange(signature);
+            if (tables.Signatures.GetReceiverTypeSpec(signature) != 0
+                || parameterCount > (allowNominalEnumsDraftIdentity ? 1 : 0)
+                || tables.Signatures.GetGenericCount(signature) != 0)
             {
-                throw Unsupported("ConstantMap result does not match the selected MethodSig type.");
-            }
-        }
-        else
-        {
-            if (code.Length != 2 || code[0] != 0x17
-                || code[1] is not (0x0E or 0x0F))
-            {
-                throw Unsupported("Standard scalar-return execution supports only Return R14 or Return R15.");
+                throw Unsupported(allowNominalEnumsDraftIdentity
+                    ? "NominalEnumsDraft identity execution requires top-level non-generic methods with at most one value parameter."
+                    : "Scalar-return execution requires top-level parameterless non-generic methods.");
             }
 
-            result = CreateSpecialRegisterConstant(resultType, code[1]);
+            var resultTypeInfo = tables.TypeSpecs.GetTypeSpecRef(
+                tables.Signatures.GetResultTypeSpec(signature));
+            var resultType = ResolveScalarReturnType(
+                tables.Signatures.GetResultTypeSpec(signature),
+                resultTypeInfo, tables, nominalEnumsDraft);
+            if (resultType == PrimitiveType.Void
+                || (moduleEntryPoint == (uint)methodRow
+                    && resultType != PrimitiveType.Int32))
+            {
+                throw Unsupported(
+                    "Scalar-return execution requires non-unit scalar results and an int32 entry point.");
+            }
+
+            var identityMethod = parameterCount == 1;
+            uint parameterTypeSpec = 0;
+            if (identityMethod)
+            {
+                parameterTypeSpec = tables.Parameters.GetTypeSpec(parameterStart);
+                var parameterTypeInfo = tables.TypeSpecs.GetTypeSpecRef(
+                    parameterTypeSpec);
+                var parameterType = ResolveScalarReturnType(
+                    parameterTypeSpec, parameterTypeInfo, tables,
+                    nominalEnumsDraft);
+                if (!allowNominalEnumsDraftIdentity
+                    || !BoundEnumTypes.IsValidType(parameterType,
+                        enumDefinitions)
+                    || parameterType != resultType
+                    || tables.Parameters.GetMode(parameterStart) != 0
+                    || tables.Parameters.GetFlags(parameterStart) != 0
+                    || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        parameterTypeSpec,
+                        tables.Signatures.GetResultTypeSpec(signature)))
+                {
+                    throw Unsupported(
+                        "NominalEnumsDraft identity methods require one value parameter identical to the nominal enum result type.");
+                }
+            }
+
+            var bodyRow = tables.Methods.GetBodyRow(methodRow);
+            if (bodyRow <= 0 || bodyRow > methodCount || usedBodies[bodyRow - 1])
+            {
+                throw Unsupported("Scalar-return execution does not admit shared MethodDef Body rows.");
+            }
+            usedBodies[bodyRow - 1] = true;
+            tables.Bodies.ValidateSelectedImplementation(bodyRow, tables.Contracts.Count);
+            tables.ValidateRegisterBodyMapsForMethod(methodRow);
+            var body = tables.Bodies.GetRegisterBody(bodyRow, tables.Contracts.Count);
+            if ((identityMethod
+                    ? body.MapMask != 0x03
+                    : body.MapMask is not (0 or 0x10))
+                || body.BlockCount != 1 || body.RecordCount != 1)
+            {
+                throw Unsupported(identityMethod
+                    ? "NominalEnumsDraft identity execution requires one bounded Block, HomeMap and TypeMap."
+                    : "Scalar-return execution requires one bounded Block, result record and optional ConstantMap.");
+            }
+
+            var entryState = body.GetRecord(0);
+            if (entryState.Length != 8 || entryState[0] != 0x01
+                || BinaryPrimitives.ReadUInt32LittleEndian(entryState[4..]) != 0)
+            {
+                throw Unsupported("Scalar-return execution requires an empty BlockEntryState.");
+            }
+
+            var code = body.GetBlockCode(0);
+            BoundExpression result;
+            var variables = ImmutableArray<BoundVariable>.Empty;
+            if (identityMethod)
+            {
+                var homeMap = body.HomeMap;
+                var typeMap = body.TypeMap;
+                if (body.ConstantCount != 0 || homeMap.Length != 8
+                    || homeMap[0] != 0x02 || homeMap[1] != 0
+                    || BinaryPrimitives.ReadUInt16LittleEndian(homeMap[2..]) != 0
+                    || BinaryPrimitives.ReadUInt16LittleEndian(homeMap[4..]) != 0
+                    || BinaryPrimitives.ReadUInt16LittleEndian(homeMap[6..]) != 0
+                    || typeMap.Length != sizeof(uint))
+                {
+                    throw Unsupported(
+                        "NominalEnumsDraft identity execution requires one parameter home and TypeMap row.");
+                }
+
+                var mappedType = BinaryPrimitives.ReadUInt32LittleEndian(typeMap);
+                if (mappedType >> 24 != 0x11
+                    || !tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                        mappedType & 0x00FF_FFFF, parameterTypeSpec)
+                    || code.Length != 4 || code[0] != 0x13 || code[1] != 0
+                    || code[2] != 0x17 || code[3] != 0)
+                {
+                    throw Unsupported(
+                        "NominalEnumsDraft identity execution requires the exact home load and result sequence.");
+                }
+
+                hasIdentityBody = true;
+                result = new BoundRead(0, resultType, default);
+                variables = [new BoundVariable("value", resultType, false, default)];
+            }
+            else if (body.MapMask == 0x10)
+            {
+                hasConstantBody = true;
+                if (body.ConstantCount != 1 || code.Length != 2
+                    || code[0] != 0x09 || code[1] != 0)
+                {
+                    throw Unsupported("Scalar-return execution supports one exact ConstantMap load.");
+                }
+
+                var typeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(body.ConstantMap);
+                var constantSourceRow = checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    body.ConstantMap[sizeof(uint)..]));
+                result = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
+                    constantSourceRow, typeSpecRef, 1,
+                    tables.Modules.GetRequirements(1).TargetRequirement,
+                    tables.ConstantSources, tables.FrozenValueNodes, tables.Blobs,
+                    tables.TypeSpecs, tables.Features, tables.Modules,
+                    tables.TypeDefs, tables.EnumDefs, tables.Imports);
+                if (result.Type != resultType)
+                {
+                    throw Unsupported("ConstantMap result does not match the selected MethodSig type.");
+                }
+            }
+            else
+            {
+                if (body.ConstantCount != 0 || code.Length != 2
+                    || code[0] != 0x17 || code[1] is not (0x0E or 0x0F))
+                {
+                    throw Unsupported("Scalar-return execution supports only Return R14 or Return R15 without a ConstantMap.");
+                }
+
+                result = CreateSpecialRegisterConstant(resultType, code[1]);
+            }
+
+            var flags = tables.Methods.GetFlags(methodRow);
+            functions.Add(new BoundFunction(tables.Methods.GetName(methodRow),
+                resultType, variables, identityMethod ? 1 : 0,
+                new BoundBlock([new BoundReturn(result, default)], default), default)
+            {
+                IsPrivate = flags == 0,
+                IsInternal = flags == 1,
+            });
         }
 
-        var function = new BoundFunction(tables.Methods.GetName(1),
-            resultType, [], 0,
-            new BoundBlock([new BoundReturn(result, default)], default), default)
+        if (Array.Exists(usedBodies, static used => !used))
         {
-            IsPrivate = tables.Methods.GetFlags(1) == 0,
-            IsInternal = tables.Methods.GetFlags(1) == 1,
-        };
-        var program = new BoundProgram([function], moduleEntryPoint == 0 ? -1 : 0)
+            throw Unsupported("Scalar-return execution does not admit unowned Body rows.");
+        }
+        if (nominalEnumsDraft
+            ? (!hasConstantBody && !hasIdentityBody)
+                || (hasConstantBody
+                    && !TrRmFeatureManifestValidator.Requires(tables.Features,
+                        tables.Modules, 1,
+                        TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+                        schema))
+                || (tables.EnumDefs.Count != 0
+                    && !TrRmFeatureManifestValidator.Requires(tables.Features,
+                        tables.Modules, 1, 18, schema))
+            : hasConstantBody
+            ? featureCount != 1 || featureRange != (1, 1)
+            : featureCount != 0 || featureRange != (0, 0))
         {
+            throw Unsupported("Scalar-return execution requires the exact Feature manifest for its selected Bodies.");
+        }
+
+        var entryPoint = moduleEntryPoint == 0
+            ? -1 : checked((int)moduleEntryPoint - 1);
+        var program = new BoundProgram(functions.MoveToImmutable(), entryPoint)
+        {
+            EnumDefinitions = enumDefinitions,
             RuntimePolicy = BoundRuntimePolicy.FailFast,
         };
         if (moduleEntryPoint == 0)
@@ -405,7 +576,7 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported($"Register opcode 0x{opcode:X2} is outside the scalar floating-operation execution slice.");
             }
 
-            position += TrRmRegisterBodyReader.InstructionLength(opcode);
+            position += TrRmRegisterBodyReader.InstructionLength(opcode, body.Schema);
             if (result is not null && position != code.Length)
             {
                 throw Invalid("A terminal register instruction is followed by code.");

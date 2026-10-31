@@ -11,6 +11,8 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmTypeDefTableReader
 {
     private const int RowSize = 44;
+    internal const uint DeclaredCopyFlag = 0x20;
+    internal const uint DeclaredUniqueFlag = 0x40;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly TrRmModuleTableReader _modules;
@@ -18,6 +20,7 @@ public readonly ref struct TrRmTypeDefTableReader
     private readonly int _fieldCount;
     private readonly int _layoutCount;
     private readonly int _contractCount;
+    private readonly TrRmArtifactSchema _schema;
     private readonly int[] _fieldOwners;
 
     public int Count => _recordCount;
@@ -37,6 +40,15 @@ public readonly ref struct TrRmTypeDefTableReader
     public TrRmTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         int fieldCount, int genericParamCount, int layoutCount, int contractCount)
+        : this(section, recordCount, strings, modules, fieldCount,
+            genericParamCount, layoutCount, contractCount, TrRmArtifactSchema.Standard)
+    {
+    }
+
+    internal TrRmTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmModuleTableReader modules,
+        int fieldCount, int genericParamCount, int layoutCount, int contractCount,
+        TrRmArtifactSchema schema)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.TypeDefCount
@@ -55,14 +67,28 @@ public readonly ref struct TrRmTypeDefTableReader
         _fieldCount = fieldCount;
         _layoutCount = layoutCount;
         _contractCount = contractCount;
+        _schema = schema;
         _fieldOwners = new int[fieldCount + 1];
         for (var row = 1; row <= recordCount; row++)
         {
             _ = ReadNamespace(row - 1);
             _ = ReadName(row - 1);
             var flags = Read(row - 1, 8);
-            if ((flags & ~0x0Fu) != 0 || (flags & 3) == 3
-                || ((flags >> 2) & 3) == 0
+            var kind = (flags >> 2) & 7;
+            var maximumKind = schema.SupportsNominalEnums() ? 4u : 3u;
+            var flagsMask = (schema.SupportsNominalEnums() ? 0x1Fu : 0x0Fu)
+                | (schema.SupportsDeclaredCopyEvidence()
+                    ? DeclaredCopyFlag : 0)
+                | (schema.SupportsDeclaredUniqueEvidence()
+                    ? DeclaredUniqueFlag : 0);
+            if ((flags & ~flagsMask) != 0 || (flags & 3) == 3
+                || kind is 0 || kind > maximumKind
+                || ((flags & DeclaredCopyFlag) != 0
+                    && (!schema.SupportsDeclaredCopyEvidence() || kind != 1))
+                || ((flags & DeclaredUniqueFlag) != 0
+                    && (!schema.SupportsDeclaredUniqueEvidence() || kind != 1))
+                || (flags & (DeclaredCopyFlag | DeclaredUniqueFlag))
+                    == (DeclaredCopyFlag | DeclaredUniqueFlag)
                 || !ValidRange(row, 12, fieldCount)
                 || !ValidRange(row, 20, genericParamCount)
                 || !ValidRange(row, 28, layoutCount)
@@ -160,6 +186,21 @@ public readonly ref struct TrRmTypeDefTableReader
         return Read(row - 1, 8);
     }
 
+    internal bool HasDeclaredCopy(int row)
+        => _schema.SupportsDeclaredCopyEvidence()
+            && (GetFlags(row) & DeclaredCopyFlag) != 0;
+
+    internal bool HasDeclaredUnique(int row)
+        => _schema.SupportsDeclaredUniqueEvidence()
+            && (GetFlags(row) & DeclaredUniqueFlag) != 0;
+
+    /// <summary>Gets the assigned nominal kind from a validated TypeDef row.</summary>
+    public byte GetKind(int row)
+    {
+        CheckRow(row);
+        return (byte)((Read(row - 1, 8) >> 2) & 7);
+    }
+
     public (int Start, int Count) GetGenericRange(int row)
     {
         CheckRow(row);
@@ -225,4 +266,6 @@ public readonly ref struct TrRmTypeDefTableReader
 
     private static InvalidDataException InvalidType()
         => new("Invalid TRRM TypeDef table.");
+
+    internal TrRmArtifactSchema Schema => _schema;
 }

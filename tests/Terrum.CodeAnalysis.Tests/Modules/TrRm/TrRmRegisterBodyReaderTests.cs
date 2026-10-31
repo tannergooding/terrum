@@ -121,6 +121,46 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void ReadsA2FixedArrayLayoutPlaceSelectionReference()
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var homeMap = new byte[] { 3, 0, 0, 0, 0, 0, 0, 0 };
+        var typeMap = new byte[2 * sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(typeMap,
+            0x1100_0001);
+        BinaryPrimitives.WriteUInt32LittleEndian(typeMap.AsSpan(sizeof(uint)),
+            0x1100_0002);
+        var selection = TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+            targetKind: 3, accessKind: 1, destinationKind: 1, baseKind: 2,
+            destinationIndex: 0, baseIndex: 0, indexKind: 1,
+            targetRefKind: 3, indexIndex: 1, targetRef: 1,
+            referentTypeMapIndex: 1, schema);
+        var records = new ReadOnlyMemory<byte>[]
+        {
+            new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+            selection,
+        };
+        var bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0, 6, 0)],
+            records,
+            new byte[] { 0xD8, 0, 1, 0, 0xB7, 0 }, schema: schema);
+        var body = new TrRmRegisterBodyReader(bodyBytes, schema: schema);
+
+        Assert.That(body.GetRecord(1)[0], Is.EqualTo(0x04));
+        Assert.That(body.GetRecord(1)[13], Is.EqualTo(3));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            body.GetRecord(1)[16..]), Is.EqualTo(1));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmRegisterBodyWriter.Encode(homeMap, typeMap, default, default,
+                default, [new TrRmRegisterBodyBlock(0, 6, 0)],
+                records,
+                new byte[] { 0xD8, 0, 1, 0, 0xB7, 0 },
+                schema: TrRmArtifactSchema.ForeignInvocationStorageAddressDraft));
+    }
+
+    [Test]
     public void BindsShortAndLongThrowInstructionsToThrowRecords()
     {
         var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
@@ -1314,6 +1354,92 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void A3RejectsConstructedGenericTypeInBodyTypeMap()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(37), 0x1100_0004);
+        var artifact = CreateStandardArtifactWithConstructedTypeMap(body,
+            schema:
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft);
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            artifact)));
+    }
+
+    [Test]
+    public void A3RejectsDirectGenericTypeDefBodyTypeMap()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(37), 0x1300_0001);
+        var artifact = CreateStandardArtifactWithConstructedTypeMap(body,
+            schema:
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft);
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            artifact)));
+    }
+
+    [Test]
+    public void A3RejectsImportedGenericTypeDefBodyTypeMap()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(37), 0x1C00_0001);
+        var artifact = CreateStandardArtifactWithConstructedTypeMap(body,
+            equivalentLocalAndImportedGenericDefinitions: true,
+            schema:
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft);
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            artifact)));
+    }
+
+    [Test]
+    public void A3RejectsUnconstructedGenericTypeInMethodSignature()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts);
+        BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(37), 0x1100_0002);
+        var artifact = CreateStandardArtifactWithConstructedTypeMap(body,
+            methodParameterTypeSpecRef: 3,
+            schema:
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft);
+
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            artifact)));
+    }
+
+    [Test]
     public void BindsConstructedConstantArgumentsInTheUsingModule()
     {
         var counts = new uint[5];
@@ -1374,6 +1500,24 @@ public sealed class TrRmRegisterBodyReaderTests
         Assert.Throws<InvalidDataException>(() =>
             ValidateSelectedConstructedTypeMap(
                 mismatchedArgument, methodParameterTypeSpecRef: 7));
+    }
+
+    [Test]
+    public void MatchesConstructedHomeTypesAcrossLocalAndImportedDefinitionRefs()
+    {
+        var counts = new uint[5];
+        counts[0] = 1;
+        counts[1] = 1;
+        counts[2] = 1;
+        var body = CreateBody(0x07, counts, [0x18, 0]);
+        var mapStart = 5 + (3 * sizeof(uint)) + (3 * sizeof(uint));
+        body[mapStart] = 2;
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            body.AsSpan(mapStart + 8), 0x1100_000C);
+
+        ValidateSelectedConstructedTypeMap(body,
+            methodParameterTypeSpecRef: 11,
+            equivalentLocalAndImportedGenericDefinitions: true);
     }
 
     [Test]
@@ -2346,12 +2490,14 @@ public sealed class TrRmRegisterBodyReaderTests
         bool includeFeature11 = false,
         uint constantTypeSpecRef = 0xF200_0008,
         bool duplicateConstantSource = false,
-        int secondConstantValue = 42)
+        int secondConstantValue = 42,
+        bool equivalentLocalAndImportedGenericDefinitions = false)
     {
         var artifact = CreateStandardArtifactWithConstructedTypeMap(
             body, importedTypeOwnerIsDifferentModule, methodParameterTypeSpecRef,
             constantFormal, includeFeature11, constantTypeSpecRef,
-            duplicateConstantSource, secondConstantValue);
+            duplicateConstantSource, secondConstantValue,
+            equivalentLocalAndImportedGenericDefinitions);
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
@@ -2471,8 +2617,17 @@ public sealed class TrRmRegisterBodyReaderTests
         bool includeFeature11 = false,
         uint constantTypeSpecRef = 0xF200_0008,
         bool duplicateConstantSource = false,
-        int secondConstantValue = 42)
+        int secondConstantValue = 42,
+        bool equivalentLocalAndImportedGenericDefinitions = false,
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
     {
+        if (equivalentLocalAndImportedGenericDefinitions
+            && (constantFormal || importedTypeOwnerIsDifferentModule))
+        {
+            throw new ArgumentException(
+                "The local and imported generic definition comparison fixture has one using Module and type formals.");
+        }
+
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("module", 0), ("main", 0), ("Example", 0),
             ("Owner", 0), ("T", 0), ("Imported", 0),
@@ -2508,6 +2663,21 @@ public sealed class TrRmRegisterBodyReaderTests
                 TrRmTypeSpecTableWriter.Reference(0x03, 1),
                 TrRmTypeSpecTableWriter.Constructed(3, [1]),
             ]
+            : equivalentLocalAndImportedGenericDefinitions
+                ? [
+                    TrRmTypeSpecTableWriter.Builtin(0),
+                    TrRmTypeSpecTableWriter.Builtin(8),
+                    TrRmTypeSpecTableWriter.Reference(0x02, 1),
+                    TrRmTypeSpecTableWriter.Constructed(3, [5]),
+                    TrRmTypeSpecTableWriter.Reference(0x03, 1),
+                    TrRmTypeSpecTableWriter.Builtin(0),
+                    TrRmTypeSpecTableWriter.Constructed(3, [1]),
+                    TrRmTypeSpecTableWriter.Constructed(3, [0xF200_0000]),
+                    TrRmTypeSpecTableWriter.Constructed(3, [2]),
+                    TrRmTypeSpecTableWriter.Reference(0x02, 2),
+                    TrRmTypeSpecTableWriter.Constructed(10, [1]),
+                    TrRmTypeSpecTableWriter.Constructed(5, [1]),
+                ]
             : [
                 TrRmTypeSpecTableWriter.Builtin(0),
                 TrRmTypeSpecTableWriter.Builtin(8),
@@ -2524,15 +2694,20 @@ public sealed class TrRmRegisterBodyReaderTests
             typeSpecRows = [.. typeSpecRows,
                 TrRmTypeSpecTableWriter.Constructed(3, [2])];
         }
-        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows, 2, 1, 1);
+        var genericParamCount = equivalentLocalAndImportedGenericDefinitions ? 2 : 1;
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(
+            typeSpecRows, 2, 1, genericParamCount, 0, schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeSpecRows.Length, 2, 1, 1);
+            typeSpecRows.Length, 2, 1, genericParamCount, 0, schema);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(4, 5, 6, 0, 0, 1, 1, 1, 1, 0, 0),
-            new TrRmTypeDefRow(4, 7, 6, 0, 0, 0, 0, 2, 1, 0, 0),
-        ], strings, modules, 0, 1, 2, 0);
+            new TrRmTypeDefRow(4, 7, 6, 0, 0,
+                equivalentLocalAndImportedGenericDefinitions ? 2 : 0,
+                equivalentLocalAndImportedGenericDefinitions ? 1 : 0,
+                2, 1, 0, 0),
+        ], strings, modules, 0, genericParamCount, 2, 0, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes, 2,
-            strings, modules, 0, 1, 2, 0);
+            strings, modules, 0, genericParamCount, 2, 0, schema);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
         var layoutBytes = TrRmLayoutTableWriter.Encode([
             new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
@@ -2555,19 +2730,29 @@ public sealed class TrRmRegisterBodyReaderTests
                 new TrRmParamRow(1, 0, methodParameterTypeSpecRef, 0),
             ], signatures, typeSpecs)
             : Array.Empty<byte>();
-        var genericParam = constantFormal
-            ? new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
-                2, 0, 0, constantTypeSpecRef, 0)
-            : new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
-                1, 1, 1, 0, 0);
+        var genericParamRows = constantFormal
+            ? new[] {
+                new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
+                    2, 0, 0, constantTypeSpecRef, 0),
+            }
+            : equivalentLocalAndImportedGenericDefinitions
+                ? new[] {
+                    new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
+                        1, 1, 1, 0, 0),
+                    new TrRmGenericParamRow(0x1300_0002, 0, 6, 0, 0,
+                        1, 1, 1, 0, 0),
+                }
+                : new[] {
+                    new TrRmGenericParamRow(0x1300_0001, 0, 6, 0, 0,
+                        1, 1, 1, 0, 0),
+                };
         var constantSourceCount = constantFormal ? 1 : 0;
         if (constantFormal && duplicateConstantSource)
         {
             constantSourceCount++;
         }
-        var genericParamBytes = TrRmGenericParamTableWriter.Encode([
-            genericParam,
-        ], strings, typeDefs, methods, signatures, typeSpecs, 0,
+        var genericParamBytes = TrRmGenericParamTableWriter.Encode(
+            genericParamRows, strings, typeDefs, methods, signatures, typeSpecs, 0,
             constantSourceCount);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, 1,
             strings, modules);
@@ -2596,7 +2781,8 @@ public sealed class TrRmRegisterBodyReaderTests
                 TrRmFeatureTableWriter.Encode([TrRmFeatureRow.TypedFrozenValues])));
         }
         sections.AddRange([
-            new TrRmSection(0x0019, 0, 1, genericParamBytes),
+            new TrRmSection(0x0019, 0,
+                (uint)genericParamCount, genericParamBytes),
             new TrRmSection(0x001C, 0, 1, importBytes),
             new TrRmSection(0x0020, 0, 1,
                 TrRmVariableTableWriter.EncodeBodies([body])),
@@ -2627,7 +2813,7 @@ public sealed class TrRmRegisterBodyReaderTests
             sections.Add(new TrRmSection(0x003F, 0, (uint)sourceCount, nodes));
         }
         sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
-        return TrRmArtifactWriter.Encode(sections);
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static void AssertInvalidSelectedBodyMaps(byte[] body)

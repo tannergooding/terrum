@@ -14,6 +14,9 @@ public static unsafe partial class NativeJit
         NativeRuntimePolicy runtimePolicy, string? registrarAssembly)
     {
         ArgumentNullException.ThrowIfNull(plan);
+        var admissionScope = plan.A3AdmissionScope;
+        try
+        {
         if (runtimePolicy != NativeRuntimePolicy.FailFast
             || plan.RuntimePolicy != runtimePolicy)
         {
@@ -52,7 +55,25 @@ public static unsafe partial class NativeJit
             bindings, runtimePolicy, allowDirectNativeImports: true);
         ValidateBufferMetadata(program, code);
         var (modules, selectedImports) = CreateSystem32ImportModules(imports);
-        return ExecuteCode(code, modules, selectedImports, registrarAssembly,
-            null, null, 0, false, out _);
+        if (admissionScope is null)
+        {
+            return ExecuteCode(code, modules, selectedImports,
+                registrarAssembly, null, null, 0, false, out _);
+        }
+
+        return admissionScope.ExecuteAfterHandoff(() => ExecuteCode(code,
+            modules, selectedImports, registrarAssembly,
+            null, null, 0, false, out _));
+        }
+        catch (Exception exception)
+        {
+            if (admissionScope is not null
+                && !admissionScope.IsBeforeExecutionHandoff)
+            {
+                TrRmA3AdmissionFailureMarkers.Remove(exception);
+            }
+
+            throw;
+        }
     }
 }

@@ -22,7 +22,14 @@ public static class TrRmFeatureTableWriter
         ArgumentNullException.ThrowIfNull(rows);
         if (schema is not (TrRmArtifactSchema.Standard
             or TrRmArtifactSchema.CopyOriginDraft
-            or TrRmArtifactSchema.ForeignInvocationDraft))
+            or TrRmArtifactSchema.ForeignInvocationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+            or TrRmArtifactSchema.ScalarFrozenValuesDraft
+            or TrRmArtifactSchema.NominalEnumsDraft
+            or TrRmArtifactSchema.RootPinRuntimeDraft
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
         {
             throw InvalidFeature();
         }

@@ -311,7 +311,116 @@ public sealed class TrRmArtifactIndexTests
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 12), Is.True);
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10), Is.True);
         Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11), Is.True);
-        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9), Is.True);
+    }
+
+    [Test]
+    public void NominalEnumsDraftKeepsScalarFrozenValuesIndependentOfFeature9()
+    {
+        var schema = TrRmArtifactSchema.NominalEnumsDraft;
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 2);
+        var featureBytes = TrRmFeatureTableWriter.Encode([
+            new TrRmFeatureRow(12, 1),
+        ], schema);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, 1),
+        ], strings, 0, 0, 0, 0, 1);
+        var features = new TrRmFeatureTableReader(featureBytes, 1, schema);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 0, 0, 1);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 12, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9, schema), Is.False);
+    }
+
+    [Test]
+    public void GeneralPredicateGraphsDraftUsesItsExactFeatureClosure()
+    {
+        var schema = TrRmArtifactSchema.GeneralPredicateGraphsDraft;
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 2);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, 1),
+        ], strings, 0, 0, 0, 0, 1);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 0, 0, 1);
+
+        var features = ReadFeatures([TrRmFeatureRow.GeneralPredicateGraphsCandidate]);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 17, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11, schema), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 12, schema), Is.False);
+
+        features = ReadFeatures([TrRmFeatureRow.ImmutableDataIdentitiesCandidate]);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            features, modules, 1, 19, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            features, modules, 1, 17, schema), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            features, modules, 1, 11, schema), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(
+            features, modules, 1, 10, schema), Is.False);
+
+        features = ReadFeatures([TrRmFeatureRow.PublishedPredicates]);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11, schema), Is.False);
+
+        features = ReadFeatures([TrRmFeatureRow.TypedFrozenValues]);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9, schema), Is.False);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10, schema), Is.False);
+
+        features = ReadFeatures([TrRmFeatureRow.ConstantExecution]);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 12, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 11, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 17, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 10, schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules, 1, 9, schema), Is.False);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode([TrRmFeatureRow.GeneralPredicateGraphsCandidate]));
+        var candidateBytes = TrRmFeatureTableWriter.Encode(
+            [TrRmFeatureRow.GeneralPredicateGraphsCandidate], schema);
+        var standardFeatures = new TrRmFeatureTableReader(candidateBytes, 1);
+        var standardRejectedCandidate = false;
+        try
+        {
+            _ = TrRmFeatureManifestValidator.Requires(standardFeatures, modules, 1, 17);
+        }
+        catch (InvalidDataException)
+        {
+            standardRejectedCandidate = true;
+        }
+        Assert.That(standardRejectedCandidate, Is.True);
+
+        var immutableDataCandidateBytes = TrRmFeatureTableWriter.Encode(
+            [TrRmFeatureRow.ImmutableDataIdentitiesCandidate], schema);
+        var standardImmutableDataFeatures = new TrRmFeatureTableReader(
+            immutableDataCandidateBytes, 1);
+        var standardRejectedImmutableData = false;
+        try
+        {
+            _ = TrRmFeatureManifestValidator.Requires(
+                standardImmutableDataFeatures, modules, 1, 19);
+        }
+        catch (InvalidDataException)
+        {
+            standardRejectedImmutableData = true;
+        }
+        Assert.That(standardRejectedImmutableData, Is.True);
+
+        TrRmFeatureTableReader ReadFeatures(IReadOnlyList<TrRmFeatureRow> rows)
+        {
+            var bytes = TrRmFeatureTableWriter.Encode(rows, schema);
+            return new TrRmFeatureTableReader(bytes, rows.Count, schema);
+        }
     }
 
     [Test]

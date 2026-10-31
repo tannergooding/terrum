@@ -25,7 +25,6 @@ public static partial class TrRmExecutableCompiler
             || program.InvocationProfileId is not null
             || program.IsInvocationSourceBound
             || !BoundEnumTypes.IsValidTable(program.EnumDefinitions)
-            || program.EnumDefinitions.IsEmpty
             || moduleTargetRequirement > 1
             || program.RuntimePolicy is not (BoundRuntimePolicy.FailFast
                 or BoundRuntimePolicy.CheckedExceptions))
@@ -37,8 +36,9 @@ public static partial class TrRmExecutableCompiler
         var coreRegistration = program.NativeCoreRegistration;
         if (coreRegistration is not null
             && (!coreRegistration.IsValid()
-                || !BoundEnumTypes.ContainsRegistration(
-                    program.EnumDefinitions, coreRegistration)
+                || (!program.EnumDefinitions.IsEmpty
+                    && !BoundEnumTypes.ContainsRegistration(
+                        program.EnumDefinitions, coreRegistration))
                 || !StringComparer.Ordinal.Equals(
                     coreRegistration.UsingModuleIdentity, moduleIdentity)))
         {
@@ -97,6 +97,30 @@ public static partial class TrRmExecutableCompiler
 
             throw Unsupported(
                 "NominalEnumsDraft import has no selected provider Module origin.");
+        }
+
+        (uint TargetRequirement, uint RuntimePolicy) GetProviderRequirements(
+            BoundEnumDefinition definition)
+        {
+            var identity = definition.Identity.ProviderIdentity;
+            if (coreRegistration is not null)
+            {
+                var origin = GetProviderOrigin(identity);
+                return (origin.TargetRequirement, origin.RuntimePolicy);
+            }
+
+            if (definition.ModuleImport is BoundModuleImport moduleImport
+                && StringComparer.Ordinal.Equals(
+                    moduleImport.ProducerIdentity, identity)
+                && StringComparer.Ordinal.Equals(
+                    moduleImport.ExportKey, definition.Identity.ExportKey))
+            {
+                return (moduleImport.TargetRequirement,
+                    moduleImport.RuntimePolicy);
+            }
+
+            throw Unsupported(
+                "NominalEnumsDraft imports require preserved Module identity and requirements.");
         }
 
         for (var index = 0; index < program.EnumDefinitions.Length; index++)
@@ -170,12 +194,27 @@ public static partial class TrRmExecutableCompiler
                 if (!moduleRefByProvider.TryGetValue(
                         providerIdentity, out var moduleRefRow))
                 {
-                    var origin = GetProviderOrigin(providerIdentity);
+                    var (targetRequirement, runtimePolicy) =
+                        GetProviderRequirements(definition);
                     moduleRefRow = moduleRefsToWrite.Count + 1;
                     moduleRefByProvider.Add(providerIdentity, moduleRefRow);
                     moduleRefsToWrite.Add(new TrRmModuleRefRow(
-                        GetStringRow(origin.ModuleIdentity),
-                        origin.TargetRequirement, origin.RuntimePolicy));
+                        GetStringRow(providerIdentity),
+                        targetRequirement,
+                        runtimePolicy));
+                }
+                else
+                {
+                    var (targetRequirement, runtimePolicy) =
+                        GetProviderRequirements(definition);
+                    var existing = moduleRefsToWrite[moduleRefRow - 1];
+                    if (existing.TargetRequirement
+                            != targetRequirement
+                        || existing.RuntimePolicy != runtimePolicy)
+                    {
+                        throw Unsupported(
+                            "NominalEnumsDraft imports for one Module must preserve one exact requirements tuple.");
+                    }
                 }
 
                 importsToWrite.Add(new TrRmImportRow(moduleRefRow, exportKey,
@@ -189,9 +228,11 @@ public static partial class TrRmExecutableCompiler
                 "NominalEnumsDraft Blittable layouts require Windows x64.");
         }
 
-        var featureRows = new List<TrRmFeatureRow> {
-            new(18, 1),
-        };
+        var featureRows = new List<TrRmFeatureRow>();
+        if (enumDefsToWrite.Count != 0)
+        {
+            featureRows.Add(new TrRmFeatureRow(18, 1));
+        }
         if (hasBlittableEnum)
         {
             featureRows.Add(TrRmFeatureRow.NativeBoundaryContracts);
@@ -204,7 +245,8 @@ public static partial class TrRmExecutableCompiler
             TrRmArtifactSchema.NominalEnumsDraft);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, moduleTargetRequirement,
-                (uint)program.RuntimePolicy, 0, 1, 1, 1, 1, 1,
+                (uint)program.RuntimePolicy, 0, 1, 1, 1, 1,
+                featureRows.Count == 0 ? 0 : 1,
                 featureRows.Count),
         ], strings, moduleRefsToWrite.Count, typeDefsToWrite.Count, 0, 0,
             featureRows.Count);
@@ -219,10 +261,12 @@ public static partial class TrRmExecutableCompiler
                 strings, modules);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes,
             moduleRefsToWrite.Count, strings, modules);
-        var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefsToWrite,
-            strings, modules, fieldCount: 0, genericParamCount: 0,
-            layoutCount: layoutsToWrite.Count, contractCount: 0,
-            TrRmArtifactSchema.NominalEnumsDraft);
+        var typeDefBytes = typeDefsToWrite.Count == 0
+            ? []
+            : TrRmTypeDefTableWriter.Encode(typeDefsToWrite,
+                strings, modules, fieldCount: 0, genericParamCount: 0,
+                layoutCount: layoutsToWrite.Count, contractCount: 0,
+                TrRmArtifactSchema.NominalEnumsDraft);
         var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
             typeDefsToWrite.Count, strings, modules, 0, 0,
             layoutsToWrite.Count, 0, TrRmArtifactSchema.NominalEnumsDraft);
@@ -265,11 +309,27 @@ public static partial class TrRmExecutableCompiler
         var sections = new List<TrRmSection> {
             new(0x0001, 0, 1, moduleBytes),
             new(0x0002, 0, (uint)stringRows.Count, stringBytes),
-            new(0x0004, 0, (uint)featureRows.Count, featureBytes),
-            new(0x0013, 0, (uint)typeDefsToWrite.Count, typeDefBytes),
-            new(0x0015, 0, (uint)layoutsToWrite.Count, layoutBytes),
-            new(0x0053, 0, (uint)enumDefsToWrite.Count, enumDefBytes),
         };
+        if (featureRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0004, 0,
+                (uint)featureRows.Count, featureBytes));
+        }
+        if (typeDefsToWrite.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0013, 0,
+                (uint)typeDefsToWrite.Count, typeDefBytes));
+        }
+        if (layoutsToWrite.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0015, 0,
+                (uint)layoutsToWrite.Count, layoutBytes));
+        }
+        if (enumDefsToWrite.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0053, 0,
+                (uint)enumDefsToWrite.Count, enumDefBytes));
+        }
         if (moduleRefsToWrite.Count != 0)
         {
             sections.Add(new TrRmSection(0x0010, 0,
@@ -600,7 +660,7 @@ public static partial class TrRmExecutableCompiler
             if (variable.Type != function.ReturnType || variable.IsMutable
                 || variable.IsOut || variable.IsInit || variable.IsImplicitRef
                 || variable.IsImplicitReferenceTemporary || variable.IsInitializationLocal
-                || variable.NativeFixedArrayLayout is not null)
+                || NativeFixedArrayTypes.IsType(variable.Type))
             {
                 return false;
             }

@@ -34,6 +34,103 @@ internal static class TrRmRegisterBodyRecordWriter
         return result;
     }
 
+    internal static byte[] EncodePlaceSelection(byte targetKind,
+        byte accessKind, byte destinationKind, byte baseKind,
+        ushort destinationIndex, ushort baseIndex, byte indexKind,
+        byte targetRefKind, ushort indexIndex, uint targetRef,
+        ushort referentTypeMapIndex, TrRmArtifactSchema schema)
+    {
+        if (targetKind is < 1 or > 4 || accessKind is < 1 or > 5
+            || destinationKind > 2 || baseKind > 2 || indexKind > 2
+            || targetRefKind > 3
+            || (targetRefKind == 3
+                && (!schema.UsesForeignInvocationStorageFixedArrays()
+                    || targetKind != 3 || targetRef is 0 or > 0xFF_FFFF))
+            || (targetKind == 1
+                ? targetRefKind != 0
+                : targetKind is 2 or 4
+                    ? targetRefKind != 1
+                    : targetRefKind is not (2 or 3)))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetKind));
+        }
+
+        var result = new byte[24];
+        result[0] = 0x04;
+        result[RecordHeaderSize] = targetKind;
+        result[RecordHeaderSize + 1] = accessKind;
+        result[RecordHeaderSize + 2] = destinationKind;
+        result[RecordHeaderSize + 3] = baseKind;
+        Write(result, RecordHeaderSize + 4, destinationIndex);
+        Write(result, RecordHeaderSize + 6, baseIndex);
+        result[RecordHeaderSize + 8] = indexKind;
+        result[RecordHeaderSize + 9] = targetRefKind;
+        Write(result, RecordHeaderSize + 10, indexIndex);
+        Write(result, RecordHeaderSize + 12, targetRef);
+        Write(result, RecordHeaderSize + 16, referentTypeMapIndex);
+        return result;
+    }
+
+    internal static byte[] EncodeStorageAddress(byte sourceKind,
+        byte resultKind, ushort sourceIndex, ushort resultIndex,
+        ushort pointerTypeMapIndex, uint requiredElementCount)
+    {
+        if (sourceKind is not (1 or 2)
+            || (sourceKind == 1 && sourceIndex > 13)
+            || resultKind is not (1 or 2)
+            || (resultKind == 1
+                && (resultIndex > 15 || resultIndex == 14))
+            || requiredElementCount == 0
+            || (sourceKind == 2 && resultKind == 2
+                && sourceIndex == resultIndex))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceKind));
+        }
+
+        var result = new byte[16];
+        result[0] = 0x0E;
+        result[RecordHeaderSize] = sourceKind;
+        result[RecordHeaderSize + 1] = resultKind;
+        Write(result, RecordHeaderSize + 2, sourceIndex);
+        Write(result, RecordHeaderSize + 4, resultIndex);
+        Write(result, RecordHeaderSize + 6, pointerTypeMapIndex);
+        Write(result, RecordHeaderSize + 8, requiredElementCount);
+        return result;
+    }
+
+    internal static byte[] EncodeRootPinReferenceSupport(byte sourceKind,
+        byte resultCarrier, ushort sourceIndex, byte resultRegister,
+        byte sourceMode, ushort sourceTypeMapIndex, ushort resultTypeMapIndex)
+    {
+        if (sourceKind is not (1 or 2)
+            || (sourceKind == 1 && sourceIndex > 13))
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceKind));
+        }
+        if (resultCarrier > 2
+            || (resultCarrier == 0
+                ? resultRegister != 15 || resultTypeMapIndex != 0
+                : resultRegister > 13))
+        {
+            throw new ArgumentOutOfRangeException(nameof(resultCarrier));
+        }
+        if (sourceMode is < 1 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sourceMode));
+        }
+
+        var result = new byte[16];
+        result[0] = 0x0D;
+        result[RecordHeaderSize] = sourceKind;
+        result[RecordHeaderSize + 1] = resultCarrier;
+        Write(result, RecordHeaderSize + 2, sourceIndex);
+        result[RecordHeaderSize + 4] = resultRegister;
+        result[RecordHeaderSize + 5] = sourceMode;
+        Write(result, RecordHeaderSize + 6, sourceTypeMapIndex);
+        Write(result, RecordHeaderSize + 8, resultTypeMapIndex);
+        return result;
+    }
+
     internal static byte[] EncodeCallSite(byte targetKind, byte resultKind,
         ushort targetIndex, ushort resultIndex,
         IReadOnlyList<TrRmRegisterBodyCallInput> inputs,

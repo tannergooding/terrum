@@ -40,6 +40,15 @@ internal sealed class TrRmStandardNativeBindingPlan
 {
     private const string ForeignInvocationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-contracts-1";
+    private const string ForeignInvocationStorageAddressSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-addresses-1";
+    private const string ForeignInvocationStorageFixedArrayCopySchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+    private const string ForeignInvocationStorageGenericFixedArraySchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+    private readonly TrRmA3LayoutResourceLedger? _a3LayoutResourceLedger;
+    private readonly ImmutableArray<TrRmStandardTypeProviderBinding>
+        _typeProviderBindings;
     private readonly ImmutableArray<byte[]> _artifacts;
     private readonly ImmutableArray<string> _schemaIdentities;
     private readonly ImmutableArray<TrRmStandardModuleSelection> _modules;
@@ -51,7 +60,9 @@ internal sealed class TrRmStandardNativeBindingPlan
         ImmutableArray<TrRmStandardModuleSelection> modules,
         int rootModuleRow, TrRmStandardNativeOperation operation,
         NativeRuntimePolicy runtimePolicy,
-        TrRmStandardNativeProviderBinding? providerBinding)
+        TrRmStandardNativeProviderBinding? providerBinding,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
         RootProgram = rootProgram ?? throw new ArgumentNullException(nameof(rootProgram));
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -69,6 +80,8 @@ internal sealed class TrRmStandardNativeBindingPlan
         _schemaIdentities = [.. schemaIdentities];
         _modules = modules;
         _providerBindings = providerBinding is null ? [] : [providerBinding];
+        _typeProviderBindings = typeProviderBindings;
+        _a3LayoutResourceLedger = a3LayoutResourceLedger;
         RootModuleRow = rootModuleRow;
         Operation = operation;
         RuntimePolicy = runtimePolicy;
@@ -79,6 +92,8 @@ internal sealed class TrRmStandardNativeBindingPlan
     internal int RootModuleRow { get; }
     internal TrRmStandardNativeOperation Operation { get; }
     internal NativeRuntimePolicy RuntimePolicy { get; }
+    internal TrRmA3AdmissionScope? A3AdmissionScope
+        => _a3LayoutResourceLedger?.AdmissionScope;
 
     internal void ValidateLibraryExports(IReadOnlyList<string> exports)
     {
@@ -123,7 +138,10 @@ internal sealed class TrRmStandardNativeBindingPlan
 
         foreach (var schemaIdentity in _schemaIdentities)
         {
-            if (schemaIdentity != ForeignInvocationSchemaIdentity)
+            if (schemaIdentity is not (ForeignInvocationSchemaIdentity
+                or ForeignInvocationStorageAddressSchemaIdentity
+                or ForeignInvocationStorageFixedArrayCopySchemaIdentity
+                or ForeignInvocationStorageGenericFixedArraySchemaIdentity))
             {
                 throw new InvalidDataException(
                     "The Standard native binding plan has an unselected schema.");
@@ -159,6 +177,55 @@ internal sealed class TrRmStandardNativeBindingPlan
         {
             throw new InvalidDataException(
                 "The Standard native binding plan lost its selected root Module.");
+        }
+
+        if (!_typeProviderBindings.IsDefaultOrEmpty)
+        {
+            if (_schemaIdentities[0] is not (
+                    ForeignInvocationStorageFixedArrayCopySchemaIdentity
+                    or ForeignInvocationStorageGenericFixedArraySchemaIdentity))
+            {
+                throw new InvalidDataException(
+                    "The Standard native binding plan has fixed-array type bindings under another schema.");
+            }
+
+            var rootSchema = _schemaIdentities[0] switch
+            {
+                ForeignInvocationStorageFixedArrayCopySchemaIdentity
+                    => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft,
+                ForeignInvocationStorageGenericFixedArraySchemaIdentity
+                    => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+                _ => throw new InvalidDataException(
+                    "The Standard native binding plan has an unselected fixed-array schema."),
+            };
+            var rootIndex = rootSchema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                        _artifacts[0])
+                : TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        _artifacts[0]);
+            var rootTables = rootSchema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                        rootIndex, _a3LayoutResourceLedger,
+                        createA3ResourceLedger: _a3LayoutResourceLedger is null)
+                : TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                        rootIndex);
+            var typeProviderBindings = TrRmFixedArrayProviderBindingValidator
+                .Validate(rootTables, [.. _artifacts], [.. _schemaIdentities],
+                    _modules, RootModuleRow);
+            if (!typeProviderBindings.SequenceEqual(_typeProviderBindings))
+            {
+                var exception = new InvalidDataException(
+                    "The Standard native binding plan changed a fixed-array type provider binding.");
+                _a3LayoutResourceLedger?.AdmissionScope.Mark(exception,
+                    TrRmA3AdmissionFailureKind.InvalidArtifact);
+                throw exception;
+            }
         }
 
         foreach (var binding in _providerBindings)
@@ -315,8 +382,11 @@ internal sealed class TrRmStandardNativeBindingPlan
 
         if (nativeBindings.Count == 0)
         {
-            throw new NotSupportedException(
+            var exception = new NotSupportedException(
                 "The Standard native binding plan contains no direct NativeImport.");
+            _a3LayoutResourceLedger?.AdmissionScope.Mark(exception,
+                TrRmA3AdmissionFailureKind.UnsupportedAdmission);
+            throw exception;
         }
 
         return (program, nativeBindings.ToImmutable());

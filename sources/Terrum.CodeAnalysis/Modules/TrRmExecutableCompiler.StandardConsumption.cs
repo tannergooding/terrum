@@ -27,13 +27,16 @@ public static partial class TrRmExecutableCompiler
     /// <exception cref="ArgumentException">A selection or Module identity is empty or unrecognized.</exception>
     /// <exception cref="NotSupportedException">The selected schema is not supported by this operation.</exception>
     /// <exception cref="InvalidDataException">An artifact or selected Module is invalid.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
     public static BoundProgram LoadStandard(TrRmStandardArtifactInput input,
         string moduleIdentity, IReadOnlyList<TrRmStandardArtifactInput> providers)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         var artifacts = SnapshotStandardInputs(input, providers);
-        return LoadStandardProgram(artifacts, moduleIdentity,
-            verifySemantics: true, out _, out _);
+        var schemaIdentities = GetStandardSchemaIdentities(input, providers);
+        return LoadStandardProgram(artifacts, schemaIdentities, moduleIdentity,
+            verifySemantics: true, out _, out _, out _, out _);
     }
 
     internal static TrRmStandardNativeBindingPlan
@@ -51,21 +54,18 @@ public static partial class TrRmExecutableCompiler
         }
 
         var artifacts = SnapshotStandardInputs(input, providers);
-        var schemaIdentities = ImmutableArray.CreateBuilder<string>(
-            artifacts.Length);
-        schemaIdentities.Add(input.SchemaIdentity);
-        for (var index = 0; index < providers.Count; index++)
-        {
-            schemaIdentities.Add(providers[index].SchemaIdentity);
-        }
+        var schemaIdentities = GetStandardSchemaIdentities(input, providers);
 
-        var program = LoadStandardProgram(artifacts, moduleIdentity,
+        var program = LoadStandardProgram(artifacts, schemaIdentities,
+            moduleIdentity,
             verifySemantics: true, out var providerBinding,
-            out var moduleValidation);
+            out var typeProviderBindings, out var moduleValidation,
+            out var a3LayoutResourceLedger);
         return new TrRmStandardNativeBindingPlan(program, moduleIdentity,
-            artifacts, schemaIdentities.MoveToImmutable(),
+            artifacts, schemaIdentities,
             moduleValidation.Modules, moduleValidation.RootModuleRow,
-            operation, runtimePolicy, providerBinding);
+            operation, runtimePolicy, providerBinding,
+            typeProviderBindings, a3LayoutResourceLedger);
     }
 
     /// <summary>Creates a source reference from one explicitly selected Standard Module.</summary>
@@ -77,17 +77,23 @@ public static partial class TrRmExecutableCompiler
     /// <exception cref="ArgumentException">A selection or Module identity is empty or unrecognized.</exception>
     /// <exception cref="NotSupportedException">The selected schema is not supported by this operation.</exception>
     /// <exception cref="InvalidDataException">An artifact or selected Module is invalid.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
     public static CompilationReference CreateStandardReference(
         TrRmStandardArtifactInput input, string moduleIdentity,
         IReadOnlyList<TrRmStandardArtifactInput> providers)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         var artifacts = SnapshotStandardInputs(input, providers);
-        var program = LoadStandardProgram(artifacts, moduleIdentity,
-            verifySemantics: false, out _, out _);
-        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifacts[0]);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        var schemaIdentities = GetStandardSchemaIdentities(input, providers);
+        var program = LoadStandardProgram(artifacts, schemaIdentities,
+            moduleIdentity,
+            verifySemantics: false, out _, out _, out _,
+            out var a3LayoutResourceLedger);
+        var index = CreateForeignInvocationIndex(artifacts[0],
+            input.SchemaIdentity);
+        var tables = ValidateForeignInvocationArtifact(index,
+            input.SchemaIdentity, a3LayoutResourceLedger);
         var moduleRow = FindModuleRow(tables.Modules, moduleIdentity);
         var (targetRequirement, runtimePolicy)
             = tables.Modules.GetRequirements(moduleRow);
@@ -141,35 +147,123 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static BoundProgram LoadStandardProgram(byte[][] artifacts,
-        string moduleIdentity, bool verifySemantics,
+        string[] schemaIdentities, string moduleIdentity,
+        bool verifySemantics,
         out TrRmStandardNativeProviderBinding? providerBinding,
+        out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        out StandardModuleValidation moduleValidation,
+        out TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
+    {
+        a3LayoutResourceLedger
+            = StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
+                ? new TrRmA3LayoutResourceLedger(moduleIdentity) : null;
+        try
+        {
+            return LoadStandardProgramCore(artifacts, schemaIdentities,
+                moduleIdentity, verifySemantics, a3LayoutResourceLedger,
+                out providerBinding, out typeProviderBindings,
+                out moduleValidation);
+        }
+        catch (Exception exception)
+        {
+            a3LayoutResourceLedger?.AdmissionScope.Mark(exception,
+                GetA3AdmissionFailureKind(exception));
+            throw;
+        }
+    }
+
+    private static BoundProgram LoadStandardProgramCore(byte[][] artifacts,
+        string[] schemaIdentities, string moduleIdentity,
+        bool verifySemantics,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
+        out TrRmStandardNativeProviderBinding? providerBinding,
+        out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         out StandardModuleValidation moduleValidation)
     {
         providerBinding = null;
+        typeProviderBindings = [];
         moduleValidation = ValidateStandardInputModules(artifacts,
-            moduleIdentity);
+            schemaIdentities, moduleIdentity, a3LayoutResourceLedger);
         var rootModuleRow = moduleValidation.RootModuleRow;
-        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifacts[0]);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        var index = CreateForeignInvocationIndex(artifacts[0],
+            schemaIdentities[0]);
+        var tables = ValidateForeignInvocationArtifact(index,
+            schemaIdentities[0], a3LayoutResourceLedger,
+            createA3ResourceLedger: false);
+        if (schemaIdentities[0] is
+            StandardForeignInvocationStorageFixedArraySchemaIdentity
+            or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
+        {
+            typeProviderBindings = TrRmFixedArrayProviderBindingValidator
+                .Validate(tables, artifacts, schemaIdentities,
+                    moduleValidation.Modules, rootModuleRow);
+        }
+
         if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0)
         {
             return LoadForeignInvocationDraftNativeAddressLibrary(
-                artifacts[0], rootModuleRow, null, verifySemantics);
+                artifacts[0], rootModuleRow, null, verifySemantics,
+                schema: GetForeignInvocationSchema(schemaIdentities[0]),
+                a3LayoutResourceLedger: a3LayoutResourceLedger);
         }
 
-        if (tables.Imports.Count != 1 || tables.ModuleRefs.Count != 1)
+        var boundTypeImports = typeProviderBindings
+            .Where(static binding => binding.ConsumerArtifactIndex == 0)
+            .Select(static binding => binding.ImportRow)
+            .ToHashSet();
+        var methodImportRow = 0;
+        var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
         {
+            var importedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            var definitionKind = importedDefinition >> 24;
+            if (definitionKind == 0x13
+                && boundTypeImports.Contains(importRow))
+            {
+                var importModuleRefRow = tables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                moduleRefsUsed[importModuleRefRow] = true;
+                continue;
+            }
+
+            if (definitionKind == 0x16 && methodImportRow == 0)
+            {
+                methodImportRow = importRow;
+                var importModuleRefRow = tables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                moduleRefsUsed[importModuleRefRow] = true;
+                continue;
+            }
+
             throw Unsupported(
-                "The bounded F consumer supports one imported NativeImport target.");
+                "The bounded F consumer supports A2 array TypeDef Imports and one NativeImport MethodDef target.");
+        }
+
+        var (rootModuleRefStart, rootModuleRefEnd)
+            = tables.Modules.GetModuleRefRange(rootModuleRow);
+        for (var rootModuleRefRow = rootModuleRefStart;
+            rootModuleRefRow < rootModuleRefEnd; rootModuleRefRow++)
+        {
+            if (!moduleRefsUsed[rootModuleRefRow])
+            {
+                throw Invalid(
+                    "The selected root Module has an unconsumed ModuleRef.");
+            }
+        }
+
+        if (methodImportRow == 0)
+        {
+            return LoadForeignInvocationDraftNativeAddressLibrary(
+                artifacts[0], rootModuleRow, null, verifySemantics,
+                schema: GetForeignInvocationSchema(schemaIdentities[0]),
+                a3LayoutResourceLedger: a3LayoutResourceLedger);
         }
 
         var expectedDefinition = tables.Imports
-            .GetExpectedDefinitionForImportRow(1);
-        if (expectedDefinition >> 24 != 0x16)
-        {
-            throw Unsupported("The bounded F consumer imports a MethodDef target.");
-        }
+            .GetExpectedDefinitionForImportRow(methodImportRow);
 
         var targetMethodRow = checked((int)(expectedDefinition & 0x00FF_FFFF));
         if (!tables.StandardNativeImports.HasImportForMethod(targetMethodRow)
@@ -179,17 +273,9 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The NativeAddress target has no retained NativeImport expectation.");
         }
 
-        var (moduleRefStart, moduleRefEnd)
-            = tables.Modules.GetModuleRefRange(rootModuleRow);
-        if (moduleRefEnd - moduleRefStart != 1)
-        {
-            throw Unsupported(
-                "The bounded F consumer requires one ModuleRef on the selected root Module.");
-        }
-
-        var moduleRefRow = tables.Imports.GetModuleRefForImportRow(1);
-        if (moduleRefRow != moduleRefStart
-            || tables.ModuleRefs.GetOwnerModule(moduleRefRow) != rootModuleRow)
+        var moduleRefRow
+            = tables.Imports.GetModuleRefForImportRow(methodImportRow);
+        if (tables.ModuleRefs.GetOwnerModule(moduleRefRow) != rootModuleRow)
         {
             throw Invalid("The retained Import is not owned by the selected root Module.");
         }
@@ -219,12 +305,15 @@ public static partial class TrRmExecutableCompiler
         var (providerMethodRow, providerLibraryName, providerExportName)
             = ValidateNativeImportProvider(tables,
             targetMethodRow, expectedBinding, providerArtifact,
-            providerModuleRow);
+            providerModuleRow, schemaIdentities[providerArtifactIndex],
+            a3LayoutResourceLedger);
         var moduleImport = new BoundModuleImport(
             expectedBinding.ProducerIdentity, expectedBinding.ExportKey,
             expectedBinding.TargetRequirement, expectedBinding.RuntimePolicy);
         var program = LoadForeignInvocationDraftNativeAddressLibrary(
-            artifacts[0], rootModuleRow, moduleImport, verifySemantics);
+            artifacts[0], rootModuleRow, moduleImport, verifySemantics,
+            schema: GetForeignInvocationSchema(schemaIdentities[0]),
+            a3LayoutResourceLedger: a3LayoutResourceLedger);
         providerBinding = new TrRmStandardNativeProviderBinding(
             tables.Methods.GetName(targetMethodRow),
             expectedBinding.ProducerIdentity, expectedBinding.ExportKey,
@@ -234,6 +323,19 @@ public static partial class TrRmExecutableCompiler
             providerLibraryName, providerExportName);
         return program;
     }
+
+    private static TrRmA3AdmissionFailureKind GetA3AdmissionFailureKind(
+        Exception exception)
+        => exception switch
+        {
+            TrRmResourceLimitException
+                => TrRmA3AdmissionFailureKind.ResourceLimit,
+            NotSupportedException
+                => TrRmA3AdmissionFailureKind.UnsupportedAdmission,
+            InvalidDataException
+                => TrRmA3AdmissionFailureKind.InvalidArtifact,
+            _ => TrRmA3AdmissionFailureKind.None
+        };
 
     private static (int ArtifactIndex, byte[] Artifact, int ModuleRow)
         FindSelectedProviderModule(
@@ -265,12 +367,15 @@ public static partial class TrRmExecutableCompiler
         ValidateNativeImportProvider(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
         int expectedMethodRow, TrRmImportBinding expectedBinding,
-        byte[] providerArtifact, int providerModuleRow)
+        byte[] providerArtifact, int providerModuleRow,
+        string schemaIdentity,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
-        var providerIndex = TrRmArtifactIndex
-            .ForForeignInvocationDraft(providerArtifact);
-        var provider = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationDraftAndGetExecutionTables(providerIndex);
+        var providerIndex = CreateForeignInvocationIndex(providerArtifact,
+        schemaIdentity);
+        var provider = ValidateForeignInvocationArtifact(providerIndex,
+            schemaIdentity, a3LayoutResourceLedger,
+            createA3ResourceLedger: false);
         var (providerTargetRequirement, providerRuntimePolicy)
             = provider.Modules.GetRequirements(providerModuleRow);
         var (methodStart, methodEnd)
@@ -310,7 +415,9 @@ public static partial class TrRmExecutableCompiler
         }
 
         _ = LoadForeignInvocationDraftNativeAddressLibrary(providerArtifact,
-            providerModuleRow, null, verifySemantics: false);
+            providerModuleRow, null, verifySemantics: false,
+            schema: GetForeignInvocationSchema(schemaIdentity),
+            a3LayoutResourceLedger: a3LayoutResourceLedger);
         EnsureNativeAddressContracts(provider.Methods, provider.Contracts,
             providerMethodRow,
             provider.Contracts.GetNativeParameters(providerMethodRow).Length + 1,
@@ -409,7 +516,10 @@ public static partial class TrRmExecutableCompiler
     {
         ArgumentException.ThrowIfNullOrEmpty(input.SchemaIdentity,
             parameterName);
-        if (input.SchemaIdentity != StandardForeignInvocationSchemaIdentity)
+        if (input.SchemaIdentity is not (StandardForeignInvocationSchemaIdentity
+            or StandardForeignInvocationStorageAddressSchemaIdentity
+            or StandardForeignInvocationStorageFixedArraySchemaIdentity
+            or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity))
         {
             throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
@@ -419,12 +529,83 @@ public static partial class TrRmExecutableCompiler
         return [.. input.Artifact.Span];
     }
 
+    private static string[] GetStandardSchemaIdentities(
+        TrRmStandardArtifactInput input,
+        IReadOnlyList<TrRmStandardArtifactInput> providers)
+    {
+        var result = new string[providers.Count + 1];
+        result[0] = input.SchemaIdentity;
+        for (var index = 0; index < providers.Count; index++)
+        {
+            result[index + 1] = providers[index].SchemaIdentity;
+        }
+
+        return result;
+    }
+
+    private static TrRmArtifactSchema GetForeignInvocationSchema(
+        string schemaIdentity)
+        => schemaIdentity switch
+        {
+            StandardForeignInvocationSchemaIdentity
+                => TrRmArtifactSchema.ForeignInvocationDraft,
+            StandardForeignInvocationStorageAddressSchemaIdentity
+                => TrRmArtifactSchema.ForeignInvocationStorageAddressDraft,
+            StandardForeignInvocationStorageFixedArraySchemaIdentity
+                => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft,
+            StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
+                => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            _ => throw new ArgumentException(
+                "The exact Standard schema identity is not selected by this consumer.",
+                nameof(schemaIdentity)),
+        };
+
+    private static TrRmArtifactIndex CreateForeignInvocationIndex(
+        byte[] artifact, string schemaIdentity)
+    {
+        var schema = GetForeignInvocationSchema(schemaIdentity);
+        return schema.UsesForeignInvocationStorageFixedArrays()
+            ? schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+                : TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)
+            : schema.UsesForeignInvocationStorageAddresses()
+                ? TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact)
+                : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+    }
+
+    private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
+        ValidateForeignInvocationArtifact(TrRmArtifactIndex index,
+            string schemaIdentity,
+            TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
+            bool createA3ResourceLedger = true)
+        => GetForeignInvocationSchema(schemaIdentity)
+            .UsesForeignInvocationStorageFixedArrays()
+            ? GetForeignInvocationSchema(schemaIdentity)
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                        index, a3LayoutResourceLedger, createA3ResourceLedger)
+                : TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                        index, a3LayoutResourceLedger)
+            : GetForeignInvocationSchema(schemaIdentity)
+                .UsesForeignInvocationStorageAddresses()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index)
+                : TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+
     private readonly record struct StandardModuleValidation(
         int RootModuleRow,
         ImmutableArray<TrRmStandardModuleSelection> Modules);
 
     private static StandardModuleValidation ValidateStandardInputModules(
-        byte[][] artifacts, string rootModuleIdentity)
+        byte[][] artifacts, string[] schemaIdentities,
+        string rootModuleIdentity,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
         var identities = new HashSet<string>(StringComparer.Ordinal);
         var rootModuleRow = 0;
@@ -432,10 +613,11 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<TrRmStandardModuleSelection>();
         for (var index = 0; index < artifacts.Length; index++)
         {
-            var artifactIndex = TrRmArtifactIndex
-                .ForForeignInvocationDraft(artifacts[index]);
-            var tables = TrRmStructuralMetadataValidator
-                .ValidateForeignInvocationDraftAndGetExecutionTables(artifactIndex);
+            var artifactIndex = CreateForeignInvocationIndex(artifacts[index],
+                schemaIdentities[index]);
+            var tables = ValidateForeignInvocationArtifact(artifactIndex,
+                schemaIdentities[index], a3LayoutResourceLedger,
+                createA3ResourceLedger: false);
             var populatedModuleCount = 0;
             for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
                 moduleRow++)
@@ -469,7 +651,12 @@ public static partial class TrRmExecutableCompiler
                         featureStart + offset);
                     if (feature.FeatureId
                         is not (TrRmFeatureTableReader.NativeExportEntriesFeatureId
-                            or TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId))
+                            or TrRmFeatureTableReader.RootlessNativeValuesFeatureId
+                            or TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId)
+                        && !(schemaIdentities[index]
+                                == StandardForeignInvocationStorageFixedArraySchemaIdentity
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId))
                     {
                         throw Unsupported(
                             "The bounded F consumer does not support a required Module feature.");
@@ -478,11 +665,13 @@ public static partial class TrRmExecutableCompiler
 
                 var (methodStart, methodEnd)
                     = tables.Modules.GetMethodDefRange(moduleRow);
+                var (typeStart, typeEnd)
+                    = tables.Modules.GetTypeDefRange(moduleRow);
                 moduleSelections.Add(new TrRmStandardModuleSelection(index,
                     moduleRow, identity, targetRequirement, runtimePolicy,
                     tables.Modules.GetEntryMethod(moduleRow), methodStart,
                     methodEnd));
-                if (methodEnd == methodStart)
+                if (methodEnd == methodStart && typeEnd == typeStart)
                 {
                     continue;
                 }
@@ -498,11 +687,12 @@ public static partial class TrRmExecutableCompiler
                         "Only the selected root Module may retain a provider Import in this F slice.");
                 }
 
-                if (!isSelectedRoot)
+                if (!isSelectedRoot && methodEnd != methodStart)
                 {
                     _ = LoadForeignInvocationDraftNativeAddressLibrary(
                         artifacts[index], moduleRow, null,
-                        verifySemantics: false);
+                        verifySemantics: false,
+                        schema: GetForeignInvocationSchema(schemaIdentities[index]));
                 }
             }
 
