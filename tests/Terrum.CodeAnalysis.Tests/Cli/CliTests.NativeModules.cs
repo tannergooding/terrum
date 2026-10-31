@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -36,6 +37,83 @@ public sealed partial class CliTests
                 Is.True);
             Assert.That(await ExecuteNativeImageAsync(output).ConfigureAwait(true),
                 Is.EqualTo(12));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(source).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(output).ConfigureAwait(true);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task BuildLibraryEmitsFlatArrayExportAsync(
+        string runtimePolicy)
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-fixed-array-library-{Guid.NewGuid():N}");
+        var source = prefix + ".terrum";
+        var output = prefix + ".dll";
+        try
+        {
+            await File.WriteAllTextAsync(source,
+                "public int32 ReadArray() { [int32; 2] values = [20, 22]; "
+                + "return values[1]; }");
+            var (exitCode, json, error) = await RunAsync([], "build-library",
+                source, "--export", "ReadArray", "-o", output,
+                "--runtime", runtimePolicy, "--json");
+            Assert.That(exitCode, Is.Zero, json + error);
+            Assert.That(error, Is.Empty);
+            using var result = JsonDocument.Parse(json);
+            Assert.That(result.RootElement.GetProperty("success").GetBoolean(),
+                Is.True);
+
+            var library = NativeLibrary.Load(output);
+            try
+            {
+                Assert.That(NativeLibrary.TryGetExport(library, "ReadArray",
+                    out var entryPoint), Is.True);
+                Assert.That(entryPoint, Is.Not.EqualTo(IntPtr.Zero));
+            }
+            finally
+            {
+                NativeLibrary.Free(library);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(source).ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(output).ConfigureAwait(true);
+        }
+    }
+
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task BuildNativeImportUsesBoundedFixedArrayElementAsync(
+        string runtimePolicy)
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-fixed-array-native-import-{Guid.NewGuid():N}");
+        var source = prefix + ".terrum";
+        var output = prefix + ".exe";
+        try
+        {
+            var sourceText =
+                "[Terrum.Interop.NativeImport(\"kernel32.dll\", \"lstrlenW\")]\n"
+                + "[Terrum.Interop.NativeParameter(1, Read, NoEscape, 3)]\n"
+                + "extern unsafe int32 Length(ptr<char16> value);\n"
+                + "int32 Main() { [char16; 3] text = [char16(65), char16(66), char16(0)]; "
+                + "unsafe { return Length(&text[0]); } }";
+            await File.WriteAllTextAsync(source, sourceText);
+            var (exitCode, json, error) = await RunAsync([], "build-native-import",
+                source, "-o", output, "--runtime", runtimePolicy, "--json");
+            Assert.That(exitCode, Is.Zero, json + error);
+            Assert.That(error, Is.Empty);
+            using var result = JsonDocument.Parse(json);
+            Assert.That(result.RootElement.GetProperty("success").GetBoolean(),
+                Is.True);
+            Assert.That(await ExecuteNativeImageAsync(output).ConfigureAwait(true),
+                Is.EqualTo(2));
         }
         finally
         {
