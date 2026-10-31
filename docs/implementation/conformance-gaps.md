@@ -459,13 +459,16 @@ Feature `2/1` for checked ordinary non-unique/no-Cleanup declarations; unique
 rows remain unmarked. It also emits TypeSpec `0x11` and Module-owned
 FixedArrayLayout rows for scalar, unit and nested array fields in these
 declarations with exact Feature `20/1` and `2/1` closure. Array Body rows and
-operations are not produced. The public source-free NativeAddress reader now consumes
+operations are not produced. The type-only source-free branch reconstructs
+local non-generic Copy TypeDefs and these field types; the executable
+NativeAddress path still rejects nonempty TypeDef tables. The public source-free NativeAddress reader now consumes
 A2 Section `0x0012` and TargetProfile rows for selected-Module scalar, unit,
 direct-pointer, function-pointer and nested-array types; it rebuilds bound
 array identities, checks target geometry and preserves wide counts. Its
 synthetic consumer and combined TRRM array suites passed 151/151 with zero
-skips. It still rejects nonempty TypeDef tables and does not construct array
-TypeMap entries or PlaceSelection/EC Bodies. Compatible provider replacement,
+skips. External/imported Copy provider origins remain unsupported, and neither
+path constructs executable array TypeMap entries or PlaceSelection/EC Bodies.
+Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact
 uniqueness-amended A3 identity is

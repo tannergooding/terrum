@@ -3137,8 +3137,11 @@ public static partial class TrRmExecutableCompiler
         TrRmTargetProfileTableReader targetProfiles, TrRmTypeSpecTableReader typeSpecs,
         ImmutableArray<BoundStruct> optionalStructures,
         List<NativePointerTypeDefinition> nativePointerTypes,
-        out int[] structureTypeByTypeDef)
+        out int[] structureTypeByTypeDef,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
+        IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null)
     {
+        fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
         {
             var hasBlittableVariant = false;
@@ -3207,8 +3210,26 @@ public static partial class TrRmExecutableCompiler
             for (var ordinal = 0; ordinal < fieldCount; ordinal++)
             {
                 var fieldRow = layoutFields.GetFieldDef(firstField + ordinal);
-                var fieldType = FromNativeValueRow(typeSpecs,
-                    fields.GetTypeSpecRef(fieldRow), nativePointerTypes, structureTypeByTypeDef);
+                var fieldTypeSpecRef = fields.GetTypeSpecRef(fieldRow);
+                var fieldTypeReference = typeSpecs.GetTypeSpecRef(
+                    fieldTypeSpecRef);
+                PrimitiveType fieldType;
+                if (fieldTypeReference.IsRow
+                    && fieldTypeReference.Form == 0x11)
+                {
+                    if (arrayTypeByTypeSpecRow is null
+                        || !arrayTypeByTypeSpecRow.TryGetValue(
+                            fieldTypeReference.Row, out fieldType))
+                    {
+                        throw Invalid("A native Blittable field has an unmapped fixed-array TypeSpec.");
+                    }
+                }
+                else
+                {
+                    fieldType = FromNativeValueRow(typeSpecs,
+                        fieldTypeSpecRef, nativePointerTypes,
+                        structureTypeByTypeDef);
+                }
                 var fieldFlags = fields.GetFlags(fieldRow);
                 structureFields.Add(new BoundStructField(fields.GetName(fieldRow),
                     fieldType, 0, 0)
@@ -3227,8 +3248,9 @@ public static partial class TrRmExecutableCompiler
 
         try
         {
-            var result = FixedLayoutStorage.Materialize([.. structures]);
-            _ = FixedLayoutStorage.Validate(result);
+            var result = FixedLayoutStorage.Materialize([.. structures],
+                fixedArrayTypes);
+            _ = FixedLayoutStorage.Validate(result, fixedArrayTypes);
             return result;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)

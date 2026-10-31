@@ -28,6 +28,12 @@ public static class FixedLayoutStorage
         => Compute(structures, validateRecordedLayout: false,
             ImmutableArray<BoundNativeFixedArrayType>.Empty).Structures;
 
+    internal static ImmutableArray<BoundStruct> Materialize(
+        ImmutableArray<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        => Compute(structures, validateRecordedLayout: false,
+            fixedArrays).Structures;
+
     private static (ImmutableArray<BoundStruct> Structures, ImmutableArray<int> Alignments)
         Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout,
             IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)

@@ -705,8 +705,17 @@ public static partial class TrRmExecutableCompiler
 
             var (rootMethodStart, rootMethodEnd)
                 = tables.Modules.GetMethodDefRange(rootModuleRow);
+            var (rootTypeStart, rootTypeEnd)
+                = tables.Modules.GetTypeDefRange(rootModuleRow);
+            var rootIsA2TypeLibrary = index == 0
+                && StringComparer.Ordinal.Equals(schemaIdentities[0],
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                && rootMethodStart == rootMethodEnd
+                && rootTypeStart < rootTypeEnd
+                && tables.Modules.GetEntryMethod(rootModuleRow) == 0;
             if (populatedModuleCount == 0
-                || (index == 0 && rootMethodEnd == rootMethodStart))
+                || (index == 0 && rootMethodEnd == rootMethodStart
+                    && !rootIsA2TypeLibrary))
             {
                 throw Unsupported(
                     "The selected F artifact must contain a supported populated Module.");

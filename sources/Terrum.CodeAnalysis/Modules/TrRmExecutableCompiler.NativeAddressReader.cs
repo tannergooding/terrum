@@ -68,8 +68,14 @@ public static partial class TrRmExecutableCompiler
                 && !(kind == 0x0012
                     && schema
                         == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
+                && !(schema
+                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                    && tables.TypeDefs.Count != 0
+                    && (kind == 0x0013 || kind == 0x0014
+                        || kind == 0x0015 || kind == 0x0023))
                 && !(kind == 0x0048
-                    && tables.FixedArrayLayouts.Count != 0
+                    && (tables.FixedArrayLayouts.Count != 0
+                        || tables.TypeDefs.Count != 0)
                     && schema
                         == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft))
             {
@@ -102,6 +108,15 @@ public static partial class TrRmExecutableCompiler
                     selectedImportRow = importRow;
                 }
             }
+        }
+
+        if (schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            && tables.TypeDefs.Count != 0 && methodEnd == methodStart
+            && selectedModuleImport is null)
+        {
+            return LoadForeignInvocationFixedArrayTypeLibrary(tables,
+                selectedModuleRow, verifySemantics);
         }
 
         if (tables.Schema != schema
@@ -372,7 +387,8 @@ public static partial class TrRmExecutableCompiler
             == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 ? ReadForeignInvocationFixedArrayTypes(tables,
                     selectedModuleRow, nativePointerTypeDefinitions,
-                    signatureIndexByAnchorMethod, structureTypeByTypeDef)
+                    signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                    [], out _)
                 : [];
         var typeArray = nativePointerTypeDefinitions.ToImmutableArray();
         if (!NativePointerTypeContract.IsValidTable(typeArray, [],
@@ -1566,13 +1582,118 @@ public static partial class TrRmExecutableCompiler
             nativePointerTypeDefinitions, structureTypeByTypeDef);
     }
 
+    private static BoundProgram LoadForeignInvocationFixedArrayTypeLibrary(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow, bool verifySemantics)
+    {
+        if (tables.Schema
+                != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            || tables.Modules.Count != 1 || selectedModuleRow != 1
+            || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
+            || tables.Modules.GetEntryMethod(selectedModuleRow) != 0
+            || tables.Modules.GetModuleRefRange(selectedModuleRow) is
+                not (Start: 1, End: 1)
+            || tables.TypeDefs.Count == 0 || tables.Fields.Count == 0
+            || tables.Methods.Count != 0 || tables.Bodies.Count != 0
+            || tables.Signatures.Count != 0
+            || tables.Imports.Count != 0 || tables.ModuleRefs.Count != 0
+            || tables.Contracts.Count != 0 || tables.GenericParams.Count != 0
+            || tables.Constraints.Count != 0 || tables.EnumDefs.Count != 0
+            || tables.EnumMembers.Count != 0 || tables.Interfaces.Count != 0
+            || tables.NativeFunctionPointerSignatures.Count != 0
+            || tables.NativeCallables.Count != 0
+            || tables.NativeVTables.Count != 0
+            || tables.NativeExports.Count != 0
+            || tables.StandardNativeImports.Count != 0)
+        {
+            throw Unsupported(
+                "The bounded A2 type-library loader supports one local Copy declaration Module without executable or provider records.");
+        }
+
+        if (!tables.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw Invalid("The A2 type library has no Windows x64 TargetProfile.");
+        }
+
+        for (var typeDefRow = 1; typeDefRow <= tables.TypeDefs.Count;
+            typeDefRow++)
+        {
+            var (genericFirst, genericCount)
+                = tables.TypeDefs.GetGenericRange(typeDefRow);
+            var (layoutFirst, layoutCount)
+                = tables.TypeDefs.GetLayoutRange(typeDefRow);
+            var layout = tables.Layouts.GetLayoutForProfile(typeDefRow,
+                (uint)profileRow);
+            if (tables.TypeDefs.GetOwnerModule(typeDefRow)
+                    != selectedModuleRow
+                || tables.TypeDefs.GetKind(typeDefRow) != 1
+                || !tables.TypeDefs.HasDeclaredCopy(typeDefRow)
+                || genericFirst != 0 || genericCount != 0
+                || layoutCount != 2
+                || !tables.Layouts.HasBlittableLayout(typeDefRow,
+                    (uint)profileRow, 1)
+                || tables.Layouts.GetFlags(layout) != 1
+                || tables.Layouts.GetLayoutKind(layout) is not (1 or 3))
+            {
+                throw Unsupported(
+                    "The bounded A2 type-library loader requires local nongeneric Copy structs with supported Blittable layouts.");
+            }
+        }
+
+        var nativePointerTypeDefinitions
+            = new List<NativePointerTypeDefinition>();
+        var structureTypeByTypeDef = new int[tables.TypeDefs.Count + 1];
+        Array.Fill(structureTypeByTypeDef, -1);
+        var signatureIndexByAnchorMethod = new int[tables.Methods.Count + 1];
+        Array.Fill(signatureIndexByAnchorMethod, -1);
+        var nativeFixedArrayTypes = ReadForeignInvocationFixedArrayTypes(
+            tables, selectedModuleRow, nativePointerTypeDefinitions,
+            signatureIndexByAnchorMethod, structureTypeByTypeDef, [],
+            out var arrayTypeByTypeSpecRow);
+        var structures = LoadBlittableStructures(tables.TypeDefs,
+            tables.Fields, tables.Layouts, tables.LayoutFields,
+            tables.TargetProfiles, tables.TypeSpecs, [],
+            nativePointerTypeDefinitions, out structureTypeByTypeDef,
+            nativeFixedArrayTypes, arrayTypeByTypeSpecRow);
+        var nativePointerTypes = nativePointerTypeDefinitions.ToImmutableArray();
+        if (!NativePointerTypeContract.IsValidTable(nativePointerTypes,
+                structures, [], nativeFixedArrayTypes))
+        {
+            throw Invalid("Invalid A2 native pointer type table.");
+        }
+
+        var program = new BoundProgram([], -1)
+        {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            Structures = structures,
+            NativePointerTypes = nativePointerTypes,
+            NativeFixedArrayTypes = nativeFixedArrayTypes,
+        };
+        if (!NativeFixedArrayContract.MatchesProgram(program))
+        {
+            throw Invalid("Invalid reconstructed A2 fixed-array type table.");
+        }
+        if (verifySemantics)
+        {
+            SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+        }
+
+        return program;
+    }
+
     private static ImmutableArray<BoundNativeFixedArrayType>
         ReadForeignInvocationFixedArrayTypes(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int selectedModuleRow,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        IReadOnlyList<BoundStruct> structures,
+        out Dictionary<int, PrimitiveType> arrayTypeByTypeSpecRow)
     {
+        arrayTypeByTypeSpecRow = [];
         if (tables.FixedArrayLayouts.Count == 0)
         {
             return [];
@@ -1606,8 +1727,6 @@ public static partial class TrRmExecutableCompiler
 
         var fixedArrayTypes = new List<BoundNativeFixedArrayType>(
             pendingLayouts.Count);
-        var arrayTypeByTypeSpecRow = new Dictionary<int, PrimitiveType>(
-            pendingLayouts.Count);
         while (pendingLayouts.Count != 0)
         {
             var madeProgress = false;
@@ -1633,6 +1752,12 @@ public static partial class TrRmExecutableCompiler
                         continue;
                     }
                 }
+                else if (elementTypeReference.IsRow
+                    && elementTypeReference.Form is 0x02 or 0x03 or 0x05)
+                {
+                    throw Unsupported(
+                        "Array elements with nominal TypeDefs are outside the bounded source-free subset.");
+                }
                 else
                 {
                     elementType = ReadForeignInvocationType(
@@ -1643,7 +1768,8 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 if (!NativeFixedArrayContract.TryCreateType(elementType,
-                        elementCount, [], fixedArrayTypes, out var arrayType,
+                        elementCount, structures, fixedArrayTypes,
+                        out var arrayType,
                         out var computedLayout))
                 {
                     throw Unsupported(

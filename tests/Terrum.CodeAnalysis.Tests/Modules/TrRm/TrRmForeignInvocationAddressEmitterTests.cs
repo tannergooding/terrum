@@ -267,6 +267,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(tables.Features.TryGetFeature(
             TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
             out _), Is.False);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, artifact),
+                moduleIdentity, []));
     }
 
     [Test]
@@ -313,6 +317,50 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
             out var arrayFeature), Is.True);
         Assert.That(arrayFeature.RuleRevision, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void StandardA2TypeLibraryLoaderReconstructsCopyArrayFields()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-array-field-type-library";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Scalar {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct ArrayHolder {
+                public Scalar Payload;
+                public [[int32; 2]; 3] Values;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+
+        Assert.That(loaded.Functions, Is.Empty);
+        Assert.That(loaded.EntryPoint, Is.EqualTo(-1));
+        Assert.That(loaded.Structures, Has.Length.EqualTo(2));
+        Assert.That(loaded.Structures[0].Name, Is.EqualTo("Scalar"));
+        Assert.That(loaded.Structures[1].Name, Is.EqualTo("ArrayHolder"));
+        Assert.That(loaded.Structures[1].Fields, Has.Length.EqualTo(2));
+        Assert.That(loaded.Structures[1].Fields[0].Type,
+            Is.EqualTo((PrimitiveType)100));
+        Assert.That(loaded.Structures[1].Fields[1].Type,
+            Is.EqualTo(NativeFixedArrayTypes.Type(1)));
+        Assert.That(loaded.Structures[1].Size, Is.EqualTo(28));
+        Assert.That(loaded.NativeFixedArrayTypes, Has.Length.EqualTo(2));
+        Assert.That(loaded.NativeFixedArrayTypes[0].ElementCount,
+            Is.EqualTo(2UL));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ElementCount,
+            Is.EqualTo(3UL));
+        Assert.That(NativeFixedArrayContract.MatchesProgram(loaded), Is.True);
     }
 
     [Test]
