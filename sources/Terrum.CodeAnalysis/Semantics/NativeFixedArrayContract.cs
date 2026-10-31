@@ -168,6 +168,42 @@ internal static class NativeFixedArrayContract
         return true;
     }
 
+    internal static bool TryGetLayout(PrimitiveType arrayType,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        out BoundNativeFixedArrayLayout layout)
+    {
+        layout = default;
+        if (!NativeFixedArrayTypes.IsType(arrayType))
+        {
+            return false;
+        }
+
+        var index = NativeFixedArrayTypes.Index(arrayType);
+        if ((uint)index >= (uint)fixedArrays.Count)
+        {
+            return false;
+        }
+
+        var definition = fixedArrays[index];
+        return TryGetLayout(arrayType, definition.ElementType,
+            definition.ElementCount, structures, fixedArrays, out layout);
+    }
+
+    internal static bool MatchesType(PrimitiveType arrayType,
+        BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        => arrayType == layout.CarrierType
+            && TryGetLayout(arrayType, structures, fixedArrays,
+                out var expected)
+            && expected == layout;
+
+    internal static bool MatchesType(PrimitiveType arrayType,
+        BoundNativeFixedArrayLayout layout, BoundProgram program)
+        => MatchesType(arrayType, layout, program.Structures,
+            program.NativeFixedArrayTypes);
+
     internal static bool MatchesLayout(BoundNativeFixedArrayLayout layout,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)

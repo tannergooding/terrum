@@ -31,8 +31,8 @@ public enum SyntaxKind
     ReferenceTypeName,
     /// <summary>A type-use attribute applied to a nested type name.</summary>
     AttributedTypeName,
-    /// <summary>The local fixed-array type name <c>InlineArray&lt;T, N&gt;</c>.</summary>
-    InlineArrayTypeName,
+    /// <summary>A structural fixed-array type form <c>[E; N]</c>.</summary>
+    FixedArrayTypeName,
     /// <summary>A function or constructor parameter list.</summary>
     ParameterList,
     /// <summary>A declared parameter.</summary>

@@ -612,14 +612,15 @@ public static partial class SemanticVerifier
                                 || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsOut || variable.IsInit
                                 || variable.IsInitializationLocal
-                                || variable.NativeFixedArrayLayout is not BoundNativeFixedArrayLayout fixedArrayLayout
+                                || !NativeFixedArrayContract.TryGetLayout(
+                                    variable.Type, program.Structures,
+                                    program.NativeFixedArrayTypes,
+                                    out var fixedArrayLayout)
                                 || fixedArrayLayout.CarrierType != variable.Type
                                 || (variable.IsMutable
                                     && !NativeFixedArrayContract.AllowsMutableLocal(fixedArrayLayout))
                                 || !NativeFixedArrayContract.MatchesLayout(fixedArrayLayout, program)
                                 || !NativeFixedArrayContract.MatchesProgram(program)))
-                                || (!NativeFixedArrayContract.IsCarrier(variable.Type)
-                                    && variable.NativeFixedArrayLayout is not null)
                                 || (!NativeFixedArrayContract.IsCarrier(variable.Type)
                                     && NativeFixedArrayContract.HasMetadataOnlyArrayType(
                                         variable.Type, program.Structures,
@@ -2586,8 +2587,7 @@ public static partial class SemanticVerifier
             || program.Functions.Any(static function =>
                 NativeFixedArrayContract.IsCarrier(function.ReturnType)
                 || function.Variables.Any(static variable =>
-                    NativeFixedArrayContract.IsCarrier(variable.Type)
-                    || variable.NativeFixedArrayLayout is not null))
+                    NativeFixedArrayContract.IsCarrier(variable.Type)))
             || program.Structures.Any(static structure =>
                 structure.Fields.Any(static field =>
                     NativeFixedArrayContract.IsCarrier(field.Type)))
@@ -2632,8 +2632,7 @@ public static partial class SemanticVerifier
                 var variable = function.Variables[variableIndex];
                 if (!NativeFixedArrayContract.IsCarrier(variable.Type))
                 {
-                    if (variable.NativeFixedArrayLayout is not null
-                        || NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                    if (NativeFixedArrayContract.HasMetadataOnlyArrayType(
                             variable.Type, program.Structures,
                             program.NativeFixedArrayTypes,
                             program.NativePointerTypes,
@@ -2650,8 +2649,9 @@ public static partial class SemanticVerifier
                     || variable.IsOut
                     || variable.IsInit
                     || variable.IsInitializationLocal
-                    || variable.NativeFixedArrayLayout
-                        is not BoundNativeFixedArrayLayout layout
+                    || !NativeFixedArrayContract.TryGetLayout(
+                        variable.Type, program.Structures,
+                        program.NativeFixedArrayTypes, out var layout)
                     || !NativeFixedArrayContract.MatchesLayout(layout, program))
                 {
                     return true;

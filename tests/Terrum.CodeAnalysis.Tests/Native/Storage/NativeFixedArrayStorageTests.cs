@@ -14,6 +14,17 @@ namespace Terrum.CodeAnalysis.Tests.Native.Storage;
 
 public sealed class NativeFixedArrayStorageTests
 {
+    private static BoundNativeFixedArrayLayout GetFixedArrayLayout(
+        BoundProgram program, string variableName)
+    {
+        var variable = program.Functions[program.EntryPoint].Variables
+            .Single(candidate => candidate.Name == variableName);
+        Assert.That(NativeFixedArrayContract.TryGetLayout(variable.Type,
+            program.Structures, program.NativeFixedArrayTypes, out var layout),
+            Is.True);
+        return layout;
+    }
+
     [Test]
     public void CheckedFixedArrayStorageAdmitsUnrelatedBlittableAggregates()
     {
@@ -42,10 +53,7 @@ public sealed class NativeFixedArrayStorageTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program ?? throw new AssertionException("Expected a bound program.");
 
-        var layout = program.Functions[program.EntryPoint].Variables
-            .Single(static variable => variable.Name == "values").NativeFixedArrayLayout;
-        Assert.That(layout, Is.Not.Null);
-        var arrayLayout = layout ?? throw new AssertionException("Expected the fixed array layout.");
+        var arrayLayout = GetFixedArrayLayout(program, "values");
         Assert.That(arrayLayout.ElementStride, Is.EqualTo(24));
         Assert.That(arrayLayout.ByteExtent, Is.EqualTo(48));
         Assert.That(NativeFixedArrayContract.MatchesProgram(program), Is.True);
@@ -69,6 +77,218 @@ public sealed class NativeFixedArrayStorageTests
 
         Assert.That(NativeEmitter.EmitWithNativeImports(program,
             NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+    }
+
+    [TestCase(BoundRuntimePolicy.FailFast)]
+    [TestCase(BoundRuntimePolicy.CheckedExceptions)]
+    public void RequiredConstEvalCallsDetermineFixedArrayExtents(
+        BoundRuntimePolicy policy)
+    {
+        const string source = """
+            int32 Main() {
+                mut [uint32; const (Count())] values = [10, 20, 30];
+                return int32(values[2]);
+            }
+            [ConstEval] uint64 Count() { return Add(1, 2); }
+            [ConstEval] uint64 Add(uint64 left, uint64 right) {
+                return left + right;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), policy);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(program.NativeFixedArrayTypes.Single().ElementCount,
+            Is.EqualTo(3));
+        Assert.That(NativeJit.Execute(program, (NativeRuntimePolicy)policy),
+            Is.EqualTo(30));
+    }
+
+    [Test]
+    public void RequiredFixedArrayExtentRejectsRuntimeAndOverflowingCalls()
+    {
+        const string runtimeCall = """
+            uint64 RuntimeCount() { return 2; }
+            int32 Main() {
+                mut [uint32; const (RuntimeCount())] values = [1, 2];
+                return int32(values[0]);
+            }
+            """;
+        var runtimeCompilation = Compilation.Create(
+            SyntaxTree.Parse(runtimeCall));
+        Assert.That(runtimeCompilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, runtimeCompilation.Diagnostics));
+
+        const string overflowingCall = """
+            [ConstEval] uint64 Overflow() {
+                return uint64.MaxValue + 1;
+            }
+            int32 Main() {
+                mut [uint32; const (Overflow())] values = [];
+                return 0;
+            }
+            """;
+        var overflowCompilation = Compilation.Create(
+            SyntaxTree.Parse(overflowingCall));
+        Assert.That(overflowCompilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, overflowCompilation.Diagnostics));
+
+        const string signatureArray = """
+            [ConstEval] uint64 Count() { return 1; }
+            int32 Read([uint32; const (Count())] values) { return 0; }
+            int32 Main() { return 0; }
+            """;
+        var signatureCompilation = Compilation.Create(
+            SyntaxTree.Parse(signatureArray));
+        Assert.That(signatureCompilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine,
+                signatureCompilation.Diagnostics));
+
+        const string fieldRuntimeCall = """
+            [Blittable] [Layout(Sequential)]
+            struct RuntimeTable {
+                private [uint32; const (RuntimeCount())] Items;
+            }
+            uint64 RuntimeCount() { return 2; }
+            public int32 Value() { return 42; }
+            """;
+        var fieldRuntimeCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(fieldRuntimeCall));
+        Assert.That(fieldRuntimeCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine,
+                fieldRuntimeCompilation.Diagnostics));
+
+        const string fieldOverflowCall = """
+            [Blittable] [Layout(Sequential)]
+            struct OverflowTable {
+                private [uint32; const (Overflow())] Items;
+            }
+            [ConstEval] uint64 Overflow() {
+                return uint64.MaxValue + 1;
+            }
+            public int32 Value() { return 42; }
+            """;
+        var fieldOverflowCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(fieldOverflowCall));
+        Assert.That(fieldOverflowCompilation.Diagnostics.Any(
+            static diagnostic => diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine,
+                fieldOverflowCompilation.Diagnostics));
+    }
+
+    [Test]
+    public void ConstEvalCallsCanDetermineArrayFieldExtents()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            struct Table {
+                private [uint32; const (Count())] Items;
+            }
+            [ConstEval] uint64 Count() { return Add(1, 2); }
+            [ConstEval] uint64 Add(uint64 left, uint64 right) {
+                return left + right;
+            }
+            public int32 Value() { return 42; }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var table = program.Structures.Single(static structure =>
+            structure.Name == "Table");
+        Assert.That(table.Fields, Has.Length.EqualTo(1));
+        var arrayIndex = NativeFixedArrayTypes.Index(table.Fields[0].Type);
+        Assert.That((uint)arrayIndex,
+            Is.LessThan((uint)program.NativeFixedArrayTypes.Length));
+        Assert.That(program.NativeFixedArrayTypes[arrayIndex].ElementType,
+            Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(program.NativeFixedArrayTypes[arrayIndex].ElementCount,
+            Is.EqualTo(3));
+        Assert.That(NativeFixedArrayContract.IsValidTable(program.Structures,
+            program.NativeFixedArrayTypes), Is.True);
+    }
+
+    [Test]
+    public void ConstEvalArrayAliasesPreserveStructuralIdentityAndNamespaceContext()
+    {
+        var entry = SyntaxTree.Parse("""
+            using Tables;
+            int32 Main() {
+                Row<uint32> first = [1, 2, 3];
+                RowAlias second = [4, 5, 6];
+                [uint32; 3] direct = [7, 8, 9];
+                return int32(first[2] + second[2] + direct[2]);
+            }
+            """);
+        var definitions = SyntaxTree.Parse("""
+            namespace Tables {
+                alias Row<T> = [T; const (Count())];
+                alias Words = [uint32; const (Count())];
+                alias RowAlias = Words;
+                [Blittable] [Layout(Sequential)]
+                struct Table {
+                    private Row<uint32> Items;
+                }
+                [ConstEval] uint64 Count() { return Add(1, 2); }
+                [ConstEval] uint64 Add(uint64 left, uint64 right) {
+                    return left + right;
+                }
+            }
+            """);
+        var compilation = Compilation.Create([entry, definitions],
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var variables = program.Functions[program.EntryPoint].Variables;
+        var firstType = variables.Single(static variable =>
+            variable.Name == "first").Type;
+        var aliasType = variables.Single(static variable =>
+            variable.Name == "second").Type;
+        var directType = variables.Single(static variable =>
+            variable.Name == "direct").Type;
+        var table = program.Structures.Single(static structure =>
+            structure.Fields.Length == 1
+            && NativeFixedArrayTypes.IsType(structure.Fields[0].Type));
+
+        Assert.That(firstType, Is.EqualTo(aliasType));
+        Assert.That(aliasType, Is.EqualTo(directType));
+        Assert.That(table.Fields[0].Type, Is.EqualTo(firstType));
+        Assert.That(program.NativeFixedArrayTypes, Has.Length.EqualTo(1));
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(18));
+
+        const string runtimeCall = """
+            alias Values = [uint32; const (RuntimeCount())];
+            uint64 RuntimeCount() { return 3; }
+            int32 Main() { return 0; }
+            """;
+        var runtimeCompilation = Compilation.Create(
+            SyntaxTree.Parse(runtimeCall), BoundRuntimePolicy.FailFast);
+        Assert.That(runtimeCompilation.Program, Is.Null);
+        Assert.That(runtimeCompilation.HasErrors, Is.True);
+
+        const string overflowCall = """
+            alias Values = [uint32; const (Overflow())];
+            [ConstEval] uint64 Overflow() {
+                return uint64.MaxValue + 1;
+            }
+            int32 Main() { return 0; }
+            """;
+        var overflowCompilation = Compilation.Create(
+            SyntaxTree.Parse(overflowCall), BoundRuntimePolicy.FailFast);
+        Assert.That(overflowCompilation.Program, Is.Null);
+        Assert.That(overflowCompilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, overflowCompilation.Diagnostics));
     }
 
     [Test]
@@ -199,12 +419,9 @@ public sealed class NativeFixedArrayStorageTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
             ?? throw new AssertionException("Expected a bound program.");
-        var layout = program.Functions[program.EntryPoint].Variables
-            .Single(static variable => variable.Name == "values")
-            .NativeFixedArrayLayout;
-        Assert.That(layout, Is.Not.Null);
-        Assert.That(layout!.Value.ElementCount, Is.EqualTo(513));
-        Assert.That(layout.Value.ByteExtent, Is.EqualTo(4104));
+        var layout = GetFixedArrayLayout(program, "values");
+        Assert.That(layout.ElementCount, Is.EqualTo(513));
+        Assert.That(layout.ByteExtent, Is.EqualTo(4104));
         Assert.That(NativeEmitter.EmitWithNativeImports(program,
             NativeRuntimePolicy.FailFast), Is.Not.Empty);
     }
@@ -225,12 +442,9 @@ public sealed class NativeFixedArrayStorageTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
             ?? throw new AssertionException("Expected a bound program.");
-        var layout = program.Functions[program.EntryPoint].Variables
-            .Single(static variable => variable.Name == "values")
-            .NativeFixedArrayLayout;
-        Assert.That(layout, Is.Not.Null);
-        Assert.That(layout!.Value.ElementCount, Is.Zero);
-        Assert.That(layout.Value.ByteExtent, Is.Zero);
+        var layout = GetFixedArrayLayout(program, "values");
+        Assert.That(layout.ElementCount, Is.Zero);
+        Assert.That(layout.ByteExtent, Is.Zero);
     }
 
     [Test]
@@ -258,6 +472,60 @@ public sealed class NativeFixedArrayStorageTests
     }
 
     [Test]
+    public void FixedArrayTypeIdentityIsCanonicalByElementAndCount()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            struct FixedArrayFields {
+                private [uint32; 2] Pair;
+                private [uint16; 2] NarrowPair;
+                private [uint32; 3] Triple;
+            }
+
+            int32 Main() {
+                [uint32; 2] first = [1, 2];
+                [uint32; 2] second = [3, 4];
+                [uint16; 2] narrow = [5, 6];
+                [uint32; 3] triple = [7, 8, 9];
+                return int32(first[0] + second[0]
+                    + uint32(narrow[0]) + triple[0]);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var variables = program.Functions[program.EntryPoint].Variables;
+        var firstType = variables.Single(static variable =>
+            variable.Name == "first").Type;
+        var secondType = variables.Single(static variable =>
+            variable.Name == "second").Type;
+        var narrowType = variables.Single(static variable =>
+            variable.Name == "narrow").Type;
+        var tripleType = variables.Single(static variable =>
+            variable.Name == "triple").Type;
+        var fields = program.Structures.Single(static structure =>
+            structure.Name == "FixedArrayFields").Fields;
+
+        Assert.That(NativeFixedArrayTypes.IsType(firstType), Is.True);
+        Assert.That(firstType, Is.Not.EqualTo(PrimitiveType.NativeFixedArray));
+        Assert.That(secondType, Is.EqualTo(firstType));
+        Assert.That(narrowType, Is.Not.EqualTo(firstType));
+        Assert.That(tripleType, Is.Not.EqualTo(firstType));
+        Assert.That(fields, Has.Length.EqualTo(3));
+        Assert.That(fields[0].Type, Is.EqualTo(firstType));
+        Assert.That(fields[1].Type, Is.EqualTo(narrowType));
+        Assert.That(fields[2].Type, Is.EqualTo(tripleType));
+        Assert.That(program.NativeFixedArrayTypes, Has.Length.EqualTo(3));
+        Assert.That(NativeFixedArrayContract.MatchesProgram(program), Is.True);
+        Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(16));
+    }
+
+    [Test]
     public void ZeroPayloadArrayStillRequiresEveryElement()
     {
         const string source = """
@@ -275,13 +543,10 @@ public sealed class NativeFixedArrayStorageTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
             ?? throw new AssertionException("Expected a bound program.");
-        var layout = program.Functions[program.EntryPoint].Variables
-            .Single(static variable => variable.Name == "values")
-            .NativeFixedArrayLayout;
-        Assert.That(layout, Is.Not.Null);
-        Assert.That(layout!.Value.ElementStride, Is.Zero);
-        Assert.That(layout.Value.ByteExtent, Is.Zero);
-        Assert.That(layout.Value.Alignment, Is.EqualTo(1));
+        var layout = GetFixedArrayLayout(program, "values");
+        Assert.That(layout.ElementStride, Is.Zero);
+        Assert.That(layout.ByteExtent, Is.Zero);
+        Assert.That(layout.Alignment, Is.EqualTo(1));
         Assert.That(NativeJit.Execute(program, NativeRuntimePolicy.CheckedExceptions),
             Is.EqualTo(0));
 
@@ -564,10 +829,7 @@ public sealed class NativeFixedArrayStorageTests
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program
             ?? throw new AssertionException("Expected a bound program.");
-        var outer = program.Functions[program.EntryPoint].Variables
-            .Single(static variable => variable.Name == "values")
-            .NativeFixedArrayLayout
-            ?? throw new AssertionException("Expected the outer array layout.");
+        var outer = GetFixedArrayLayout(program, "values");
         var inner = program.NativeFixedArrayTypes[
             NativeFixedArrayTypes.Index(outer.ElementType)];
         Assert.That(outer.ElementCount, Is.EqualTo(2));
@@ -747,5 +1009,4 @@ public sealed class NativeFixedArrayStorageTests
         Assert.That(NativeJit.Execute(threeDimensionCompilation.Program!,
             NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(9));
     }
-
 }

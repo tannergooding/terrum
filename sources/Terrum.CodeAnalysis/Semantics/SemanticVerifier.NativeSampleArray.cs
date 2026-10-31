@@ -23,7 +23,8 @@ public static partial class SemanticVerifier
             || ((ulong)initialization.Elements.Length != initialization.Layout.ElementCount
                 && !(initialization.Elements.IsEmpty
                     && NativeFixedArrayContract.AllowsEmptyInitialization(initialization.Layout)))
-            || function.Variables[variable].NativeFixedArrayLayout != initialization.Layout
+            || !NativeFixedArrayContract.MatchesType(
+                function.Variables[variable].Type, initialization.Layout, program)
             || !NativeFixedArrayContract.MatchesLayout(initialization.Layout, program))
         {
             throw InvalidEffect(expression.Span, "NativeImport");
@@ -159,7 +160,8 @@ public static partial class SemanticVerifier
             || function.Variables[element.Variable].Type != element.Layout.CarrierType
             || (function.Variables[element.Variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(element.Layout))
-            || function.Variables[element.Variable].NativeFixedArrayLayout != element.Layout
+            || !NativeFixedArrayContract.MatchesType(
+                function.Variables[element.Variable].Type, element.Layout, program)
             || !NativeFixedArrayContract.MatchesLayout(element.Layout, program)
             || element.Type != element.Layout.ElementType || element.Index is null
             || !NativeFixedArrayContract.IsIndexType(element.Index.Type)
@@ -209,8 +211,9 @@ public static partial class SemanticVerifier
             || variable >= function.Variables.Length
             || !NativeFixedArrayContract.IsCarrier(
                 function.Variables[variable].Type)
-            || function.Variables[variable].NativeFixedArrayLayout
-                is not BoundNativeFixedArrayLayout rootLayout
+            || !NativeFixedArrayContract.TryGetLayout(
+                function.Variables[variable].Type, program.Structures,
+                program.NativeFixedArrayTypes, out var rootLayout)
             || function.Variables[variable].Type != rootLayout.CarrierType
             || projections.IsDefaultOrEmpty
             || projections.Length < 2
@@ -300,8 +303,8 @@ public static partial class SemanticVerifier
             || !initialized[address.Variable]
             || function.Variables[address.Variable].Type
                 != rootLayout.CarrierType
-            || function.Variables[address.Variable].NativeFixedArrayLayout
-                != rootLayout
+            || !NativeFixedArrayContract.MatchesType(
+                function.Variables[address.Variable].Type, rootLayout, program)
             || !NativeFixedArrayContract.MatchesLayout(rootLayout, program)
             || !NativeFixedArrayContract.MatchesLayout(leafLayout, program)
             || leafLayout != address.Layout
@@ -372,7 +375,8 @@ public static partial class SemanticVerifier
             || !function.Variables[write.Variable].IsMutable
             || !NativeFixedArrayContract.AllowsMutableLocal(write.Layout)
             || function.Variables[write.Variable].Type != write.Layout.CarrierType
-            || function.Variables[write.Variable].NativeFixedArrayLayout != write.Layout
+            || !NativeFixedArrayContract.MatchesType(
+                function.Variables[write.Variable].Type, write.Layout, program)
             || !NativeFixedArrayContract.MatchesLayout(write.Layout, program)
             || write.Value.Type != write.Layout.ElementType
             || (NativeFixedArrayTypes.IsType(write.Layout.ElementType)

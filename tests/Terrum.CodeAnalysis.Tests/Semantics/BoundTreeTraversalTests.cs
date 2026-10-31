@@ -63,7 +63,7 @@ internal sealed class BoundTreeTraversalTests
             uint32 Element() { return 42; }
             int32 Index() { return 1; }
             int32 Main() {
-                InlineArray<uint32, 2> values = [7, Element()];
+                [uint32; 2] values = [7, Element()];
                 return int32(values[Index()]);
             }
             """), BoundRuntimePolicy.CheckedExceptions);

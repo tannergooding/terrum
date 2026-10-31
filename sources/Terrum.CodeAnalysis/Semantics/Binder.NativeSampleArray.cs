@@ -16,6 +16,13 @@ internal sealed partial class Binder
         arrayType = PrimitiveType.Int32;
         elementType = PrimitiveType.Int32;
         elementCount = 0;
+        if (_isBindingConstEvalBody)
+        {
+            Report("TRM3024",
+                "ConstEval bodies support only scalar local values.",
+                node.Span);
+            return false;
+        }
         if (!NativeFixedArrayContract.SupportsRuntimePolicy(_runtimePolicy))
         {
             Report("TRM3030", "Fixed-array storage is not supported under the selected runtime policy.",
@@ -38,8 +45,27 @@ internal sealed partial class Binder
 
         var diagnosticCount = DiagnosticCount;
         var resolvedElement = BindType(elementNode, allowVoid: true);
-        var boundExtent = FoldFixedArrayExtentExpression(
-            BindExpression(extentNode, PrimitiveType.UInt64));
+        var extentExpression = BindExpression(extentNode, PrimitiveType.UInt64);
+        var boundExtent = FoldFixedArrayExtentExpression(extentExpression);
+        if (boundExtent is not BoundConstant
+            && extentExpression.Type == PrimitiveType.UInt64
+            && CheckConstExpression(extentExpression, out _)
+            && _boundConstEvalFunctions is { } constEvalFunctions)
+        {
+            try
+            {
+                boundExtent = EvaluateConstExpression(extentExpression,
+                    ConstSlots(_constScalarValues, _variables.Count),
+                    constEvalFunctions, 0,
+                    new ConstEvalState(_cancellationToken));
+            }
+            catch (ConstEvalFailure failure)
+            {
+                Report("TRM3030",
+                    $"A fixed-array extent failed required constant evaluation: {failure.Message}",
+                    extentNode.Span);
+            }
+        }
         if (DiagnosticCount != diagnosticCount
             || boundExtent is not BoundConstant { Type: PrimitiveType.UInt64 } constant
             || constant.Bits.High != 0

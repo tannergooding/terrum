@@ -92,14 +92,13 @@ public sealed class Lexer
         return (trivia, GetDiagnostics(), _position);
     }
 
-    internal int ReadValidationTokenEnd(int position)
+    internal TokenKind ReadValidationToken(out int end)
     {
-        // Match the former isolated token-framing scan.
-        _position = position;
         _deferredRunEnd = 0;
         _diagnostics?.Clear();
-        _ = ReadToken();
-        return _position;
+        var kind = ReadToken();
+        end = _position;
+        return kind;
     }
 
     private bool AtEnd => _position == _source.Length;
@@ -1161,6 +1160,7 @@ public sealed class Lexer
         "var" => TokenKind.VarKeyword,
         "mut" => TokenKind.MutKeyword,
         "write" => TokenKind.WriteKeyword,
+        "gc" => TokenKind.GcKeyword,
         "ref" => TokenKind.RefKeyword,
         "out" => TokenKind.OutKeyword,
         "if" => TokenKind.IfKeyword,

@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -314,6 +315,11 @@ internal static class BoundTreeTraversal
             })],
         };
 
+    internal static BoundNativeFixedArrayType RewriteTypes(
+        BoundNativeFixedArrayType fixedArray,
+        Func<PrimitiveType, PrimitiveType> rewriteType) =>
+        fixedArray with { ElementType = rewriteType(fixedArray.ElementType) };
+
     internal static CheckedReferenceTypeDefinition RewriteTypes(
         CheckedReferenceTypeDefinition referenceType,
         Func<PrimitiveType, PrimitiveType> rewriteType) =>
@@ -475,8 +481,6 @@ internal static class BoundTreeTraversal
                 : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = rewriteType(variable.Type),
-                NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
-                    ? RewriteLayout(layout, rewriteType) : null,
             })],
         };
     }
@@ -500,13 +504,25 @@ internal static class BoundTreeTraversal
                 Type = type,
                 Layout = RewriteLayout(fixedArrayElement.Layout, rewriteType),
             },
+            BoundNativeFixedArrayPathElement pathElement => pathElement with {
+                Type = type,
+                Projections = RewriteArrayProjections(
+                    pathElement.Projections, rewriteType),
+            },
             BoundNativeFixedArrayPointerAddress pointerAddress => pointerAddress with {
                 Type = type,
                 Layout = RewriteLayout(pointerAddress.Layout, rewriteType),
+                Projections = RewriteArrayProjections(
+                    pointerAddress.Projections, rewriteType),
             },
             BoundNativeFixedArrayWrite fixedArrayWrite => fixedArrayWrite with {
                 Type = type,
                 Layout = RewriteLayout(fixedArrayWrite.Layout, rewriteType),
+            },
+            BoundNativeFixedArrayPathWrite pathWrite => pathWrite with {
+                Type = type,
+                Projections = RewriteArrayProjections(
+                    pathWrite.Projections, rewriteType),
             },
             _ => expression with { Type = type },
         };
@@ -518,6 +534,15 @@ internal static class BoundTreeTraversal
             CarrierType = rewriteType(layout.CarrierType),
             ElementType = rewriteType(layout.ElementType),
         };
+
+    private static ImmutableArray<BoundNativeFixedArrayProjection>
+        RewriteArrayProjections(
+            ImmutableArray<BoundNativeFixedArrayProjection> projections,
+            Func<PrimitiveType, PrimitiveType> rewriteType)
+        => projections.IsDefault ? [] : [
+            .. projections.Select(projection => projection with {
+                Layout = RewriteLayout(projection.Layout, rewriteType),
+            })];
 
     private static BoundStatement RewriteExpressions(BoundStatement statement,
         Func<BoundExpression, BoundExpression> rewrite) =>
