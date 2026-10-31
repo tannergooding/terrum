@@ -1452,26 +1452,33 @@ public static class TrRmStructuralMetadataValidator
                 textContentShapes);
             predicateGraphs = new TrRmPredicateGraphTableReader(
                 predicateGraphBytes, predicateGraphCount, predicateNodeCount,
-                predicateReadFootprintCount);
+                predicateReadFootprintCount,
+                selectedA3LayoutResourceLedger);
             predicateChildEdges = new TrRmPredicateChildEdgeTableReader(
                 predicateChildEdgeBytes, predicateChildEdgeCount,
-                predicateNodeCount, predicateGraphs);
+                predicateNodeCount, predicateGraphs,
+                selectedA3LayoutResourceLedger);
             predicateReadFootprints = new TrRmPredicateReadFootprintTableReader(
                 predicateReadFootprintBytes, predicateReadFootprintCount,
-                predicateReadRootCount, predicateReadDependencyCount);
+                predicateReadRootCount, predicateReadDependencyCount,
+                selectedA3LayoutResourceLedger);
             predicateCaptures = new TrRmPredicateCaptureTableReader(
                 predicateCaptureBytes, predicateCaptureCount,
-                predicateGraphCount, typeSpecs);
+                predicateGraphCount, typeSpecs,
+                selectedA3LayoutResourceLedger);
             predicateReadRoots = new TrRmPredicateReadRootTableReader(
                 predicateReadRootBytes, predicateReadRootCount,
-                immutableDataCount, predicateCaptureCount, index.Schema);
+                immutableDataCount, predicateCaptureCount, index.Schema,
+                selectedA3LayoutResourceLedger);
             predicateReadDependencies = new TrRmPredicateReadDependencyTableReader(
                 predicateReadDependencyBytes, predicateReadDependencyCount,
                 methodDefCount, constraintCount, interfaceWitnessCount,
-                witnessProjectionCount: 0);
+                witnessProjectionCount: 0,
+                resourceLedger: selectedA3LayoutResourceLedger);
             predicateNodes = new TrRmPredicateNodeTableReader(
                 predicateNodeBytes, predicateNodeCount,
-                predicateNodeOperandCount, typeSpecs, index.Schema);
+                predicateNodeOperandCount, typeSpecs, index.Schema,
+                selectedA3LayoutResourceLedger);
             var predicateOperandCounts = new TrRmPredicateTableRowCounts(
                 predicateReadRootCount, frozenValueNodeCount, predicateCaptureCount,
                 predicateOperationCount, predicateCallCount,
@@ -1480,7 +1487,8 @@ public static class TrRmStructuralMetadataValidator
                 predicateTypePatternCount);
             predicateNodeOperands = new TrRmPredicateNodeOperandTableReader(
                 predicateNodeOperandBytes, predicateNodeOperandCount,
-                predicateOperandCounts, index.Schema);
+                predicateOperandCounts, index.Schema,
+                selectedA3LayoutResourceLedger);
             if (index.Schema.UsesGeneralPredicateGraphs())
             {
                 predicateOperations = new TrRmPredicateOperationTableReader(
@@ -1685,7 +1693,8 @@ public static class TrRmStructuralMetadataValidator
                     predicateNodeOperandBytes, predicateNodeOperandCount,
                     predicateReadDependencyCount, predicateGraphs,
                     predicateReadFootprints, predicateChildEdges, predicateCaptures,
-                    methods, signatures, typeSpecs, contracts);
+                    methods, signatures, typeSpecs, contracts,
+                    selectedA3LayoutResourceLedger);
         }
         if (index.Schema.UsesGeneralPredicateGraphs())
         {

@@ -44,9 +44,17 @@ public readonly ref struct TrRmPredicateGraphTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated PredicateGraph rows.</summary>
-    public int Count => _recordCount;
+    public int Count
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork();
+            return _recordCount;
+        }
+    }
 
     /// <summary>Validates required root-node and read-footprint row bounds.</summary>
     /// <param name="section">The borrowed 8-byte PredicateGraph rows.</param>
@@ -55,6 +63,13 @@ public readonly ref struct TrRmPredicateGraphTableReader
     /// <param name="readFootprintCount">The number of PredicateReadFootprint rows.</param>
     public TrRmPredicateGraphTableReader(ReadOnlySpan<byte> section,
         int recordCount, int nodeCount, int readFootprintCount)
+        : this(section, recordCount, nodeCount, readFootprintCount, null)
+    {
+    }
+
+    internal TrRmPredicateGraphTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int nodeCount, int readFootprintCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(nodeCount)
             || !ValidCount(readFootprintCount)
@@ -65,11 +80,13 @@ public readonly ref struct TrRmPredicateGraphTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
             var rootNode = Read(data, 0);
             var footprint = Read(data, 4);
+            _resourceLedger?.ConsumeWork();
             if (rootNode is 0 or > 0xFF_FFFF || rootNode > (uint)nodeCount
                 || footprint is 0 or > 0xFF_FFFF
                 || footprint > (uint)readFootprintCount)
@@ -89,6 +106,7 @@ public readonly ref struct TrRmPredicateGraphTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidPredicateGraph();
@@ -100,8 +118,12 @@ public readonly ref struct TrRmPredicateGraphTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidPredicateGraph()
         => new("Invalid TRRM PredicateGraph table.");
@@ -114,17 +136,34 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly int[] _childOffsets;
+    private readonly int[] _children;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated PredicateChildEdge rows.</summary>
-    public int Count => _recordCount;
+    public int Count
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork();
+            return _recordCount;
+        }
+    }
 
-    /// <summary>Validates edge references, ordering, graph ownership and tree topology.</summary>
+    /// <summary>Validates edge references, child ordinals, graph ownership and tree topology.</summary>
     /// <param name="section">The borrowed 12-byte PredicateChildEdge rows.</param>
     /// <param name="recordCount">The number of PredicateChildEdge rows.</param>
     /// <param name="nodeCount">The number of PredicateNode rows.</param>
     /// <param name="graphs">The validated PredicateGraph roots.</param>
     public TrRmPredicateChildEdgeTableReader(ReadOnlySpan<byte> section,
         int recordCount, int nodeCount, TrRmPredicateGraphTableReader graphs)
+        : this(section, recordCount, nodeCount, graphs, null)
+    {
+    }
+
+    internal TrRmPredicateChildEdgeTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int nodeCount, TrRmPredicateGraphTableReader graphs,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(nodeCount)
             || (long)recordCount * RowSize != section.Length)
@@ -134,23 +173,28 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        var storageWork = checked(((ulong)nodeCount * 5UL)
+            + ((ulong)recordCount * 2UL) + 10UL);
+        resourceLedger?.ConsumeWork(storageWork);
         var childOffsets = new int[nodeCount + 2];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
             var parent = Read(data, 0);
             var child = Read(data, 8);
             if (parent is 0 or > 0xFF_FFFF || parent > (uint)nodeCount
-                || child is 0 or > 0xFF_FFFF || child > (uint)nodeCount
-                || child <= parent)
+                || child is 0 or > 0xFF_FFFF || child > (uint)nodeCount)
             {
                 throw InvalidPredicateChildEdge();
             }
 
+            _resourceLedger?.ConsumeWork();
             childOffsets[checked((int)parent) + 1]++;
         }
         for (var index = 1; index < childOffsets.Length; index++)
         {
+            _resourceLedger?.ConsumeWork(2);
             childOffsets[index] = checked(childOffsets[index] + childOffsets[index - 1]);
         }
 
@@ -161,6 +205,7 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
             var data = GetRow(row);
             var parent = checked((int)Read(data, 0));
             var ordinal = Read(data, 4);
+            _resourceLedger?.ConsumeWork(2);
             var parentFirst = childOffsets[parent];
             var parentCount = childOffsets[parent + 1] - parentFirst;
             if (ordinal >= (uint)parentCount)
@@ -175,12 +220,14 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
             }
 
             Set(ordinalSet, childIndex);
+            _resourceLedger?.ConsumeWork();
             children[childIndex] = checked((int)Read(data, 8));
         }
 
         var rootFlags = new byte[(nodeCount + 7) / 8];
         for (var graph = 1; graph <= graphs.Count; graph++)
         {
+            _resourceLedger?.ConsumeWork();
             var root = graphs.GetRootNodeRow(graph);
             if (root > nodeCount || IsRoot(rootFlags, root))
             {
@@ -190,40 +237,59 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
             SetRoot(rootFlags, root);
         }
 
-        var pending = new int[nodeCount];
-        var nextNodeRow = 1;
-        for (var root = 1; root <= nodeCount; root++)
+        var hasParent = new byte[nodeCount + 1];
+        foreach (var child in children)
         {
-            if (!IsRoot(rootFlags, root))
-            {
-                continue;
-            }
-            if (root != nextNodeRow)
+            _resourceLedger?.ConsumeWork(2);
+            if (hasParent[child] != 0)
             {
                 throw InvalidPredicateChildEdge();
             }
 
+            hasParent[child] = 1;
+        }
+        for (var node = 1; node <= nodeCount; node++)
+        {
+            _resourceLedger?.ConsumeWork(2);
+            if (IsRoot(rootFlags, node) == (hasParent[node] != 0))
+            {
+                throw InvalidPredicateChildEdge();
+            }
+        }
+
+        var pending = new int[nodeCount];
+        var visited = new byte[(nodeCount + 7) / 8];
+        for (var graph = 1; graph <= graphs.Count; graph++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var root = graphs.GetRootNodeRow(graph);
+            if (IsSet(visited, root - 1))
+            {
+                throw InvalidPredicateChildEdge();
+            }
+
+            Set(visited, root - 1);
+            _resourceLedger?.ConsumeWork();
             var pendingCount = 0;
             pending[pendingCount++] = root;
             while (pendingCount != 0)
             {
+                _resourceLedger?.ConsumeWork();
                 var parent = pending[--pendingCount];
-                if (parent != nextNodeRow)
-                {
-                    throw InvalidPredicateChildEdge();
-                }
-                nextNodeRow++;
-
                 var firstChild = childOffsets[parent];
                 var childEnd = childOffsets[parent + 1];
-                for (var child = childEnd - 1; child >= firstChild; child--)
+                for (var child = firstChild; child < childEnd; child++)
                 {
+                    _resourceLedger?.ConsumeWork(2);
                     var childRow = children[child];
-                    if (IsRoot(rootFlags, childRow))
+                    if (IsRoot(rootFlags, childRow)
+                        || IsSet(visited, childRow - 1))
                     {
                         throw InvalidPredicateChildEdge();
                     }
 
+                    Set(visited, childRow - 1);
+                    _resourceLedger?.ConsumeWork(2);
                     if (pendingCount == pending.Length)
                     {
                         throw InvalidPredicateChildEdge();
@@ -234,10 +300,17 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
             }
         }
 
-        if (nextNodeRow != nodeCount + 1)
+        for (var node = 1; node <= nodeCount; node++)
         {
-            throw InvalidPredicateChildEdge();
+            _resourceLedger?.ConsumeWork();
+            if (!IsSet(visited, node - 1))
+            {
+                throw InvalidPredicateChildEdge();
+            }
         }
+
+        _childOffsets = childOffsets;
+        _children = children;
     }
 
     /// <summary>Gets the one-based PredicateNode parent row.</summary>
@@ -252,8 +325,35 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
     public int GetChildNodeRow(int row)
         => checked((int)Read(GetRow(row), 8));
 
+    /// <summary>Gets the number of ordered children for one-based parent node row.</summary>
+    public int GetChildCount(int parentNodeRow)
+    {
+        _resourceLedger?.ConsumeWork(2);
+        if (parentNodeRow <= 0 || parentNodeRow >= _childOffsets.Length - 1)
+        {
+            throw InvalidPredicateChildEdge();
+        }
+
+        return _childOffsets[parentNodeRow + 1] - _childOffsets[parentNodeRow];
+    }
+
+    /// <summary>Gets an ordered child node by its parent's zero-based ordinal.</summary>
+    public int GetChildNodeRowByOrdinal(int parentNodeRow, uint childOrdinal)
+    {
+        _resourceLedger?.ConsumeWork();
+        var childCount = GetChildCount(parentNodeRow);
+        if (childOrdinal >= (uint)childCount)
+        {
+            throw InvalidPredicateChildEdge();
+        }
+
+        var firstChild = _childOffsets[parentNodeRow];
+        return _children[firstChild + checked((int)childOrdinal)];
+    }
+
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidPredicateChildEdge();
@@ -262,20 +362,28 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static bool IsRoot(byte[] rootFlags, int row)
+    private bool IsRoot(byte[] rootFlags, int row)
     {
+        _resourceLedger?.ConsumeWork();
         var index = row - 1;
         return (rootFlags[index >> 3] & (1 << (index & 7))) != 0;
     }
 
-    private static bool IsSet(byte[] bitSet, int index)
-        => (bitSet[index >> 3] & (1 << (index & 7))) != 0;
-
-    private static void Set(byte[] bitSet, int index)
-        => bitSet[index >> 3] |= (byte)(1 << (index & 7));
-
-    private static void SetRoot(byte[] rootFlags, int row)
+    private bool IsSet(byte[] bitSet, int index)
     {
+        _resourceLedger?.ConsumeWork();
+        return (bitSet[index >> 3] & (1 << (index & 7))) != 0;
+    }
+
+    private void Set(byte[] bitSet, int index)
+    {
+        _resourceLedger?.ConsumeWork();
+        bitSet[index >> 3] |= (byte)(1 << (index & 7));
+    }
+
+    private void SetRoot(byte[] rootFlags, int row)
+    {
+        _resourceLedger?.ConsumeWork();
         var index = row - 1;
         rootFlags[index >> 3] |= (byte)(1 << (index & 7));
     }
@@ -283,8 +391,12 @@ public readonly ref struct TrRmPredicateChildEdgeTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidPredicateChildEdge()
         => new("Invalid TRRM PredicateChildEdge table.");
@@ -297,9 +409,17 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated PredicateReadFootprint rows.</summary>
-    public int Count => _recordCount;
+    public int Count
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork();
+            return _recordCount;
+        }
+    }
 
     /// <summary>Validates range shape, row bounds and exclusive ownership.</summary>
     /// <param name="section">The borrowed 16-byte PredicateReadFootprint rows.</param>
@@ -308,6 +428,13 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
     /// <param name="dependencyCount">The number of PredicateReadDependency rows.</param>
     public TrRmPredicateReadFootprintTableReader(ReadOnlySpan<byte> section,
         int recordCount, int rootCount, int dependencyCount)
+        : this(section, recordCount, rootCount, dependencyCount, null)
+    {
+    }
+
+    internal TrRmPredicateReadFootprintTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int rootCount, int dependencyCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(rootCount)
             || !ValidCount(dependencyCount)
@@ -318,14 +445,18 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        resourceLedger?.ConsumeWork(checked((ulong)rootCount
+            + (ulong)dependencyCount + 2UL));
         var rootOwnership = new byte[(rootCount + 7) / 8];
         var dependencyOwnership = new byte[(dependencyCount + 7) / 8];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
-            ValidateRange(Read(data, 0), Read(data, 4), rootCount, rootOwnership);
+            ValidateRange(Read(data, 0), Read(data, 4), rootCount,
+                rootOwnership, _resourceLedger);
             ValidateRange(Read(data, 8), Read(data, 12), dependencyCount,
-                dependencyOwnership);
+                dependencyOwnership, _resourceLedger);
         }
     }
 
@@ -347,6 +478,7 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidPredicateReadFootprint();
@@ -356,8 +488,9 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
     }
 
     private static void ValidateRange(uint first, uint count, int targetCount,
-        byte[] ownership)
+        byte[] ownership, TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork();
         if (count == 0)
         {
             if (first != 0)
@@ -378,6 +511,7 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
         var lastIndex = checked((int)last - 1);
         for (var index = firstIndex; index <= lastIndex; index++)
         {
+            resourceLedger?.ConsumeWork(2);
             var byteIndex = index >> 3;
             var mask = (byte)(1 << (index & 7));
             if ((ownership[byteIndex] & mask) != 0)
@@ -392,8 +526,12 @@ public readonly ref struct TrRmPredicateReadFootprintTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidPredicateReadFootprint()
         => new("Invalid TRRM PredicateReadFootprint table.");
@@ -406,9 +544,17 @@ public readonly ref struct TrRmPredicateCaptureTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated PredicateCapture rows.</summary>
-    public int Count => _recordCount;
+    public int Count
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork();
+            return _recordCount;
+        }
+    }
 
     /// <summary>Validates graph references, contiguous ordinals, role flags and types.</summary>
     /// <param name="section">The borrowed 16-byte PredicateCapture rows.</param>
@@ -417,6 +563,13 @@ public readonly ref struct TrRmPredicateCaptureTableReader
     /// <param name="types">The validated TypeSpec table.</param>
     public TrRmPredicateCaptureTableReader(ReadOnlySpan<byte> section,
         int recordCount, int graphCount, TrRmTypeSpecTableReader types)
+        : this(section, recordCount, graphCount, types, null)
+    {
+    }
+
+    internal TrRmPredicateCaptureTableReader(ReadOnlySpan<byte> section,
+        int recordCount, int graphCount, TrRmTypeSpecTableReader types,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (!ValidCount(recordCount) || !ValidCount(graphCount)
             || (long)recordCount * RowSize != section.Length)
@@ -426,16 +579,19 @@ public readonly ref struct TrRmPredicateCaptureTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        resourceLedger?.ConsumeWork(checked((ulong)recordCount + 1UL));
         var identities = new ulong[recordCount];
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             var data = GetRow(row);
             var graph = Read(data, 0);
             var ordinal = Read(data, 4);
-            var role = data[8];
-            var flags = data[9];
-            var reserved = BinaryPrimitives.ReadUInt16LittleEndian(data[10..]);
+            var role = ReadByte(data, 8);
+            var flags = ReadByte(data, 9);
+            var reserved = ReadUInt16(data, 10);
             var typeSpecRef = Read(data, 12);
+            _resourceLedger?.ConsumeWork();
             if (graph is 0 or > 0xFF_FFFF || graph > (uint)graphCount
                 || role is < 1 or > 3
                 || (role == 1 ? (flags & ~1) != 0 : flags != 0)
@@ -445,14 +601,22 @@ public readonly ref struct TrRmPredicateCaptureTableReader
             }
 
             _ = types.GetTypeSpecRef(typeSpecRef);
+            _resourceLedger?.ConsumeWork();
             identities[row - 1] = ((ulong)graph << 32) | ordinal;
         }
 
-        Array.Sort(identities);
+        _resourceLedger?.ConsumeWork();
+        var resourceLedgerForSort = _resourceLedger;
+        Array.Sort(identities, (left, right) =>
+        {
+            resourceLedgerForSort?.ConsumeWork();
+            return left.CompareTo(right);
+        });
         var previousGraph = 0u;
         ulong nextOrdinal = 0;
         foreach (var identity in identities)
         {
+            _resourceLedger?.ConsumeWork();
             var graph = (uint)(identity >> 32);
             var ordinal = unchecked((uint)identity);
             if (graph != previousGraph)
@@ -498,6 +662,7 @@ public readonly ref struct TrRmPredicateCaptureTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidPredicateCapture();
@@ -509,8 +674,25 @@ public readonly ref struct TrRmPredicateCaptureTableReader
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
+
+    private byte ReadByte(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return data[offset];
+    }
+
+    private ushort ReadUInt16(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
+        return BinaryPrimitives.ReadUInt16LittleEndian(
+            data.Slice(offset, sizeof(ushort)));
+    }
 
     private static InvalidDataException InvalidPredicateCapture()
         => new("Invalid TRRM PredicateCapture table.");
