@@ -624,12 +624,14 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         static TrRmStructuralMetadataValidator.ValidatedExecutionTables
             CreateTables(byte[] artifact,
                 TrRmA3LayoutResourceLedger resourceLedger)
-            => TrRmStructuralMetadataValidator
+        {
+            return TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
                     TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
                             artifact),
                     resourceLedger);
+        }
 
         var measuredLedger = new TrRmA3LayoutResourceLedger();
         var measuredTables = CreateTables(consumerArtifact, measuredLedger);
@@ -667,6 +669,60 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         Assert.That(exception!.Required,
             Is.EqualTo(new System.Numerics.BigInteger(
                 TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+    }
+
+    [Test]
+    public void A3BindingPlanRevalidationWorkLimitIsExact()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+        var consumerArtifact = CreateA3GenericArrayConsumerArtifact();
+        var providerArtifact = CreateA3GenericCopyProviderArtifact();
+        byte[][] artifacts = [consumerArtifact, providerArtifact];
+        string[] schemaIdentities = [schemaIdentity, schemaIdentity];
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 1, 1, 2),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 42; }"));
+        Assert.That(compilation.HasErrors, Is.False);
+        var rootProgram = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            consumerArtifact),
+                    resourceLedger);
+            var typeBindings = TrRmFixedArrayProviderBindingValidator.Validate(
+                tables, artifacts, schemaIdentities, modules, 1);
+            var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
+                artifacts, schemaIdentities, modules, 1,
+                TrRmStandardNativeOperation.EmitExecutable,
+                NativeRuntimePolicy.FailFast, null, typeBindings,
+                resourceLedger);
+
+            try
+            {
+                _ = plan.CreateLoweringInputs(
+                    TrRmStandardNativeOperation.EmitExecutable);
+                Assert.Fail("Expected a no-import rejection.");
+            }
+            catch (NotSupportedException exception)
+            {
+                if (exception is TrRmResourceLimitException)
+                {
+                    throw;
+                }
+
+                Assert.That(exception.Message,
+                    Does.Contain("no direct NativeImport"));
+            }
+        });
     }
 
     [Test]
@@ -709,7 +765,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
             try
             {
-                plan.CreateLoweringInputs(
+                _ = plan.CreateLoweringInputs(
                     TrRmStandardNativeOperation.EmitExecutable);
                 Assert.Fail("Expected changed provider bindings to be rejected.");
             }
@@ -726,56 +782,120 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
-    public void A3BindingPlanRevalidationWorkLimitIsExact()
+    public void A3ValueAndLayoutReadersUseTheRootResourceLedger()
     {
-        const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
-        var consumerArtifact = CreateA3GenericArrayConsumerArtifact();
-        var providerArtifact = CreateA3GenericCopyProviderArtifact();
-        byte[][] artifacts = [consumerArtifact, providerArtifact];
-        string[] schemaIdentities = [schemaIdentity, schemaIdentity];
-        var modules = ImmutableArray.Create(
-            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 1, 1, 2),
-            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
-        var compilation = Compilation.Create(SyntaxTree.Parse(
-            "int32 Main() { return 42; }"));
-        Assert.That(compilation.HasErrors, Is.False);
-        var rootProgram = compilation.Program
-            ?? throw new InvalidOperationException(
-                "A successful compilation must contain a bound program.");
+        var artifact = CreateA3GenericArrayConsumerArtifact(
+            includeMeteredReaderTables: true);
+        var ledger = new TrRmA3LayoutResourceLedger();
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                        artifact),
+                ledger);
 
-        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        var workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.Blobs.GetRow(1).Length, Is.EqualTo(4));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.FrozenValueNodes.GetKind(1), Is.EqualTo((byte)1));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.ConstantSources.GetKind(1), Is.EqualTo(1u));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.TargetLayoutDependencies.GetQueryKind(1),
+            Is.EqualTo((byte)3));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.TargetLayoutDependencyFields.GetFieldReference(1),
+            Is.EqualTo(0x1400_0001u));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.FieldPaths.GetFieldReference(1, 0),
+            Is.EqualTo(0x1400_0001u));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateGraphs.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateReadFootprints.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateReadRoots.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateReadDependencies.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateChildEdges.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateCaptures.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateNodes.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.PredicateNodeOperands.Count, Is.Zero);
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+    }
+
+    [Test]
+    public void A3InterfaceBaseReadersUseTheRootResourceLedger()
+    {
+        var artifact = CreateA3GenericArrayConsumerArtifact(
+            includeInterfaceHierarchy: true);
+        var ledger = new TrRmA3LayoutResourceLedger();
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                        artifact),
+                ledger);
+
+        var workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.Interfaces.GetInterfaceDefForTypeDef(3),
+            Is.EqualTo(2));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+
+        workRemaining = ledger.WorkRemaining;
+        Assert.That(tables.InterfaceBases.GetBaseTypeSpecRef(1),
+            Is.EqualTo(6u));
+        Assert.That(ledger.WorkRemaining, Is.LessThan(workRemaining));
+    }
+
+    [Test]
+    public void A3PublishedSelectorReservesItsEmptyStateAtExactWorkBoundary()
+    {
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
         {
-            var tables = TrRmStructuralMetadataValidator
-                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
-                    TrRmArtifactIndex
-                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
-                            consumerArtifact),
-                    resourceLedger);
-            var typeBindings = TrRmFixedArrayProviderBindingValidator.Validate(
-                tables, artifacts, schemaIdentities, modules, 1);
-            var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
-                artifacts, schemaIdentities, modules, 1,
-                TrRmStandardNativeOperation.EmitExecutable,
-                NativeRuntimePolicy.FailFast, null, typeBindings,
-                resourceLedger);
-
-            try
-            {
-                plan.CreateLoweringInputs(
-                    TrRmStandardNativeOperation.EmitExecutable);
-                Assert.Fail("Expected a no-import rejection.");
-            }
-            catch (NotSupportedException exception)
-            {
-                if (exception is TrRmResourceLimitException)
-                {
-                    throw;
-                }
-
-                Assert.That(exception.Message,
-                    Does.Contain("no direct NativeImport"));
-            }
+            var contracts = new TrRmContractTableReader(
+                [], 0, default, default, default,
+                default, default,
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+                ledger);
+            var selectorKinds
+                = TrRmPublishedPredicateSelectorValidator.Validate(
+                    [], 0,
+                    [], 0,
+                    [], 0, 0,
+                    default, default, default, default,
+                    default, default, default, contracts, ledger);
+            Assert.That(selectorKinds, Is.EqualTo(new byte[1]));
         });
     }
 
@@ -1119,10 +1239,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             ledger.ConsumeWork();
         }
 
-        var exception = Assert.Throws<TrRmResourceLimitException>(() =>
-        {
-            ledger.ConsumeWork();
-        });
+        var exception = Assert.Throws<TrRmResourceLimitException>(
+            () => ledger.ConsumeWork());
 
         Assert.That(exception!.Operation,
             Is.EqualTo("trrm.a3-fixed-array-layout/1"));
@@ -1153,10 +1271,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             }
 
             var workRemaining = ledger.WorkRemaining;
-            var exception = Assert.Throws<TrRmResourceLimitException>(() =>
-            {
-                _ = ledger.EnterFrame();
-            });
+            var exception = Assert.Throws<TrRmResourceLimitException>(
+                () => ledger.EnterFrame());
 
             Assert.That(exception!.Dimension, Is.EqualTo("depth"));
             Assert.That(exception.Limit,
@@ -1187,10 +1303,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         using var outerFrame = ledger.EnterFrame();
         var workRemaining = ledger.WorkRemaining;
 
-        var exception = Assert.Throws<TrRmResourceLimitException>(() =>
-        {
-            _ = ledger.EnterFrame();
-        });
+        var exception = Assert.Throws<TrRmResourceLimitException>(
+            () => ledger.EnterFrame());
 
         Assert.That(exception!.Dimension, Is.EqualTo("depth"));
         Assert.That(exception.Required,
@@ -1212,7 +1326,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         Assert.That(TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
             out var kind), Is.False);
         Assert.That(kind, Is.EqualTo(TrRmA3AdmissionFailureKind.None));
-        Assert.Throws<ArgumentNullException>(() =>
+        _ = Assert.Throws<ArgumentNullException>(() =>
             TrRmExecutableCompiler.TryGetA3AdmissionFailure(null!, out _));
     }
 
@@ -1422,11 +1536,9 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     [Test]
     public void A3RejectsConstructedArrayExtentOverflow()
     {
-        _ = Assert.Throws<InvalidDataException>(() =>
-        {
-            _ = CreateA3GenericDeclarationArtifact(includeArray: true,
-                arrayCount: ulong.MaxValue, arrayExtentOverride: 0);
-        });
+        _ = Assert.Throws<InvalidDataException>(
+            () => CreateA3GenericDeclarationArtifact(includeArray: true,
+                arrayCount: ulong.MaxValue, arrayExtentOverride: 0));
     }
 
     [Test]
@@ -2302,16 +2414,31 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
     private static byte[] CreateA3GenericArrayConsumerArtifact(
         bool uniqueNominalActual = false, bool twoFormals = false,
-        uint pack = 16, uint explicitAlignment = 0)
+        uint pack = 16, uint explicitAlignment = 0,
+        bool includeMeteredReaderTables = false,
+        bool includeInterfaceHierarchy = false)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
-        var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
+        var stringRows = new List<(string Text, int Encoding)>
+        {
             ("", 0), ("Root", 0), ("Provider", 0), ("UniqueProvider", 0),
             ("Cell", 0), ("Value", 0), ("T", 0), ("U", 0), ("CellKey", 0),
             ("UniquePayload", 0), ("UniqueKey", 0),
-        ]);
-        var strings = new TrRmStringTableReader(stringsBytes, 11);
+        };
+        var baseInterfaceNameRow = 0;
+        var derivedInterfaceNameRow = 0;
+        if (includeInterfaceHierarchy)
+        {
+            stringRows.Add(("IBase", 0));
+            baseInterfaceNameRow = stringRows.Count;
+            stringRows.Add(("IDerived", 0));
+            derivedInterfaceNameRow = stringRows.Count;
+        }
+
+        var stringsBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var strings = new TrRmStringTableReader(stringsBytes,
+            stringRows.Count);
         var featureRows = new[]
         {
             TrRmFeatureRow.RootlessNativeValues,
@@ -2320,7 +2447,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var featuresBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
         var features = new TrRmFeatureTableReader(featuresBytes,
             featureRows.Length, schema);
-        var typeDefCount = uniqueNominalActual ? 2 : 1;
+        var typeDefCount = (uniqueNominalActual ? 2 : 1)
+            + (includeInterfaceHierarchy ? 2 : 0);
         var genericParamCount = twoFormals ? 2 : 1;
         var moduleRefCount = uniqueNominalActual ? 2 : 1;
         var importCount = moduleRefCount;
@@ -2381,11 +2509,26 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 formalTypeSpecRef));
         }
 
+        var baseInterfaceTypeSpecRef = 0u;
+        var baseInterfaceTypeDefRow = uniqueNominalActual ? 3 : 2;
+        var derivedInterfaceTypeDefRow = baseInterfaceTypeDefRow + 1;
+        if (includeInterfaceHierarchy)
+        {
+            baseInterfaceTypeSpecRef = (uint)typeSpecRows.Count + 1;
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+                (uint)baseInterfaceTypeDefRow));
+            typeSpecRows.Add(TrRmTypeSpecTableWriter.Reference(0x02,
+                (uint)derivedInterfaceTypeDefRow));
+        }
+
         var typeSpecsBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             typeDefCount, importCount, genericParamCount, 0, schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes,
             typeSpecRows.Count, typeDefCount, importCount,
             genericParamCount, 0, schema);
+        var layoutCount = (uniqueNominalActual ? 4 : 2)
+            + (includeInterfaceHierarchy ? 2 : 0);
+        var interfaceLayoutFirst = uniqueNominalActual ? 5 : 3;
         var typeDefRows = new List<TrRmTypeDefRow>
         {
             new TrRmTypeDefRow(1, 5, 0x26, 1, 1, 1,
@@ -2396,8 +2539,14 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             typeDefRows.Add(new TrRmTypeDefRow(1, 10, 0x46,
                 0, 0, 0, 0, 3, 2, 0, 0));
         }
+        if (includeInterfaceHierarchy)
+        {
+            typeDefRows.Add(new TrRmTypeDefRow(1, baseInterfaceNameRow, 14,
+                0, 0, 0, 0, interfaceLayoutFirst, 1, 0, 0));
+            typeDefRows.Add(new TrRmTypeDefRow(1, derivedInterfaceNameRow, 14,
+                0, 0, 0, 0, interfaceLayoutFirst + 1, 1, 0, 0));
+        }
 
-        var layoutCount = uniqueNominalActual ? 4 : 2;
         var typeDefsBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
             strings, modules, 1, genericParamCount, layoutCount, 0, schema);
         var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes,
@@ -2448,6 +2597,13 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             layoutRows.Add(new TrRmLayoutRow(2, 0, 1, 0, 0, 16, 0, 0));
             layoutRows.Add(new TrRmLayoutRow(2, 1, 1, 1, 0, 16, 0, 0));
         }
+        if (includeInterfaceHierarchy)
+        {
+            layoutRows.Add(new TrRmLayoutRow(baseInterfaceTypeDefRow,
+                0, 0, 0, 0, 0, 0, 0));
+            layoutRows.Add(new TrRmLayoutRow(derivedInterfaceTypeDefRow,
+                0, 0, 0, 0, 0, 0, 0));
+        }
 
         var layoutsBytes = TrRmLayoutTableWriter.Encode(layoutRows,
             typeDefs, targetProfiles, 2);
@@ -2485,10 +2641,27 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 3 * stride, alignment),
         ], typeSpecs, targetProfiles, features, modules, schema);
 
+        byte[] interfaceDefBytes = [];
+        byte[] interfaceBaseBytes = [];
+        if (includeInterfaceHierarchy)
+        {
+            interfaceDefBytes = TrRmInterfaceDefTableWriter.Encode([
+                new TrRmInterfaceDefRow(baseInterfaceTypeDefRow,
+                    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+                new TrRmInterfaceDefRow(derivedInterfaceTypeDefRow,
+                    0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0),
+            ], typeDefs, genericParams, 1, 0, 0, 0, 0);
+            var interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes,
+                2, typeDefs, genericParams, 1, 0, 0, 0, 0);
+            interfaceBaseBytes = TrRmInterfaceBaseTableWriter.Encode([
+                new TrRmInterfaceBaseRow(2, 0, baseInterfaceTypeSpecRef),
+            ], typeSpecs, interfaces);
+        }
+
         var sections = new List<TrRmSection>
         {
             new TrRmSection(0x0001, 0, 1, modulesBytes),
-            new TrRmSection(0x0002, 0, 11, stringsBytes),
+            new TrRmSection(0x0002, 0, (uint)stringRows.Count, stringsBytes),
             new TrRmSection(0x0004, 0, (uint)featureRows.Length,
                 featuresBytes),
             new TrRmSection(0x0010, 0, (uint)moduleRefRows.Count,
@@ -2510,6 +2683,47 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         {
             sections.Add(new TrRmSection(0x001A, 0,
                 (uint)constraintCount, constraintsBytes));
+        }
+
+        if (includeMeteredReaderTables)
+        {
+            var blobBytes = TrRmVariableTableWriter.EncodeBlobs([
+                new byte[] { 1, 2, 3, 4 },
+            ]);
+            var blobs = new TrRmBlobTableReader(blobBytes, 1);
+            var frozenValueNodeBytes
+                = TrRmFrozenValueNodeTableWriter.Encode([
+                    new TrRmFrozenValueNodeRow(1, 1, 1, 0, 0, 0),
+                ], typeSpecs, blobs, 0, 0);
+            var constantSourceBytes = TrRmConstantSourceTableWriter.Encode([
+                new TrRmConstantSourceRow(1, 1),
+            ], 1, 0, 0);
+            var dependencyFieldBytes
+                = TrRmTargetLayoutDependencyFieldTableWriter.Encode([
+                    0x1400_0001,
+                ], fields, default);
+            var dependencyBytes = TrRmTargetLayoutDependencyTableWriter.Encode([
+                new TrRmTargetLayoutDependencyRow(3, 0, 0, 1, 1, 1, 1),
+            ], typeSpecs, targetProfiles, 1);
+            var fieldPathBytes = TrRmFieldPathTableWriter.Encode([
+                new TrRmFieldPathRow(1, [0x1400_0001]),
+            ], typeSpecs, fields, default);
+
+            sections.Add(new TrRmSection(0x0003, 0, 1, blobBytes));
+            sections.Add(new TrRmSection(0x0030, 0, 1,
+                constantSourceBytes));
+            sections.Add(new TrRmSection(0x003F, 0, 1,
+                frozenValueNodeBytes));
+            sections.Add(new TrRmSection(0x0045, 0, 1, dependencyBytes));
+            sections.Add(new TrRmSection(0x004A, 0, 1,
+                dependencyFieldBytes));
+            sections.Add(new TrRmSection(0x004B, 0, 1, fieldPathBytes));
+        }
+
+        if (includeInterfaceHierarchy)
+        {
+            sections.Add(new TrRmSection(0x0025, 0, 2, interfaceDefBytes));
+            sections.Add(new TrRmSection(0x0026, 0, 1, interfaceBaseBytes));
         }
 
         sections.Sort(static (left, right)
@@ -2723,7 +2937,6 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var featureBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
         ], schema);
-        var features = new TrRmFeatureTableReader(featureBytes, 1, schema);
         var modulesBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
                 FeatureFirst: 1, FeatureCount: 1),

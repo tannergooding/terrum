@@ -2,12 +2,15 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmPublishedPredicateSelectorTests
+[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes",
+    Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmPublishedPredicateSelectorTests
 {
     private const TrRmArtifactSchema s_schema
         = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
@@ -52,15 +55,15 @@ public sealed class TrRmPublishedPredicateSelectorTests
             [], 0, 1, graphs, resourceLedger);
         var captures = new TrRmPredicateCaptureTableReader(
             [], 0, 1, typeSpecs, resourceLedger);
-        var readRoots = new TrRmPredicateReadRootTableReader(
+        _ = new TrRmPredicateReadRootTableReader(
             fixture.ReadRoots, 1, 0, 0, s_schema, resourceLedger);
         var readDependencies = new TrRmPredicateReadDependencyTableReader(
             [], 0, 1, 0, 0, 0, resourceLedger);
-        var nodes = new TrRmPredicateNodeTableReader(fixture.Nodes, 1, 1,
+        _ = new TrRmPredicateNodeTableReader(fixture.Nodes, 1, 1,
             typeSpecs, s_schema, resourceLedger);
         var operandCounts = new TrRmPredicateTableRowCounts(
             1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
-        var operands = new TrRmPredicateNodeOperandTableReader(
+        _ = new TrRmPredicateNodeOperandTableReader(
             fixture.Operands, 1, operandCounts, s_schema, resourceLedger);
 
         var selectorKinds = TrRmPublishedPredicateSelectorValidator.Validate(

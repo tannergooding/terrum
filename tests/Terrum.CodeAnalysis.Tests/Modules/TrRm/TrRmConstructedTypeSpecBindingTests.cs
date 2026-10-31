@@ -2,13 +2,16 @@
 
 using System;
 using System.Buffers.Binary;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
-public sealed class TrRmConstructedTypeSpecBindingTests
+[SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes",
+    Justification = "NUnit instantiates this fixture through reflection.")]
+internal sealed class TrRmConstructedTypeSpecBindingTests
 {
     [Test]
     public void BindsLocalAndImportedGenericTypeDefinitionsAndAllowsAcyclicForwardArguments()
@@ -22,13 +25,13 @@ public sealed class TrRmConstructedTypeSpecBindingTests
     [Test]
     public void RejectsWrongArityAndTypeSpecReferencesToConstantFormals()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 formalKind: 1, [4, 4])));
 
         var rows = ConstructedRows(formalKind: 2, [1]);
         rows[2] = TrRmTypeSpecTableWriter.Reference(0x04, 1);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 formalKind: 2, [1], typeSpecRows: rows, constantSourceCount: 1)));
     }
@@ -40,12 +43,12 @@ public sealed class TrRmConstructedTypeSpecBindingTests
             formalKind: 2, [1], constantSourceCount: 1,
             constantTypeSpecRef: 2, defaultArgumentRef: 1));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 formalKind: 2, [2], constantSourceCount: 1,
                 constantTypeSpecRef: 2)));
 
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 formalKind: 2, [1], constantSourceCount: 1,
                 constantTypeSpecRef: 2, defaultArgumentRef: 2)));
@@ -54,7 +57,7 @@ public sealed class TrRmConstructedTypeSpecBindingTests
     [Test]
     public void RejectsImportedGenericReferencesWithNonTypeExpectations()
     {
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 formalKind: 1, [4], importedGenericType: true,
                 importExpectedDefId: 0x1600_0001, includeMethodImport: true)));
@@ -65,7 +68,7 @@ public sealed class TrRmConstructedTypeSpecBindingTests
     {
         var rows = ConstructedRows(formalKind: 1, [4]);
         rows[3] = TrRmTypeSpecTableWriter.Wrapped(0x06, 3);
-        Assert.Throws<InvalidDataException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmStructuralMetadataValidator.Validate(CreateArtifact(
                 formalKind: 1, [4], typeSpecRows: rows)));
     }
@@ -74,10 +77,8 @@ public sealed class TrRmConstructedTypeSpecBindingTests
     public void A3ConstructedTypeSpecGraphUsesExactWorkBoundary()
     {
         TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
-        {
-            _ = CreateArtifact(formalKind: 1, [4],
-                resourceLedger: resourceLedger);
-        });
+            CreateArtifact(formalKind: 1, [4],
+                resourceLedger: resourceLedger));
     }
 
     private static ReadOnlyMemory<byte>[] ConstructedRows(byte formalKind, uint[] arguments)
@@ -201,7 +202,7 @@ public sealed class TrRmConstructedTypeSpecBindingTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 constantSourceBytes.AsSpan(row * 8), 1);
             BinaryPrimitives.WriteUInt32LittleEndian(
-                constantSourceBytes.AsSpan(row * 8 + 4), 1);
+                constantSourceBytes.AsSpan((row * 8) + 4), 1);
         }
 
         var sections = new System.Collections.Generic.List<TrRmSection>

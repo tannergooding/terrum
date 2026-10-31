@@ -671,7 +671,8 @@ internal static class TrRmRegisterBodyMapValidator
                 constantValues.ConstantSources, constantValues.FrozenValueNodes,
                 constantValues.Blobs, typeSpecs, constantValues.Features,
                 constantValues.Modules, constantValues.TypeDefs,
-                constantValues.EnumDefs, constantValues.Imports);
+                constantValues.EnumDefs, constantValues.Imports,
+                typeSpecs.ResourceLedger);
         var rightPayload = TrRmConstantSourceValueValidator
             .GetFrozenScalarPayload(rightRow, constantTypeSpecRef, ownerModule,
                 constantValues.ConstantSources, constantValues.FrozenValueNodes,
@@ -3284,7 +3285,7 @@ internal static class TrRmRegisterBodyMapValidator
                         constantValues.FrozenValueNodes, constantValues.Blobs,
                         typeSpecs, constantValues.Features, constantValues.Modules,
                         constantValues.TypeDefs, constantValues.EnumDefs,
-                        constantValues.Imports);
+                        constantValues.Imports, typeSpecs.ResourceLedger);
                     break;
                 default:
                     throw InvalidMap();
