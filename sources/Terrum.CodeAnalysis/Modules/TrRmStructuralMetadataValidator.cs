@@ -518,46 +518,81 @@ public static class TrRmStructuralMetadataValidator
             }
 
             uint profileReference = 0;
-            var pending = new Stack<uint>();
+            A3LayoutResourceLedger?.ConsumeWork(2);
+            var pending = new Stack<(uint TypeSpecRef, ulong Depth)>();
             var visited = new HashSet<int>();
-            pending.Push(typeSpecRef);
+            A3LayoutResourceLedger?.ReserveWorkAtDepth(1, 1);
+            pending.Push((typeSpecRef, 1));
             while (pending.TryPop(out var current))
             {
-                var reference = TypeSpecs.GetTypeSpecRef(current);
-                if (!reference.IsRow || !visited.Add(reference.Row))
+                A3LayoutResourceLedger?.ConsumeWork();
+                A3LayoutResourceLedger?.CheckDepthFromCurrent(current.Depth);
+                var reference = TypeSpecs.GetTypeSpecRef(current.TypeSpecRef);
+                if (!reference.IsRow)
+                {
+                    continue;
+                }
+
+                A3LayoutResourceLedger?.ConsumeWork(2);
+                if (!visited.Add(reference.Row))
                 {
                     continue;
                 }
 
                 var row = TypeSpecs.GetRow(reference.Row);
-                switch (row[0])
+                switch (reference.Form)
                 {
                     case 0x05:
+                    {
                         var typeDef = TypeSpecs.GetNominalTypeDefRow(
-                            BinaryPrimitives.ReadUInt32LittleEndian(row[2..]),
-                            TypeDefs, Imports);
+                            current.TypeSpecRef, TypeDefs, Imports);
                         var (firstFormal, formalCount)
                             = TypeDefs.GetGenericRange(typeDef);
                         for (var ordinal = 0; ordinal < formalCount; ordinal++)
                         {
+                            A3LayoutResourceLedger?.ConsumeWork();
                             if (GenericParams.GetFormalKind(firstFormal + ordinal) == 1)
                             {
-                                pending.Push(TypeSpecs.GetConstructedArgument(
-                                    reference.Row, ordinal));
+                                var genericArgumentRef
+                                    = TypeSpecs.GetConstructedArgument(
+                                        reference.Row, ordinal);
+                                var genericArgumentDepth
+                                    = checked(current.Depth + 1);
+                                A3LayoutResourceLedger?.ReserveWorkAtDepth(1,
+                                    genericArgumentDepth);
+                                pending.Push((genericArgumentRef,
+                                    genericArgumentDepth));
                             }
                         }
                         break;
+                    }
 
                     case >= 0x06 and <= 0x0B:
                     case 0x0E:
-                        pending.Push(BinaryPrimitives.ReadUInt32LittleEndian(
-                            row[2..]));
+                    {
+                        A3LayoutResourceLedger?.ConsumeWork(
+                            sizeof(uint) + 1UL);
+                        var wrapperChildRef
+                            = BinaryPrimitives.ReadUInt32LittleEndian(row[2..]);
+                        var wrapperChildDepth = checked(current.Depth + 1);
+                        A3LayoutResourceLedger?.ReserveWorkAtDepth(1,
+                            wrapperChildDepth);
+                        pending.Push((wrapperChildRef, wrapperChildDepth));
                         break;
+                    }
 
                     case 0x0C:
-                        pending.Push(BinaryPrimitives.ReadUInt32LittleEndian(
-                            row[3..]));
+                    {
+                        A3LayoutResourceLedger?.ConsumeWork(
+                            sizeof(uint) + 1UL);
+                        var qualifiedChildRef
+                            = BinaryPrimitives.ReadUInt32LittleEndian(row[3..]);
+                        var qualifiedChildDepth = checked(current.Depth + 1);
+                        A3LayoutResourceLedger?.ReserveWorkAtDepth(1,
+                            qualifiedChildDepth);
+                        pending.Push((qualifiedChildRef, qualifiedChildDepth));
                         break;
+                    }
 
                     case 0x11:
                         if (profileReference == 0)
@@ -576,8 +611,14 @@ public static class TrRmStructuralMetadataValidator
                             throw InvalidMetadata();
                         }
 
-                        pending.Push(BinaryPrimitives.ReadUInt32LittleEndian(
-                            row[2..]));
+                        A3LayoutResourceLedger?.ConsumeWork(
+                            sizeof(uint) + 1UL);
+                        var arrayElementRef
+                            = BinaryPrimitives.ReadUInt32LittleEndian(row[2..]);
+                        var arrayElementDepth = checked(current.Depth + 1);
+                        A3LayoutResourceLedger?.ReserveWorkAtDepth(1,
+                            arrayElementDepth);
+                        pending.Push((arrayElementRef, arrayElementDepth));
                         break;
                 }
             }
@@ -1654,7 +1695,8 @@ public static class TrRmStructuralMetadataValidator
                 var (first, count) = types.GetContractRange(typeDef);
                 for (var offset = 0; offset < count; offset++)
                 {
-                    selectedA3LayoutResourceLedger?.ConsumeWork(2);
+                    selectedA3LayoutResourceLedger?.ConsumeWork(
+                        sizeof(ushort) + 1UL);
                     if (BinaryPrimitives.ReadUInt16LittleEndian(
                             contracts.GetRow(first + offset)[4..]) == 5)
                     {
@@ -1966,7 +2008,8 @@ public static class TrRmStructuralMetadataValidator
                 typeSpecs, signatures, parameters, methods, types, fields,
                 staticFields, unionCaseDefs, unionCaseFields, textContentShapes,
                 textCaptureShapes, predicateGraphs, predicateCaptures,
-                contracts, generics, imports, features, modules, index.Schema);
+                contracts, generics, imports, features, modules, index.Schema,
+                selectedA3LayoutResourceLedger);
             if (!copyOriginDraft)
             {
                 ValidateStandardNativeImportFeatureAssignments(standardNativeImports,
@@ -2315,57 +2358,84 @@ public static class TrRmStructuralMetadataValidator
         TrRmContractTableReader contracts,
         TrRmGenericParamTableReader genericParams, TrRmImportTableReader imports,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
-        var containsFunctionPointerValueByModule = new bool[modules.Count + 1];
-        for (var field = 1; field <= staticFields.Count; field++)
+        var moduleCount = modules.Count;
+        resourceLedger?.ConsumeWork(checked((ulong)moduleCount + 1UL));
+        var containsFunctionPointerValueByModule = new bool[moduleCount + 1];
+        var staticFieldCount = staticFields.Count;
+        for (var field = 1; field <= staticFieldCount; field++)
         {
+            resourceLedger?.ConsumeWork();
             var ownerType = staticFields.GetOwnerTypeDefRow(field);
             var ownerModule = typeDefs.GetOwnerModule(ownerType);
-            containsFunctionPointerValueByModule[ownerModule] |=
-                typeSpecs.ContainsNativeFunctionPointerValue(
+            var containsFunctionPointerValue
+                = typeSpecs.ContainsNativeFunctionPointerValue(
                     staticFields.GetTypeSpecRef(field), typeDefs,
                     genericParams, imports);
+            resourceLedger?.ConsumeWork();
+            containsFunctionPointerValueByModule[ownerModule] |=
+                containsFunctionPointerValue;
         }
 
-        for (var field = 1; field <= unionCaseFields.Count; field++)
+        var unionCaseFieldCount = unionCaseFields.Count;
+        for (var field = 1; field <= unionCaseFieldCount; field++)
         {
+            resourceLedger?.ConsumeWork();
             var caseDef = unionCaseFields.GetOwnerUnionCaseDef(field);
             var ownerType = unionCaseDefs.GetOwnerTypeDef(caseDef);
             var ownerModule = typeDefs.GetOwnerModule(ownerType);
-            containsFunctionPointerValueByModule[ownerModule] |=
-                typeSpecs.ContainsNativeFunctionPointerValue(
+            var containsFunctionPointerValue
+                = typeSpecs.ContainsNativeFunctionPointerValue(
                     unionCaseFields.GetTypeSpecRef(field), typeDefs,
                     genericParams, imports);
+            resourceLedger?.ConsumeWork();
+            containsFunctionPointerValueByModule[ownerModule] |=
+                containsFunctionPointerValue;
         }
 
-        for (var capture = 1; capture <= textCaptureShapes.Count; capture++)
+        var textCaptureCount = textCaptureShapes.Count;
+        for (var capture = 1; capture <= textCaptureCount; capture++)
         {
+            resourceLedger?.ConsumeWork();
             var shape = textCaptureShapes.GetShapeRow(capture);
             var ownerType = textContentShapes.GetGeneratedTypeDef(shape);
             var ownerModule = typeDefs.GetOwnerModule(ownerType);
-            containsFunctionPointerValueByModule[ownerModule] |=
-                typeSpecs.ContainsNativeFunctionPointerValue(
+            var containsFunctionPointerValue
+                = typeSpecs.ContainsNativeFunctionPointerValue(
                     textCaptureShapes.GetTypeSpecRef(capture), typeDefs,
                     genericParams, imports);
+            resourceLedger?.ConsumeWork();
+            containsFunctionPointerValueByModule[ownerModule] |=
+                containsFunctionPointerValue;
         }
 
-        var predicateGraphOwnerModules = new int[predicateGraphs.Count + 1];
-        for (var method = 1; method <= methods.Count; method++)
+        var predicateGraphCount = predicateGraphs.Count;
+        resourceLedger?.ConsumeWork(
+            checked((ulong)predicateGraphCount + 1UL));
+        var predicateGraphOwnerModules = new int[predicateGraphCount + 1];
+        var methodCount = methods.Count;
+        for (var method = 1; method <= methodCount; method++)
         {
+            resourceLedger?.ConsumeWork();
             foreach (var predicate in contracts.GetPredicateGraphContracts(method))
             {
+                resourceLedger?.ConsumeWork();
                 var graph = predicate.PredicateGraphRow;
                 if (graph > 0 && graph < predicateGraphOwnerModules.Length)
                 {
+                    resourceLedger?.ConsumeWork();
                     predicateGraphOwnerModules[graph]
                         = methods.GetOwnerModule(method);
                 }
             }
         }
 
-        for (var capture = 1; capture <= predicateCaptures.Count; capture++)
+        var predicateCaptureCount = predicateCaptures.Count;
+        for (var capture = 1; capture <= predicateCaptureCount; capture++)
         {
+            resourceLedger?.ConsumeWork();
             if (predicateCaptures.GetRole(capture) is not (1 or 2))
             {
                 continue;
@@ -2375,52 +2445,77 @@ public static class TrRmStructuralMetadataValidator
             var ownerModule = predicateGraphOwnerModules[graph];
             if (ownerModule != 0)
             {
-                containsFunctionPointerValueByModule[ownerModule] |=
-                    typeSpecs.ContainsNativeFunctionPointerValue(
+                var containsFunctionPointerValue
+                    = typeSpecs.ContainsNativeFunctionPointerValue(
                         predicateCaptures.GetCapturedTypeSpecRef(capture),
                         typeDefs, genericParams, imports);
+                resourceLedger?.ConsumeWork();
+                containsFunctionPointerValueByModule[ownerModule] |=
+                    containsFunctionPointerValue;
             }
         }
 
-        for (var module = 1; module <= modules.Count; module++)
+        for (var module = 1; module <= moduleCount; module++)
         {
+            resourceLedger?.ConsumeWork();
             var containsFunctionPointerValue
                 = containsFunctionPointerValueByModule[module];
             var (methodStart, methodEnd) = modules.GetMethodDefRange(module);
             for (var method = methodStart; method < methodEnd; method++)
             {
+                resourceLedger?.ConsumeWork();
                 var signature = methods.GetSignature(method);
-                containsFunctionPointerValue |= typeSpecs.ContainsNativeFunctionPointerValue(
-                    signatures.GetResultTypeSpec(signature), typeDefs, genericParams,
-                    imports);
+                var containsResultFunctionPointerValue
+                    = typeSpecs.ContainsNativeFunctionPointerValue(
+                        signatures.GetResultTypeSpec(signature), typeDefs,
+                        genericParams, imports);
+                resourceLedger?.ConsumeWork();
+                containsFunctionPointerValue
+                    |= containsResultFunctionPointerValue;
                 var receiverTypeSpec = signatures.GetReceiverTypeSpec(signature);
                 if (receiverTypeSpec != 0)
                 {
-                    containsFunctionPointerValue |= typeSpecs
+                    var containsReceiverFunctionPointerValue = typeSpecs
                         .ContainsNativeFunctionPointerValue(receiverTypeSpec,
                             typeDefs, genericParams, imports);
+                    resourceLedger?.ConsumeWork();
+                    containsFunctionPointerValue
+                        |= containsReceiverFunctionPointerValue;
                 }
 
                 var (parameterStart, parameterCount) = signatures.GetParamRange(signature);
                 for (var parameter = 0; parameter < parameterCount; parameter++)
                 {
-                    containsFunctionPointerValue |= typeSpecs.ContainsNativeFunctionPointerValue(
-                        parameters.GetTypeSpec(parameterStart + parameter), typeDefs,
-                        genericParams, imports);
+                    resourceLedger?.ConsumeWork();
+                    var containsParameterFunctionPointerValue
+                        = typeSpecs.ContainsNativeFunctionPointerValue(
+                            parameters.GetTypeSpec(parameterStart + parameter),
+                            typeDefs, genericParams, imports);
+                    resourceLedger?.ConsumeWork();
+                    containsFunctionPointerValue
+                        |= containsParameterFunctionPointerValue;
                 }
             }
 
             var (typeStart, typeEnd) = modules.GetTypeDefRange(module);
             for (var type = typeStart; type < typeEnd; type++)
             {
+                resourceLedger?.ConsumeWork();
                 var (fieldStart, fieldEnd) = typeDefs.GetFieldRange(type);
                 for (var field = fieldStart; field < fieldEnd; field++)
                 {
-                    containsFunctionPointerValue |= typeSpecs.ContainsNativeFunctionPointerValue(
-                        fields.GetTypeSpecRef(field), typeDefs, genericParams, imports);
+                    resourceLedger?.ConsumeWork();
+                    var containsFieldFunctionPointerValue
+                        = typeSpecs.ContainsNativeFunctionPointerValue(
+                            fields.GetTypeSpecRef(field), typeDefs,
+                            genericParams, imports);
+                    resourceLedger?.ConsumeWork();
+                    containsFunctionPointerValue
+                        |= containsFieldFunctionPointerValue;
                 }
             }
 
+            resourceLedger?.ConsumeWork();
             if (containsFunctionPointerValue
                 && !TrRmFeatureManifestValidator.Requires(features, modules,
                     module, TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
