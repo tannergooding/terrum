@@ -34,6 +34,60 @@ usage-error path before output replacement. This implementation follows the unap
 [source arithmetic selection proposal](../proposals/source-arithmetic-profile-selection.md);
 it does not adopt or amend the selected `terrum.cli/1` protocol.
 
+## Provisional TRRM source schema selection
+
+The experimental `compile-trrm` command accepts
+`--trrm-schema <exact-schema-identity>` for Standard source production. The
+current exact selections are `trrm/1-draft-layout-queries-1` and
+`trrm/1-draft-nominal-enums-1`; omission preserves the existing Development
+`Emit` behavior. Unknown, malformed, repeated and ineligible options are
+usage errors, and a failed selected emission does not replace the output.
+The public `EmitStandard` API also selects the unapproved
+`trrm/1-draft-foreign-invocation-contracts-1` (F) and
+`trrm/1-draft-foreign-invocation-storage-addresses-1` (F+S) and
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-2` (A2) identities.
+The CLI does not accept an explicit `NativeCoreRegistration` input, so it
+cannot author the NativeImport source required by these bounded producers.
+Artifact commands accept exact per-artifact F or F+S schema identities and a
+root Module identity, plus repeatable explicitly selected provider
+schema/path pairs including A2; they preflight selections before reading
+artifacts, and the Development default remains unchanged. Exact A3 selection
+uses `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`; the
+flag-free `...-3` identity is not an alias. For an A3 root only, marked
+admission failures map to experimental `TRM5001`/1 (invalid metadata),
+`TRM5005`/1 (target-layout overflow), `TRM5006`/1 (unsupported admission),
+and `TRM5007`/2 (deterministic resource refusal). A2 retains its existing
+`TRM5001`/1 behavior, and unmarked failures are not promoted to admission
+diagnostics. These A3-only codes and the host resource envelope are
+provisional candidates under the unapproved
+[A3 failure-class proposal](../proposals/standard-trrm-a3-layout-failure-classes.md),
+not `terrum.cli/1` assignments. The A2 CLI route is currently qualified only
+for the inherited scalar F+S path; A2 array metadata and PlaceSelection rows
+are not source-free executable support. The
+bounded F route runs/builds direct NativeImport
+executables and emits direct-import libraries. A provisional
+NativeModuleCompiler path verifies one retained Import against one selected
+F/F+S provider and carries the checked origin/expectation plan through JIT
+and PE lowering. The source-free loader selects exact non-first root/provider
+Module identities, and one root Import can resolve to a distinct leaf provider
+co-located in the root artifact or supplied separately. Other populated
+Modules cannot retain ModuleRefs/Imports; provider chains, additional imports,
+raw-output contracts and wider remapping remain unsupported.
+
+The scalar-local F+S Body path explicitly initializes typed Homes using the
+assigned R14/R15 contextual values, forms `EC`/record `0E` addresses, and
+stages those pointer Homes in NativeParameter CallSites. The selected
+`GetSystemTimeAdjustment` case is supervised through API JIT, CLI JIT and CLI
+AOT; malformed Home write authority and extent reject, and failed AOT
+preflight preserves an existing output. RegisterPlace sources, arrays,
+aggregates, field/index selection, multiple indirect operations, staged
+side-effects and provider NativeParameter runtime qualification remain open.
+The source and consumer surfaces follow the unapproved
+[Standard schema-selection proposal](../proposals/standard-trrm-source-schema-selection.md)
+and [selected-provider consumption proposal](../proposals/standard-trrm-selected-provider-consumption.md);
+the provisional native handoff and F+S delta follow
+[provider-native lowering](../proposals/standard-trrm-provider-native-lowering.md).
+
 ## Provisional normal-backing agreement selection
 
 The source `analyze`, `build`, `build-native-import` and `jit` commands accept
@@ -49,14 +103,19 @@ selected agreement for source-bound classes with scalar/native-address,
 inline-copy and ordinary class-handle fields. They also support local ordinary
 references with the candidate 16-byte/8-aligned carrier and a zero support word
 for stack/inline places: formation, Copy/rebind, reborrow, and scalar or
-inline-Copy reads/writes. This does not extend the referent lifetime. Class
-creation, handle copies, handle-field assignment/replacement, borrowed receiver
-calls, scope retirement, iterative child-handle retirement and checked
-construction rollback remain supported under both runtime policies.
-Support-bearing class/box subplace references, optional-reference operations,
-reference-bearing fields/aggregates, reference parameters/results, by-value
-handle parameters, Cleanup, foreign calls and source-independent indexed
-bodies remain unsupported and reject before emission.
+inline-Copy reads/writes. References to normal-backed class/box subplaces
+capture the selected control and field address, retain one support hold per
+descriptor residence, and release it on rebind, lexical exit and checked
+unwind. References to class-handle slots retain the containing allocation;
+writable slot stores preserve local roots and typed class-field retirement.
+Direct class fields, nested child fields and inline-Copy subplaces are covered
+under both runtime policies. Class creation, handle copies,
+handle-field assignment/replacement, borrowed receiver calls, scope retirement,
+iterative child-handle retirement and checked construction rollback remain
+supported. Optional-reference operations, reference-bearing fields/aggregates,
+reference parameters/results, by-value handle parameters, Cleanup, foreign
+calls and source-independent indexed bodies remain unsupported and reject
+before emission.
 `build-native-import` accepts the selector but still rejects at its
 native-import lowering boundary. No route falls back to the address-only or
 tracing representation. This provisional implementation follows the unapproved

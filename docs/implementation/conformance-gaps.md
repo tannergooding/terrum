@@ -444,12 +444,73 @@ equivalent TypeSpec identities. The direct selected-provider path resolves an
 imported Copy TypeDef by its ModuleRef and ExportKey, compares its fields and
 all Layout variants, derives target geometry, and retains/revalidates the
 provider origin in the Standard native plan. The Debug fast A2/F+S/API/CLI/
-provider-binding selection passed 127/127 with zero skips; this is not array
-source-free or runtime evidence. A2, its allocations and Copy bit remain
-unapproved. Provider dependency chains, complete replacement/remapping,
+provider-binding selection passed 127/127 with zero skips. Provider-owned
+import chains now resolve each exact ModuleRef and ExportKey and validate
+every intermediate Copy expectation against the selected provider; matching
+and same-size/different-field chain cases, plus nested-array field identity
+and same-layout nested replacement rejection, passed in the 27-test A2
+fixed-array layout/provider selection. The follow-up selection passed
+29/29, adding function-pointer anchor equivalence across relocated MethodDef
+rows and rejection of a different anchor signature. These are metadata/provider checks,
+not array source-free or runtime evidence. A2, its allocations and Copy bit
+remain unapproved. Compatible replacement and complete remapping,
 initialization, source-free reconstruction and A2 indexed native/runtime
 lowering remain open; the source-free loader still rejects Section `0x0012`
-and nonempty TypeDef tables.
+and nonempty TypeDef tables. Closed constructed array elements remain incomplete. The exact
+uniqueness-amended A3 identity is
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`; the prior
+flag-free `...-3` identity is not accepted as an alias. Its provisional,
+unapproved proposal adds A3-only TypeDef `DeclaredUnique=0x40`, exclusive
+with Copy `0x20`, requires Feature `2/1` for either positive fact, and
+requires Unique evidence for A3 Cleanup declarations. A2 remains unchanged.
+The A3 consumer now performs closed actual substitution, domain and
+qualification checks, nested field geometry/RootlessCopy validation, and
+generic provider binding across exact A3 selections. Local layout now keys
+recursive visits by normalized constructed identity: finite repeated generic
+definitions succeed while direct same-instance inline cycles reject. Tests
+also cover nested closed arrays, Transparent-over-void, pack/alignment,
+zero extents and aggregate overflow. Provider-geometry cases bind matching
+packed declarations and reject a selected provider with a different derived
+alignment. A compatible replacement with a relocated provider TypeDef row
+binds through the preserved export key. The validator compares formal
+domains/defaults/constraints, Copy/Unique and Layout commitments, ordered
+field templates and nested constructed identities; generic and Unique
+dependencies cannot bind to A2 providers. Direct generic values and
+unconstructed generic definitions/imports in Body TypeMaps reject. A
+plan-level test confirms retained A3 bindings are revalidated before the
+current no-`NativeImport` lowering boundary; it is not public source-free
+provider execution evidence. The
+combined A3 layout/provider/Body-map/TypeSpec/emission/CLI matrix passed
+159/159 with zero skips at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-10-31_04_31_06_net11.0.trx`.
+Its selected-schema CLI cases still exercise inherited nongeneric
+NativeParameter operations only. A provisional implementation of the
+[A3 failure-class companion proposal](../proposals/standard-trrm-a3-layout-failure-classes.md)
+now adds the host exception/classifier boundary, exact-root exception markers,
+post-handoff marker removal, selected-module resource context, and A3-only
+CLI mapping. CLI regressions exercise invalid metadata, unsupported admission,
+target overflow and work exhaustion through both build and run, including
+status/code checks and retained-output preservation; A2 still reports
+`TRM5001`/1. The root ledger is shared through Standard structural
+loading, TypeSpec/Feature/Body validation, fixed-array table decoding, layout,
+A3/A2 selected-provider checks and binding-plan revalidation. Inclusive
+work/depth reservation, iterative child-state insertion, provider depth
+context and constructed-identity payload charges are covered. The bounded
+expansion subtask is complete; the full deterministic field/action/payload
+recipe and every remaining table/body/provider state charge are still
+unfinished in the resource-ledger task. The latest focused A3/A2
+layout/provider/Body-map/CLI selection passed 114/114 with zero skips at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-10-31_06_08_37_net11.0.trx`.
+The latest normal Debug analyzer/style build still fails on the repository
+baseline; the normalized comparison to
+`artifacts\\log\\a3-layout-analyzer-check-final.log` has 353 unique diagnostic
+identities on each side, with no additions or removals.
+
+Source production, source-free generic reconstruction and
+remapping/replacement, generic-array CLI JIT/AOT and supervised
+constructed-array runtime behavior remain open. The failure-class proposal
+remains unapproved and only provisionally actionable; this candidate does
+not admit general generic execution/export or establish conformance.
 
 The separate unapproved source-contract proposal's `[E; N]` form is now
 provisionally parsed and bound for initialized local storage. The former
@@ -462,10 +523,18 @@ references, and page-probed JIT/AOT frames. Unit
 arrays retain exact N-expression initialization and execute indexed reads and
 writes with a dynamic bounds-checked index; zero-extent element addresses are
 rejected. This does not approve the source contract or establish all required
-cases. Pointer-bearing nested-array provenance, distinct Copy
-Transparent-over-void nominal elements, ConstEval-call extent
-evaluation, A2 PlaceSelection index transport/remapping, full-width local-frame
-offsets, provenance/transformation, and other declaration contexts remain open.
+cases. Source array identities now resolve through canonical table rows that
+carry complete element identity, exact count and checked geometry; locals no
+longer duplicate that layout in a sidecar. Pointer-bearing nested-array
+provenance, distinct Copy Transparent-over-void nominal elements, ConstEval
+extents in whole-array function signatures, field initialization/access, A2
+PlaceSelection index
+transport/remapping, full-width local-frame offsets, provenance/transformation,
+and other declaration contexts remain open. Local and struct-field extents
+require exact `uint64` and transparent aliases evaluate eligible scalar
+`ConstEval` calls through the existing bounded required-constant path; struct
+field layout derives from the array row. Whole-array function signatures
+continue to reject because no call ABI is selected.
 Private semantic revision 100 is a separate unapproved provisional schema
 that inherits revision 99's u64 tag-35 storage-address extents and adds
 structural array rows and flat direct-local operations. Nested and
