@@ -21,6 +21,8 @@ public static partial class TrRmExecutableCompiler
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
         if (program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty             || !program.Classes.IsEmpty
+            || program.Structures.Any(static structure =>
+                structure.StandardTypeOrigin is not null)
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || !program.NativePointerTypes.IsEmpty

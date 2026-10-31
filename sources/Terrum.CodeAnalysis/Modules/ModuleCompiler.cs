@@ -5043,6 +5043,13 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
+        if (program.Structures.Any(static structure =>
+                structure.StandardTypeOrigin is not null))
+        {
+            throw new ModuleContractException(
+                "Private semantic modules do not preserve Standard TypeDef origins.");
+        }
+
         if (module.NativeFixedArrayTypes.IsDefault
             || !NativeFixedArrayContract.IsValidTable(module.Structures,
                 module.NativeFixedArrayTypes))

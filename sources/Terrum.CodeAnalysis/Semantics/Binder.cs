@@ -31,6 +31,7 @@ internal sealed partial class Binder
     private readonly List<Signature> _signatures = [];
     private readonly List<NativeFunctionPointerSignatureDefinition> _nativeFunctionPointerSignatures = [];
     private readonly List<NativePointerTypeDefinition> _nativePointerTypes = [];
+    private readonly List<BoundNativeFixedArrayType> _nativeFixedArrayTypes = [];
     private readonly List<CheckedReferenceTypeDefinition> _checkedReferenceTypes = [];
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Expression)>
         _pendingNativeCallConvExpressions = [];
@@ -378,10 +379,15 @@ internal sealed partial class Binder
         {
             _nativeFunctionPointerSignatures.AddRange(_reference.NativeFunctionPointerSignatures);
             _nativePointerTypes.AddRange(_reference.NativePointerTypes);
+            _nativeFixedArrayTypes.AddRange(_reference.NativeFixedArrayTypes);
             _checkedReferenceTypes.AddRange(_reference.CheckedReferenceTypes);
             foreach (var structure in _reference.Structures)
             {
-                _structNames.Add(structure.Name, (PrimitiveType)(100 + _structs.Count));
+                if (structure.StandardTypeOrigin?.IsLookupRoot != false)
+                {
+                    _structNames.Add(structure.Name,
+                        (PrimitiveType)(100 + _structs.Count));
+                }
                 _structs.Add(structure);
                 _ = _laidOut.Add(_structs.Count - 1);
             }
@@ -882,6 +888,7 @@ internal sealed partial class Binder
             NativeCoreRegistration = _nativeCoreRegistration,
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
             NativePointerTypes = [.. _nativePointerTypes],
+            NativeFixedArrayTypes = [.. _nativeFixedArrayTypes],
             CheckedReferenceTypes = [.. _checkedReferenceTypes],
             Interfaces = [.. _interfaces],
             GenericNominalTypeDefinitions = [.. _genericNominalTypeDefinitions],
@@ -1618,9 +1625,41 @@ internal sealed partial class Binder
             {
                 Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
-            var width = ValueLayout.Size(type, _structs,
-                [.. _checkedReferenceTypes], _nativeLoweringAgreement);
-            var fieldAlignment = width == 0 ? 1 : ValueAlignment(type);
+            int width;
+            int fieldAlignment;
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                var arrayIndex = NativeFixedArrayTypes.Index(type);
+                if ((uint)arrayIndex >= (uint)_nativeFixedArrayTypes.Count)
+                {
+                    Report("TRM3005",
+                        "A fixed-array field references an absent structural type.",
+                        field.Span);
+                    continue;
+                }
+
+                var array = _nativeFixedArrayTypes[arrayIndex];
+                if (!NativeFixedArrayContract.TryGetLayout(type,
+                        array.ElementType, array.ElementCount, _structs,
+                        _nativeFixedArrayTypes, out var arrayLayout)
+                    || arrayLayout.ByteExtent > int.MaxValue
+                    || arrayLayout.Alignment > int.MaxValue)
+                {
+                    Report("TRM3005",
+                        "A fixed-array field requires a representable complete layout.",
+                        field.Span);
+                    continue;
+                }
+
+                width = (int)arrayLayout.ByteExtent;
+                fieldAlignment = (int)arrayLayout.Alignment;
+            }
+            else
+            {
+                width = ValueLayout.Size(type, _structs,
+                    [.. _checkedReferenceTypes], _nativeLoweringAgreement);
+                fieldAlignment = width == 0 ? 1 : ValueAlignment(type);
+            }
             var duplicate = false;
             foreach (var previous in fields)
             {
@@ -1828,14 +1867,16 @@ internal sealed partial class Binder
         if (!IsStruct(type))
         {
             return ValueLayout.Alignment(type, _structs,
-                [.. _checkedReferenceTypes], _nativeLoweringAgreement);
+                [.. _checkedReferenceTypes], _nativeLoweringAgreement,
+                _nativeFixedArrayTypes);
         }
         if (_structureAlignments.TryGetValue(type, out var alignment))
         {
             return alignment;
         }
         alignment = ValueLayout.Alignment(type, _structs,
-            [.. _checkedReferenceTypes], _nativeLoweringAgreement);
+            [.. _checkedReferenceTypes], _nativeLoweringAgreement,
+            _nativeFixedArrayTypes);
         if (_laidOut.Contains((int)type - 100))
         {
             _structureAlignments.Add(type, alignment);

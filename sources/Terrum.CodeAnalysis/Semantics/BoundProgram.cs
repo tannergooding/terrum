@@ -487,6 +487,8 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
 
+    internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; init; } = [];
+
     internal ImmutableArray<CheckedReferenceTypeDefinition> CheckedReferenceTypes { get; init; } = [];
 
     internal ImmutableArray<BoundInterfaceDefinition> Interfaces { get; init; } = [];
@@ -529,6 +531,23 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 internal sealed record BoundSourceTypeDeclaration(int StructureIndex,
     string Namespace, string Name, BoundStruct DeclarationSnapshot);
 
+internal readonly record struct BoundSourceTypeFeature(
+    uint FeatureId, uint RuleRevision);
+
+internal readonly record struct BoundSourceTypeTargetProfile(
+    uint ProfileId, uint RuleRevision);
+
+internal sealed record BoundSourceTypeProviderSnapshot(
+    string SchemaIdentity, ImmutableArray<byte> ArtifactSnapshot,
+    int ModuleRow, string ModuleIdentity, uint GoverningRuleEdition,
+    uint TargetRequirement, uint RuntimePolicy,
+    ImmutableArray<BoundSourceTypeFeature> Features,
+    ImmutableArray<BoundSourceTypeTargetProfile> TargetProfiles);
+
+internal sealed record BoundStandardTypeOrigin(
+    BoundSourceTypeProviderSnapshot Provider, uint DefinitionId,
+    ImmutableArray<string> ExportKeys, bool IsLookupRoot);
+
 /// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
 public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
@@ -542,6 +561,7 @@ public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fi
 public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> Fields, int Size)
 {
     internal TokenSpanTypeRole TokenSpanRole { get; init; }
+    internal BoundStandardTypeOrigin? StandardTypeOrigin { get; init; }
 
     /// <summary>Whether the value requests declaration-order natural layout; a public commitment also requires <see cref="BlittableTargetRequirement"/>.</summary>
     public bool IsSequential { get; init; }
@@ -1177,9 +1197,30 @@ public sealed record BoundNativePointerWrite(BoundExpression Address, BoundExpre
         };
 }
 
-/// <summary>The verified storage geometry for a bounded native fixed-array carrier.</summary>
-public readonly record struct BoundNativeFixedArrayLayout(PrimitiveType CarrierType, PrimitiveType ElementType,
-    int ElementCount, int ElementStride, int ByteExtent, int Alignment);
+/// <summary>The verified storage geometry for one structural native fixed-array type.</summary>
+public readonly record struct BoundNativeFixedArrayLayout(
+    PrimitiveType CarrierType, PrimitiveType ElementType, ulong ElementCount,
+    ulong ElementStride, ulong ByteExtent, ulong Alignment,
+    ulong RequiredAlignment);
+
+internal readonly record struct BoundNativeFixedArrayType(
+    PrimitiveType ElementType, ulong ElementCount, ulong ElementStride,
+    ulong ByteExtent, ulong Alignment, ulong RequiredAlignment);
+
+internal static class NativeFixedArrayTypes
+{
+    internal const int First = 1 << 29;
+    internal const int MaximumCount = NativePointerTypes.First - First;
+
+    internal static bool IsType(PrimitiveType type)
+        => (int)type is >= First and < NativePointerTypes.First;
+
+    internal static int Index(PrimitiveType type)
+        => checked((int)type - First);
+
+    internal static PrimitiveType Type(int index)
+        => (PrimitiveType)checked(First + index);
+}
 
 /// <summary>A source-ordered initializer for a bounded native fixed-array carrier.</summary>
 public sealed record BoundNativeFixedArrayInitialization(BoundNativeFixedArrayLayout Layout,

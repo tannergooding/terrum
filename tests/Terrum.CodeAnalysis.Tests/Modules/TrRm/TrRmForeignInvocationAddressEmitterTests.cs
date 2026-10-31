@@ -341,6 +341,124 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2TypeReferenceSelectsRootsAndRetainsLocalOrigins()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-type-reference-provider";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Element {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public [Element; 2] Values;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Unused {
+                public int32 Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1,
+        [
+            new TrRmSourceTypeExport("", "Container", "container-key"),
+            new TrRmSourceTypeExport("", "Element", "element-key"),
+        ]);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, [], ["container-key"]);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            artifact);
+
+        Assert.That(reference.Structures, Has.Length.EqualTo(2));
+        Assert.That(reference.Structures.Any(static structure
+            => structure.Name == "Unused"), Is.False);
+        var container = reference.Structures.Single(static structure
+            => structure.Name == "Container");
+        var containerOrigin = container.StandardTypeOrigin;
+        Assert.That(containerOrigin, Is.Not.Null);
+        Assert.That(containerOrigin!.IsLookupRoot, Is.True);
+        Assert.That(containerOrigin.Provider.SchemaIdentity,
+            Is.EqualTo(schemaIdentity));
+        Assert.That(containerOrigin.Provider.ModuleIdentity,
+            Is.EqualTo(moduleIdentity));
+        Assert.That(containerOrigin.Provider.GoverningRuleEdition, Is.EqualTo(1));
+        Assert.That(containerOrigin.Provider.TargetRequirement, Is.EqualTo(1));
+        Assert.That(containerOrigin.Provider.RuntimePolicy, Is.Zero);
+        Assert.That(containerOrigin.Provider.ArtifactSnapshot.AsSpan()
+            .SequenceEqual(artifact), Is.True);
+        Assert.That(containerOrigin.DefinitionId, Is.EqualTo(0x1300_0002u));
+        Assert.That(containerOrigin.ExportKeys, Has.Length.EqualTo(1));
+        Assert.That(containerOrigin.ExportKeys[0], Is.EqualTo("container-key"));
+        var element = reference.Structures.Single(static structure
+            => structure.Name == "Element");
+        Assert.That(element.StandardTypeOrigin!.IsLookupRoot, Is.False);
+        Assert.That(element.StandardTypeOrigin.ExportKeys, Has.Length.EqualTo(1));
+        Assert.That(element.StandardTypeOrigin.ExportKeys[0],
+            Is.EqualTo("element-key"));
+        Assert.That(reference.NativeFixedArrayTypes, Has.Length.EqualTo(1));
+        var multipleRoots = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, moduleIdentity, [],
+            ["container-key", "element-key"]);
+        Assert.That(multipleRoots.Structures, Has.Length.EqualTo(2));
+        Assert.That(multipleRoots.Structures.All(static structure
+            => structure.StandardTypeOrigin!.IsLookupRoot), Is.True);
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                moduleIdentity, [], []));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                moduleIdentity, [], ["missing-key"]));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(providerInput,
+                moduleIdentity, [providerInput], ["container-key"]));
+
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Consumer {
+                public Container Value;
+                public [Container; 2] Values;
+            }
+            """), reference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        Assert.That(consumer.Program!.Structures[1].StandardTypeOrigin
+            ?.IsLookupRoot, Is.True);
+        Assert.That(consumer.Program.NativeFixedArrayTypes, Has.Length.EqualTo(2));
+
+        var closureLookup = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Consumer {
+                    public Element Value;
+                }
+                """), reference);
+        Assert.That(closureLookup.HasErrors, Is.True);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(consumer.Program!,
+                "a2-type-reference-consumer", schemaIdentity, 1));
+
+        var functionConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Read() {
+                return 0;
+            }
+            """), reference);
+        Assert.That(functionConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, functionConsumer.Diagnostics));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(functionConsumer.Program!,
+                ["Read"]));
+        _ = Assert.Throws<ModuleContractException>(() =>
+            NativeModuleCompiler.CreateProducer(functionConsumer.Program!,
+                ["Read"], "A2TypeReferenceConsumer",
+                NativeRuntimePolicy.FailFast));
+    }
+
+    [Test]
     public void StandardA2SourceTypeExportsRejectHandBuiltAndDuplicateMappings()
     {
         const string schemaIdentity

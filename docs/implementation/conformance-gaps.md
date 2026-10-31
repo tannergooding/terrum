@@ -479,11 +479,16 @@ implemented provisionally: source-bound public ordinary Copy declarations
 require explicit namespace/name selection and an exact caller-supplied key;
 exported roots also require explicit keys for every local nominal child in
 their field/array closure. There is no name-derived default or alias. The full
-`TrRmForeignInvocationAddressEmitterTests` class passed 39/39 with zero skips,
-covering explicit keys, closure, empty-map behavior, provider-side Export rows,
-local LoadStandard and invalid/unbound/duplicate selections. Source `CreateStandardReference`
-type-key projection, imported origins/original expectations and replacement
-remapping remain open.
+`CreateStandardReference` type-key projection now selects nonempty explicit
+TypeDef ExportKeys from one local type-only A2 Module, then materializes only
+the selected roots and their required public nominal/array closure. Closure-
+only declarations are not exposed through source name lookup. Projected types
+retain the schema, artifact snapshot, Module requirements, TypeDef identity,
+and selected/closure ExportKeys; Standard and private module producers reject
+the projection rather than losing that origin. Separate provider artifacts,
+imported-origin expectations, replacement/remapping and executable Body
+consumption remain open. The combined A2 emitter/reference/layout selection
+passed 161/161 with zero skips.
 Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact

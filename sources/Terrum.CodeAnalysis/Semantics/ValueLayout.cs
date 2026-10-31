@@ -54,7 +54,8 @@ internal static class ValueLayout
     // Callers have established that all nested layouts are acyclic and complete.
     internal static int Alignment(PrimitiveType type, IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<CheckedReferenceTypeDefinition>? checkedReferenceTypes = null,
-        string? nativeLoweringAgreement = null)
+        string? nativeLoweringAgreement = null,
+        IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null)
     {
         if (BoundGenericNominalTypeTypes.IsType(type))
         {
@@ -92,12 +93,26 @@ internal static class ValueLayout
                 ? 8 : Size(type, structures, checkedReferenceTypes,
                     nativeLoweringAgreement);
         }
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            if (fixedArrayTypes is null
+                || !NativeFixedArrayContract.TryGetLayout(type, structures,
+                    fixedArrayTypes, out var arrayLayout)
+                || arrayLayout.Alignment > int.MaxValue)
+            {
+                throw new NotSupportedException(
+                    "Fixed-array alignment requires its validated type table.");
+            }
+
+            return (int)arrayLayout.Alignment;
+        }
         var structure = structures[(int)type - 100];
         var alignment = 1;
         foreach (var field in structure.Fields)
         {
             alignment = Math.Max(alignment, Alignment(field.Type, structures,
-                checkedReferenceTypes, nativeLoweringAgreement));
+                checkedReferenceTypes, nativeLoweringAgreement,
+                fixedArrayTypes));
         }
         return alignment;
     }

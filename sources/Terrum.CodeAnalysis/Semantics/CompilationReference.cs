@@ -18,7 +18,8 @@ public sealed class CompilationReference
         ImmutableArray<BoundInterfaceDefinition> interfaces = default,
         ImmutableArray<BoundGenericNominalTypeDefinition> genericNominalTypeDefinitions = default,
         ImmutableArray<BoundGenericNominalTypeInstance> genericNominalTypeInstances = default,
-        CoreTaskTypeIdentity? coreTaskType = null)
+        CoreTaskTypeIdentity? coreTaskType = null,
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
@@ -35,6 +36,13 @@ public sealed class CompilationReference
         {
             throw new ArgumentException("The selected checked-reference types are invalid.",
                 nameof(checkedReferenceTypes));
+        }
+        if (!nativeFixedArrayTypes.IsDefault
+            && !NativeFixedArrayContract.IsValidTable(structures,
+                nativeFixedArrayTypes))
+        {
+            throw new ArgumentException("The selected fixed-array types are invalid.",
+                nameof(nativeFixedArrayTypes));
         }
         if (!interfaces.IsDefault && !BoundInterfaceContract.IsValidTable(interfaces,
             static _ => true))
@@ -74,6 +82,8 @@ public sealed class CompilationReference
         NativeFunctionPointerSignatures = nativeFunctionPointerSignatures.IsDefault
             ? [] : nativeFunctionPointerSignatures;
         NativePointerTypes = nativePointerTypes.IsDefault ? [] : nativePointerTypes;
+        NativeFixedArrayTypes = nativeFixedArrayTypes.IsDefault
+            ? [] : nativeFixedArrayTypes;
         NativeCoreRegistration = nativeCoreRegistration;
         EnumDefinitions = enumDefinitions.IsDefault ? [] : enumDefinitions;
         CheckedReferenceTypes = checkedReferenceTypes.IsDefault ? [] : checkedReferenceTypes;
@@ -103,6 +113,8 @@ public sealed class CompilationReference
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; }
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; }
+
+    internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; }
 
     // This host-selected Core profile is deliberately separate from normalized module declarations.
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; }
@@ -144,6 +156,6 @@ public sealed class CompilationReference
             NativeFunctionPointerSignatures, NativePointerTypes,
             NativeCoreRegistration, EnumDefinitions, CheckedReferenceTypes,
             Interfaces, GenericNominalTypeDefinitions, GenericNominalTypeInstances,
-            selection);
+            selection, NativeFixedArrayTypes);
     }
 }

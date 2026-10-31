@@ -385,7 +385,8 @@ public static partial class SemanticVerifier
                 var alignment = width == 0 ? 1 : nested >= 0 && nested < alignments.Length
                     ? alignments[nested] : ValueLayout.Alignment(field.Type,
                         program.Structures, program.CheckedReferenceTypes,
-                        program.NativeLoweringAgreement);
+                        program.NativeLoweringAgreement,
+                        program.NativeFixedArrayTypes);
                 offset = (offset + alignment - 1) & -alignment;
                 if (field.Size != width || field.Offset != offset || (field.IsMutable && !@class.IsMutable)
                     || width < 1 || width > maximumClassFieldSize
@@ -503,7 +504,8 @@ public static partial class SemanticVerifier
                     fieldAlignment = nested >= 0 ? alignments[nested]
                         : ValueLayout.Alignment(field.Type,
                             program.Structures, program.CheckedReferenceTypes,
-                            program.NativeLoweringAgreement);
+                            program.NativeLoweringAgreement,
+                            program.NativeFixedArrayTypes);
                 }
                 var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)

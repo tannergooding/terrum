@@ -3013,7 +3013,8 @@ internal sealed partial class PeCompiler
     private int ScratchSize(PrimitiveType type) => Math.Max(8, Size(type));
     private int ScratchAlignment(PrimitiveType type) =>
         Math.Max(8, ValueLayout.Alignment(type, _program.Structures,
-            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement));
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement,
+            _program.NativeFixedArrayTypes));
     private static int AlignOffset(int offset, int alignment) =>
         checked((offset + alignment - 1) & ~(alignment - 1));
 
