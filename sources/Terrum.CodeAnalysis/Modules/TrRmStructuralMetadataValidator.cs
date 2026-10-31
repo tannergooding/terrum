@@ -1201,12 +1201,14 @@ public static class TrRmStructuralMetadataValidator
             : new TrRmBodyTableReader(bodyBytes, bodyCount, index.Schema,
                 selectedA3LayoutResourceLedger);
 
-        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        var strings = new TrRmStringTableReader(stringBytes, stringCount,
+            selectedA3LayoutResourceLedger);
         strings.ValidateShapes(stringCount);
         var features = new TrRmFeatureTableReader(featureBytes, featureCount,
             index.Schema, selectedA3LayoutResourceLedger);
         var modules = new TrRmModuleTableReader(moduleBytes, moduleCount, strings,
-            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount);
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
+            featureCount, selectedA3LayoutResourceLedger);
         for (var module = 1; module <= modules.Count; module++)
         {
             if (modules.GetGoverningRuleEdition(module) != 1)
@@ -1238,7 +1240,7 @@ public static class TrRmStructuralMetadataValidator
             }
         }
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes, moduleRefCount,
-            strings, modules);
+            strings, modules, selectedA3LayoutResourceLedger);
         var selectedNativeFunctionPointerSignatureCount = developmentProfile
             ? nativeFunctionPointerSignatureCount : 0;
         var typeSpecs = typeSpecCount == 0
@@ -1255,7 +1257,7 @@ public static class TrRmStructuralMetadataValidator
             : default;
         var types = new TrRmTypeDefTableReader(typeDefBytes, typeDefCount,
             strings, modules, fieldDefCount, genericParamCount, layoutCount,
-            contractCount, index.Schema);
+            contractCount, index.Schema, selectedA3LayoutResourceLedger);
         if (index.Schema.SupportsDeclaredCopyEvidence())
         {
             for (var typeDef = 1; typeDef <= types.Count; typeDef++)
@@ -1273,7 +1275,8 @@ public static class TrRmStructuralMetadataValidator
         }
 
         var targetProfiles = new TrRmTargetProfileTableReader(
-            targetProfileBytes, targetProfileCount, index.Schema);
+            targetProfileBytes, targetProfileCount, index.Schema,
+            selectedA3LayoutResourceLedger);
         if (index.Schema.UsesRootPinRuntime())
         {
             for (var module = 1; module <= modules.Count; module++)
@@ -1291,7 +1294,8 @@ public static class TrRmStructuralMetadataValidator
             }
         }
         var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
-            types, targetProfiles, layoutFieldCount);
+            types, targetProfiles, layoutFieldCount,
+            selectedA3LayoutResourceLedger);
         if (index.Schema.UsesRootPinRuntime()
             && targetProfiles.TryGetProfile(
                 TrRmTargetProfileTableReader.WindowsX64RootPinProfileId,
@@ -1331,9 +1335,10 @@ public static class TrRmStructuralMetadataValidator
         }
         var fields = fieldDefCount == 0 ? default
             : new TrRmFieldDefTableReader(fieldDefBytes, fieldDefCount, strings, types,
-                typeSpecs);
+                typeSpecs, selectedA3LayoutResourceLedger);
         var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
-            layoutFieldCount, layouts, types, fields);
+            layoutFieldCount, layouts, types, fields,
+            selectedA3LayoutResourceLedger);
         var fixedArrayLayouts = index.Schema.UsesForeignInvocationStorageFixedArrays()
             ? new TrRmFixedArrayLayoutTableReader(fixedArrayLayoutBytes,
                 fixedArrayLayoutCount, typeSpecs, targetProfiles, features,
@@ -1377,7 +1382,7 @@ public static class TrRmStructuralMetadataValidator
         var selectedConstantSourceCount = developmentProfile ? 0 : constantSourceCount;
         var generics = new TrRmGenericParamTableReader(genericParamBytes, genericParamCount,
             strings, types, methods, signatures, typeSpecs, constraintCount,
-            selectedConstantSourceCount);
+            selectedConstantSourceCount, selectedA3LayoutResourceLedger);
         var interfaces = default(TrRmInterfaceDefTableReader);
         var associatedTypeDefs = default(TrRmAssociatedTypeDefTableReader);
         var interfaceWitnesses = default(TrRmInterfaceWitnessTableReader);
@@ -1542,7 +1547,8 @@ public static class TrRmStructuralMetadataValidator
                 strings, moduleRefs, types, methods, properties,
                 interfaces, associatedTypeDefs, fields, features, modules,
                 index.Schema, associatedConstDefs, staticFields,
-                staticFieldContracts, intrinsicRegistrations);
+                staticFieldContracts, intrinsicRegistrations,
+                selectedA3LayoutResourceLedger);
             for (var formal = 1; formal <= generics.Count; formal++)
             {
                 if (generics.GetFormalKind(formal) != 2
@@ -1617,7 +1623,7 @@ public static class TrRmStructuralMetadataValidator
 
         var constraints = constraintCount == 0 ? default
             : new TrRmConstraintTableReader(constraintBytes, constraintCount,
-                generics, typeSpecs);
+                generics, typeSpecs, selectedA3LayoutResourceLedger);
         var contracts = developmentProfile
             ? new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs,
@@ -1848,7 +1854,7 @@ public static class TrRmStructuralMetadataValidator
                 strings, moduleRefs, types, methods, properties, interfaces,
                 associatedTypeDefs, fields, features, modules, index.Schema,
                 associatedConstDefs, staticFields, staticFieldContracts,
-                intrinsicRegistrations);
+                intrinsicRegistrations, selectedA3LayoutResourceLedger);
         }
         if (copyOriginDraft)
         {

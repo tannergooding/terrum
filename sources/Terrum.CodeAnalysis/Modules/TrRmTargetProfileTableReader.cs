@@ -23,6 +23,7 @@ public readonly ref struct TrRmTargetProfileTableReader
     private const int RowSize = 8;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmArtifactSchema _schema;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated TargetProfile rows.</summary>
     public int Count { get; }
@@ -36,8 +37,10 @@ public readonly ref struct TrRmTargetProfileTableReader
     }
 
     internal TrRmTargetProfileTableReader(ReadOnlySpan<byte> section,
-        int recordCount, TrRmArtifactSchema schema)
+        int recordCount, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || schema is not (TrRmArtifactSchema.Standard
@@ -58,23 +61,30 @@ public readonly ref struct TrRmTargetProfileTableReader
 
         _rows = section;
         _schema = schema;
+        _resourceLedger = resourceLedger;
         Count = recordCount;
+        _resourceLedger?.ConsumeWork();
         var profiles = new HashSet<(uint ProfileId, uint RuleRevision)>();
         for (var row = 0; row < recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var profileId = Read(row, 0);
             var ruleRevision = Read(row, 4);
+            _resourceLedger?.ConsumeWork(2);
             if (profileId == 0 || ruleRevision == 0
-                || !profiles.Add((profileId, ruleRevision)))
+                || profiles.Contains((profileId, ruleRevision)))
             {
                 throw InvalidProfile();
             }
+            _resourceLedger?.ConsumeWork();
+            _ = profiles.Add((profileId, ruleRevision));
         }
     }
 
     /// <summary>Gets a validated TargetProfile row by its one-based row number.</summary>
     public TrRmTargetProfileRow GetProfile(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > Count)
         {
             throw InvalidProfile();
@@ -91,7 +101,9 @@ public readonly ref struct TrRmTargetProfileTableReader
     {
         for (var candidate = 1; candidate <= Count; candidate++)
         {
+            _resourceLedger?.ConsumeWork();
             var profile = GetProfile(candidate);
+            _resourceLedger?.ConsumeWork(2);
             if (profile.ProfileId == profileId && profile.RuleRevision == ruleRevision
                 && IsAssigned(profileId, ruleRevision, _schema))
             {
@@ -117,6 +129,7 @@ public readonly ref struct TrRmTargetProfileTableReader
 
     internal bool IsAssignedProfileReference(uint profileRow)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (profileRow == 0 || profileRow > (uint)Count)
         {
             return false;
@@ -127,8 +140,11 @@ public readonly ref struct TrRmTargetProfileTableReader
     }
 
     private uint Read(int row, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
             _rows.Slice((row * RowSize) + offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidProfile()
         => new("Invalid TRRM TargetProfile table.");

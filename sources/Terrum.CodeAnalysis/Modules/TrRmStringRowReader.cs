@@ -21,6 +21,28 @@ public static class TrRmStringRowReader
     internal static void ValidateShape(ReadOnlySpan<byte> row)
         => _ = Content(row);
 
+    internal static int GetDecodedCharacterCount(ReadOnlySpan<byte> row)
+    {
+        var content = Content(row);
+        try
+        {
+            return row[0] switch
+            {
+                0 when IsValidAsciiText(content) => content.Length,
+                0 => throw InvalidRow(),
+                1 => s_utf8.GetCharCount(content),
+                2 => s_utf16.GetCharCount(content),
+                3 => s_utf32.GetCharCount(content),
+                _ => throw InvalidRow(),
+            };
+        }
+        catch (DecoderFallbackException exception)
+        {
+            throw new InvalidDataException(
+                "Invalid TRRM String name encoding.", exception);
+        }
+    }
+
     private static string DecodeText(ReadOnlySpan<byte> row, bool allowEmpty)
     {
         var content = Content(row);

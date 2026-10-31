@@ -15,12 +15,22 @@ public readonly ref struct TrRmModuleRefTableReader
     private readonly TrRmStringTableReader _strings;
     private readonly TrRmModuleTableReader _modules;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public int Count => _recordCount;
 
     public TrRmModuleRefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules)
+        : this(section, recordCount, strings, modules, null)
     {
+    }
+
+    internal TrRmModuleRefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmModuleTableReader modules,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.ModuleRefCount
             || (long)recordCount * RowSize != section.Length)
@@ -32,14 +42,18 @@ public readonly ref struct TrRmModuleRefTableReader
         _strings = strings;
         _modules = modules;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var module = 1; module <= modules.Count; module++)
         {
+            _resourceLedger?.ConsumeWork();
             var (start, end) = modules.GetModuleRefRange(module);
             for (var row = start; row < end; row++)
             {
+                _resourceLedger?.ConsumeWork();
                 var producer = ReadIdentity(row - 1);
                 var target = Read(row - 1, 4);
                 var policy = Read(row - 1, 8);
+                _resourceLedger?.ConsumeWork(2);
                 if (target > 1 || policy > 1)
                 {
                     throw InvalidRef();
@@ -60,6 +74,7 @@ public readonly ref struct TrRmModuleRefTableReader
 
     public string GetProducerIdentity(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidRef();
@@ -70,6 +85,7 @@ public readonly ref struct TrRmModuleRefTableReader
 
     public (uint TargetRequirement, uint RuntimePolicy) GetRequirements(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidRef();
@@ -80,6 +96,7 @@ public readonly ref struct TrRmModuleRefTableReader
 
     public int GetOwnerModule(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidRef();
@@ -89,6 +106,7 @@ public readonly ref struct TrRmModuleRefTableReader
         var high = _modules.Count;
         while (low <= high)
         {
+            _resourceLedger?.ConsumeWork();
             var middle = low + (high - low) / 2;
             var (start, end) = _modules.GetModuleRefRange(middle);
             if (row < start)
@@ -120,7 +138,11 @@ public readonly ref struct TrRmModuleRefTableReader
     }
 
     private uint Read(int row, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice(row * RowSize + offset, sizeof(uint)));
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            _rows.Slice(row * RowSize + offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidRef()
         => new("Invalid TRRM ModuleRef table.");

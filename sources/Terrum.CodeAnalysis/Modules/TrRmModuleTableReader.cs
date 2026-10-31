@@ -23,6 +23,7 @@ public readonly ref struct TrRmModuleTableReader
     private readonly int _methodDefCount;
     private readonly int _sourceFileCount;
     private readonly Dictionary<string, int> _identities;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public int Count => _recordCount;
     public int ModuleRefCount => _moduleRefCount;
@@ -42,7 +43,17 @@ public readonly ref struct TrRmModuleTableReader
     public TrRmModuleTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
         int methodDefCount, int sourceFileCount, int featureCount = -1)
+        : this(section, recordCount, strings, moduleRefCount, typeDefCount,
+            methodDefCount, sourceFileCount, featureCount, null)
     {
+    }
+
+    internal TrRmModuleTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
+        int methodDefCount, int sourceFileCount, int featureCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(7);
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
             || !ValidCount(moduleRefCount) || !ValidCount(typeDefCount)
@@ -59,22 +70,39 @@ public readonly ref struct TrRmModuleTableReader
         _typeDefCount = typeDefCount;
         _methodDefCount = methodDefCount;
         _sourceFileCount = sourceFileCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)recordCount
+            + (ulong)recordCount));
         _identities = new Dictionary<string, int>(recordCount, StringComparer.Ordinal);
 
         Span<int> cursorOffsets = [32, 36, 40, 44];
         Span<int> tableCounts = [moduleRefCount, typeDefCount, methodDefCount, sourceFileCount];
         for (var row = 0; row < recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (Read(row, 4) == 0 || Read(row, 8) > 1 || Read(row, 12) > 1
                 || Read(row, 20) != 0
-                || !ValidFeatureRange(Read(row, 24), Read(row, 28), featureCount)
-                || !_identities.TryAdd(ReadIdentity(row), row + 1))
+                || !ValidFeatureRange(Read(row, 24), Read(row, 28), featureCount))
+            {
+                throw InvalidModule();
+            }
+
+            var identity = ReadIdentity(row);
+            var identityBytes = checked((ulong)identity.Length * sizeof(char));
+            _resourceLedger?.ConsumeWork(checked(identityBytes + 1UL));
+            if (!IsValidIdentity(identity))
+            {
+                throw InvalidModule();
+            }
+            _resourceLedger?.ConsumeWork(checked(identityBytes + 2UL));
+            if (!_identities.TryAdd(identity, row + 1))
             {
                 throw InvalidModule();
             }
 
             for (var table = 0; table < cursorOffsets.Length; table++)
             {
+                _resourceLedger?.ConsumeWork(4);
                 var start = Read(row, cursorOffsets[table]);
                 if (start == 0 || start > tableCounts[table] + 1
                     || (row == 0 && start != 1)
@@ -88,6 +116,7 @@ public readonly ref struct TrRmModuleTableReader
             var methodStart = Read(row, 40);
             var methodEnd = row + 1 < recordCount
                 ? Read(row + 1, 40) : (uint)methodDefCount + 1;
+            _resourceLedger?.ConsumeWork(3);
             if (entry != 0 && (entry < methodStart || entry >= methodEnd))
             {
                 throw InvalidModule();
@@ -97,6 +126,7 @@ public readonly ref struct TrRmModuleTableReader
 
     public string GetIdentity(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -110,6 +140,7 @@ public readonly ref struct TrRmModuleTableReader
     /// <returns>The entry MethodDef row or zero.</returns>
     public int GetEntryMethod(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -120,6 +151,7 @@ public readonly ref struct TrRmModuleTableReader
 
     public (int Start, int End) GetModuleRefRange(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -137,6 +169,7 @@ public readonly ref struct TrRmModuleTableReader
 
     public (int Start, int End) GetSourceFileRange(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -154,6 +187,7 @@ public readonly ref struct TrRmModuleTableReader
 
     public (int Start, int End) GetTypeDefRange(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -171,6 +205,7 @@ public readonly ref struct TrRmModuleTableReader
 
     public (int Start, int End) GetMethodDefRange(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -188,6 +223,7 @@ public readonly ref struct TrRmModuleTableReader
 
     public (uint TargetRequirement, uint RuntimePolicy) GetRequirements(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -206,6 +242,7 @@ public readonly ref struct TrRmModuleTableReader
     /// <summary>Gets the exact governing semantic edition selected by a module.</summary>
     public uint GetGoverningRuleEdition(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -218,6 +255,7 @@ public readonly ref struct TrRmModuleTableReader
     /// <param name="row">The one-based Module row number.</param>
     public (int First, int Count) GetFeatureRange(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidModule();
@@ -228,12 +266,17 @@ public readonly ref struct TrRmModuleTableReader
 
     public bool TryFindModule(string identity, out int row)
     {
+        _resourceLedger?.ConsumeWork();
         ArgumentNullException.ThrowIfNull(identity);
+        _resourceLedger?.ConsumeWork(checked(((ulong)identity.Length
+            * sizeof(char)) + 1UL));
         if (identity.Length == 0 || !IsValidIdentity(identity))
         {
             throw new ArgumentException("A module identity must be nonempty, NUL-free scalar text.", nameof(identity));
         }
 
+        _resourceLedger?.ConsumeWork(checked(((ulong)identity.Length
+            * sizeof(char)) + 1UL));
         return _identities.TryGetValue(identity, out row);
     }
 
@@ -249,7 +292,11 @@ public readonly ref struct TrRmModuleTableReader
     }
 
     private uint Read(int row, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice(row * RowSize + offset, sizeof(uint)));
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            _rows.Slice(row * RowSize + offset, sizeof(uint)));
+    }
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;

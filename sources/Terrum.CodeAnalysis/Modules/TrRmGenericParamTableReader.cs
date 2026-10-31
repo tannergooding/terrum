@@ -13,6 +13,7 @@ public readonly ref struct TrRmGenericParamTableReader
     private const int RowSize = 32;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int[] _constraintOwners;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated GenericParam rows.</summary>
     public int Count { get; }
@@ -34,7 +35,19 @@ public readonly ref struct TrRmGenericParamTableReader
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmTypeSpecTableReader typeSpecs, int constraintCount,
         int constantSourceCount = 0)
+        : this(section, recordCount, strings, types, methods, signatures,
+            typeSpecs, constraintCount, constantSourceCount, null)
     {
+    }
+
+    internal TrRmGenericParamTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader typeSpecs,
+        int constraintCount, int constantSourceCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(6);
         if (recordCount is < 0 or > 0xFF_FFFF || constraintCount is < 0 or > 0xFF_FFFF
             || constantSourceCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length
@@ -45,18 +58,23 @@ public readonly ref struct TrRmGenericParamTableReader
 
         _rows = section;
         Count = recordCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)constraintCount + 1UL));
         _constraintOwners = new int[constraintCount + 1];
         long declaredFormalCount = 0;
         for (var type = 1; type <= types.Count; type++)
         {
+            _resourceLedger?.ConsumeWork();
             declaredFormalCount += types.GetGenericRange(type).Count;
         }
 
         for (var method = 1; method <= methods.Count; method++)
         {
+            _resourceLedger?.ConsumeWork();
             declaredFormalCount += signatures.GetGenericRange(methods.GetSignature(method)).Count;
         }
 
+        _resourceLedger?.ConsumeWork();
         if (declaredFormalCount != recordCount)
         {
             throw InvalidFormal();
@@ -65,6 +83,7 @@ public readonly ref struct TrRmGenericParamTableReader
         // Per-row range membership plus the equal total proves an exact partition.
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = section.Slice((row - 1) * RowSize, RowSize);
             var owner = Read(data, 0);
             var ownerRow = (int)(owner & 0xFF_FFFF);
@@ -78,10 +97,10 @@ public readonly ref struct TrRmGenericParamTableReader
             };
             var name = Read(data, 8);
             var ordinal = Read(data, 4);
-            var formalKind = data[20];
-            var ownershipDomain = data[21];
-            var nullabilityDomain = data[22];
-            var reserved = data[23];
+            var formalKind = ReadByte(data, 20);
+            var ownershipDomain = ReadByte(data, 21);
+            var nullabilityDomain = ReadByte(data, 22);
+            var reserved = ReadByte(data, 23);
             var first = Read(data, 12);
             var count = Read(data, 16);
             var constantTypeSpec = Read(data, 24);
@@ -97,6 +116,7 @@ public readonly ref struct TrRmGenericParamTableReader
                         && defaultArgument > (uint)constantSourceCount),
                 _ => true,
             };
+            _resourceLedger?.ConsumeWork(10);
             if (formalCount == 0 || row < firstFormal || row >= firstFormal + formalCount
                 || ordinal != (uint)(row - firstFormal)
                 || name is 0 or > 0xFF_FFFF || reserved != 0
@@ -114,6 +134,7 @@ public readonly ref struct TrRmGenericParamTableReader
                 _ = typeSpecs.GetTypeSpecRef(constantTypeSpec);
             }
 
+            _resourceLedger?.ConsumeWork(3);
             if (count == 0 ? first != 0
                 : first == 0 || first > constraintCount
                     || count > (uint)constraintCount - first + 1)
@@ -123,6 +144,7 @@ public readonly ref struct TrRmGenericParamTableReader
 
             for (var constraint = first; constraint < first + count; constraint++)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (_constraintOwners[constraint] != 0)
                 {
                     throw InvalidFormal();
@@ -136,6 +158,7 @@ public readonly ref struct TrRmGenericParamTableReader
 
         for (var row = 1; row <= constraintCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_constraintOwners[row] == 0)
             {
                 throw InvalidFormal();
@@ -146,11 +169,13 @@ public readonly ref struct TrRmGenericParamTableReader
     /// <summary>Gets the one-based GenericParam row that owns a Constraint.</summary>
     public int GetConstraintOwner(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row >= _constraintOwners.Length)
         {
             throw InvalidFormal();
         }
 
+        _resourceLedger?.ConsumeWork();
         return _constraintOwners[row];
     }
 
@@ -172,15 +197,15 @@ public readonly ref struct TrRmGenericParamTableReader
 
     /// <summary>Gets the assigned formal kind.</summary>
     public byte GetFormalKind(int row)
-        => GetRow(row)[20];
+        => ReadByte(GetRow(row), 20);
 
     /// <summary>Gets the type formal's ownership domain, or zero for a constant formal.</summary>
     public byte GetOwnershipDomain(int row)
-        => GetRow(row)[21];
+        => ReadByte(GetRow(row), 21);
 
     /// <summary>Gets the type formal's nullability domain, or zero for a constant formal.</summary>
     public byte GetNullabilityDomain(int row)
-        => GetRow(row)[22];
+        => ReadByte(GetRow(row), 22);
 
     /// <summary>Gets the constant formal's type reference, or zero for a type formal.</summary>
     public uint GetConstantTypeSpecRef(int row)
@@ -192,6 +217,7 @@ public readonly ref struct TrRmGenericParamTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > Count)
         {
             throw InvalidFormal();
@@ -203,8 +229,18 @@ public readonly ref struct TrRmGenericParamTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
+
+    private byte ReadByte(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return data[offset];
+    }
 
     private static InvalidDataException InvalidFormal()
         => new("Invalid TRRM GenericParam table.");

@@ -16,6 +16,7 @@ public readonly ref struct TrRmFieldDefTableReader
     private readonly TrRmTypeDefTableReader _types;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated FieldDef rows.</summary>
     public int Count => _recordCount;
@@ -29,7 +30,16 @@ public readonly ref struct TrRmFieldDefTableReader
     public TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs)
+        : this(section, recordCount, strings, types, typeSpecs, null)
     {
+    }
+
+    internal TrRmFieldDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(4);
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || recordCount != types.FieldCount || (long)recordCount * RowSize != section.Length)
         {
@@ -41,12 +51,15 @@ public readonly ref struct TrRmFieldDefTableReader
         _types = types;
         _typeSpecs = typeSpecs;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var owner = Read(row - 1, 0);
             var name = Read(row - 1, 4);
             var spec = Read(row - 1, 8);
             var flags = Read(row - 1, 12);
+            _resourceLedger?.ConsumeWork(6);
             if (owner == 0 || owner > types.Count || owner != types.GetFieldOwner(row)
                 || name is 0 or > 0xFF_FFFF
                 || (flags & ~15u) != 0 || (flags & 3) == 3)
@@ -55,6 +68,7 @@ public readonly ref struct TrRmFieldDefTableReader
             }
 
             _ = typeSpecs.GetTypeSpecRef(spec);
+            _resourceLedger?.ConsumeWork();
             _ = _strings.DecodeName((int)name);
         }
     }
@@ -69,6 +83,7 @@ public readonly ref struct TrRmFieldDefTableReader
     /// <summary>Gets the decoded name for a FieldDef row.</summary>
     public string GetName(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidField();
@@ -80,6 +95,7 @@ public readonly ref struct TrRmFieldDefTableReader
             throw InvalidField();
         }
 
+        _resourceLedger?.ConsumeWork();
         return _strings.DecodeName((int)name);
     }
 
@@ -111,6 +127,7 @@ public readonly ref struct TrRmFieldDefTableReader
 
     private void CheckRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidField();
@@ -118,7 +135,11 @@ public readonly ref struct TrRmFieldDefTableReader
     }
 
     private uint Read(int row, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice((row * RowSize) + offset, sizeof(uint)));
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            _rows.Slice((row * RowSize) + offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidField()
         => new("Invalid TRRM FieldDef table.");

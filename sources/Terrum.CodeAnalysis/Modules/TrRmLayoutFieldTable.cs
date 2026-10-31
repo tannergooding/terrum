@@ -21,6 +21,7 @@ public readonly ref struct TrRmLayoutFieldTableReader
     private const int RowSize = 12;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated LayoutField rows.</summary>
     public int Count => _recordCount;
@@ -34,7 +35,16 @@ public readonly ref struct TrRmLayoutFieldTableReader
     public TrRmLayoutFieldTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmLayoutTableReader layouts, TrRmTypeDefTableReader types,
         TrRmFieldDefTableReader fields)
+        : this(section, recordCount, layouts, types, fields, null)
     {
+    }
+
+    internal TrRmLayoutFieldTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmLayoutTableReader layouts,
+        TrRmTypeDefTableReader types, TrRmFieldDefTableReader fields,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(4);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != layouts.LayoutFieldCount
             || (long)recordCount * RowSize != section.Length)
@@ -44,22 +54,28 @@ public readonly ref struct TrRmLayoutFieldTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)recordCount + 1UL));
         var owners = new int[recordCount + 1];
         for (var layout = 1; layout <= layouts.Count; layout++)
         {
+            _resourceLedger?.ConsumeWork(3);
             var (first, count) = layouts.GetLayoutFieldRange(layout);
             var typeDef = layouts.GetOwnerTypeDef(layout);
             var (firstField, endField) = types.GetFieldRange(typeDef);
+            _resourceLedger?.ConsumeWork(checked((ulong)fields.Count + 1UL));
             var seenFields = new bool[fields.Count + 1];
             var expectedCount = 0;
             for (var field = firstField; field < endField; field++)
             {
+                _resourceLedger?.ConsumeWork();
                 if ((fields.GetFlags(field) & 8) == 0)
                 {
                     expectedCount++;
                 }
             }
 
+            _resourceLedger?.ConsumeWork();
             if (count != expectedCount)
             {
                 throw InvalidLayoutField();
@@ -67,6 +83,7 @@ public readonly ref struct TrRmLayoutFieldTableReader
 
             for (var ordinal = 0; ordinal < count; ordinal++)
             {
+                _resourceLedger?.ConsumeWork(3);
                 var row = first + ordinal;
                 if (row <= 0 || row > recordCount || owners[row] != 0)
                 {
@@ -77,6 +94,7 @@ public readonly ref struct TrRmLayoutFieldTableReader
                 var ownerLayout = Read(offset);
                 var rowOrdinal = Read(offset + 4);
                 var fieldDef = Read(offset + 8);
+                _resourceLedger?.ConsumeWork(7);
                 if (ownerLayout != layout || rowOrdinal != ordinal
                     || fieldDef == 0 || fieldDef > fields.Count
                     || fields.GetOwnerTypeDef((int)fieldDef) != typeDef
@@ -86,12 +104,14 @@ public readonly ref struct TrRmLayoutFieldTableReader
                     throw InvalidLayoutField();
                 }
 
+                _resourceLedger?.ConsumeWork(2);
                 seenFields[checked((int)fieldDef)] = true;
                 owners[row] = layout;
             }
 
             for (var field = firstField; field < endField; field++)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if ((fields.GetFlags(field) & 8) == 0 && !seenFields[field])
                 {
                     throw InvalidLayoutField();
@@ -101,6 +121,7 @@ public readonly ref struct TrRmLayoutFieldTableReader
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork(2);
             if (owners[row] == 0)
             {
                 throw InvalidLayoutField();
@@ -131,6 +152,7 @@ public readonly ref struct TrRmLayoutFieldTableReader
 
     private void CheckRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidLayoutField();
@@ -138,7 +160,11 @@ public readonly ref struct TrRmLayoutFieldTableReader
     }
 
     private uint Read(int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice(offset, sizeof(uint)));
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            _rows.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidLayoutField()
         => new("Invalid TRRM LayoutField table.");

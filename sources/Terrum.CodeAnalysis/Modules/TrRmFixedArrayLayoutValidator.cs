@@ -199,19 +199,24 @@ internal static class TrRmFixedArrayLayoutValidator
 
     private sealed class TypeSubstitutionContext(
         Dictionary<int, TypeSpecContext> arguments,
-        TypeSubstitutionContext? parent)
+        TypeSubstitutionContext? parent,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         private readonly Dictionary<int, TypeSpecContext> _arguments = arguments;
         private readonly TypeSubstitutionContext? _parent = parent;
+        private readonly TrRmA3LayoutResourceLedger? _resourceLedger
+            = resourceLedger;
 
         internal bool TryGet(int formalRow, out TypeSpecContext argument)
         {
             for (var current = this; current is not null;
                 current = current._parent)
             {
+                _resourceLedger?.ConsumeWork();
                 if (current._arguments.TryGetValue(formalRow,
                         out argument))
                 {
+                    _resourceLedger?.ConsumeWork();
                     return true;
                 }
             }
@@ -271,6 +276,7 @@ internal static class TrRmFixedArrayLayoutValidator
             _constraints = constraints;
             _schema = schema;
             _a3ResourceLedger = a3ResourceLedger;
+            _a3ResourceLedger?.ConsumeWork(5);
             _typeCache = [];
             _visitingTypeDefs = [];
             _visitingArrays = [];
@@ -302,10 +308,13 @@ internal static class TrRmFixedArrayLayoutValidator
             using var frame = EnterFrame();
             ConsumeWork();
             var key = (ownerModule, arrayTypeSpecRow);
-            if (!_visitingArrays.Add(key))
+            ConsumeWork(2);
+            if (_visitingArrays.Contains(key))
             {
                 throw InvalidLayout();
             }
+            ConsumeWork();
+            _ = _visitingArrays.Add(key);
 
             try
             {
@@ -330,6 +339,7 @@ internal static class TrRmFixedArrayLayoutValidator
             }
             finally
             {
+                ConsumeWork();
                 _ = _visitingArrays.Remove(key);
             }
         }
@@ -344,12 +354,15 @@ internal static class TrRmFixedArrayLayoutValidator
             using var frame = EnterFrame();
             ConsumeWork();
             var context = ResolveTypeSpecContext(input);
-            if (context.Substitutions is null
-                && _typeCache.TryGetValue((context.OwnerModule,
-                    context.Reference),
-                    out var cached))
+            if (context.Substitutions is null)
             {
-                return cached;
+                var cacheKey = (context.OwnerModule, context.Reference);
+                ConsumeWork(2);
+                if (_typeCache.TryGetValue(cacheKey, out var cached))
+                {
+                    ConsumeWork();
+                    return cached;
+                }
             }
 
             var reference = _typeSpecs.GetTypeSpecRef(context.Reference);
@@ -388,6 +401,7 @@ internal static class TrRmFixedArrayLayoutValidator
 
             if (context.Substitutions is null)
             {
+                ConsumeWork();
                 _typeCache.Add((context.OwnerModule, context.Reference),
                     result);
             }
@@ -443,6 +457,13 @@ internal static class TrRmFixedArrayLayoutValidator
                 firstFormal, formalCount);
             var key = CreateConstructedTypeLayoutIdentity(context.OwnerModule,
                 typeDef, firstFormal, formalCount, substitutions);
+            var identityPayloadBytes = checked((ulong)key.Length * sizeof(char));
+            ConsumeWork(checked(identityPayloadBytes + 1UL));
+            if (_activeGenericActuals.Contains(key))
+            {
+                throw InvalidLayout();
+            }
+            ConsumeWork(checked(identityPayloadBytes + 2UL));
             if (!_activeGenericActuals.Add(key))
             {
                 throw InvalidLayout();
@@ -453,6 +474,7 @@ internal static class TrRmFixedArrayLayoutValidator
             }
             finally
             {
+                ConsumeWork(checked(identityPayloadBytes + 1UL));
                 _ = _activeGenericActuals.Remove(key);
             }
         }
@@ -761,6 +783,7 @@ internal static class TrRmFixedArrayLayoutValidator
                 throw InvalidLayout();
             }
 
+            ConsumeWork();
             var arguments = new Dictionary<int, TypeSpecContext>(formalCount);
             for (var ordinal = 0; ordinal < formalCount; ordinal++)
             {
@@ -777,11 +800,13 @@ internal static class TrRmFixedArrayLayoutValidator
                     argument, context.OwnerModule,
                     context.Substitutions));
                 ValidateGenericActual(formal, actual);
+                ConsumeWork();
                 arguments.Add(formal, actual);
             }
 
+            ConsumeWork();
             return new TypeSubstitutionContext(arguments,
-                context.Substitutions);
+                context.Substitutions, _a3ResourceLedger);
         }
 
         private void ValidateGenericActual(int formal,
@@ -1419,12 +1444,13 @@ internal static class TrRmFixedArrayLayoutValidator
 
         private bool ContainsFormalReference(uint typeSpecRef)
         {
+            _a3ResourceLedger?.ReserveWorkAtDepth(1, 1);
             var pending = new Stack<(uint Reference, bool AllowInitQualifier,
                 ulong Depth)>();
+            pending.Push((typeSpecRef, false, 1));
+            ConsumeWork();
             var visited = new Dictionary<(int Row, bool AllowInitQualifier),
                 ulong>();
-            _a3ResourceLedger?.ReserveWorkAtDepth(1, 1);
-            pending.Push((typeSpecRef, false, 1));
             while (pending.TryPop(out var current))
             {
                 ConsumeWork();
@@ -1437,12 +1463,22 @@ internal static class TrRmFixedArrayLayoutValidator
                 }
                 var visitKey = (reference.Row,
                     current.AllowInitQualifier);
-                if (visited.TryGetValue(visitKey, out var previousDepth)
-                    && current.Depth <= previousDepth)
+                ConsumeWork(2);
+                if (visited.TryGetValue(visitKey, out var previousDepth))
                 {
-                    continue;
+                    if (current.Depth <= previousDepth)
+                    {
+                        continue;
+                    }
+
+                    ConsumeWork();
+                    visited[visitKey] = current.Depth;
                 }
-                visited[visitKey] = current.Depth;
+                else
+                {
+                    ConsumeWork();
+                    visited.Add(visitKey, current.Depth);
+                }
                 if (reference.Form == 0x04)
                 {
                     return true;
@@ -1548,9 +1584,16 @@ internal static class TrRmFixedArrayLayoutValidator
 
             var typeKey = (typeDefModule, typeDef);
             var trackDefinitionCycle = genericCount == 0;
-            if (trackDefinitionCycle && !_visitingTypeDefs.Add(typeKey))
+            if (trackDefinitionCycle)
             {
-                throw InvalidLayout();
+                ConsumeWork(2);
+                if (_visitingTypeDefs.Contains(typeKey))
+                {
+                    throw InvalidLayout();
+                }
+
+                ConsumeWork();
+                _ = _visitingTypeDefs.Add(typeKey);
             }
 
             try
@@ -1662,6 +1705,7 @@ internal static class TrRmFixedArrayLayoutValidator
             {
                 if (trackDefinitionCycle)
                 {
+                    ConsumeWork();
                     _ = _visitingTypeDefs.Remove(typeKey);
                 }
             }

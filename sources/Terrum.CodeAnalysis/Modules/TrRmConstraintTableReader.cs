@@ -12,6 +12,7 @@ public readonly ref struct TrRmConstraintTableReader
 {
     private const int RowSize = 12;
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated Constraint rows.</summary>
     public int Count { get; }
@@ -23,7 +24,16 @@ public readonly ref struct TrRmConstraintTableReader
     /// <param name="types">The validated TypeSpec table for type-valued payloads.</param>
     public TrRmConstraintTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmGenericParamTableReader formals, TrRmTypeSpecTableReader types)
+        : this(section, recordCount, formals, types, null)
     {
+    }
+
+    internal TrRmConstraintTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmGenericParamTableReader formals,
+        TrRmTypeSpecTableReader types,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != formals.ConstraintCount
             || (long)recordCount * RowSize != section.Length)
@@ -33,13 +43,18 @@ public readonly ref struct TrRmConstraintTableReader
 
         _rows = section;
         Count = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = section.Slice((row - 1) * RowSize, RowSize);
             var owner = Read(data, 0);
+            _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
             var kind = BinaryPrimitives.ReadUInt16LittleEndian(data[4..]);
+            _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
             var flags = BinaryPrimitives.ReadUInt16LittleEndian(data[6..]);
             var payload = Read(data, 8);
+            _resourceLedger?.ConsumeWork(5);
             if (owner != formals.GetConstraintOwner(row)
                 || flags != 0 || payload == 0
                 || (kind == 2 && payload > 3)
@@ -63,6 +78,7 @@ public readonly ref struct TrRmConstraintTableReader
     public ushort GetKind(int row)
     {
         CheckRow(row);
+        _resourceLedger?.ConsumeWork(sizeof(ushort) + 1);
         return BinaryPrimitives.ReadUInt16LittleEndian(
             _rows.Slice(((row - 1) * RowSize) + 4, sizeof(ushort)));
     }
@@ -79,14 +95,19 @@ public readonly ref struct TrRmConstraintTableReader
 
     private void CheckRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > Count)
         {
             throw InvalidConstraint();
         }
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidConstraint()
         => new("Invalid TRRM Constraint table.");

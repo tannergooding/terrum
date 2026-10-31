@@ -9,10 +9,20 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmStringTableReader
 {
     private readonly TrRmVariableTableIndex _rows;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public TrRmStringTableReader(ReadOnlySpan<byte> section, int recordCount)
+        : this(section, recordCount, null)
     {
+    }
+
+    internal TrRmStringTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(checked((ulong)section.Length
+            + (ulong)recordCount + 2UL));
         _rows = new TrRmVariableTableIndex(section, recordCount, 8, 4);
+        _resourceLedger = resourceLedger;
         Count = recordCount;
     }
 
@@ -20,16 +30,34 @@ public readonly ref struct TrRmStringTableReader
     public int Count { get; }
 
     public string DecodeName(int row)
-        => TrRmStringRowReader.DecodeName(_rows.GetRow(row));
+        => DecodeText(row, allowEmpty: false);
 
     public string DecodeNamespace(int row)
-        => TrRmStringRowReader.DecodeNamespace(_rows.GetRow(row));
+        => DecodeText(row, allowEmpty: true);
 
     internal void ValidateShapes(int recordCount)
     {
         for (var row = 1; row <= recordCount; row++)
         {
-            TrRmStringRowReader.ValidateShape(_rows.GetRow(row));
+            _resourceLedger?.ConsumeWork();
+            var data = _rows.GetRow(row);
+            _resourceLedger?.ConsumeWork(checked((ulong)data.Length));
+            TrRmStringRowReader.ValidateShape(data);
         }
+    }
+
+    private string DecodeText(int row, bool allowEmpty)
+    {
+        _resourceLedger?.ConsumeWork();
+        var data = _rows.GetRow(row);
+        var inputBytes = checked((ulong)data.Length);
+        _resourceLedger?.ConsumeWork(checked(inputBytes + 1UL));
+        var characterCount
+            = TrRmStringRowReader.GetDecodedCharacterCount(data);
+        _resourceLedger?.ConsumeWork(checked(inputBytes + 1UL
+            + ((ulong)characterCount * sizeof(char))));
+        return allowEmpty
+            ? TrRmStringRowReader.DecodeNamespace(data)
+            : TrRmStringRowReader.DecodeName(data);
     }
 }

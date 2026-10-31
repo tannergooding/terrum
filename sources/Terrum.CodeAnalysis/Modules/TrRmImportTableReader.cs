@@ -18,8 +18,16 @@ public readonly ref struct TrRmImportTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly Dictionary<uint, TrRmImportBinding> _expected;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
-    internal int Count => _expected is null ? 0 : _expected.Count;
+    internal int Count
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork();
+            return _expected is null ? 0 : _expected.Count;
+        }
+    }
 
     /// <summary>Validates retained imports and their local expected definitions.</summary>
     /// <param name="section">The borrowed 12-byte Import rows.</param>
@@ -45,7 +53,7 @@ public readonly ref struct TrRmImportTableReader
             properties, interfaces, associatedTypeDefs, fields, associatedConstDefs,
             default, default, TrRmArtifactSchema.Standard,
             default, default, default,
-            profileAware: false)
+            resourceLedger: null, profileAware: false)
     {
     }
 
@@ -61,11 +69,12 @@ public readonly ref struct TrRmImportTableReader
         TrRmAssociatedConstDefTableReader associatedConstDefs = default,
         TrRmStaticFieldTableReader staticFields = default,
         TrRmStaticFieldContractTableReader staticFieldContracts = default,
-        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations = default)
+        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations = default,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
         : this(section, recordCount, strings, references, types, methods,
             properties, interfaces, associatedTypeDefs, fields, associatedConstDefs,
             features, modules, schema, staticFields, staticFieldContracts,
-            intrinsicRegistrations,
+            intrinsicRegistrations, resourceLedger,
             profileAware: true)
     {
     }
@@ -83,8 +92,10 @@ public readonly ref struct TrRmImportTableReader
         TrRmStaticFieldTableReader staticFields,
         TrRmStaticFieldContractTableReader staticFieldContracts,
         TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
+        TrRmA3LayoutResourceLedger? resourceLedger,
         bool profileAware)
     {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
         {
@@ -93,16 +104,20 @@ public readonly ref struct TrRmImportTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork((ulong)recordCount);
         _expected = new Dictionary<uint, TrRmImportBinding>(recordCount);
         var lastModuleRefRow = 0;
         var lastRequirements = default((int OwnerModule,
             uint TargetRequirement, uint RuntimePolicy));
         for (var row = 0; row < recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = section.Slice(row * RowSize, RowSize);
             var moduleRef = Read(data, 0);
             var key = Read(data, 4);
             var expected = Read(data, 8);
+            _resourceLedger?.ConsumeWork(3);
             if (moduleRef == 0 || moduleRef > references.Count
                 || key is 0 or > 0xFF_FFFF)
             {
@@ -116,6 +131,7 @@ public readonly ref struct TrRmImportTableReader
             var moduleRefRow = (int)moduleRef;
             if (moduleRefRow != lastModuleRefRow)
             {
+                _resourceLedger?.ConsumeWork();
                 var ownerModule = references.GetOwnerModule(moduleRefRow);
                 if (ownerModule != module
                     || (expected >> 24 is 0x16 or 0x1E && body != 0))
@@ -133,6 +149,7 @@ public readonly ref struct TrRmImportTableReader
             {
                 throw InvalidImport();
             }
+            _resourceLedger?.ConsumeWork(2);
             if (profileAware && schema == TrRmArtifactSchema.CopyOriginDraft)
             {
                 var definitionKind = expected >> 24;
@@ -151,6 +168,7 @@ public readonly ref struct TrRmImportTableReader
                 }
             }
 
+            _resourceLedger?.ConsumeWork(2);
             if (!_expected.TryAdd(expected, new TrRmImportBinding(
                 references.GetProducerIdentity(moduleRefRow), strings.DecodeName((int)key),
                 lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy)))
@@ -161,6 +179,7 @@ public readonly ref struct TrRmImportTableReader
 
         for (var row = 0; row < recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var expected = Read(section.Slice(row * RowSize, RowSize), 8);
             var kind = expected >> 24;
             if (kind == 0x26)
@@ -203,17 +222,22 @@ public readonly ref struct TrRmImportTableReader
     }
 
     public bool IsExpectedDefinition(uint reference)
-        => _expected is not null && _expected.ContainsKey(reference);
+    {
+        _resourceLedger?.ConsumeWork();
+        return _expected is not null && _expected.ContainsKey(reference);
+    }
 
     public bool TryGetExpectedRequirements(uint reference,
         out (uint TargetRequirement, uint RuntimePolicy) requirements)
     {
+        _resourceLedger?.ConsumeWork();
         if (_expected is null)
         {
             requirements = default;
             return false;
         }
 
+        _resourceLedger?.ConsumeWork();
         if (!_expected.TryGetValue(reference, out var binding))
         {
             requirements = default;
@@ -226,6 +250,7 @@ public readonly ref struct TrRmImportTableReader
 
     internal bool TryGetExpectedBinding(uint reference, out TrRmImportBinding binding)
     {
+        _resourceLedger?.ConsumeWork();
         if (_expected is not null && _expected.TryGetValue(reference, out binding))
         {
             return true;
@@ -237,6 +262,7 @@ public readonly ref struct TrRmImportTableReader
 
     internal uint GetExpectedDefinitionForImportRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidImport();
@@ -247,6 +273,7 @@ public readonly ref struct TrRmImportTableReader
 
     internal int GetModuleRefForImportRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidImport();
@@ -255,8 +282,12 @@ public readonly ref struct TrRmImportTableReader
         return checked((int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 0));
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidImport()
         => new("Invalid TRRM Import table.");

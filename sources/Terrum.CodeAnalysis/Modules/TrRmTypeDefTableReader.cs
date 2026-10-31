@@ -22,6 +22,7 @@ public readonly ref struct TrRmTypeDefTableReader
     private readonly int _contractCount;
     private readonly TrRmArtifactSchema _schema;
     private readonly int[] _fieldOwners;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public int Count => _recordCount;
     public int FieldCount => _fieldCount;
@@ -48,8 +49,10 @@ public readonly ref struct TrRmTypeDefTableReader
     internal TrRmTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         int fieldCount, int genericParamCount, int layoutCount, int contractCount,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork(8);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.TypeDefCount
             || (long)recordCount * RowSize != section.Length
@@ -68,9 +71,12 @@ public readonly ref struct TrRmTypeDefTableReader
         _layoutCount = layoutCount;
         _contractCount = contractCount;
         _schema = schema;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)fieldCount + 1UL));
         _fieldOwners = new int[fieldCount + 1];
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             _ = ReadNamespace(row - 1);
             _ = ReadName(row - 1);
             var flags = Read(row - 1, 8);
@@ -101,6 +107,7 @@ public readonly ref struct TrRmTypeDefTableReader
             var count = Read(row - 1, 16);
             for (var field = first; field < first + count; field++)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (_fieldOwners[field] != 0)
                 {
                     throw InvalidType();
@@ -112,6 +119,7 @@ public readonly ref struct TrRmTypeDefTableReader
 
         for (var field = 1; field <= fieldCount; field++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_fieldOwners[field] == 0)
             {
                 throw InvalidType();
@@ -151,6 +159,7 @@ public readonly ref struct TrRmTypeDefTableReader
         var high = _modules.Count;
         while (low <= high)
         {
+            _resourceLedger?.ConsumeWork();
             var middle = low + (high - low) / 2;
             var (start, end) = _modules.GetTypeDefRange(middle);
             if (row < start)
@@ -172,11 +181,13 @@ public readonly ref struct TrRmTypeDefTableReader
 
     public int GetFieldOwner(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _fieldCount)
         {
             throw InvalidType();
         }
 
+        _resourceLedger?.ConsumeWork();
         return _fieldOwners[row];
     }
 
@@ -223,6 +234,7 @@ public readonly ref struct TrRmTypeDefTableReader
     private string ReadNamespace(int row)
     {
         var reference = Read(row, 0);
+        _resourceLedger?.ConsumeWork();
         if (reference is 0 or > 0xFF_FFFF)
         {
             throw InvalidType();
@@ -234,6 +246,7 @@ public readonly ref struct TrRmTypeDefTableReader
     private string ReadName(int row)
     {
         var reference = Read(row, 4);
+        _resourceLedger?.ConsumeWork();
         if (reference is 0 or > 0xFF_FFFF)
         {
             throw InvalidType();
@@ -246,12 +259,14 @@ public readonly ref struct TrRmTypeDefTableReader
     {
         var first = Read(row - 1, offset);
         var count = Read(row - 1, offset + 4);
+        _resourceLedger?.ConsumeWork(3);
         return count == 0 ? first == 0
             : first != 0 && first <= tableCount && count <= (uint)tableCount - first + 1;
     }
 
     private void CheckRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidType();
@@ -259,7 +274,11 @@ public readonly ref struct TrRmTypeDefTableReader
     }
 
     private uint Read(int row, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_rows.Slice(row * RowSize + offset, sizeof(uint)));
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            _rows.Slice(row * RowSize + offset, sizeof(uint)));
+    }
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;

@@ -18,6 +18,7 @@ public readonly ref struct TrRmLayoutTableReader
     private readonly int _recordCount;
     private readonly int _layoutFieldCount;
     private readonly int[] _ownerTypeDefs;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated Layout rows.</summary>
     public int Count => _recordCount;
@@ -34,7 +35,16 @@ public readonly ref struct TrRmLayoutTableReader
     public TrRmLayoutTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeDefTableReader types, TrRmTargetProfileTableReader targetProfiles,
         int layoutFieldCount)
+        : this(section, recordCount, types, targetProfiles, layoutFieldCount,
+            null)
     {
+    }
+
+    internal TrRmLayoutTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmTypeDefTableReader types, TrRmTargetProfileTableReader targetProfiles,
+        int layoutFieldCount, TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(7);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != types.LayoutCount
             || layoutFieldCount is < 0 or > 0xFF_FFFF
@@ -49,10 +59,13 @@ public readonly ref struct TrRmLayoutTableReader
         _targetProfiles = targetProfiles;
         _recordCount = recordCount;
         _layoutFieldCount = layoutFieldCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)recordCount + 1UL));
         _ownerTypeDefs = new int[recordCount + 1];
 
         for (var type = 1; type <= types.Count; type++)
         {
+            _resourceLedger?.ConsumeWork(2);
             var (first, count) = types.GetLayoutRange(type);
             if (count == 0)
             {
@@ -60,24 +73,30 @@ public readonly ref struct TrRmLayoutTableReader
             }
 
             var hasDefault = false;
+            _resourceLedger?.ConsumeWork();
             var profiles = new HashSet<uint>();
             for (var row = first; row < first + count; row++)
             {
+                _resourceLedger?.ConsumeWork(4);
                 if (row <= 0 || row > recordCount || _ownerTypeDefs[row] != 0)
                 {
                     throw InvalidLayout();
                 }
 
+                _resourceLedger?.ConsumeWork();
                 var data = section.Slice((row - 1) * RowSize, RowSize);
                 var owner = Read(data, 0);
                 var targetProfile = Read(data, 4);
+                _resourceLedger?.ConsumeWork(4);
                 var kind = data[8];
                 var flags = data[9];
+                _resourceLedger?.ConsumeWork(3);
                 var reserved = BinaryPrimitives.ReadUInt16LittleEndian(data[10..]);
                 var alignment = Read(data, 12);
                 var pack = Read(data, 16);
                 var fieldFirst = Read(data, 20);
                 var fieldCount = Read(data, 24);
+                _resourceLedger?.ConsumeWork(12);
                 if (owner != type || targetProfile > targetProfiles.Count
                     || (targetProfile != 0
                         && !targetProfiles.IsAssignedProfileReference(targetProfile))
@@ -88,12 +107,15 @@ public readonly ref struct TrRmLayoutTableReader
                     || ((flags & 1) != 0 && targetProfile == 0)
                     || (kind == 0 && (alignment != 0 || pack != 0))
                     || (kind == 3 && (alignment != 0 || pack != 0))
-                    || !profiles.Add(targetProfile))
+                    || profiles.Contains(targetProfile))
                 {
                     throw InvalidLayout();
                 }
 
+                _resourceLedger?.ConsumeWork();
+                _ = profiles.Add(targetProfile);
                 hasDefault |= targetProfile == 0;
+                _resourceLedger?.ConsumeWork();
                 _ownerTypeDefs[row] = type;
             }
 
@@ -105,6 +127,7 @@ public readonly ref struct TrRmLayoutTableReader
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_ownerTypeDefs[row] == 0)
             {
                 throw InvalidLayout();
@@ -116,6 +139,7 @@ public readonly ref struct TrRmLayoutTableReader
     public int GetOwnerTypeDef(int row)
     {
         CheckRow(row);
+        _resourceLedger?.ConsumeWork();
         return _ownerTypeDefs[row];
     }
 
@@ -125,11 +149,19 @@ public readonly ref struct TrRmLayoutTableReader
 
     /// <summary>Gets the assigned layout kind for a validated Layout row.</summary>
     public byte GetLayoutKind(int row)
-        => GetRow(row)[8];
+    {
+        var data = GetRow(row);
+        _resourceLedger?.ConsumeWork(2);
+        return data[8];
+    }
 
     /// <summary>Gets the Layout flags for a validated Layout row.</summary>
     public byte GetFlags(int row)
-        => GetRow(row)[9];
+    {
+        var data = GetRow(row);
+        _resourceLedger?.ConsumeWork(2);
+        return data[9];
+    }
 
     /// <summary>Gets the declared aggregate alignment, or zero when omitted.</summary>
     public uint GetAlignment(int row)
@@ -149,6 +181,7 @@ public readonly ref struct TrRmLayoutTableReader
     /// <summary>Gets the exact profile variant, or the default variant if absent.</summary>
     public int GetLayoutForProfile(int typeDefRow, uint targetProfileRow)
     {
+        _resourceLedger?.ConsumeWork(3);
         if (typeDefRow <= 0 || typeDefRow > _types.Count
             || targetProfileRow > _targetProfiles.Count)
         {
@@ -159,6 +192,7 @@ public readonly ref struct TrRmLayoutTableReader
         var defaultRow = 0;
         for (var row = first; row < first + count; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var target = GetTargetProfileRef(row);
             if (target == targetProfileRow && targetProfileRow != 0)
             {
@@ -189,6 +223,7 @@ public readonly ref struct TrRmLayoutTableReader
     /// <summary>Reports whether any complete Layout variant has the Blittable flag.</summary>
     public bool HasBlittableVariant(int typeDefRow)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (typeDefRow <= 0 || typeDefRow > _types.Count)
         {
             throw InvalidLayout();
@@ -197,6 +232,7 @@ public readonly ref struct TrRmLayoutTableReader
         var (first, count) = _types.GetLayoutRange(typeDefRow);
         for (var row = first; row < first + count; row++)
         {
+            _resourceLedger?.ConsumeWork();
             if ((GetFlags(row) & 1) != 0)
             {
                 return true;
@@ -214,14 +250,19 @@ public readonly ref struct TrRmLayoutTableReader
 
     private void CheckRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidLayout();
         }
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static bool ValidRange(uint first, uint count, int total)
         => count == 0 ? first == 0
