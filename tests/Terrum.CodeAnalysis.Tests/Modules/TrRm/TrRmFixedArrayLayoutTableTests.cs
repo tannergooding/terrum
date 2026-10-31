@@ -485,11 +485,90 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         Assert.That(exception, Is.Not.Null);
         Assert.That(exception!.Required,
             Is.EqualTo(new System.Numerics.BigInteger(
-                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+                TrRmA3LayoutResourceLedger.WorkLimit + 4)));
         Assert.That(TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
             out var kind), Is.True);
         Assert.That(kind,
             Is.EqualTo(TrRmA3AdmissionFailureKind.ResourceLimit));
+    }
+
+    [Test]
+    public void A3ProviderBindingWorkLimitIsExact()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+        var consumerArtifact = CreateA3GenericArrayConsumerArtifact(
+            uniqueNominalActual: true);
+        var providerArtifact = CreateA3GenericCopyProviderArtifact(
+            ownershipDomain: 2, includeBlittableConstraint: false,
+            pointerField: true);
+        var uniqueProviderArtifact = CreateA3UniqueNominalProviderArtifact(
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            declaredUnique: true);
+        byte[][] artifacts =
+        [
+            consumerArtifact,
+            providerArtifact,
+            uniqueProviderArtifact,
+        ];
+        string[] schemaIdentities =
+        [
+            schemaIdentity,
+            schemaIdentity,
+            schemaIdentity,
+        ];
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 0, 1, 1),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1),
+            new TrRmStandardModuleSelection(2, 1, "UniqueProvider", 1, 0,
+                0, 1, 1));
+
+        static TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            CreateTables(byte[] artifact,
+                TrRmA3LayoutResourceLedger resourceLedger)
+            => TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            artifact),
+                    resourceLedger);
+
+        var measuredLedger = new TrRmA3LayoutResourceLedger();
+        var measuredTables = CreateTables(consumerArtifact, measuredLedger);
+        var workBeforeBinding = measuredLedger.WorkRemaining;
+        var bindings = TrRmFixedArrayProviderBindingValidator.Validate(
+            measuredTables, artifacts, schemaIdentities, modules, 1);
+        var bindingWork = workBeforeBinding - measuredLedger.WorkRemaining;
+        Assert.That(bindings, Has.Length.EqualTo(2));
+        Assert.That(bindings[0].ImportRow,
+            Is.LessThan(bindings[1].ImportRow));
+
+        var exactLedger = new TrRmA3LayoutResourceLedger();
+        var exactTables = CreateTables(consumerArtifact, exactLedger);
+        exactLedger.ConsumeWork(
+            exactLedger.WorkRemaining - bindingWork);
+        _ = TrRmFixedArrayProviderBindingValidator.Validate(exactTables,
+            artifacts, schemaIdentities, modules, 1);
+        Assert.That(exactLedger.WorkRemaining, Is.Zero);
+
+        var exhaustedLedger = new TrRmA3LayoutResourceLedger();
+        var exhaustedTables = CreateTables(consumerArtifact, exhaustedLedger);
+        exhaustedLedger.ConsumeWork(
+            exhaustedLedger.WorkRemaining - (bindingWork - 1));
+        TrRmResourceLimitException? exception = null;
+        try
+        {
+            _ = TrRmFixedArrayProviderBindingValidator.Validate(
+                exhaustedTables, artifacts, schemaIdentities, modules, 1);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
     }
 
     [Test]

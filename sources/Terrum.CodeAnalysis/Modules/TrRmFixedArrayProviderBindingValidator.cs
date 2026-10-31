@@ -5,7 +5,6 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
-using System.Linq;
 
 namespace Terrum.CodeAnalysis.Modules;
 
@@ -139,6 +138,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             _schemaIdentities = schemaIdentities;
             _modules = modules;
             _a3ResourceLedger = a3ResourceLedger;
+            _a3ResourceLedger?.ConsumeWork(4);
             _imports = [];
             _visitedLocalTypes = [];
             _visitedTypePairs = [];
@@ -155,6 +155,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 throw InvalidBinding();
             }
 
+            _a3ResourceLedger?.ConsumeWork();
             var pendingTypes = new Queue<TypeOriginPair>();
             for (var layoutRow = 1;
                 layoutRow <= _consumer.FixedArrayLayouts.Count; layoutRow++)
@@ -180,15 +181,47 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 ValidateTypePair(pair, pendingTypes);
             }
 
-            return [.. _imports.Values
-                .OrderBy(static binding => binding.Binding.ConsumerArtifactIndex)
-                .ThenBy(static binding => binding.Binding.ImportRow)
-                .Select(static binding => binding.Binding)];
+            _a3ResourceLedger?.ConsumeWork();
+            var orderedBindings
+                = new List<TrRmStandardTypeProviderBinding>(_imports.Count);
+            foreach (var resolution in _imports.Values)
+            {
+                ConsumeWork();
+                orderedBindings.Add(resolution.Binding);
+            }
+
+            var resourceLedger = _a3ResourceLedger;
+            orderedBindings.Sort((left, right) =>
+            {
+                resourceLedger?.ConsumeWork();
+                var result = left.ConsumerArtifactIndex
+                    .CompareTo(right.ConsumerArtifactIndex);
+                if (result != 0)
+                {
+                    return result;
+                }
+
+                resourceLedger?.ConsumeWork();
+                return left.ImportRow.CompareTo(right.ImportRow);
+            });
+
+            _a3ResourceLedger?.ConsumeWork();
+            var resultBindings
+                = ImmutableArray.CreateBuilder<TrRmStandardTypeProviderBinding>(
+                    orderedBindings.Count);
+            foreach (var binding in orderedBindings)
+            {
+                ConsumeWork();
+                resultBindings.Add(binding);
+            }
+
+            return resultBindings.MoveToImmutable();
         }
 
         private void CollectStorageType(int artifactIndex, int moduleRow,
             uint typeSpecRef, Queue<TypeOriginPair> pendingTypes)
         {
+            ConsumeWork();
             var pending = new Stack<TypeSpecLocation>();
             PushLocation(pending, new TypeSpecLocation(artifactIndex,
                 moduleRow, typeSpecRef, IsInlineStorage: true));
@@ -331,6 +364,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             var origin = new TypeOrigin(artifactIndex,
                 GetTables(artifactIndex).TypeDefs.GetOwnerModule(typeDefRow),
                 typeDefRow);
+            ConsumeWork(2);
             if (!_visitedLocalTypes.Add(origin))
             {
                 return;
@@ -370,6 +404,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
         {
             ConsumeWork();
             _a3ResourceLedger?.CheckDepth(pair.Depth);
+            ConsumeWork(2);
             if (!_visitedTypePairs.Add((pair.Expected, pair.Actual,
                     pair.IsInlineStorage)))
             {
@@ -386,6 +421,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 = expected.TypeDefs.GetGenericRange(expectedType);
             var (actualFormalFirst, actualFormalCount)
                 = actual.TypeDefs.GetGenericRange(actualType);
+            ConsumeWork(4);
             if (expected.TypeDefs.GetOwnerModule(expectedType)
                     != pair.Expected.ModuleRow
                 || actual.TypeDefs.GetOwnerModule(actualType)
@@ -394,12 +430,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 || expectedKind != actualKind
                 || expected.TypeDefs.GetFlags(expectedType)
                     != actual.TypeDefs.GetFlags(actualType)
-                || !StringComparer.Ordinal.Equals(
-                    expected.TypeDefs.GetNamespace(expectedType),
-                    actual.TypeDefs.GetNamespace(actualType))
-                || !StringComparer.Ordinal.Equals(
-                    expected.TypeDefs.GetName(expectedType),
-                    actual.TypeDefs.GetName(actualType))
+                || !TypeNamesMatch(expected, expectedType,
+                    actual, actualType)
                 || expectedFormalCount != actualFormalCount
                 || (pair.IsInlineStorage
                     && (expectedKind != 1
@@ -470,9 +502,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 var actualField = actualFirst + ordinal;
                 if (expected.Fields.GetFlags(expectedField)
                         != actual.Fields.GetFlags(actualField)
-                    || !StringComparer.Ordinal.Equals(
-                        expected.Fields.GetName(expectedField),
-                        actual.Fields.GetName(actualField))
+                    || !FieldNamesMatch(expected, expectedField,
+                        actual, actualField)
                     || !TypeSpecsMatch(expected, pair.Expected.ArtifactIndex,
                         pair.Expected.ModuleRow,
                         expected.Fields.GetTypeSpecRef(expectedField),
@@ -499,6 +530,40 @@ internal static class TrRmFixedArrayProviderBindingValidator
             {
                 throw InvalidBinding();
             }
+        }
+
+        private bool TypeNamesMatch(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
+            int expectedType,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
+            int actualType)
+        {
+            var expectedNamespace = expected.TypeDefs.GetNamespace(expectedType);
+            var actualNamespace = actual.TypeDefs.GetNamespace(actualType);
+            ConsumeWork(GetStringComparisonWork(
+                expectedNamespace, actualNamespace));
+            if (!StringComparer.Ordinal.Equals(
+                    expectedNamespace, actualNamespace))
+            {
+                return false;
+            }
+
+            var expectedName = expected.TypeDefs.GetName(expectedType);
+            var actualName = actual.TypeDefs.GetName(actualType);
+            ConsumeWork(GetStringComparisonWork(expectedName, actualName));
+            return StringComparer.Ordinal.Equals(expectedName, actualName);
+        }
+
+        private bool FieldNamesMatch(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
+            int expectedField,
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
+            int actualField)
+        {
+            var expectedName = expected.Fields.GetName(expectedField);
+            var actualName = actual.Fields.GetName(actualField);
+            ConsumeWork(GetStringComparisonWork(expectedName, actualName));
+            return StringComparer.Ordinal.Equals(expectedName, actualName);
         }
 
         private bool GenericFormalsMatch(TypeOrigin expectedOrigin,
@@ -604,11 +669,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 return false;
             }
 
+            ConsumeWork(checked((ulong)actualCount + 1UL));
             var actualRows = new Dictionary<LayoutIdentity, int>(actualCount);
             for (var ordinal = 0; ordinal < actualCount; ordinal++)
             {
                 ConsumeWork();
                 var row = actualFirst + ordinal;
+                ConsumeWork(2);
                 if (!actualRows.TryAdd(GetLayoutIdentity(actual, row), row))
                 {
                     return false;
@@ -620,6 +687,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 ConsumeWork();
                 var expectedLayout = expectedFirst + ordinal;
                 var identity = GetLayoutIdentity(expected, expectedLayout);
+                ConsumeWork();
                 if (!actualRows.Remove(identity, out var actualLayout))
                 {
                     return false;
@@ -686,6 +754,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             TypeOrigin? leftFormalOwner = null,
             TypeOrigin? rightFormalOwner = null, ulong depth = 1)
         {
+            ConsumeWork();
             var pending = new Stack<TypeSpecComparison>();
             PushComparison(pending, new TypeSpecComparison(leftArtifactIndex,
                 leftModuleRow, leftTypeSpecRef, rightArtifactIndex,
@@ -994,6 +1063,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 rightTypeSpecRow);
             var anchorPair = (comparison.LeftArtifactIndex, leftMethod,
                 comparison.RightArtifactIndex, rightMethod);
+            ConsumeWork(2);
             if (leftAnchors.GetCallingConvention(leftTypeSpecRow)
                     != rightAnchors.GetCallingConvention(rightTypeSpecRow)
                 || !_activeAnchorPairs.Add(anchorPair))
@@ -1058,6 +1128,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
             finally
             {
+                ConsumeWork();
                 _ = _activeAnchorPairs.Remove(anchorPair);
             }
         }
@@ -1098,6 +1169,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
         {
             ConsumeWork();
             var key = (artifactIndex, importRow);
+            ConsumeWork(2);
             if (_imports.TryGetValue(key, out var existing))
             {
                 if (existing.Expected.ModuleRow != moduleRow)
@@ -1131,9 +1203,16 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         _schemaIdentities[artifactIndex]))
                 || consumer.ModuleRefs.GetOwnerModule(moduleRefRow) != moduleRow
                 || !consumer.Imports.TryGetExpectedBinding(expectedDefinition,
-                    out var binding)
-                || !StringComparer.Ordinal.Equals(
-                    consumer.ModuleRefs.GetProducerIdentity(moduleRefRow),
+                    out var binding))
+            {
+                throw InvalidBinding();
+            }
+
+            var producerIdentity
+                = consumer.ModuleRefs.GetProducerIdentity(moduleRefRow);
+            ConsumeWork(GetStringComparisonWork(producerIdentity,
+                binding.ProducerIdentity));
+            if (!StringComparer.Ordinal.Equals(producerIdentity,
                     binding.ProducerIdentity)
                 || consumer.ModuleRefs.GetRequirements(moduleRefRow)
                     != (binding.TargetRequirement, binding.RuntimePolicy))
@@ -1192,6 +1271,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 new TypeOrigin(selected.ArtifactIndex, selected.ModuleRow,
                     providerTypeDefRow),
                 providerBinding);
+            ConsumeWork(2);
             _imports.Add(key, result);
             return result;
         }
@@ -1202,6 +1282,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
             foreach (var module in _modules)
             {
                 ConsumeWork();
+                ConsumeWork(GetStringComparisonWork(module.Identity,
+                    identity));
                 if (!StringComparer.Ordinal.Equals(module.Identity, identity))
                 {
                     continue;
@@ -1223,6 +1305,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             ulong depth = 1)
         {
             var pair = (expected, actual, isInlineStorage);
+            ConsumeWork(2);
             if (!_visitedTypePairs.Contains(pair))
             {
                 _a3ResourceLedger?.ReserveWorkAtDepth(1, depth);
@@ -1297,6 +1380,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
         private TrRmStructuralMetadataValidator.ValidatedExecutionTables
             GetTables(int artifactIndex)
         {
+            ConsumeWork();
             if (artifactIndex == 0)
             {
                 return _consumer;
@@ -1330,26 +1414,48 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         index, _a3ResourceLedger);
         }
 
-        private static bool IsFixedArraySchemaIdentity(string schemaIdentity)
-            => StringComparer.Ordinal.Equals(schemaIdentity,
-                   FixedArraySchemaIdentity)
-                || StringComparer.Ordinal.Equals(schemaIdentity,
-                    GenericFixedArraySchemaIdentity);
+        private bool IsFixedArraySchemaIdentity(string schemaIdentity)
+        {
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                FixedArraySchemaIdentity));
+            if (StringComparer.Ordinal.Equals(schemaIdentity,
+                FixedArraySchemaIdentity))
+            {
+                return true;
+            }
 
-        private static bool IsGenericFixedArraySchemaIdentity(
-            string schemaIdentity)
-            => StringComparer.Ordinal.Equals(schemaIdentity,
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                GenericFixedArraySchemaIdentity));
+            return StringComparer.Ordinal.Equals(schemaIdentity,
                 GenericFixedArraySchemaIdentity);
+        }
 
-        private static TrRmArtifactSchema GetFixedArraySchema(
+        private bool IsGenericFixedArraySchemaIdentity(
             string schemaIdentity)
-            => StringComparer.Ordinal.Equals(schemaIdentity,
-                GenericFixedArraySchemaIdentity)
-                ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-                : StringComparer.Ordinal.Equals(schemaIdentity,
-                    FixedArraySchemaIdentity)
-                    ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                    : throw InvalidBinding();
+        {
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                GenericFixedArraySchemaIdentity));
+            return StringComparer.Ordinal.Equals(schemaIdentity,
+                GenericFixedArraySchemaIdentity);
+        }
+
+        private TrRmArtifactSchema GetFixedArraySchema(string schemaIdentity)
+        {
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                GenericFixedArraySchemaIdentity));
+            if (StringComparer.Ordinal.Equals(schemaIdentity,
+                GenericFixedArraySchemaIdentity))
+            {
+                return TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+            }
+
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                FixedArraySchemaIdentity));
+            return StringComparer.Ordinal.Equals(schemaIdentity,
+                FixedArraySchemaIdentity)
+                ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                : throw InvalidBinding();
+        }
 
         private uint Read(ReadOnlySpan<byte> row, int offset)
         {
@@ -1360,6 +1466,15 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
         private void ConsumeWork(ulong units = 1)
             => _a3ResourceLedger?.ConsumeWork(units);
+
+        private static ulong GetStringComparisonWork(string left,
+            string right)
+        {
+            var characterCount
+                = checked((ulong)left.Length + (ulong)right.Length);
+            var payloadBytes = checked(characterCount * sizeof(char));
+            return checked(payloadBytes + 1UL);
+        }
 
         private static InvalidDataException InvalidBinding()
             => new("Invalid TRRM fixed-array TypeDef provider binding.");
