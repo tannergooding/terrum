@@ -1824,13 +1824,15 @@ internal static class TrRmRegisterBodyMapValidator
             var layoutRow = ReadUInt32(body, selection, 12);
             var arrayLayout = constantValues.FixedArrayLayouts.GetRow(
                 checked((int)layoutRow));
+            var requiredElementCount = ReadUInt32(body, storage, 8);
             if (arrayLayout.OwnerModuleRow != ownerModule
                 || !typeSpecs.TryGetFixedInlineArray(
                     (uint)arrayLayout.ArrayTypeSpecRow,
                     out var elementTypeSpecRef, out var elementCount)
                 || !typeSpecs.AreEquivalentTypeSpecRefs(
                     source.TypeSpecRef, elementTypeSpecRef)
-                || ReadUInt32(body, storage, 8) > elementCount)
+                || requiredElementCount == 0
+                || requiredElementCount > elementCount)
             {
                 throw InvalidMap();
             }

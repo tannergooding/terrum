@@ -326,6 +326,15 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             () => ValidateBodyMaps(artifact));
     }
 
+    [Test]
+    public void RejectsEmptyCountedAddressFromAnArrayElement()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            zeroRequiredElementCount: true);
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
     [TestCase(3UL, 4UL, 11UL, 4UL)]
     [TestCase(ulong.MaxValue, 4UL, 0UL, 4UL)]
     [TestCase(3UL, 4UL, 12UL, 3UL)]
@@ -4246,7 +4255,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     private static byte[] CreateNestedArrayPlaceArtifact(
-        ulong requiredElementCount = 1)
+        ulong requiredElementCount = 1,
+        bool zeroRequiredElementCount = false)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -4320,7 +4330,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var address = TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
             sourceKind: 1, resultKind: 1, sourceIndex: 1, resultIndex: 2,
             pointerTypeMapIndex: 3,
-            requiredElementCount: checked((uint)requiredElementCount));
+            requiredElementCount: checked((uint)(zeroRequiredElementCount
+                ? 1UL : requiredElementCount)));
         var bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
             default, default, default,
             [new TrRmRegisterBodyBlock(0, 14, 0)],
@@ -4337,6 +4348,17 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 0xB7, 0,
             },
             schema: schema);
+        if (zeroRequiredElementCount)
+        {
+            var addressRecordOffset = bodyBytes.AsSpan().IndexOf(address);
+            if (addressRecordOffset < 0)
+            {
+                throw new InvalidOperationException(
+                    "The encoded Body must retain its storage-address record.");
+            }
+
+            bodyBytes.AsSpan(addressRecordOffset + 12, sizeof(uint)).Clear();
+        }
 
         var sections = new List<TrRmSection>
         {
