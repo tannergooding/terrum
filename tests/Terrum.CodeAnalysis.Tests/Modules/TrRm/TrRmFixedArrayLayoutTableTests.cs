@@ -356,6 +356,17 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void RejectsBranchJoinWithIncompatiblePlaceAuthority()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            branchJoinPlaceSelection: true,
+            alternateFirstSelectionAccessKind: 2);
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
+    [Test]
     public void RejectsBranchJoinWhenAnIncomingPathHasNoPlaceHandle()
     {
         var artifact = CreateNestedArrayPlaceArtifact(
@@ -4544,7 +4555,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         bool branchJoinPlaceSelection = false,
         bool loopPlaceSelection = false,
         bool missingBranchPlaceHandle = false,
-        bool mismatchedCrossBlockIndexType = false)
+        bool mismatchedCrossBlockIndexType = false,
+        byte alternateFirstSelectionAccessKind = 1)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -4639,7 +4651,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 referentTypeMapIndex: 1, schema);
         var alternateFirstSelection
             = TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
-                targetKind: 3, accessKind: 1, destinationKind: 1, baseKind: 2,
+                targetKind: 3, accessKind: alternateFirstSelectionAccessKind,
+                destinationKind: 1, baseKind: 2,
                 destinationIndex: 0, baseIndex: 3, indexKind: 2,
                 targetRefKind: 3, indexIndex: 4, targetRef: 2,
                 referentTypeMapIndex: 1, schema);
