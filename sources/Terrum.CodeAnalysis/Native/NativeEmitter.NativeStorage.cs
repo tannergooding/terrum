@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -10,31 +11,116 @@ namespace Terrum.CodeAnalysis.Native;
 internal sealed partial class PeCompiler
 {
     private void EmitNativeArrayElementAddress(int variable, BoundExpression index, int spill,
-        int elementCount, int elementStride)
+        ulong elementCount, ulong elementStride)
     {
-        Expression(index, spill);
-        _code.Byte(0x3D);
-        _code.Int32(elementCount);
-        RuntimeBranch(0x83, 3);
-        if (elementStride <= sbyte.MaxValue)
-        {
-            _code.Bytes(0x6B, 0xC0, checked((byte)elementStride));
-        }
-        else
-        {
-            _code.Bytes(0x69, 0xC0);
-            _code.Int32(elementStride);
-        }
+        EmitNativeArrayElementOffset(index, spill, elementCount, elementStride);
         _code.Bytes(0x48, 0x89, 0xC2);
         _code.Address(Slot(variable));
         _code.Bytes(0x48, 0x01, 0xD0);
     }
 
+    private void EmitNativeArrayElementAddressFromBase(int baseAddressSlot,
+        BoundExpression index, int spill, ulong elementCount,
+        ulong elementStride)
+    {
+        EmitNativeArrayElementOffset(index, spill, elementCount, elementStride);
+        _code.Bytes(0x48, 0x89, 0xC2);
+        _code.Load64(baseAddressSlot);
+        _code.Bytes(0x48, 0x01, 0xD0);
+    }
+
+    private void EmitNativeFixedArrayPathAddress(int variable,
+        ImmutableArray<BoundNativeFixedArrayProjection> projections, int spill)
+    {
+        if (projections.IsDefaultOrEmpty)
+        {
+            throw new InvalidOperationException(
+                "A nested fixed-array access has no projections.");
+        }
+
+        var first = projections[0];
+        EmitNativeArrayElementAddress(variable, first.Index, spill,
+            first.Layout.ElementCount, first.Layout.ElementStride);
+        for (var index = 1; index < projections.Length; index++)
+        {
+            var projection = projections[index];
+            _code.Store64(Spill(spill));
+            EmitNativeArrayElementAddressFromBase(Spill(spill),
+                projection.Index, spill + 1, projection.Layout.ElementCount,
+                projection.Layout.ElementStride);
+        }
+    }
+
+    private void EmitNativeArrayElementOffset(BoundExpression index,
+        int indexSpill, ulong elementCount, ulong elementStride)
+    {
+        Expression(index, indexSpill);
+        if (index.Type is PrimitiveType.Int128 or PrimitiveType.UInt128)
+        {
+            // Wide scalar expressions are address-backed; load high then low limbs for the checks below.
+            _code.Bytes(0x48, 0x8B, 0x50, 0x08);
+            _code.Bytes(0x48, 0x8B, 0x00);
+        }
+
+        switch (index.Type)
+        {
+            case PrimitiveType.Int8:
+            case PrimitiveType.Int16:
+            case PrimitiveType.Int32:
+                _code.Bytes(0x85, 0xC0);
+                RuntimeBranch(0x88, 3);
+                goto case PrimitiveType.UInt32;
+            case PrimitiveType.UInt8:
+            case PrimitiveType.UInt16:
+            case PrimitiveType.UInt32:
+                if (elementCount <= uint.MaxValue)
+                {
+                    _code.Byte(0x3D);
+                    _code.Int32((int)elementCount);
+                    RuntimeBranch(0x83, 3);
+                }
+                break;
+            case PrimitiveType.Int64:
+                _code.Bytes(0x48, 0x85, 0xC0);
+                RuntimeBranch(0x88, 3);
+                goto case PrimitiveType.UInt64;
+            case PrimitiveType.UInt128:
+            case PrimitiveType.Int128:
+                _code.Bytes(0x48, 0x85, 0xD2);
+                RuntimeBranch(0x85, 3);
+                goto case PrimitiveType.UInt64;
+            case PrimitiveType.UInt64:
+                _code.Bytes(0x48, 0xBA);
+                _code.Int64(unchecked((long)elementCount));
+                _code.Bytes(0x48, 0x39, 0xD0);
+                RuntimeBranch(0x83, 3);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "A fixed-array index has an unsupported integer type.");
+        }
+
+        if (elementStride == 0)
+        {
+            _code.Bytes(0x31, 0xC0);
+        }
+        else if (elementStride <= int.MaxValue)
+        {
+            _code.Bytes(0x48, 0x69, 0xC0);
+            _code.Int32((int)elementStride);
+        }
+        else
+        {
+            _code.Bytes(0x48, 0xBA);
+            _code.Int64(unchecked((long)elementStride));
+            _code.Bytes(0x48, 0x0F, 0xAF, 0xC2);
+        }
+    }
+
     private void EmitNativeStorageAddress(BoundNativeStorageAddress address, int spill)
     {
         if (address.Type != address.AddressType
-            || address.ElementCount <= 0 || address.ElementStride <= 0
-            || address.ByteExtent <= 0)
+            || address.ElementCount == 0)
         {
             throw new InvalidOperationException("The native storage address has an invalid extent.");
         }
@@ -46,12 +132,11 @@ internal sealed partial class PeCompiler
         }
         if (address.ByteExtent == completeExtent)
         {
-            Expression(address.Index, spill);
-            _code.Byte(0x3D);
-            _code.Int32(address.ElementCount);
-            RuntimeBranch(0x83, 3);
-            _code.Bytes(0x85, 0xC0);
-            RuntimeBranch(0x85, 3);
+            if (!NativeFixedArrayContract.IsConstantIndex(address.Index, 0))
+            {
+                throw new InvalidOperationException(
+                    "A whole-storage address must select the first element.");
+            }
             _code.Address(Slot(address.Variable));
         }
         else
@@ -593,6 +678,11 @@ internal sealed partial class PeCompiler
     {
         EmitNativeArrayElementAddress(element.Variable, element.Index, spill,
             element.Layout.ElementCount, element.Layout.ElementStride);
+        if (Size(element.Type) == 0)
+        {
+            _code.Bytes(0x31, 0xC0);
+            return;
+        }
         if (IsIndirect(element.Type))
         {
             return;
@@ -616,16 +706,73 @@ internal sealed partial class PeCompiler
         }
     }
 
-    private void EmitNativeFixedArrayPointerAddress(BoundNativeFixedArrayPointerAddress address, int spill) =>
-        EmitNativeArrayElementAddress(address.Variable, address.Index, spill,
-            address.Layout.ElementCount, address.Layout.ElementStride);
+    private void EmitNativeFixedArrayPathElement(
+        BoundNativeFixedArrayPathElement element, int spill)
+    {
+        EmitNativeFixedArrayPathAddress(element.Variable,
+            element.Projections, spill);
+        if (Size(element.Type) == 0)
+        {
+            _code.Bytes(0x31, 0xC0);
+            return;
+        }
+        if (IsIndirect(element.Type))
+        {
+            return;
+        }
+
+        switch (Size(element.Type))
+        {
+            case 1:
+                _code.Bytes(0x0F, 0xB6, 0x00);
+                break;
+            case 2:
+                _code.Bytes(0x0F, 0xB7, 0x00);
+                break;
+            case 4:
+                _code.Bytes(0x8B, 0x00);
+                break;
+            case 8:
+                _code.Bytes(0x48, 0x8B, 0x00);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "A nested fixed-array element has an unsupported native width.");
+        }
+    }
+
+    private void EmitNativeFixedArrayPointerAddress(
+        BoundNativeFixedArrayPointerAddress address, int spill)
+    {
+        if (address.Projections.IsDefaultOrEmpty)
+        {
+            EmitNativeArrayElementAddress(address.Variable, address.Index,
+                spill, address.Layout.ElementCount,
+                address.Layout.ElementStride);
+        }
+        else
+        {
+            EmitNativeFixedArrayPathAddress(address.Variable,
+                address.Projections, spill);
+        }
+    }
 
     private void EmitNativeFixedArrayWrite(BoundNativeFixedArrayWrite write, int spill)
     {
         EmitNativeArrayElementAddress(write.Variable, write.Index, spill,
             write.Layout.ElementCount, write.Layout.ElementStride);
         _code.Store64(Spill(spill));
+        if (write.Value is BoundNativeFixedArrayInitialization initialization)
+        {
+            EmitNativeFixedArrayInitializationAtAddress(initialization,
+                Spill(spill), spill + 1);
+            return;
+        }
         Expression(write.Value, spill + 1);
+        if (Size(write.Value.Type) == 0)
+        {
+            return;
+        }
         if (IsIndirect(write.Value.Type))
         {
             _code.Load64(Spill(spill), destinationRegister: true);
@@ -658,6 +805,164 @@ internal sealed partial class PeCompiler
                     break;
                 default:
                     throw new InvalidOperationException("A fixed-array element has an unsupported native width.");
+            }
+        }
+    }
+
+    private void EmitNativeFixedArrayPathWrite(
+        BoundNativeFixedArrayPathWrite write, int spill)
+    {
+        EmitNativeFixedArrayPathAddress(write.Variable, write.Projections,
+            spill);
+        _code.Store64(Spill(spill));
+        if (write.Value is BoundNativeFixedArrayInitialization initialization)
+        {
+            EmitNativeFixedArrayInitializationAtAddress(initialization,
+                Spill(spill), spill + 1);
+            return;
+        }
+
+        Expression(write.Value, spill + 1);
+        if (Size(write.Value.Type) == 0)
+        {
+            return;
+        }
+        if (IsIndirect(write.Value.Type))
+        {
+            _code.Load64(Spill(spill), destinationRegister: true);
+            _code.CopyMemory(Size(write.Value.Type));
+            return;
+        }
+
+        var width = Size(write.Value.Type);
+        if (width == sizeof(ulong))
+        {
+            _code.Bytes(0x48, 0x89, 0xC1);
+        }
+        else
+        {
+            _code.Bytes(0x89, 0xC1);
+        }
+        _code.Load64(Spill(spill));
+        switch (width)
+        {
+            case 1:
+                _code.Bytes(0x88, 0x08);
+                break;
+            case 2:
+                _code.Bytes(0x66, 0x89, 0x08);
+                break;
+            case 4:
+                _code.Bytes(0x89, 0x08);
+                break;
+            case 8:
+                _code.Bytes(0x48, 0x89, 0x08);
+                break;
+            default:
+                throw new InvalidOperationException(
+                    "A nested fixed-array element has an unsupported native width.");
+        }
+    }
+
+    private void EmitNativeFixedArrayInitializationAtAddress(
+        BoundNativeFixedArrayInitialization initialization,
+        int destinationAddressSlot, int scratchSpill)
+    {
+        var stride = initialization.Layout.ElementStride;
+        for (var index = 0; index < initialization.Elements.Length; index++)
+        {
+            var element = initialization.Elements[index];
+            var elementOffset = checked((int)checked((ulong)index * stride));
+            _code.Load64(destinationAddressSlot);
+            if (elementOffset != 0)
+            {
+                _code.PointerOffset(elementOffset);
+            }
+            _code.Store64(Spill(scratchSpill));
+            if (element is BoundNativeFixedArrayInitialization nested)
+            {
+                EmitNativeFixedArrayInitializationAtAddress(nested,
+                    Spill(scratchSpill), scratchSpill + 1);
+                continue;
+            }
+
+            Expression(element, scratchSpill + 1);
+            if (stride == 0)
+            {
+                continue;
+            }
+            if (IsIndirect(element.Type))
+            {
+                _code.Load64(Spill(scratchSpill),
+                    destinationRegister: true);
+                _code.CopyMemory(Size(element.Type));
+                continue;
+            }
+
+            var width = Size(element.Type);
+            if (width == sizeof(ulong))
+            {
+                _code.Bytes(0x48, 0x89, 0xC1);
+            }
+            else
+            {
+                _code.Bytes(0x89, 0xC1);
+            }
+            _code.Load64(Spill(scratchSpill));
+            switch (width)
+            {
+                case 1:
+                    _code.Bytes(0x88, 0x08);
+                    break;
+                case 2:
+                    _code.Bytes(0x66, 0x89, 0x08);
+                    break;
+                case 4:
+                    _code.Bytes(0x89, 0x08);
+                    break;
+                case 8:
+                    _code.Bytes(0x48, 0x89, 0x08);
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        "A fixed-array element has an unsupported native width.");
+            }
+        }
+    }
+
+    private void EmitNativeFixedArrayInitialization(
+        BoundNativeFixedArrayInitialization initialization, int destinationOffset,
+        int spill)
+    {
+        var stride = initialization.Layout.ElementStride;
+        for (var index = 0; index < initialization.Elements.Length; index++)
+        {
+            var element = initialization.Elements[index];
+            var elementDestination = checked(destinationOffset
+                + (int)checked((ulong)index * stride));
+            if (element is BoundNativeFixedArrayInitialization nested)
+            {
+                EmitNativeFixedArrayInitialization(nested, elementDestination,
+                    spill);
+                continue;
+            }
+
+            Expression(element, spill);
+            if (stride == 0)
+            {
+                continue;
+            }
+            if (IsIndirect(element.Type))
+            {
+                CopyToFrame(elementDestination, checked((int)stride));
+            }
+            else if (element.Type is PrimitiveType.Bool or PrimitiveType.Char16)
+            {
+                _code.StoreField(elementDestination, Size(element.Type));
+            }
+            else
+            {
+                StoreValue(elementDestination, element.Type);
             }
         }
     }

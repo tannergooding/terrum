@@ -166,7 +166,7 @@ public sealed class IntegerParsingRadixModuleTests
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public async Task SourceGrantIntegerParsingScalarExportsMatchHostOracleAsync(
+    public async Task SourceGrantIntegerParsingExportsRespectCheckedBoundaryAsync(
         BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
@@ -191,12 +191,24 @@ public sealed class IntegerParsingRadixModuleTests
             },
         ], policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var exports = Enum.GetValues<ParserApi>().SelectMany(static api => new[] {
+            SourceIntegerParsingNamespace + "CanParse" + api + "Base",
+            SourceIntegerParsingNamespace + "Parse" + api + "Base",
+        }).ToArray();
+        if (policy == BoundRuntimePolicy.CheckedExceptions)
+        {
+            var proofFailure = Assert.Throws<System.ArgumentException>(() =>
+                NativeEmitter.EmitLibraryWithSourceGrant(program, exports,
+                    (NativeRuntimePolicy)policy));
+            Assert.That(proofFailure!.Data["Terrum.InvalidEffect"],
+                Is.EqualTo("NoThrow"));
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(
-            ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))(),
-            Enum.GetValues<ParserApi>().SelectMany(static api => new[] {
-                SourceIntegerParsingNamespace + "CanParse" + api + "Base",
-                SourceIntegerParsingNamespace + "Parse" + api + "Base",
-            }).ToArray(), (NativeRuntimePolicy)policy);
+            program, exports, (NativeRuntimePolicy)policy);
         Assert.That(artifact.Exports.Length, Is.EqualTo(Enum.GetValues<ParserApi>().Length * 2));
         {var __nunitItems0 = artifact.Exports;        Assert.Multiple(() => {
             foreach (var __nunitItem3 in __nunitItems0)

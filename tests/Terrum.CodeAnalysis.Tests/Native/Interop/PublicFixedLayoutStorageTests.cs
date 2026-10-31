@@ -52,7 +52,7 @@ public sealed class PublicFixedLayoutStorageTests
         Assert.That(global::System.Linq.Enumerable.Single(FixedLayoutStorage.Validate(program.Structures)), Is.EqualTo(width));
         SemanticVerifier.VerifyLibrary(program);
         var producer = ModuleCompiler.CreateProducer(program, ["Check"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(100));
         var retained = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Structures);
         Assert.That(retained.IsSequential, Is.True);
         Assert.That(retained.BlittableTargetRequirement, Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
@@ -166,7 +166,7 @@ public sealed class PublicFixedLayoutStorageTests
                 }),
             },
             "native-carrier" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = PrimitiveType.NativeFixedArray }) },
-            "unknown-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)999 }) },
+            "unknown-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)99 }) },
             "negative-type" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Type = (PrimitiveType)int.MinValue }) },
             "duplicate-field" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { Name = "Prefix" }) },
             "conflicting-access" => packet with { Fields = packet.Fields.SetItem(1, packet.Fields[1] with { IsPrivate = true, IsInternal = true }) },
@@ -209,7 +209,7 @@ public sealed class PublicFixedLayoutStorageTests
             public unique struct Owner {
                 private int32 Value;
                 public Owner(int32 value) { Value = value; }
-                [NoThrow] [Cleanup]
+                 [Cleanup]
                 public void Close() { }
             }
             """);
@@ -266,7 +266,7 @@ public sealed class PublicFixedLayoutStorageTests
             """), reference, policy);
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual1 = compilation.Program; Assert.That(__nunitActual1, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual1!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(100));
         var snapshot = SHA256.HashData(consumer);
         var replacementProgram = CompileLibrary(
             "[Blittable] [Layout(LayoutKind.Sequential)] public struct Other { public uint64 Value; } "
@@ -570,7 +570,7 @@ public sealed class PublicFixedLayoutStorageTests
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
         var formatVersion = reader.ReadInt32();
-        Assert.That(formatVersion, Is.EqualTo(89));
+        Assert.That(formatVersion, Is.EqualTo(100));
         _ = ReadString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();

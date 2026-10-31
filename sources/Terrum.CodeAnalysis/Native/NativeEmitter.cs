@@ -604,7 +604,7 @@ public static class NativeEmitter
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(program);
         SemanticVerifier.RejectSourceNativeImports(program, "PE library emission",
-            allowDirectNativeImports);
+            allowDirectNativeImports, allowFixedArrayStorage: true);
         if (program.RequiresSourceGrant && !program.IsInvocationSourceBound && sourceDependent is null)
         {
             throw new NotSupportedException("An invocation-scoped Host.Source grant must be bound through NativeJit.");
@@ -915,9 +915,7 @@ public static class NativeEmitter
 
 internal sealed partial class PeCompiler
 {
-    // A sub-4 KiB frame cannot cross more than one guard page in its single allocation.
-    // 32 bytes of outgoing home space and all outgoing stack arguments stay at the bottom of each frame.
-    private const int MaximumFrame = 0xF00;
+    private const int MaximumFrame = int.MaxValue - 7;
     private const int MaximumText = 8 * 1024 * 1024;
     private sealed record Binary128Runtime(NativeCode Code,
         ImmutableDictionary<string, int> FunctionOffsets);
@@ -1001,6 +999,7 @@ internal sealed partial class PeCompiler
     private int _entryFilter;
     private int _normalBackingReleaseStart = -1;
     private int _normalBackingReleaseEnd;
+    private NativeFunctionRange? _stackProbeHelper;
     private int _frame;
     private int _spillBase;
     private int _returnSlot;
@@ -1191,6 +1190,10 @@ internal sealed partial class PeCompiler
     {
         PrepareFrames();
         var (processEntry, processEnd) = EmitEntryAndFailureHelpers();
+        if (_frames.Any(static frame => frame > NativeUnwind.StackProbeThreshold + 8))
+        {
+            _stackProbeHelper = EmitStackProbeHelper();
+        }
         EmitSourceFunctions();
         EmitCleanupFunclets();
         EmitNormalBackingRuntimeHelper();
@@ -1331,7 +1334,8 @@ internal sealed partial class PeCompiler
                 functionCount = checked(functionCount + 1);
             }
         }
-        var functions = ImmutableArray.CreateBuilder<NativeFunctionRange>(functionCount);
+        var functions = ImmutableArray.CreateBuilder<NativeFunctionRange>(
+            functionCount + (_stackProbeHelper is null ? 0 : 1));
         if (!_library)
         {
             functions.Add(new NativeFunctionRange(_entryStart, _entryEnd, 40) {
@@ -1344,12 +1348,18 @@ internal sealed partial class PeCompiler
         {
             functions.Add(new NativeFunctionRange(_failureStarts[i], _failureEnds[i], _checkedExceptions ? 72 : 40));
         }
+        if (_stackProbeHelper is NativeFunctionRange stackProbeHelper)
+        {
+            functions.Add(stackProbeHelper);
+        }
         for (var i = 0; i < _starts.Length; i++)
         {
             if (!_program.Functions[i].IsExternal && _starts[i] >= 0)
             {
                 functions.Add(new NativeFunctionRange(_starts[i], _ends[i], _frames[i]) {
                     UsesFramePointer = true,
+                    UsesStackProbe = _frames[i] - 8
+                        > NativeUnwind.StackProbeThreshold,
                     ExceptionHandler = _checkedExceptions ? _exceptionHandler : 0,
                     ExceptionScopes = [.. _scopes[i].Select(scope => scope with {
                         Handler = scope.Target != 0 ? _catchFilter : _funclets[-scope.Handler - 1].Start,
@@ -1361,6 +1371,8 @@ internal sealed partial class PeCompiler
         {
             functions.Add(new NativeFunctionRange(start, end, _frames[function]) {
                 UsesFramePointer = true,
+                UsesStackProbe = _frames[function] - 8
+                    > NativeUnwind.StackProbeThreshold,
                 UsesParentFrame = true,
             });
         }
@@ -1469,13 +1481,24 @@ internal sealed partial class PeCompiler
                     at = (at + 15) & ~15;
                 }
                 slots[variable] = at;
-                at += function.Variables[variable].NativeFixedArrayLayout?.ByteExtent
-                    ?? ((IsIndirect(function.Variables[variable].Type)
-                            && IsStruct(function.Variables[variable].Type))
-                    ? Size(function.Variables[variable].Type) : (IsIndirect(function.Variables[variable].Type)
-                    || function.Variables[variable].Type is PrimitiveType.ReadonlyInt32BufferView
-                        or PrimitiveType.MutableInt32BufferView)
-                    && !function.Variables[variable].IsOut ? 16 : 8);
+                var variableSize = function.Variables[variable]
+                    .NativeFixedArrayLayout is BoundNativeFixedArrayLayout fixedArrayLayout
+                        ? fixedArrayLayout.ByteExtent
+                        : checked((ulong)((IsIndirect(function.Variables[variable].Type)
+                                && IsStruct(function.Variables[variable].Type))
+                            ? Size(function.Variables[variable].Type)
+                            : (IsIndirect(function.Variables[variable].Type)
+                                || function.Variables[variable].Type
+                                    is PrimitiveType.ReadonlyInt32BufferView
+                                        or PrimitiveType.MutableInt32BufferView)
+                                    && !function.Variables[variable].IsOut
+                                ? 16 : 8));
+                if (variableSize > (ulong)(int.MaxValue - at))
+                {
+                    throw new InvalidOperationException(
+                        "The native stack frame exceeds the supported local-offset range.");
+                }
+                at += (int)variableSize;
                 at = (at + 7) & ~7;
             }
             _slots[i] = slots;
@@ -1770,12 +1793,12 @@ internal sealed partial class PeCompiler
             required += 8; // Saved RBP lives above the addressable frame slots.
             if (required > MaximumFrame)
             {
-                throw new NotSupportedException("Native frame exceeds the 3840-byte page-safe ceiling.");
+                throw new NotSupportedException("Native frame exceeds the signed x64 stack-offset range.");
             }
-            var frame = AlignFrame((int)required);
+            var frame = AlignFrame(checked((int)required));
             if (frame > MaximumFrame)
             {
-                throw new NotSupportedException("Native frame exceeds the 3840-byte page-safe ceiling.");
+                throw new NotSupportedException("Native frame exceeds the signed x64 stack-offset range.");
             }
             _frames[i] = frame;
         }
@@ -2184,7 +2207,35 @@ internal sealed partial class PeCompiler
         return (processEntry, processEnd);
     }
 
-    private static int AlignFrame(int bytes) => ((bytes + 8 + 15) & ~15) - 8;
+    private NativeFunctionRange EmitStackProbeHelper()
+    {
+        var start = _code.Position;
+        Prolog(40);
+        _code.Bytes(0x4C, 0x8D, 0x54, 0x24, 0x30); // lea r10,[rsp+48]
+        _code.Bytes(0x49, 0x89, 0xC3); // mov r11,rax
+        var loop = _code.Position;
+        _code.Bytes(0x49, 0x81, 0xFB);
+        _code.Int32(0x1000);
+        var tailBranch = _code.JumpIf(0x82);
+        _code.Bytes(0x49, 0x81, 0xEA);
+        _code.Int32(0x1000);
+        _code.Bytes(0x41, 0xF6, 0x02, 0x00); // test byte ptr [r10],0
+        _code.Bytes(0x49, 0x81, 0xEB);
+        _code.Int32(0x1000);
+        _code.PatchRelative(_code.Jump(), loop);
+        _code.PatchRelative(tailBranch, _code.Position);
+        _code.Bytes(0x4D, 0x29, 0xDA); // sub r10,r11
+        _code.Bytes(0x41, 0xF6, 0x02, 0x00);
+        _code.Bytes(0x48, 0x81, 0xC4);
+        _code.Int32(40);
+        _code.Byte(0xC3);
+        return new NativeFunctionRange(start, _code.Position, 40) {
+            IsStackProbeHelper = true,
+        };
+    }
+
+    private static int AlignFrame(int bytes)
+        => checked((int)((((long)bytes + 8 + 15) & ~15L) - 8));
 
     private int PendingReturnSlot() => (_returnSlot
         + (IsIndirectResult(_program.Functions[_currentFunction].ReturnType) ? 8 : 0) + 15) & ~15;
@@ -2288,20 +2339,59 @@ internal sealed partial class PeCompiler
         switch (expression)
         {
             case BoundNativeFixedArrayInitialization fixedArray:
-                var fixedArraySpills = 0;
+                var fixedArraySpills = 1;
                 foreach (var element in fixedArray.Elements)
                 {
                     fixedArraySpills = Math.Max(fixedArraySpills,
-                        ExpressionSpills(element, ref maximumArguments));
+                        1 + ExpressionSpills(element,
+                            ref maximumArguments));
                 }
                 return fixedArraySpills;
             case BoundNativeFixedArrayElement fixedArrayElement:
                 return ExpressionSpills(fixedArrayElement.Index, ref maximumArguments);
+            case BoundNativeFixedArrayPathElement pathElement:
+                var pathElementSpills = 0;
+                for (var index = 0; index < pathElement.Projections.Length;
+                     index++)
+                {
+                    pathElementSpills = Math.Max(pathElementSpills,
+                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                            pathElement.Projections[index].Index,
+                            ref maximumArguments));
+                }
+                return pathElementSpills;
             case BoundNativeFixedArrayPointerAddress pointerAddress:
-                return ExpressionSpills(pointerAddress.Index, ref maximumArguments);
+                if (pointerAddress.Projections.IsDefaultOrEmpty)
+                {
+                    return ExpressionSpills(pointerAddress.Index,
+                        ref maximumArguments);
+                }
+                var pointerPathSpills = 0;
+                for (var index = 0;
+                     index < pointerAddress.Projections.Length; index++)
+                {
+                    pointerPathSpills = Math.Max(pointerPathSpills,
+                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                            pointerAddress.Projections[index].Index,
+                            ref maximumArguments));
+                }
+                return pointerPathSpills;
             case BoundNativeFixedArrayWrite fixedArrayWrite:
                 return Math.Max(2, Math.Max(1 + ExpressionSpills(fixedArrayWrite.Index, ref maximumArguments),
                     1 + ExpressionSpills(fixedArrayWrite.Value, ref maximumArguments)));
+            case BoundNativeFixedArrayPathWrite pathWrite:
+                var pathWriteSpills = 0;
+                for (var index = 0; index < pathWrite.Projections.Length;
+                     index++)
+                {
+                    pathWriteSpills = Math.Max(pathWriteSpills,
+                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                            pathWrite.Projections[index].Index,
+                            ref maximumArguments));
+                }
+                return Math.Max(2, Math.Max(pathWriteSpills,
+                    1 + ExpressionSpills(pathWrite.Value,
+                        ref maximumArguments)));
             case BoundNativeStorageAddress address:
                 return ExpressionSpills(address.Index, ref maximumArguments);
             case BoundNativeOutputReservation:
@@ -2678,13 +2768,36 @@ internal sealed partial class PeCompiler
                 case BoundNativeFixedArrayElement fixedArrayElement:
                     VisitExpression(fixedArrayElement.Index);
                     break;
+                case BoundNativeFixedArrayPathElement pathElement:
+                    foreach (var projection in pathElement.Projections)
+                    {
+                        VisitExpression(projection.Index);
+                    }
+                    break;
                 case BoundNativeFixedArrayPointerAddress pointerAddress:
                     _ = variables.Add(pointerAddress.Variable);
-                    VisitExpression(pointerAddress.Index);
+                    if (pointerAddress.Projections.IsDefaultOrEmpty)
+                    {
+                        VisitExpression(pointerAddress.Index);
+                    }
+                    else
+                    {
+                        foreach (var projection in pointerAddress.Projections)
+                        {
+                            VisitExpression(projection.Index);
+                        }
+                    }
                     break;
                 case BoundNativeFixedArrayWrite fixedArrayWrite:
                     VisitExpression(fixedArrayWrite.Index);
                     VisitExpression(fixedArrayWrite.Value);
+                    break;
+                case BoundNativeFixedArrayPathWrite pathWrite:
+                    foreach (var projection in pathWrite.Projections)
+                    {
+                        VisitExpression(projection.Index);
+                    }
+                    VisitExpression(pathWrite.Value);
                     break;
                 case BoundNativeStorageAddress address:
                     VisitExpression(address.Index);
@@ -2858,9 +2971,23 @@ internal sealed partial class PeCompiler
             || NativeFunctionPointerTypes.IsType(type)
             || CheckedReferenceTypes.IsType(type)
             || ManagedClassTypes.IsManaged(type);
-    private int Size(PrimitiveType type) =>
-        ValueLayout.Size(type, _program.Structures, _program.CheckedReferenceTypes,
-            _program.NativeLoweringAgreement);
+    private int Size(PrimitiveType type)
+    {
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            var arrayIndex = NativeFixedArrayTypes.Index(type);
+            if ((uint)arrayIndex >= (uint)_program.NativeFixedArrayTypes.Length)
+            {
+                throw new InvalidOperationException(
+                    "A fixed-array value has no verified type-table entry.");
+            }
+            return checked((int)_program.NativeFixedArrayTypes[arrayIndex]
+                .ByteExtent);
+        }
+
+        return ValueLayout.Size(type, _program.Structures,
+            _program.CheckedReferenceTypes, _program.NativeLoweringAgreement);
+    }
     private static bool IsNarrowInteger(PrimitiveType type) =>
         PrimitiveTypeFacts.IntegerWidth(type) is 8 or 16;
 
@@ -4662,6 +4789,7 @@ internal sealed partial class PeCompiler
         }
     }
     private bool IsIndirect(PrimitiveType type) => type == PrimitiveType.TokenSpan
+        || NativeFixedArrayTypes.IsType(type)
         || (_normalBacking && CheckedReferenceTypes.IsType(type))
         || type is PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128
             or PrimitiveType.Decimal128
@@ -5426,6 +5554,18 @@ internal sealed partial class PeCompiler
     private void Prolog(int frame)
     {
         // Entry rsp is 8 mod 16. Subtracting 8 mod 16 aligns rsp at each call site.
+        if (frame > NativeUnwind.StackProbeThreshold)
+        {
+            if (_stackProbeHelper is not NativeFunctionRange stackProbeHelper)
+            {
+                throw new InvalidOperationException(
+                    "A large native frame has no stack-probe helper.");
+            }
+
+            _code.Byte(0xB8);
+            _code.Int32(frame);
+            _code.PatchRelative(_code.RelativeCall(), stackProbeHelper.Start);
+        }
         _code.Bytes(0x48, 0x81, 0xEC);
         _code.Int32(frame);
     }
@@ -5767,39 +5907,8 @@ internal sealed partial class PeCompiler
             case BoundLocal local:
                 if (local.Initializer is BoundNativeFixedArrayInitialization fixedArray)
                 {
-                    var stride = fixedArray.Layout.ElementStride;
-                    if (fixedArray.Elements.IsEmpty)
-                    {
-                        _code.Bytes(0x31, 0xC0);
-                        for (var offset = 0; offset < fixedArray.Layout.ByteExtent;)
-                        {
-                            var remaining = fixedArray.Layout.ByteExtent - offset;
-                            var width = remaining >= sizeof(ulong) ? sizeof(ulong)
-                                : remaining >= sizeof(uint) ? sizeof(uint)
-                                : remaining >= sizeof(ushort) ? sizeof(ushort) : sizeof(byte);
-                            _code.StoreField(Slot(local.Variable) + offset, width);
-                            offset += width;
-                        }
-                        break;
-                    }
-                    for (var index = 0; index < fixedArray.Elements.Length; index++)
-                    {
-                        var element = fixedArray.Elements[index];
-                        var fixedArrayDestination = Slot(local.Variable) + (index * stride);
-                        Expression(element, 0);
-                        if (IsIndirect(element.Type))
-                        {
-                            CopyToFrame(fixedArrayDestination, stride);
-                        }
-                        else if (element.Type is PrimitiveType.Bool or PrimitiveType.Char16)
-                        {
-                            _code.StoreField(fixedArrayDestination, Size(element.Type));
-                        }
-                        else
-                        {
-                            StoreValue(fixedArrayDestination, element.Type);
-                        }
-                    }
+                    EmitNativeFixedArrayInitialization(fixedArray,
+                        Slot(local.Variable), 0);
                 }
                 else
                 {
@@ -6415,11 +6524,6 @@ internal sealed partial class PeCompiler
                 if (result.Value is not null)
                 {
                     Expression(result.Value, 0);
-                    if (IsFloatingCallCarrier(result.Value.Type))
-                    {
-                        _code.MoveFloatingReturnToAccumulator(
-                            result.Value.Type == PrimitiveType.Float64);
-                    }
                     if (_cleanups.Count != 0 || result.Value.Type == PrimitiveType.Float128
                         || normalBackingReferenceReturn)
                     {
@@ -6781,11 +6885,17 @@ internal sealed partial class PeCompiler
             case BoundNativeFixedArrayElement fixedArrayElement:
                 EmitNativeFixedArrayElement(fixedArrayElement, spill);
                 break;
+            case BoundNativeFixedArrayPathElement pathElement:
+                EmitNativeFixedArrayPathElement(pathElement, spill);
+                break;
             case BoundNativeFixedArrayPointerAddress pointerAddress:
                 EmitNativeFixedArrayPointerAddress(pointerAddress, spill);
                 break;
             case BoundNativeFixedArrayWrite fixedArrayWrite:
                 EmitNativeFixedArrayWrite(fixedArrayWrite, spill);
+                break;
+            case BoundNativeFixedArrayPathWrite pathWrite:
+                EmitNativeFixedArrayPathWrite(pathWrite, spill);
                 break;
             case BoundNativeStorageAddress address:
                 EmitNativeStorageAddress(address, spill);

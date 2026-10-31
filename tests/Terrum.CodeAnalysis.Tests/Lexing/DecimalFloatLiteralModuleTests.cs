@@ -190,7 +190,7 @@ public sealed class DecimalFloatLiteralModuleTests
     }
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
-    public void DecimalFloatLiteralExportsPreserveScalarSourceGrantAbi(BoundRuntimePolicy policy)
+    public void DecimalFloatLiteralExportsRespectCheckedBoundary(BoundRuntimePolicy policy)
     {
         Assert.That(OperatingSystem.IsWindows() && RuntimeInformation.ProcessArchitecture == Architecture.X64, Is.True);
         var root = RepositoryRoot();
@@ -204,6 +204,17 @@ public sealed class DecimalFloatLiteralModuleTests
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         const string Float32Export = "Terrum.CodeAnalysis.GetDecimalFloat32LiteralBitsOrMinusOne";
         const string Float64Export = "Terrum.CodeAnalysis.GetDecimalFloat64LiteralBitsOrMinusOne";
+        if (policy == BoundRuntimePolicy.CheckedExceptions)
+        {
+            var proofFailure = Assert.Throws<ArgumentException>(() =>
+                NativeEmitter.EmitLibraryWithSourceGrant(program,
+                    [Float32Export, Float64Export],
+                    (NativeRuntimePolicy)policy));
+            Assert.That(proofFailure!.Data["Terrum.InvalidEffect"],
+                Is.EqualTo("NoThrow"));
+            return;
+        }
+
         var artifact = NativeEmitter.EmitLibraryWithSourceGrant(program,
             [Float32Export, Float64Export], (NativeRuntimePolicy)policy);
         foreach (var descriptor in artifact.Exports)

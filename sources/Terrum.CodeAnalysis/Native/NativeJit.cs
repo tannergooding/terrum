@@ -449,25 +449,45 @@ public static unsafe partial class NativeJit
         }
         var previousEnd = 0;
         var containsEntry = false;
+        var stackProbeHelpers = code.Functions
+            .Where(static function => function.IsStackProbeHelper)
+            .ToArray();
+        if (stackProbeHelpers.Length > 1
+            || (code.Functions.Any(static function => function.UsesStackProbe)
+                != (stackProbeHelpers.Length == 1)))
+        {
+            throw new ArgumentException(
+                "Large native frames require exactly one stack-probe helper.",
+                nameof(code));
+        }
+        if (stackProbeHelpers.Length == 1
+            && !IsValidStackProbeHelper(text, stackProbeHelpers[0]))
+        {
+            throw new ArgumentException(
+                "Invalid native stack-probe helper.", nameof(code));
+        }
+
         foreach (var function in functions)
         {
-            var prologLength = function.UsesFramePointer ? 11 : 7;
+            var allocationSize = function.StackSize
+                - (function.UsesFramePointer ? 8 : 0);
+            var requiresProbe = allocationSize > NativeUnwind.StackProbeThreshold;
+            var prologLength = NativeUnwind.PrologSize(function);
             if (function.Start < previousEnd || function.Start < 0 || function.End > text.Length
-                || function.End - function.Start < prologLength || function.StackSize is < 8 or > 0xF00
+                || function.End - function.Start < prologLength
+                || function.StackSize < 8 || allocationSize <= 0
+                || function.UsesStackProbe != requiresProbe
+                || (function.UsesStackProbe && !function.UsesFramePointer)
                 || (function.StackSize & 15) != 8
+                || (function.IsStackProbeHelper
+                    && (function.StackSize != 40 || function.UsesFramePointer
+                        || function.UsesParentFrame || function.UsesStackProbe
+                        || !function.ExceptionScopes.IsEmpty))
                 || (!function.ExceptionScopes.IsEmpty && (function.ExceptionHandler < 0
                     || function.ExceptionHandler > text.Length - 6
                     || function.ExceptionScopes.Length > 100_000))
                 || (function.UsesParentFrame && !function.UsesFramePointer)
-                || (function.UsesFramePointer
-                    ? text[function.Start] != 0x55
-                        || text[function.Start + 1] != 0x48 || text[function.Start + 2] != 0x81
-                        || text[function.Start + 3] != 0xEC
-                        || BinaryPrimitives.ReadInt32LittleEndian(text.AsSpan(function.Start + 4, 4)) != function.StackSize - 8
-                        || text[function.Start + 8] != 0x48 || text[function.Start + 9] != 0x89
-                        || text[function.Start + 10] != (function.UsesParentFrame ? 0xD5 : 0xE5)
-                    : text[function.Start] != 0x48 || text[function.Start + 1] != 0x81 || text[function.Start + 2] != 0xEC
-                        || BinaryPrimitives.ReadInt32LittleEndian(text.AsSpan(function.Start + 3, 4)) != function.StackSize))
+                || !HasValidProlog(text, function, stackProbeHelpers))
             {
                 throw new ArgumentException("Invalid native function range or prolog.", nameof(code));
             }
@@ -842,6 +862,87 @@ public static unsafe partial class NativeJit
             NativeLibrary.Free(handlerModule);
         }
         NativeLibrary.Free(module);
+    }
+
+    private static bool HasValidProlog(ReadOnlySpan<byte> text,
+        NativeFunctionRange function,
+        NativeFunctionRange[] stackProbeHelpers)
+    {
+        var start = function.Start;
+        if (!function.UsesFramePointer)
+        {
+            return !function.UsesStackProbe
+                && text[start] == 0x48 && text[start + 1] == 0x81
+                && text[start + 2] == 0xEC
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    text[(start + 3)..]) == function.StackSize;
+        }
+
+        if (text[start] != 0x55)
+        {
+            return false;
+        }
+
+        if (!function.UsesStackProbe)
+        {
+            return text[start + 1] == 0x48 && text[start + 2] == 0x81
+                && text[start + 3] == 0xEC
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    text[(start + 4)..]) == function.StackSize - 8
+                && text[start + 8] == 0x48 && text[start + 9] == 0x89
+                && text[start + 10]
+                    == (function.UsesParentFrame ? 0xD5 : 0xE5);
+        }
+
+        var allocationSize = function.StackSize - 8;
+        if (text[start + 1] != 0xB8
+            || BinaryPrimitives.ReadInt32LittleEndian(text[(start + 2)..])
+                != allocationSize
+            || text[start + 6] != 0xE8
+            || text[start + 11] != 0x48 || text[start + 12] != 0x81
+            || text[start + 13] != 0xEC
+            || BinaryPrimitives.ReadInt32LittleEndian(text[(start + 14)..])
+                != allocationSize
+            || text[start + 18] != 0x48 || text[start + 19] != 0x89
+            || text[start + 20]
+                != (function.UsesParentFrame ? 0xD5 : 0xE5))
+        {
+            return false;
+        }
+
+        var probeTarget = checked(start + 11
+            + BinaryPrimitives.ReadInt32LittleEndian(text[(start + 7)..]));
+        return stackProbeHelpers.Length == 1
+            && probeTarget == stackProbeHelpers[0].Start;
+    }
+
+    private static bool IsValidStackProbeHelper(ReadOnlySpan<byte> text,
+        NativeFunctionRange function)
+    {
+        if (function.Start < 0 || function.End > text.Length
+            || function.End - function.Start != 66)
+        {
+            return false;
+        }
+
+        Span<byte> expected = [
+            0x48, 0x81, 0xEC, 0x28, 0x00, 0x00, 0x00,
+            0x4C, 0x8D, 0x54, 0x24, 0x30,
+            0x49, 0x89, 0xC3,
+            0x49, 0x81, 0xFB, 0x00, 0x10, 0x00, 0x00,
+            0x0F, 0x82, 0x00, 0x00, 0x00, 0x00,
+            0x49, 0x81, 0xEA, 0x00, 0x10, 0x00, 0x00,
+            0x41, 0xF6, 0x02, 0x00,
+            0x49, 0x81, 0xEB, 0x00, 0x10, 0x00, 0x00,
+            0xE9, 0x00, 0x00, 0x00, 0x00,
+            0x4D, 0x29, 0xDA,
+            0x41, 0xF6, 0x02, 0x00,
+            0x48, 0x81, 0xC4, 0x28, 0x00, 0x00, 0x00,
+            0xC3,
+        ];
+        BinaryPrimitives.WriteInt32LittleEndian(expected[24..], 23);
+        BinaryPrimitives.WriteInt32LittleEndian(expected[47..], -36);
+        return text.Slice(function.Start, expected.Length).SequenceEqual(expected);
     }
 
     private static int Align(int value, int alignment) => checked((value + alignment - 1) & (-alignment));
