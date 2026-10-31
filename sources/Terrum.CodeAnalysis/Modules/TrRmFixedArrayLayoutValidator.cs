@@ -140,14 +140,27 @@ internal static class TrRmFixedArrayLayoutValidator
         }
     }
 
-    private static ulong RoundUp(ulong value, ulong alignment)
+    private static ulong RoundUp(ulong value, ulong alignment,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
-        if (alignment == 0 || (alignment & (alignment - 1)) != 0)
+        resourceLedger?.ConsumeWork();
+        if (alignment == 0)
         {
             throw InvalidLayout();
         }
 
-        return checked((value + alignment - 1) & ~(alignment - 1));
+        resourceLedger?.ConsumeWork();
+        var alignmentMask = alignment - 1;
+        resourceLedger?.ConsumeWork(2);
+        if ((alignment & alignmentMask) != 0)
+        {
+            throw InvalidLayout();
+        }
+
+        resourceLedger?.ConsumeWork();
+        var roundedValue = checked(value + alignmentMask);
+        resourceLedger?.ConsumeWork();
+        return roundedValue & ~alignmentMask;
     }
 
     private static TypeLayout GetAtomicLayout(byte code) => code switch
@@ -331,6 +344,7 @@ internal static class TrRmFixedArrayLayoutValidator
 
                 var element = CalculateTypeLayout(elementTypeSpecRef,
                     ownerModule);
+                ConsumeWork();
                 var alignment = Math.Max(1UL, element.Alignment);
                 var stride = RoundUpTargetLayout(element.Size, alignment);
                 var extent = MultiplyTargetLayout(elementCount, stride);
@@ -1369,7 +1383,7 @@ internal static class TrRmFixedArrayLayoutValidator
         {
             try
             {
-                return RoundUp(value, alignment);
+                return RoundUp(value, alignment, _a3ResourceLedger);
             }
             catch (OverflowException exception)
             {
@@ -1388,6 +1402,7 @@ internal static class TrRmFixedArrayLayoutValidator
         {
             try
             {
+                ConsumeWork();
                 return checked(left + right);
             }
             catch (OverflowException exception)
@@ -1407,6 +1422,7 @@ internal static class TrRmFixedArrayLayoutValidator
         {
             try
             {
+                ConsumeWork();
                 return checked(left * right);
             }
             catch (OverflowException exception)
@@ -1635,10 +1651,12 @@ internal static class TrRmFixedArrayLayoutValidator
                 }
 
                 var declaredPack = _layouts.GetPack(layoutRow);
+                ConsumeWork();
                 var pack = declaredPack == 0 ? 16UL : declaredPack;
                 var explicitAlignment = _layouts.GetAlignment(layoutRow);
                 var end = 0UL;
                 var aggregateAlignment = 1UL;
+                ConsumeWork();
                 var requiredAlignment = Math.Max(1UL, explicitAlignment);
                 for (var ordinal = 0; ordinal < fieldCount; ordinal++)
                 {
@@ -1648,30 +1666,37 @@ internal static class TrRmFixedArrayLayoutValidator
                         new TypeSpecContext(_fields.GetTypeSpecRef(field),
                             typeDefModule,
                             genericCount == 0 ? null : substitutions));
+                    ConsumeWork();
                     requiredAlignment = Math.Max(requiredAlignment,
                         fieldLayout.RequiredAlignment);
+                    ConsumeWork();
                     if (fieldLayout.Size == 0)
                     {
                         continue;
                     }
 
+                    ConsumeWork();
                     if (fieldLayout.Alignment == 0)
                     {
                         throw InvalidLayout();
                     }
 
+                    ConsumeWork(2);
                     var placementAlignment = Math.Max(
                         Math.Min(fieldLayout.Alignment, pack),
                         fieldLayout.RequiredAlignment);
                     end = AddTargetLayout(
                         RoundUpTargetLayout(end, placementAlignment),
                         fieldLayout.Size);
+                    ConsumeWork();
                     aggregateAlignment = Math.Max(aggregateAlignment,
                         placementAlignment);
                 }
 
+                ConsumeWork();
                 if (explicitAlignment != 0)
                 {
+                    ConsumeWork();
                     if (explicitAlignment < aggregateAlignment)
                     {
                         throw InvalidLayout();
@@ -1680,8 +1705,10 @@ internal static class TrRmFixedArrayLayoutValidator
                     aggregateAlignment = explicitAlignment;
                 }
 
+                ConsumeWork();
                 var size = RoundUpTargetLayout(end == 0 ? 1UL : end,
                     aggregateAlignment);
+                ConsumeWork();
                 requiredAlignment = Math.Max(requiredAlignment,
                     explicitAlignment);
                 return new TypeLayout(size, aggregateAlignment,
