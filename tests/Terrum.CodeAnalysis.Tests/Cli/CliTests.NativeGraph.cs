@@ -28,7 +28,9 @@ public sealed partial class CliTests
         try
         {
             await File.WriteAllTextAsync(leafSource, "[NoThrow] public int32 Leaf() { return 40; }");
-            await File.WriteAllTextAsync(middleSource, "public int32 Middle() { return Leaf() + 1; }");
+            await File.WriteAllTextAsync(middleSource,
+                "public int32 Middle() { mut [uint32; 2] values = [0, 0]; "
+                + "return Leaf() + int32(values[0] + values[1]) + 1; }");
             await File.WriteAllTextAsync(rootSource, "int32 Main() { return Middle() + 1; }");
             Assert.That((await RunAsync([], "compile-native", "producer", leafSource, "NodeB",
                 "--export", "Leaf", "-o", leaf, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));

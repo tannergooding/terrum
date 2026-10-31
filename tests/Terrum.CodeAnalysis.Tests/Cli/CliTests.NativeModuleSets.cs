@@ -27,9 +27,11 @@ public sealed partial class CliTests
         var secondSource = Path.Combine(directory, "second.terrum");
         try
         {
-            await File.WriteAllTextAsync(firstSource, "public int32 Alpha() { return 20; }");
+            await File.WriteAllTextAsync(firstSource,
+                "public int32 Alpha() { mut [uint32; 2] values = [10, 10]; return int32(values[0] + values[1]); }");
             await File.WriteAllTextAsync(secondSource, "public int32 Beta() { return 22; }");
-            await File.WriteAllTextAsync(source, "int32 Main() { return Alpha() + Beta(); }");
+            await File.WriteAllTextAsync(source,
+                "int32 Main() { mut [uint16; 1] local = [1]; return Alpha() + Beta() + int32(local[0]) - 1; }");
             Assert.That((await RunAsync([], "compile-native", "producer", firstSource, "First",
                 "--export", "Alpha", "-o", first, "--runtime", "fail-fast")).ExitCode, Is.EqualTo(0));
             Assert.That((await RunAsync([], "compile-native", "producer", secondSource, "Second",

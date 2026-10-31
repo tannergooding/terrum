@@ -13,6 +13,67 @@ namespace Terrum.CodeAnalysis.Tests.Cli;
 
 public sealed partial class CliTests
 {
+    [TestCase("fail-fast")]
+    [TestCase("checked-exceptions")]
+    public async Task NativePackagesCompileAndRunFlatArrayProgramsAsync(
+        string policy)
+    {
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"terrum-native-array-cli-{Guid.NewGuid():N}");
+        var producerSource = prefix + ".producer.terrum";
+        var consumerSource = prefix + ".consumer.terrum";
+        var producer = prefix + ".producer.trmn";
+        var consumer = prefix + ".consumer.trmn";
+        try
+        {
+            await File.WriteAllTextAsync(producerSource, """
+                public int32 ReadArray() {
+                    mut [uint32; 2] values = [10, 20];
+                    values[1] = values[0] + 1;
+                    unsafe {
+                        ptr<uint32> selected = &values[1];
+                        return int32(*selected);
+                    }
+                }
+                """);
+            await File.WriteAllTextAsync(consumerSource, """
+                int32 Main() {
+                    mut [uint16; 1] local = [1];
+                    return ReadArray() + int32(local[0]) - 12;
+                }
+                """);
+
+            var (producerExit, producerOutput, producerError) =
+                await RunAsync([], "compile-native", "producer",
+                    producerSource, "ArrayProvider", "--export",
+                    "ReadArray", "-o", producer, "--runtime", policy,
+                    "--json");
+            Assert.That(producerExit, Is.Zero, producerOutput);
+            Assert.That(producerError, Is.Empty);
+
+            var (consumerExit, consumerOutput, consumerError) =
+                await RunAsync([], "compile-native", "consumer",
+                    consumerSource, producer, "-o", consumer, "--runtime",
+                    policy, "--json");
+            Assert.That(consumerExit, Is.Zero, consumerOutput);
+            Assert.That(consumerError, Is.Empty);
+
+            var (runExit, runOutput, runError) =
+                await RunAsync([], "run-native", consumer, producer,
+                    "--runtime", policy, "--json");
+            Assert.That(runExit, Is.Zero, runOutput + runError);
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+        }
+        finally
+        {
+            File.Delete(producerSource);
+            File.Delete(consumerSource);
+            File.Delete(producer);
+            File.Delete(consumer);
+        }
+    }
+
     [Test]
     public async Task NativePackagesRunAnUnchangedConsumerWithAValidatedReplacementAsync()
     {
