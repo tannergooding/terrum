@@ -25,12 +25,13 @@ internal static class TrRmConstructedTypeSpecValidator
         {
             resourceLedger?.ConsumeWork();
             var bytes = typeSpecs.GetRow(row);
-            if (bytes[0] == 0x03)
+            var form = ReadByte(bytes, 0, resourceLedger);
+            if (form == 0x03)
             {
                 ValidateImportedTypeDef(Read(bytes, 2, resourceLedger),
                     imports);
             }
-            else if (bytes[0] == 0x04)
+            else if (form == 0x04)
             {
                 var formalRow = checked((int)Read(bytes, 2, resourceLedger));
                 if (formals.GetFormalKind(formalRow) != 1)
@@ -38,11 +39,12 @@ internal static class TrRmConstructedTypeSpecValidator
                     throw InvalidTypeSpec();
                 }
             }
-            else if (bytes[0] == 0x05)
+            else if (form == 0x05)
             {
                 var definition = GetConstructedDefinition(
                     bytes, typeSpecs, typeDefs, formals, imports,
                     resourceLedger);
+                resourceLedger?.ConsumeWork(3);
                 var argumentCount = (bytes.Length - 6) / sizeof(uint);
                 if (argumentCount != definition.FormalCount)
                 {
@@ -110,7 +112,8 @@ internal static class TrRmConstructedTypeSpecValidator
     {
         var genericTypeSpec = checked((int)Read(bytes, 2, resourceLedger));
         var genericType = typeSpecs.GetRow(genericTypeSpec);
-        var defId = genericType[0] switch
+        var genericForm = ReadByte(genericType, 0, resourceLedger);
+        var defId = genericForm switch
         {
             0x02 => 0x1300_0000u | Read(genericType, 2, resourceLedger),
             0x03 => imports.GetExpectedDefinitionForImportRow(
@@ -212,7 +215,8 @@ internal static class TrRmConstructedTypeSpecValidator
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var bytes = typeSpecs.GetRow(row);
-        if (bytes[0] == 0x05)
+        var form = ReadByte(bytes, 0, resourceLedger);
+        if (form == 0x05)
         {
             var definition = GetConstructedDefinition(
                 bytes, typeSpecs, typeDefs, formals, imports, resourceLedger);
@@ -233,19 +237,21 @@ internal static class TrRmConstructedTypeSpecValidator
             return count;
         }
 
-        if (bytes[0] is (>= 0x06 and <= 0x0B) or 0x0E)
+        if (form is (>= 0x06 and <= 0x0B) or 0x0E)
         {
             return typeSpecs.GetTypeSpecRef(
                 Read(bytes, 2, resourceLedger)).IsRow ? 1 : 0;
         }
 
-        if (bytes[0] == 0x0C)
+        if (form == 0x0C)
         {
+            var allowInitQualifier
+                = ReadByte(bytes, 2, resourceLedger) == 0x8A;
             return typeSpecs.GetTypeSpecRef(Read(bytes, 3, resourceLedger),
-                allowInitQualifier: bytes[2] == 0x8A).IsRow ? 1 : 0;
+                allowInitQualifier: allowInitQualifier).IsRow ? 1 : 0;
         }
 
-        if (bytes[0] == 0x11)
+        if (form == 0x11)
         {
             return typeSpecs.GetTypeSpecRef(
                 Read(bytes, 2, resourceLedger)).IsRow ? 1 : 0;
@@ -260,7 +266,8 @@ internal static class TrRmConstructedTypeSpecValidator
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var bytes = typeSpecs.GetRow(row);
-        if (bytes[0] == 0x05)
+        var form = ReadByte(bytes, 0, resourceLedger);
+        if (form == 0x05)
         {
             if (reference == 0)
             {
@@ -290,10 +297,12 @@ internal static class TrRmConstructedTypeSpecValidator
             throw InvalidTypeSpec();
         }
 
-        var offset = bytes[0] == 0x0C ? 3 : 2;
+        var offset = form == 0x0C ? 3 : 2;
+        var allowInitQualifier = form == 0x0C
+            && ReadByte(bytes, 2, resourceLedger) == 0x8A;
         var inner = typeSpecs.GetTypeSpecRef(Read(bytes, offset,
                 resourceLedger),
-            allowInitQualifier: bytes[0] == 0x0C && bytes[2] == 0x8A);
+            allowInitQualifier: allowInitQualifier);
         if (reference == 0 && inner.IsRow)
         {
             return inner.Row;
@@ -308,6 +317,13 @@ internal static class TrRmConstructedTypeSpecValidator
         resourceLedger?.ConsumeWork(sizeof(uint) + 1);
         return BinaryPrimitives.ReadUInt32LittleEndian(
             bytes.Slice(offset, sizeof(uint)));
+    }
+
+    private static byte ReadByte(ReadOnlySpan<byte> bytes, int offset,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(sizeof(byte) + 1);
+        return bytes[offset];
     }
 
     private static InvalidDataException InvalidTypeSpec()

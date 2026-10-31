@@ -1018,14 +1018,18 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     {
         var artifact = CreateA3NestedGenericArrayArtifact(
             nestedConstructedActual: true);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
-                TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
-                        artifact));
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            artifact),
+                    resourceLedger);
 
-        Assert.That(tables.FixedArrayLayouts.GetRow(1),
-            Is.EqualTo(new TrRmFixedArrayLayoutRow(1, 9, 1, 4, 12, 4)));
+            Assert.That(tables.FixedArrayLayouts.GetRow(1),
+                Is.EqualTo(new TrRmFixedArrayLayoutRow(1, 9, 1, 4, 12, 4)));
+        });
     }
 
     [Test]

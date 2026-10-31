@@ -745,25 +745,40 @@ internal static class TrRmFixedArrayLayoutValidator
             }
         }
 
-        private static ulong GetDecimalLength(int value)
+        private ulong GetDecimalLength(int value)
         {
-            var length = value < 0 ? 1UL : 0UL;
-            var magnitude = value < 0
+            ConsumeWork(5);
+            var isNegative = value < 0;
+            var length = isNegative ? 1UL : 0UL;
+            var magnitude = isNegative
                 ? (uint)-(long)value : (uint)value;
-            do
+            while (true)
             {
+                ConsumeWork(2);
                 length++;
                 magnitude /= 10;
-            } while (magnitude != 0);
+                ConsumeWork();
+                if (magnitude == 0)
+                {
+                    break;
+                }
+            }
 
             return length;
         }
 
-        private static ulong GetDecimalLength(uint value)
+        private ulong GetDecimalLength(uint value)
         {
             var length = 1UL;
-            while (value >= 10)
+            while (true)
             {
+                ConsumeWork();
+                if (value < 10)
+                {
+                    break;
+                }
+
+                ConsumeWork(2);
                 value /= 10;
                 length++;
             }
@@ -771,11 +786,18 @@ internal static class TrRmFixedArrayLayoutValidator
             return length;
         }
 
-        private static ulong GetDecimalLength(ulong value)
+        private ulong GetDecimalLength(ulong value)
         {
             var length = 1UL;
-            while (value >= 10)
+            while (true)
             {
+                ConsumeWork();
+                if (value < 10)
+                {
+                    break;
+                }
+
+                ConsumeWork(2);
                 value /= 10;
                 length++;
             }
