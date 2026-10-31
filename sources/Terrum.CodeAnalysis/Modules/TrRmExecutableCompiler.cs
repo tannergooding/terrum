@@ -3139,7 +3139,9 @@ public static partial class TrRmExecutableCompiler
         List<NativePointerTypeDefinition> nativePointerTypes,
         out int[] structureTypeByTypeDef,
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
-        IReadOnlyDictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null)
+        Dictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
+        HashSet<int>? selectedTypeDefRows = null,
+        ImmutableArray<BoundStruct>? previousStructures = null)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -3169,6 +3171,14 @@ public static partial class TrRmExecutableCompiler
             structureRows.Add(row);
         }
 
+        if (previousStructures is { } previousState
+            && (previousState.IsDefault
+                || previousState.Length
+                    != optionalStructures.Length + structureRows.Count))
+        {
+            throw Invalid("A prior native Blittable-layout state is inconsistent.");
+        }
+
         var structures = optionalStructures.ToList();
         foreach (var row in structureRows)
         {
@@ -3186,11 +3196,22 @@ public static partial class TrRmExecutableCompiler
             var typeNamespace = typeDefs.GetNamespace(row);
             var name = typeNamespace.Length == 0
                 ? typeDefs.GetName(row) : typeNamespace + "." + typeDefs.GetName(row);
+            var structureIndex = structureTypeByTypeDef[row];
+            if (previousStructures is { } previous
+                && (uint)structureIndex < (uint)previous.Length
+                && previous[structureIndex].Size > 0)
+            {
+                structures.Add(previous[structureIndex]);
+                continue;
+            }
+
             structures.Add(new BoundStruct(name, [], 0)
             {
                 IsSequential = layoutKind == 1,
                 IsTransparent = layoutKind == 3,
-                BlittableTargetRequirement = FixedLayoutStorage.WindowsX64TargetRequirement,
+                BlittableTargetRequirement = selectedTypeDefRows is null
+                    || selectedTypeDefRows.Contains(row)
+                    ? FixedLayoutStorage.WindowsX64TargetRequirement : 0,
                 IsPrivate = (flags & 3) == 0,
                 IsInternal = (flags & 3) == 1,
             });
@@ -3198,7 +3219,18 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var row in structureRows)
         {
+            if (selectedTypeDefRows is not null
+                && !selectedTypeDefRows.Contains(row))
+            {
+                continue;
+            }
+
             var structureIndex = structureTypeByTypeDef[row];
+            if (structures[structureIndex].Size > 0)
+            {
+                continue;
+            }
+
             var layoutRow = layouts.GetLayoutForProfile(row, checked((uint)windowsX64ProfileRow));
             var (firstField, fieldCount) = layouts.GetLayoutFieldRange(layoutRow);
             if (fieldCount == 0)

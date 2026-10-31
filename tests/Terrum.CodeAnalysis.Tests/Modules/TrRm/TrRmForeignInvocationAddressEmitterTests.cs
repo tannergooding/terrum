@@ -364,6 +364,53 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2TypeLibraryLoaderReconstructsLocalNominalArrayElements()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-nominal-array-elements";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Element {
+                public [uint32; 2] Values;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public [Element; 3] Items;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+
+        Assert.That(loaded.Structures, Has.Length.EqualTo(2));
+        Assert.That(loaded.Structures[0].Fields[0].Type,
+            Is.EqualTo(NativeFixedArrayTypes.Type(0)));
+        Assert.That(loaded.Structures[0].Size, Is.EqualTo(8));
+        Assert.That(loaded.Structures[1].Fields[0].Type,
+            Is.EqualTo(NativeFixedArrayTypes.Type(1)));
+        Assert.That(loaded.Structures[1].Size, Is.EqualTo(24));
+        Assert.That(loaded.NativeFixedArrayTypes, Has.Length.EqualTo(2));
+        Assert.That(loaded.NativeFixedArrayTypes[0].ElementType,
+            Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(loaded.NativeFixedArrayTypes[0].ElementCount,
+            Is.EqualTo(2UL));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ElementType,
+            Is.EqualTo((PrimitiveType)100));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ElementCount,
+            Is.EqualTo(3UL));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ElementStride,
+            Is.EqualTo(8UL));
+        Assert.That(loaded.NativeFixedArrayTypes[1].ByteExtent,
+            Is.EqualTo(24UL));
+        Assert.That(NativeFixedArrayContract.MatchesProgram(loaded), Is.True);
+    }
+
+    [Test]
     public void StandardA2LoaderReconstructsNestedAndWideArrayTypes()
     {
         const string schemaIdentity

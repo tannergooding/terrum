@@ -460,14 +460,22 @@ rows remain unmarked. It also emits TypeSpec `0x11` and Module-owned
 FixedArrayLayout rows for scalar, unit and nested array fields in these
 declarations with exact Feature `20/1` and `2/1` closure. Array Body rows and
 operations are not produced. The type-only source-free branch reconstructs
-local non-generic Copy TypeDefs and these field types; the executable
-NativeAddress path still rejects nonempty TypeDef tables. The public source-free NativeAddress reader now consumes
+local non-generic Copy TypeDefs and these field types, including acyclic arrays
+whose elements are local nominal Copy structs. It resolves array/TypeDef layout
+dependencies in order and revalidates the completed geometry. The executable
+NativeAddress path still rejects nonempty TypeDef tables. The focused
+`TrRmForeignInvocationAddressEmitterTests` class passed 36/36 with zero skips,
+including the local nominal-element round trip. The public source-free
+NativeAddress reader now consumes
 A2 Section `0x0012` and TargetProfile rows for selected-Module scalar, unit,
 direct-pointer, function-pointer and nested-array types; it rebuilds bound
 array identities, checks target geometry and preserves wide counts. Its
 synthetic consumer and combined TRRM array suites passed 151/151 with zero
 skips. External/imported Copy provider origins remain unsupported, and neither
 path constructs executable array TypeMap entries or PlaceSelection/EC Bodies.
+The source TypeDef ExportKey/origin mapping remains an unapproved candidate in
+the [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-type-identity.md);
+no key is derived from a declaration name.
 Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact
