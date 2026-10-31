@@ -31,6 +31,8 @@ public static partial class ModuleCompiler
     private const int NativeCallableEntryVersion = 88;
     private const int ArithmeticOperationVersion = 89;
     private const int NativeOutputContractVersion = 92;
+    private const int NativeStorageAddressExtentVersion = 99;
+    private const int NativeFixedArrayVersion = 100;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -144,7 +146,8 @@ public static partial class ModuleCompiler
     {
         var declarations = ImportDeclarations(producer);
         var projection = ProjectNativeContracts(declarations, producer.Structures,
-            producer.NativePointerTypes, producer.NativeFunctionPointerSignatures);
+            producer.NativePointerTypes, producer.NativeFunctionPointerSignatures,
+            producer.NativeFixedArrayTypes);
         var structures = SelectStructures(producer.Structures, projection.RequiredStructures);
         structures = [.. structures.Select(structure =>
             RemapNativePointerTypes(
@@ -157,10 +160,91 @@ public static partial class ModuleCompiler
             mapped = RemapNativeFunctionPointerTypes(mapped, projection.FunctionPointerMapping);
             remapped.Add(RemapNativePointerTypes(mapped, projection.PointerMapping));
         }
-        return new CompilationReference(structures, remapped.MoveToImmutable(), producer.RuntimePolicy,
-            producer.RequiresSourceGrant, producer.InvocationProfileId,
-            nativeFunctionPointerSignatures: projection.FunctionPointerSignatures,
-            nativePointerTypes: projection.PointerTypes);
+        return CreateProjectedReference(structures, remapped.MoveToImmutable(),
+            producer.RuntimePolicy, producer.RequiresSourceGrant,
+            producer.InvocationProfileId,
+            projection.FunctionPointerSignatures, projection.PointerTypes,
+            []);
+    }
+
+    private static CompilationReference CreateProjectedReference(
+        ImmutableArray<BoundStruct> structures,
+        ImmutableArray<BoundFunction> functions,
+        BoundRuntimePolicy runtimePolicy,
+        bool requiresSourceGrant,
+        string? invocationProfileId,
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            functionPointerSignatures,
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes)
+    {
+        var moduleFunctions = ImmutableArray.CreateBuilder<ModuleFunction>(
+            functions.Length);
+        foreach (var function in functions)
+        {
+            if (!IsRevision100RuntimeType(function.ReturnType, structures,
+                    fixedArrayTypes, nativePointerTypes,
+                    functionPointerSignatures)
+                || (function.NativeFunctionPointerType
+                    is PrimitiveType nativeFunctionPointerType
+                    && !IsRevision100RuntimeType(nativeFunctionPointerType,
+                        structures, fixedArrayTypes, nativePointerTypes,
+                        functionPointerSignatures))
+                || function.Variables.Take(function.ParameterCount
+                    + (function.IsConstructor ? 1 : 0)).Any(variable =>
+                    !IsRevision100RuntimeType(variable.Type, structures,
+                        fixedArrayTypes, nativePointerTypes,
+                        functionPointerSignatures))
+                || function.NativeOutputContracts.Any(output =>
+                    !IsRevision100RuntimeType(output.PointeeType, structures,
+                        fixedArrayTypes, nativePointerTypes,
+                        functionPointerSignatures))
+                || (function.DirectNativeImport is DirectNativeImport import
+                    && (import.Parameters.Any(parameter =>
+                            !IsRevision100RuntimeType(parameter.PointeeType,
+                                structures, fixedArrayTypes, nativePointerTypes,
+                                functionPointerSignatures))
+                        || import.Outputs.Any(output =>
+                            !IsRevision100RuntimeType(output.PointeeType,
+                                structures, fixedArrayTypes, nativePointerTypes,
+                                functionPointerSignatures))))
+                || (function.NativeVTableMethod
+                    is NativeVTableMethodDefinition vtableMethod
+                    && (vtableMethod.Parameters.Any(parameter =>
+                            !IsRevision100RuntimeType(parameter.PointeeType,
+                                structures, fixedArrayTypes, nativePointerTypes,
+                                functionPointerSignatures))
+                        || vtableMethod.Outputs.Any(output =>
+                            !IsRevision100RuntimeType(output.PointeeType,
+                                structures, fixedArrayTypes, nativePointerTypes,
+                                functionPointerSignatures)))))
+            {
+                throw new ModuleContractException(
+                    $"Private revision 100 cannot expose array-derived runtime contract '{function.Name}'.");
+            }
+            moduleFunctions.Add(new ModuleFunction(function.Name,
+                Contract(function, structures, functionPointerSignatures,
+                    nativePointerTypes, fixedArrayTypes), function, false));
+        }
+
+        var (canonicalModule, _) = CanonicalizeNativeFixedArrays(
+            new Module(false, -1, structures, moduleFunctions.MoveToImmutable()) {
+                NativeFunctionPointerSignatures = functionPointerSignatures,
+                NativePointerTypes = nativePointerTypes,
+                NativeFixedArrayTypes = fixedArrayTypes,
+                RequiresSourceGrant = requiresSourceGrant,
+                InvocationProfileId = invocationProfileId,
+                RuntimePolicy = runtimePolicy,
+            });
+        return new CompilationReference(canonicalModule.Structures,
+            [.. canonicalModule.Functions.Select(static item =>
+                item.Function ?? throw new ModuleFormatException(
+                    "Projected module declaration has no function."))],
+            runtimePolicy, requiresSourceGrant, invocationProfileId,
+            nativeFunctionPointerSignatures:
+                canonicalModule.NativeFunctionPointerSignatures,
+            nativePointerTypes: canonicalModule.NativePointerTypes,
+            nativeFixedArrayTypes: canonicalModule.NativeFixedArrayTypes);
     }
 
     private static ImmutableArray<BoundFunction> ImportDeclarations(Module module)
@@ -588,12 +672,14 @@ public static partial class ModuleCompiler
         ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes = default,
         Func<string, int>? findStructureIndex = null,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
-        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default)
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         var pending = new Queue<PrimitiveType>();
         PopulateRequiredStructures(functions, structures, classes, findStructureIndex, result, pending,
-            nativePointerTypes, nativeFunctionPointerSignatures);
+            nativePointerTypes, nativeFunctionPointerSignatures,
+            nativeFixedArrayTypes: nativeFixedArrayTypes);
         return result;
     }
 
@@ -606,7 +692,8 @@ public static partial class ModuleCompiler
     private static NativeContractProjection ProjectNativeContracts(IEnumerable<BoundFunction> functions,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
-        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures)
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default)
     {
         var requiredStructures = new HashSet<string>(StringComparer.Ordinal);
         var requiredPointerTypes = new HashSet<int>();
@@ -614,7 +701,8 @@ public static partial class ModuleCompiler
         PopulateRequiredStructures(functions, structures, default, null, requiredStructures, new Queue<PrimitiveType>(),
             nativePointerTypes, nativeFunctionPointerSignatures, includeAllInteropTypes: false,
             requiredPointerTypes: requiredPointerTypes,
-            requiredFunctionPointerTypes: requiredFunctionPointerTypes);
+            requiredFunctionPointerTypes: requiredFunctionPointerTypes,
+            nativeFixedArrayTypes: nativeFixedArrayTypes);
 
         var functionPointerMapping = CreateMapping(nativeFunctionPointerSignatures.Length,
             requiredFunctionPointerTypes, NativeFunctionPointerTypes.Type);
@@ -683,7 +771,8 @@ public static partial class ModuleCompiler
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures = default,
         bool includeAllInteropTypes = true, HashSet<int>? requiredPointerTypes = null,
-        HashSet<int>? requiredFunctionPointerTypes = null)
+        HashSet<int>? requiredFunctionPointerTypes = null,
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default)
     {
         result.Clear();
         pending.Clear();
@@ -813,6 +902,19 @@ public static partial class ModuleCompiler
                 }
                 return;
             }
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                var fixedArrayIndex = NativeFixedArrayTypes.Index(type);
+                if (nativeFixedArrayTypes.IsDefault
+                    || (uint)fixedArrayIndex
+                        >= (uint)nativeFixedArrayTypes.Length)
+                {
+                    throw new ModuleFormatException(
+                        "Invalid native fixed-array type reference.");
+                }
+                Add(nativeFixedArrayTypes[fixedArrayIndex].ElementType);
+                return;
+            }
             if (type == PrimitiveType.TokenSpan)
             {
                 var token = TokenSpanContract.Find(structures, TokenSpanContract.TokenName);
@@ -871,6 +973,7 @@ public static partial class ModuleCompiler
             Classes = producer.Classes,
             NativeFunctionPointerSignatures = producer.NativeFunctionPointerSignatures,
             NativePointerTypes = producer.NativePointerTypes,
+            NativeFixedArrayTypes = producer.NativeFixedArrayTypes,
             Buffers = producer.InvocationProfileId is not null
                 ? producer.InvocationBuffers
                 : producer.RequiresSourceGrant
@@ -956,7 +1059,7 @@ public static partial class ModuleCompiler
                 "The private semantic module format has no generic nominal type identity codec.");
         }
         SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
-            allowDirectNativeImports: true);
+            allowDirectNativeImports: true, allowFixedArrayStorage: true);
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -1052,7 +1155,8 @@ public static partial class ModuleCompiler
                 Declaration(program.Functions[index])),
                 program.Structures, findStructureIndex: FindStructureIndex,
                 nativePointerTypes: program.NativePointerTypes,
-                nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
+                nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
+                nativeFixedArrayTypes: program.NativeFixedArrayTypes);
             foreach (var structure in cleanupStructures)
             {
                 if (exportedTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
@@ -1097,7 +1201,9 @@ public static partial class ModuleCompiler
                 var currentCleanupTypeQueue = cleanupTypeQueue ??= new Queue<PrimitiveType>();
                 PopulateRequiredStructures(singleFunction, program.Structures, default,
                     FindStructureIndex, currentCleanupTypes, currentCleanupTypeQueue,
-                    program.NativePointerTypes, program.NativeFunctionPointerSignatures);
+                    program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures,
+                    nativeFixedArrayTypes: program.NativeFixedArrayTypes);
                 foreach (var structure in cleanupStructures)
                 {
                     if (currentCleanupTypes.Contains(structure.Name)
@@ -1129,17 +1235,21 @@ public static partial class ModuleCompiler
         }
         var functions = functionsBuilder.MoveToImmutable();
         var required = RequiredStructures(functions, program.Structures, program.Classes,
-            FindStructureIndex, program.NativePointerTypes, program.NativeFunctionPointerSignatures);
+            FindStructureIndex, program.NativePointerTypes,
+            program.NativeFunctionPointerSignatures,
+            program.NativeFixedArrayTypes);
         var structures = SelectStructures(program.Structures, required);
         var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, structures);
+        var nativeFixedArrayTypes = RemapNativeFixedArrayTypeDefinitions(
+            program.NativeFixedArrayTypes, program.Structures, structures);
         var moduleFunctions = ImmutableArray.CreateBuilder<ModuleFunction>(functions.Length);
         foreach (var function in functions)
         {
             var remapped = RemapFunction(function, program.Structures, structures);
             moduleFunctions.Add(new ModuleFunction(remapped.Name,
                 Contract(remapped, structures, program.NativeFunctionPointerSignatures,
-                    nativePointerTypes), remapped,
+                    nativePointerTypes, nativeFixedArrayTypes), remapped,
                 names.Contains(remapped.Name)) {
                 HasOwnershipTransfer = Compilation.HasOwnershipTransfer(remapped, structures),
                 NativeOutputRole = remapped.NativeOutputRole,
@@ -1155,6 +1265,7 @@ public static partial class ModuleCompiler
             Classes = classes.MoveToImmutable(),
             NativeFunctionPointerSignatures = program.NativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
+            NativeFixedArrayTypes = nativeFixedArrayTypes,
             RequiresSourceGrant = requiresSourceGrant,
             InvocationProfileId = program.InvocationProfileId,
             InvocationBuffers = program.InvocationProfileId is null ? [] : program.Buffers,
@@ -1186,7 +1297,7 @@ public static partial class ModuleCompiler
                 "The private semantic module format has no generic nominal type identity codec.");
         }
         SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
-            allowDirectNativeImports: true);
+            allowDirectNativeImports: true, allowFixedArrayStorage: true);
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -1282,7 +1393,8 @@ public static partial class ModuleCompiler
                 }
                 declarations.Add(new ModuleFunction(function.Name,
                     Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
-                        program.NativePointerTypes), function, false) {
+                        program.NativePointerTypes,
+                        program.NativeFixedArrayTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
                     NativeOutputRole = function.NativeOutputRole,
                     NativeOutputContracts = function.NativeOutputContracts,
@@ -1303,7 +1415,7 @@ public static partial class ModuleCompiler
                     throw new ModuleContractException($"Declaration '{function.Name}' is not a public module import.");
                 }
                 var contract = Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
-                    program.NativePointerTypes);
+                    program.NativePointerTypes, program.NativeFixedArrayTypes);
                 if (!CompatibleContract(contract, imported.Contract))
                 {
                     throw new ModuleContractException($"Reference declaration for '{function.Name}' differs from the producer.");
@@ -1354,7 +1466,8 @@ public static partial class ModuleCompiler
                 functionCalls?[i] = null;
                 declarations.Add(new ModuleFunction(function.Name,
                     Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
-                        program.NativePointerTypes), function, false) {
+                        program.NativePointerTypes,
+                        program.NativeFixedArrayTypes), function, false) {
                     HasOwnershipTransfer = Compilation.HasOwnershipTransfer(function, program.Structures),
                     NativeOutputRole = function.NativeOutputRole,
                     NativeOutputContracts = function.NativeOutputContracts,
@@ -1378,14 +1491,18 @@ public static partial class ModuleCompiler
         var required = RequiredStructures(program.Functions.Where(function => retained.ContainsKey(function.Name))
             .Select(function => retained[function.Name].Import ? Declaration(function) : function), program.Structures,
             nativePointerTypes: program.NativePointerTypes,
-            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
+            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
+            nativeFixedArrayTypes: program.NativeFixedArrayTypes);
         var structures = SelectStructures(program.Structures, required);
         var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, structures);
+        var nativeFixedArrayTypes = RemapNativeFixedArrayTypeDefinitions(
+            program.NativeFixedArrayTypes, program.Structures, structures);
         var exportedTypes = RequiredStructures(producer.Functions.Where(static function => function.Import)
             .Select(static function => Declaration(function.Function ?? throw new ModuleFormatException("Missing export."))),
             producer.Structures, nativePointerTypes: producer.NativePointerTypes,
-            nativeFunctionPointerSignatures: producer.NativeFunctionPointerSignatures);
+            nativeFunctionPointerSignatures: producer.NativeFunctionPointerSignatures,
+            nativeFixedArrayTypes: producer.NativeFixedArrayTypes);
         var producerTypes = producer.Structures.Where(structure => exportedTypes.Contains(structure.Name))
             .ToDictionary(static structure => structure.Name, StringComparer.Ordinal);
         var importedTypes = ImmutableArray.CreateBuilder<string>();
@@ -1395,7 +1512,8 @@ public static partial class ModuleCompiler
             {
                 if (!SameStructure(structure, imported, structures, producer.Structures,
                     program.NativeFunctionPointerSignatures, producer.NativeFunctionPointerSignatures,
-                    nativePointerTypes, producer.NativePointerTypes)
+                    nativePointerTypes, producer.NativePointerTypes,
+                    nativeFixedArrayTypes, producer.NativeFixedArrayTypes)
                     || structure.IsPrivate || structure.IsInternal)
                 {
                     throw new ModuleContractException($"Incompatible or inaccessible imported value layout '{structure.Name}'.");
@@ -1419,6 +1537,7 @@ public static partial class ModuleCompiler
             ImportedStructures = importedTypes.ToImmutable(),
             NativeFunctionPointerSignatures = program.NativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
+            NativeFixedArrayTypes = nativeFixedArrayTypes,
             RequiresSourceGrant = producer.RequiresSourceGrant,
             InvocationProfileId = producer.InvocationProfileId,
             InvocationBuffers = producer.InvocationBuffers,
@@ -1481,7 +1600,9 @@ public static partial class ModuleCompiler
                 && (!producerTypes.TryGetValue(structure.Name, out var actual)
                     || !SameStructure(structure, actual, consumer.Structures, producer.Structures,
                         consumer.NativeFunctionPointerSignatures, producer.NativeFunctionPointerSignatures,
-                        consumer.NativePointerTypes, producer.NativePointerTypes)
+                        consumer.NativePointerTypes, producer.NativePointerTypes,
+                        consumer.NativeFixedArrayTypes,
+                        producer.NativeFixedArrayTypes)
                     || actual.IsPrivate || actual.IsInternal))
             {
                 throw new ModuleContractException($"Incompatible producer type layout '{structure.Name}'.");
@@ -1494,10 +1615,12 @@ public static partial class ModuleCompiler
             }).ToImmutableArray();
         var consumerReference = new CompilationReference(consumer.Structures, [], consumer.RuntimePolicy,
             nativeFunctionPointerSignatures: consumer.NativeFunctionPointerSignatures,
-            nativePointerTypes: consumer.NativePointerTypes);
+            nativePointerTypes: consumer.NativePointerTypes,
+            nativeFixedArrayTypes: consumer.NativeFixedArrayTypes);
         var producerReference = new CompilationReference(renamedProducerStructures, [], producer.RuntimePolicy,
             nativeFunctionPointerSignatures: producer.NativeFunctionPointerSignatures,
-            nativePointerTypes: producer.NativePointerTypes);
+            nativePointerTypes: producer.NativePointerTypes,
+            nativeFixedArrayTypes: producer.NativeFixedArrayTypes);
         CompilationReference[] contractReferences = [consumerReference, producerReference];
         var nativeFunctionPointerSignatures = MergeNativeFunctionPointerSignatures(contractReferences,
             out var functionPointerMappings, out var nativePointerMappings);
@@ -1505,15 +1628,21 @@ public static partial class ModuleCompiler
         structures.AddRange(renamedProducerStructures.Where(structure => !sharedTypes.Contains(structure.Name)));
         var structureSkeletons = structures.ToImmutable();
         var destinationTypes = IndexTypes(structureSkeletons);
-        var nativePointerTypes = MergeNativePointerTypeDefinitions(contractReferences, structureSkeletons,
-            nativePointerMappings, functionPointerMappings);
+        var nativeFixedArrayTypes = MergeNativeFixedArrayTypeDefinitions(
+            contractReferences, structureSkeletons, nativePointerMappings,
+            functionPointerMappings, out var fixedArrayMappings);
+        var nativePointerTypes = MergeNativePointerTypeDefinitions(
+            contractReferences, structureSkeletons, nativePointerMappings,
+            functionPointerMappings, fixedArrayMappings);
         var allStructures = ImmutableArray.CreateBuilder<BoundStruct>(structureSkeletons.Length);
         for (var index = 0; index < consumer.Structures.Length; index++)
         {
             allStructures.Add(RemapNativeFunctionPointerTypes(
                 RemapNativePointerTypes(
-                    RemapStructure(consumer.Structures[index], consumer.Structures, structureSkeletons,
-                        destinationTypes),
+                    RemapNativeFixedArrayTypes(
+                        RemapStructure(consumer.Structures[index], consumer.Structures,
+                            structureSkeletons, destinationTypes),
+                        fixedArrayMappings[0]),
                     nativePointerMappings[0]),
                 functionPointerMappings[0]));
         }
@@ -1524,7 +1653,10 @@ public static partial class ModuleCompiler
             {
                 allStructures.Add(RemapNativeFunctionPointerTypes(
                     RemapNativePointerTypes(
-                        RemapStructure(structure, renamedProducerStructures, structureSkeletons, destinationTypes),
+                        RemapNativeFixedArrayTypes(
+                            RemapStructure(structure, renamedProducerStructures,
+                                structureSkeletons, destinationTypes),
+                            fixedArrayMappings[1]),
                         nativePointerMappings[1]),
                     functionPointerMappings[1]));
             }
@@ -1562,8 +1694,12 @@ public static partial class ModuleCompiler
                 producerNames.Add(declaration.Name, functions.Count);
                 producerOwned.Add(functions.Count);
                 functions.Add(RemapNativePointerTypes(
-                    RemapNativeFunctionPointerTypes(ImportFunction(replacement, declaration.Name),
-                        functionPointerMappings[1]), nativePointerMappings[1]));
+                    RemapNativeFunctionPointerTypes(
+                        RemapNativeFixedArrayTypes(
+                            ImportFunction(replacement, declaration.Name),
+                            fixedArrayMappings[1]),
+                        functionPointerMappings[1]),
+                    nativePointerMappings[1]));
             }
             else
             {
@@ -1576,7 +1712,10 @@ public static partial class ModuleCompiler
                     ?? throw new ModuleFormatException("Consumer has an unowned function.");
                 functions.Add(RemapNativePointerTypes(
                     RemapNativeFunctionPointerTypes(
-                        RemapFunction(function, consumer.Structures, combinedStructures),
+                        RemapNativeFixedArrayTypes(
+                            RemapFunction(function, consumer.Structures,
+                                combinedStructures),
+                            fixedArrayMappings[0]),
                         functionPointerMappings[0]),
                     nativePointerMappings[0]));
             }
@@ -1601,8 +1740,12 @@ public static partial class ModuleCompiler
                     : owner is not null && sharedTypes.Contains(owner)
                     ? owner + ".$producer." + exported.Name[(owner.Length + 1)..] : "$producer." + exported.Name;
                 functions.Add(RemapNativePointerTypes(
-                    RemapNativeFunctionPointerTypes(ImportFunction(exported, name),
-                        functionPointerMappings[1]), nativePointerMappings[1]));
+                    RemapNativeFunctionPointerTypes(
+                        RemapNativeFixedArrayTypes(
+                            ImportFunction(exported, name),
+                            fixedArrayMappings[1]),
+                        functionPointerMappings[1]),
+                    nativePointerMappings[1]));
             }
         }
         var resolvedFunctions = functions.ToImmutable();
@@ -1654,6 +1797,7 @@ public static partial class ModuleCompiler
                     nativePointerMappings[1]))],
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
+            NativeFixedArrayTypes = nativeFixedArrayTypes,
             Buffers = producer.InvocationProfileId is not null
                 ? producer.InvocationBuffers
                 : producer.RequiresSourceGrant
@@ -1663,6 +1807,12 @@ public static partial class ModuleCompiler
             InvocationProfileId = producer.InvocationProfileId,
             RuntimePolicy = consumer.RuntimePolicy,
         };
+        if (!NativeFixedArrayContract.IsValidTable(result.Structures,
+                result.NativeFixedArrayTypes))
+        {
+            throw new ModuleFormatException(
+                "Linked fixed-array identities do not preserve their target layouts.");
+        }
         try
         {
             if (result.Functions.Any(static function => function.DirectNativeImport is not null))
@@ -1967,6 +2117,12 @@ public static partial class ModuleCompiler
                     break;
                 case BoundBufferRead buffer:
                     VisitExpression(buffer.Index);
+                    break;
+                default:
+                    foreach (var child in expression.NestedExpressions)
+                    {
+                        VisitExpression(child);
+                    }
                     break;
             }
         }
@@ -3149,7 +3305,8 @@ public static partial class ModuleCompiler
 
     private static string Contract(BoundFunction function, ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes = default)
     {
         var result = new StringBuilder();
         var ownerVisibility = '-';
@@ -3165,7 +3322,8 @@ public static partial class ModuleCompiler
                 : isPrimitiveType ? 'E' : '?';
         }
         _ = result.Append(function.Name).Append('|')
-            .Append(ContractType(function.ReturnType, structures, functionPointerSignatures, nativePointerTypes))
+            .Append(ContractType(function.ReturnType, structures,
+                functionPointerSignatures, nativePointerTypes, fixedArrayTypes))
             .Append('|').Append(function.IsConstructor ? 'C' : 'F')
             .Append('|').Append(function.IsPrivate ? 'P' : function.IsInternal ? 'N' : 'E')
             .Append('|').Append(function.IsStatic ? 'S' : 'I')
@@ -3179,7 +3337,9 @@ public static partial class ModuleCompiler
             var mode = parameter.IsInit && !function.IsPrivate && !function.IsInternal ? "init:"
                 : parameter.IsOut ? "out:" : "in:";
             _ = result.Append('|').Append(mode)
-                .Append(ContractType(parameter.Type, structures, functionPointerSignatures, nativePointerTypes));
+                .Append(ContractType(parameter.Type, structures,
+                    functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes));
         }
         if (HasMutableStructReceiver(function))
         {
@@ -3200,7 +3360,9 @@ public static partial class ModuleCompiler
         if (function.NativeFunctionPointerType is PrimitiveType functionPointerType)
         {
             _ = result.Append("|NativeCallable:")
-                .Append(ContractType(functionPointerType, structures, functionPointerSignatures, nativePointerTypes));
+                .Append(ContractType(functionPointerType, structures,
+                    functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes));
         }
         if (function.NativeCallableEntryName is string entryName)
         {
@@ -3220,7 +3382,8 @@ public static partial class ModuleCompiler
                 _ = result.Append("|NativeVTableParameter:")
                     .Append(parameter.ParameterIndex).Append(':')
                     .Append(ContractType(parameter.PointeeType, structures,
-                        functionPointerSignatures, nativePointerTypes)).Append(':')
+                        functionPointerSignatures, nativePointerTypes,
+                        fixedArrayTypes)).Append(':')
                     .Append((byte)parameter.Access).Append(':')
                     .Append((byte)parameter.Retention).Append(':')
                     .Append(parameter.Extent);
@@ -3242,7 +3405,8 @@ public static partial class ModuleCompiler
                 _ = result.Append("|DirectNativeParameter:")
                     .Append(parameter.ParameterIndex).Append(':')
                     .Append(ContractType(parameter.PointeeType, structures,
-                        functionPointerSignatures, nativePointerTypes)).Append(':')
+                        functionPointerSignatures, nativePointerTypes,
+                        fixedArrayTypes)).Append(':')
                     .Append((byte)parameter.Access).Append(':')
                     .Append((byte)parameter.Retention).Append(':')
                     .Append(parameter.Extent);
@@ -3253,7 +3417,8 @@ public static partial class ModuleCompiler
                 _ = result.Append("|DirectNativeOutput:")
                     .Append(output.ParameterIndex).Append(':')
                     .Append(ContractType(output.PointeeType, structures,
-                        functionPointerSignatures, nativePointerTypes)).Append(':')
+                        functionPointerSignatures, nativePointerTypes,
+                        fixedArrayTypes)).Append(':')
                     .Append(output.ResultCondition).Append(':')
                     .Append(output.FailureDisposition);
             }
@@ -3431,29 +3596,51 @@ public static partial class ModuleCompiler
 
     private static string ContractType(PrimitiveType type, ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes = default)
     {
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            var fixedArrayIndex = NativeFixedArrayTypes.Index(type);
+            if (fixedArrayTypes.IsDefault
+                || (uint)fixedArrayIndex >= (uint)fixedArrayTypes.Length)
+            {
+                throw new ModuleContractException(
+                    "Native module array contract has no retained type row.");
+            }
+            var fixedArray = fixedArrayTypes[fixedArrayIndex];
+            return "[" + ContractType(fixedArray.ElementType, structures,
+                functionPointerSignatures, nativePointerTypes,
+                fixedArrayTypes) + ";"
+                + fixedArray.ElementCount.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture) + "]";
+        }
+
         var index = (int)type - 100;
         return index >= 0 && index < structures.Length
             ? structures[index].Name + ":" + Visibility(structures[index])
                 + (structures[index].IsUnique ? ":Unique:" + (structures[index].CleanupMethod ?? "-") : "")
-            : TypeName(type, structures, functionPointerSignatures, nativePointerTypes);
+            : TypeName(type, structures, functionPointerSignatures,
+                nativePointerTypes, fixedArrayTypes);
     }
 
     private static string TypeName(PrimitiveType type, ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures = default,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes = default,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes = default)
     {
         var builder = new StringBuilder();
         var byteCount = 0;
-        AppendTypeName(builder, ref byteCount, type, structures, functionPointerSignatures, nativePointerTypes);
+        AppendTypeName(builder, ref byteCount, type, structures,
+            functionPointerSignatures, nativePointerTypes, fixedArrayTypes);
         return builder.ToString();
     }
 
     private static void AppendTypeName(StringBuilder builder, ref int byteCount, PrimitiveType type,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> functionPointerSignatures,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes)
     {
         if (NativePointerTypes.IsType(type))
         {
@@ -3465,7 +3652,8 @@ public static partial class ModuleCompiler
                 AppendBoundedTypeName(builder, ref byteCount,
                     pointerType.IsWritable ? "write ptr<" : "ptr<");
                 AppendTypeName(builder, ref byteCount, pointerType.PointeeType, structures,
-                    functionPointerSignatures, nativePointerTypes);
+                    functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes);
                 AppendBoundedTypeName(builder, ref byteCount, ">");
                 return;
             }
@@ -3487,11 +3675,13 @@ public static partial class ModuleCompiler
                         AppendBoundedTypeName(builder, ref byteCount, ",");
                     }
                     AppendTypeName(builder, ref byteCount, signature.ParameterTypes[parameterIndex], structures,
-                        functionPointerSignatures, nativePointerTypes);
+                        functionPointerSignatures, nativePointerTypes,
+                        fixedArrayTypes);
                 }
                 AppendBoundedTypeName(builder, ref byteCount, ")->");
                 AppendTypeName(builder, ref byteCount, signature.ReturnType, structures,
-                    functionPointerSignatures, nativePointerTypes);
+                    functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes);
                 if (signature.EffectsMask != 0)
                 {
                     AppendBoundedTypeName(builder, ref byteCount, "|effects:");
@@ -3567,6 +3757,29 @@ public static partial class ModuleCompiler
                 }
                 return;
             }
+        }
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            var fixedArrayIndex = NativeFixedArrayTypes.Index(type);
+            if (fixedArrayTypes.IsDefault
+                || (uint)fixedArrayIndex >= (uint)fixedArrayTypes.Length)
+            {
+                throw new ModuleContractException(
+                    "Native module type identity has no fixed-array row.");
+            }
+
+            var fixedArray = fixedArrayTypes[fixedArrayIndex];
+            AppendBoundedTypeName(builder, ref byteCount, "[");
+            AppendBoundedTypeName(builder, ref byteCount,
+                ContractType(fixedArray.ElementType, structures,
+                    functionPointerSignatures, nativePointerTypes,
+                    fixedArrayTypes));
+            AppendBoundedTypeName(builder, ref byteCount, ";");
+            AppendBoundedTypeName(builder, ref byteCount,
+                fixedArray.ElementCount.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture));
+            AppendBoundedTypeName(builder, ref byteCount, "]");
+            return;
         }
         var index = (int)type - 100;
         AppendBoundedTypeName(builder, ref byteCount, index >= 0 && index < structures.Length
@@ -3697,7 +3910,9 @@ public static partial class ModuleCompiler
         ImmutableArray<NativeFunctionPointerSignatureDefinition> leftFunctionPointerSignatures = default,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> rightFunctionPointerSignatures = default,
         ImmutableArray<NativePointerTypeDefinition> leftNativePointerTypes = default,
-        ImmutableArray<NativePointerTypeDefinition> rightNativePointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> rightNativePointerTypes = default,
+        ImmutableArray<BoundNativeFixedArrayType> leftFixedArrayTypes = default,
+        ImmutableArray<BoundNativeFixedArrayType> rightFixedArrayTypes = default)
     {
         if (a.Name != b.Name || a.Size != b.Size || a.Fields.Length != b.Fields.Length
             || a.IsPrivate != b.IsPrivate || a.IsInternal != b.IsInternal
@@ -3715,8 +3930,10 @@ public static partial class ModuleCompiler
             if (x.Name != y.Name || x.IsPrivate != y.IsPrivate || x.IsInternal != y.IsInternal
                 || x.IsMutable != y.IsMutable
                 || x.RequiresUnsafeCaller != y.RequiresUnsafeCaller
-                || TypeName(x.Type, left, leftFunctionPointerSignatures, leftNativePointerTypes)
-                    != TypeName(y.Type, right, rightFunctionPointerSignatures, rightNativePointerTypes)
+                || TypeName(x.Type, left, leftFunctionPointerSignatures,
+                    leftNativePointerTypes, leftFixedArrayTypes)
+                    != TypeName(y.Type, right, rightFunctionPointerSignatures,
+                        rightNativePointerTypes, rightFixedArrayTypes)
                 || x.Size != y.Size || x.Offset != y.Offset)
             {
                 return false;
@@ -3749,6 +3966,10 @@ public static partial class ModuleCompiler
                 "The private semantic module format has no nominal enum remapping contract.");
         }
         if (NativeFunctionPointerTypes.IsType(type) || NativePointerTypes.IsType(type))
+        {
+            return type;
+        }
+        if (NativeFixedArrayTypes.IsType(type))
         {
             return type;
         }
@@ -3839,7 +4060,8 @@ public static partial class ModuleCompiler
         foreach (var reference in references)
         {
             if (!NativePointerTypeContract.IsValidTable(reference.NativePointerTypes, reference.Structures,
-                reference.NativeFunctionPointerSignatures))
+                reference.NativeFunctionPointerSignatures,
+                reference.NativeFixedArrayTypes))
             {
                 throw new ModuleContractException("Provider native pointer type table is invalid.");
             }
@@ -3847,7 +4069,9 @@ public static partial class ModuleCompiler
             for (var index = 0; index < reference.NativePointerTypes.Length; index++)
             {
                 var key = TypeName(NativePointerTypes.Type(index), reference.Structures,
-                    reference.NativeFunctionPointerSignatures, reference.NativePointerTypes);
+                    reference.NativeFunctionPointerSignatures,
+                    reference.NativePointerTypes,
+                    reference.NativeFixedArrayTypes);
                 if (!combined.TryGetValue(key, out var combinedIndex))
                 {
                     combinedIndex = combined.Count;
@@ -3867,7 +4091,8 @@ public static partial class ModuleCompiler
     private static ImmutableArray<NativePointerTypeDefinition> MergeNativePointerTypeDefinitions(
         IReadOnlyList<CompilationReference> references, IReadOnlyList<BoundStruct> structures,
         ImmutableArray<ImmutableArray<PrimitiveType>> pointerMappings,
-        ImmutableArray<ImmutableArray<PrimitiveType>> functionPointerMappings)
+        ImmutableArray<ImmutableArray<PrimitiveType>> functionPointerMappings,
+        ImmutableArray<ImmutableArray<PrimitiveType>> fixedArrayMappings = default)
     {
         var combined = new NativePointerTypeDefinition?[pointerMappings
             .SelectMany(static mapping => mapping)
@@ -3880,6 +4105,14 @@ public static partial class ModuleCompiler
             var mapped = RemapNativePointerTypeDefinitions(reference.NativePointerTypes,
                 reference.Structures, structures, functionPointerMapping: functionPointerMappings[referenceIndex],
                 pointerMapping: pointerMappings[referenceIndex]);
+            if (!fixedArrayMappings.IsDefault)
+            {
+                mapped = [.. mapped.Select(pointer => pointer with {
+                    PointeeType = RemapNativeFixedArrayType(
+                        pointer.PointeeType,
+                        fixedArrayMappings[referenceIndex]),
+                })];
+            }
             for (var typeIndex = 0; typeIndex < mapped.Length; typeIndex++)
             {
                 var combinedIndex = NativePointerTypes.Index(pointerMappings[referenceIndex][typeIndex]);
@@ -3982,11 +4215,231 @@ public static partial class ModuleCompiler
         };
     }
 
+    private static BoundFunction RemapNativeFixedArrayTypes(
+        BoundFunction function,
+        ImmutableArray<PrimitiveType> mapping)
+    {
+        if (mapping.IsDefaultOrEmpty)
+        {
+            return function;
+        }
+
+        PrimitiveType RemapFixedArrayType(PrimitiveType type)
+        {
+            if (!NativeFixedArrayTypes.IsType(type))
+            {
+                return type;
+            }
+
+            var index = NativeFixedArrayTypes.Index(type);
+            if ((uint)index >= (uint)mapping.Length
+                || !NativeFixedArrayTypes.IsType(mapping[index]))
+            {
+                throw new ModuleFormatException(
+                    "Unknown native fixed-array type.");
+            }
+            return mapping[index];
+        }
+
+        var remapped = BoundTreeTraversal.RewriteExpressions(function,
+            expression => RemapNativeTypeIdentities(expression,
+                RemapFixedArrayType));
+        return remapped with {
+            ReturnType = RemapFixedArrayType(function.ReturnType),
+            NativeOutputContracts = [.. function.NativeOutputContracts.Select(output =>
+                output with {
+                    PointeeType = RemapFixedArrayType(output.PointeeType),
+                })],
+            DirectNativeImport = function.DirectNativeImport is DirectNativeImport import
+                ? import with {
+                    Outputs = [.. import.Outputs.Select(output => output with {
+                        PointeeType = RemapFixedArrayType(output.PointeeType),
+                    })],
+                    Parameters = [.. import.Parameters.Select(parameter => parameter with {
+                        PointeeType = RemapFixedArrayType(parameter.PointeeType),
+                    })],
+                }
+                : null,
+            NativeVTableMethod = function.NativeVTableMethod
+                is NativeVTableMethodDefinition vtableMethod
+                    ? vtableMethod with {
+                        Parameters = [.. vtableMethod.Parameters.Select(parameter =>
+                            parameter with {
+                                PointeeType = RemapFixedArrayType(
+                                    parameter.PointeeType),
+                            })],
+                        Outputs = [.. vtableMethod.Outputs.Select(output =>
+                            output with {
+                                PointeeType = RemapFixedArrayType(
+                                    output.PointeeType),
+                            })],
+                    }
+                    : null,
+            Variables = [.. function.Variables.Select(variable => variable with {
+                Type = RemapFixedArrayType(variable.Type),
+                NativeFixedArrayLayout = variable.NativeFixedArrayLayout
+                    is BoundNativeFixedArrayLayout layout
+                        ? RemapNativeFixedArrayLayout(layout,
+                            RemapFixedArrayType)
+                        : null,
+            })],
+        };
+    }
+
+    private static BoundStruct RemapNativeFixedArrayTypes(
+        BoundStruct structure,
+        ImmutableArray<PrimitiveType> mapping)
+        => BoundTreeTraversal.RewriteTypes(structure,
+            type => RemapNativeFixedArrayType(type, mapping));
+
     private static BoundNativeFixedArrayLayout RemapNativeFixedArrayLayout(
         BoundNativeFixedArrayLayout layout, Func<PrimitiveType, PrimitiveType> remapType) => layout with {
             CarrierType = remapType(layout.CarrierType),
             ElementType = remapType(layout.ElementType),
         };
+
+    private static ImmutableArray<BoundNativeFixedArrayType>
+        RemapNativeFixedArrayTypeDefinitions(
+            ImmutableArray<BoundNativeFixedArrayType> fixedArrays,
+            ImmutableArray<BoundStruct> sourceStructures,
+            IReadOnlyList<BoundStruct> destinationStructures,
+            IReadOnlyDictionary<string, PrimitiveType>? destinationTypes = null,
+            ImmutableArray<PrimitiveType> functionPointerMapping = default,
+            ImmutableArray<PrimitiveType> pointerMapping = default)
+    {
+        if (fixedArrays.IsDefaultOrEmpty)
+        {
+            return [];
+        }
+
+        var remapped = ImmutableArray.CreateBuilder<BoundNativeFixedArrayType>(
+            fixedArrays.Length);
+        foreach (var fixedArray in fixedArrays)
+        {
+            var elementType = RemapType(fixedArray.ElementType,
+                sourceStructures, destinationStructures,
+                destinationTypes: destinationTypes);
+            elementType = RemapNativeFunctionPointerType(elementType,
+                functionPointerMapping);
+            elementType = RemapNativePointerType(elementType,
+                pointerMapping);
+            remapped.Add(fixedArray with {
+                ElementType = elementType,
+            });
+        }
+        var result = remapped.MoveToImmutable();
+        if (!NativeFixedArrayContract.IsValidTable(destinationStructures,
+                result))
+        {
+            throw new ModuleContractException(
+                "Private fixed-array identities do not preserve their target layouts.");
+        }
+        return result;
+    }
+
+    private static ImmutableArray<BoundNativeFixedArrayType>
+        MergeNativeFixedArrayTypeDefinitions(
+            IReadOnlyList<CompilationReference> references,
+            IReadOnlyList<BoundStruct> structures,
+            ImmutableArray<ImmutableArray<PrimitiveType>> pointerMappings,
+            ImmutableArray<ImmutableArray<PrimitiveType>> functionPointerMappings,
+            out ImmutableArray<ImmutableArray<PrimitiveType>> typeMappings)
+    {
+        var combined = new List<BoundNativeFixedArrayType>();
+        var mappings = ImmutableArray.CreateBuilder<ImmutableArray<PrimitiveType>>(
+            references.Count);
+        for (var referenceIndex = 0;
+            referenceIndex < references.Count;
+            referenceIndex++)
+        {
+            var reference = references[referenceIndex];
+            var sourceArrays = reference.NativeFixedArrayTypes;
+            if (!NativeFixedArrayContract.IsValidTable(reference.Structures,
+                    sourceArrays))
+            {
+                throw new ModuleContractException(
+                    "Provider native fixed-array type table is invalid.");
+            }
+
+            var mapping = new PrimitiveType?[sourceArrays.Length];
+            var states = new byte[sourceArrays.Length];
+            PrimitiveType MapType(PrimitiveType type)
+            {
+                if (NativeFixedArrayTypes.IsType(type))
+                {
+                    return MapArray(NativeFixedArrayTypes.Index(type));
+                }
+
+                return RemapNativePointerType(
+                    RemapNativeFunctionPointerType(
+                        RemapType(type, reference.Structures, structures),
+                        functionPointerMappings[referenceIndex]),
+                    pointerMappings[referenceIndex]);
+            }
+
+            PrimitiveType MapArray(int index)
+            {
+                if ((uint)index >= (uint)sourceArrays.Length)
+                {
+                    throw new ModuleFormatException(
+                        "Invalid native fixed-array type reference.");
+                }
+                if (mapping[index] is PrimitiveType existing)
+                {
+                    return existing;
+                }
+                if (states[index] != 0)
+                {
+                    throw new ModuleFormatException(
+                        "Cyclic native fixed-array type identity.");
+                }
+
+                states[index] = 1;
+                var source = sourceArrays[index];
+                var definition = source with {
+                    ElementType = MapType(source.ElementType),
+                };
+                var combinedIndex = combined.FindIndex(existing =>
+                    existing.ElementType == definition.ElementType
+                    && existing.ElementCount == definition.ElementCount);
+                if (combinedIndex >= 0)
+                {
+                    if (combined[combinedIndex] != definition)
+                    {
+                        throw new ModuleContractException(
+                            "Incompatible native fixed-array type identities.");
+                    }
+                }
+                else
+                {
+                    if (combined.Count is >= NativeFixedArrayTypes.MaximumCount
+                        or >= SemanticVerifier.MaximumAnalysisVisits)
+                    {
+                        throw new ModuleContractException(
+                            "Combined native fixed-array types exceed limits.");
+                    }
+                    combinedIndex = combined.Count;
+                    combined.Add(definition);
+                }
+
+                var mapped = NativeFixedArrayTypes.Type(combinedIndex);
+                mapping[index] = mapped;
+                states[index] = 2;
+                return mapped;
+            }
+
+            for (var index = 0; index < sourceArrays.Length; index++)
+            {
+                _ = MapArray(index);
+            }
+            mappings.Add([.. mapping.Select(static type =>
+                type ?? throw new ModuleFormatException(
+                    "Combined native fixed-array type identity is incomplete."))]);
+        }
+
+        typeMappings = mappings.MoveToImmutable();
+        return [.. combined];
+    }
 
     private static BoundExpression RemapNativeTypeIdentities(BoundExpression expression,
         Func<PrimitiveType, PrimitiveType> remapType)
@@ -4044,7 +4497,8 @@ public static partial class ModuleCompiler
             var reference = references[referenceIndex];
             var signatures = reference.NativeFunctionPointerSignatures;
             if (!NativePointerTypeContract.IsValidTable(reference.NativePointerTypes,
-                reference.Structures, signatures))
+                reference.Structures, signatures,
+                reference.NativeFixedArrayTypes))
             {
                 throw new ModuleContractException("Provider native interop type tables are invalid.");
             }
@@ -4141,15 +4595,19 @@ public static partial class ModuleCompiler
         ImmutableArray<BoundStruct> destinationStructures = default,
         ImmutableArray<BoundStruct> sourceStructures = default,
         ImmutableArray<NativePointerTypeDefinition> destinationPointerTypes = default,
-        ImmutableArray<NativePointerTypeDefinition> sourcePointerTypes = default)
+        ImmutableArray<NativePointerTypeDefinition> sourcePointerTypes = default,
+        ImmutableArray<BoundNativeFixedArrayType> destinationFixedArrays = default,
+        ImmutableArray<BoundNativeFixedArrayType> sourceFixedArrays = default)
     {
         if (!NativeFunctionPointerContract.IsValidTable(destination)
             || !NativeFunctionPointerContract.IsValidTable(source)
             || (!destinationPointerTypes.IsDefault
                 && !NativePointerTypeContract.IsValidTable(destinationPointerTypes,
-                    destinationStructures, destination))
+                    destinationStructures, destination,
+                    destinationFixedArrays))
             || (!sourcePointerTypes.IsDefault
-                && !NativePointerTypeContract.IsValidTable(sourcePointerTypes, sourceStructures, source)))
+                && !NativePointerTypeContract.IsValidTable(sourcePointerTypes,
+                    sourceStructures, source, sourceFixedArrays)))
         {
             throw new ModuleContractException("Native function-pointer signature table is invalid.");
         }
@@ -4157,12 +4615,13 @@ public static partial class ModuleCompiler
         for (var sourceIndex = 0; sourceIndex < source.Length; sourceIndex++)
         {
             var sourceName = TypeName(NativeFunctionPointerTypes.Type(sourceIndex), sourceStructures,
-                source, sourcePointerTypes);
+                source, sourcePointerTypes, sourceFixedArrays);
             var destinationIndex = -1;
             for (var candidate = 0; candidate < destination.Length; candidate++)
             {
                 if (sourceName == TypeName(NativeFunctionPointerTypes.Type(candidate), destinationStructures,
-                    destination, destinationPointerTypes))
+                    destination, destinationPointerTypes,
+                    destinationFixedArrays))
                 {
                     destinationIndex = candidate;
                     break;
@@ -4184,12 +4643,14 @@ public static partial class ModuleCompiler
         ImmutableArray<NativeFunctionPointerSignatureDefinition> destinationFunctionPointerSignatures,
         ImmutableArray<NativePointerTypeDefinition> source,
         ImmutableArray<BoundStruct> sourceStructures,
-        ImmutableArray<NativeFunctionPointerSignatureDefinition> sourceFunctionPointerSignatures)
+        ImmutableArray<NativeFunctionPointerSignatureDefinition> sourceFunctionPointerSignatures,
+        ImmutableArray<BoundNativeFixedArrayType> destinationFixedArrays = default,
+        ImmutableArray<BoundNativeFixedArrayType> sourceFixedArrays = default)
     {
         if (!NativePointerTypeContract.IsValidTable(destination, destinationStructures,
-                destinationFunctionPointerSignatures)
+                destinationFunctionPointerSignatures, destinationFixedArrays)
             || !NativePointerTypeContract.IsValidTable(source, sourceStructures,
-                sourceFunctionPointerSignatures))
+                sourceFunctionPointerSignatures, sourceFixedArrays))
         {
             throw new ModuleContractException("Native pointer type table is invalid.");
         }
@@ -4197,12 +4658,13 @@ public static partial class ModuleCompiler
         for (var sourceIndex = 0; sourceIndex < source.Length; sourceIndex++)
         {
             var sourceName = TypeName(NativePointerTypes.Type(sourceIndex), sourceStructures,
-                sourceFunctionPointerSignatures, source);
+                sourceFunctionPointerSignatures, source, sourceFixedArrays);
             var destinationIndex = -1;
             for (var candidate = 0; candidate < destination.Length; candidate++)
             {
                 if (sourceName == TypeName(NativePointerTypes.Type(candidate), destinationStructures,
-                    destinationFunctionPointerSignatures, destination))
+                    destinationFunctionPointerSignatures, destination,
+                    destinationFixedArrays))
                 {
                     destinationIndex = candidate;
                     break;
@@ -4581,17 +5043,35 @@ public static partial class ModuleCompiler
 
     private static byte[] Write(Module module, BoundProgram program)
     {
+        if (module.NativeFixedArrayTypes.IsDefault
+            || !NativeFixedArrayContract.IsValidTable(module.Structures,
+                module.NativeFixedArrayTypes))
+        {
+            throw new ModuleContractException(
+                "Module fixed-array type identities do not match their retained layouts.");
+        }
+        var (canonicalModule, fixedArrayMapping) =
+            CanonicalizeNativeFixedArrays(module);
+        module = canonicalModule;
+        if (NativeFixedArrayContract.HasMetadataOnlyArrayClassFields(
+                module.Classes, module.Structures,
+                module.NativeFixedArrayTypes, module.NativePointerTypes,
+                module.NativeFunctionPointerSignatures))
+        {
+            throw new ModuleContractException(
+                "Private revision 100 cannot persist array-derived managed-class fields.");
+        }
         if (program.Functions.Any(static function =>
             function.NoFailureProof && !IsRoleNoFailureIntrinsic(function.Intrinsic)))
         {
             throw new ModuleContractException(
-                "General NoThrow declarations are not supported by structured-module revision 92.");
+                "General NoThrow declarations are not supported by the selected private schema.");
         }
         if (program.NativeFunctionPointerSignatures.Any(static signature =>
             !NativeFunctionPointerContract.CanPersistRevision92(signature)))
         {
             throw new ModuleContractException(
-                "Structured-module revision 92 does not encode complete function-pointer invocation contracts.");
+                "The selected private schema does not encode complete function-pointer invocation contracts.");
         }
         if (module.FormatVersion == Version
             && (program.NativeFunctionPointerSignatures.Any(static signature =>
@@ -4605,7 +5085,7 @@ public static partial class ModuleCompiler
                             || import.ResolutionPolicy != NativeImportResolutionPolicy.NotApplicable))))
         {
             throw new ModuleContractException(
-                "Structured-module revision 92 does not encode normalized native calling conventions.");
+                "The selected private schema does not encode normalized native calling conventions.");
         }
         var persistedFunctionNames = module.Functions
             .Select(static function => function.Name)
@@ -4616,23 +5096,51 @@ public static partial class ModuleCompiler
                 && !HasOnlyRevision92NativeOutputDependencyContracts(function))
             {
                 throw new ModuleContractException(
-                    $"Function '{function.Name}' has dependency contracts not represented by structured-module revision 92.");
+                    $"Function '{function.Name}' has dependency contracts not represented by the selected private schema.");
             }
         }
+        ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            expectedNativeFunctionPointerSignatures = fixedArrayMapping.IsEmpty
+                ? program.NativeFunctionPointerSignatures
+                : [.. program.NativeFunctionPointerSignatures
+                    .Select(signature =>
+                        RemapNativeFixedArrayTypeDefinitions(signature,
+                            type => RemapNativeFixedArrayType(type,
+                                fixedArrayMapping)))];
         if (module.NativeFunctionPointerSignatures.IsDefault
-            || !module.NativeFunctionPointerSignatures.SequenceEqual(program.NativeFunctionPointerSignatures)
-            || !NativeFunctionPointerContract.IsValidTable(module.NativeFunctionPointerSignatures))
+            || !module.NativeFunctionPointerSignatures.SequenceEqual(
+                expectedNativeFunctionPointerSignatures))
         {
             throw new ModuleContractException("Module native function-pointer signatures do not match its program.");
         }
+        if (!NativeFunctionPointerContract.IsValidTable(
+                module.NativeFunctionPointerSignatures))
+        {
+            throw new ModuleContractException(
+                "Module native function-pointer signatures are invalid.");
+        }
         var expectedNativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, module.Structures);
+        expectedNativePointerTypes = [.. expectedNativePointerTypes.Select(pointer =>
+            pointer with {
+                PointeeType = RemapNativeFixedArrayType(pointer.PointeeType,
+                    fixedArrayMapping),
+            })];
         if (module.NativePointerTypes.IsDefault
             || !module.NativePointerTypes.SequenceEqual(expectedNativePointerTypes)
             || !NativePointerTypeContract.IsValidTable(module.NativePointerTypes, module.Structures,
-                module.NativeFunctionPointerSignatures))
+                module.NativeFunctionPointerSignatures,
+                module.NativeFixedArrayTypes))
         {
             throw new ModuleContractException("Module native pointer types do not match its program.");
+        }
+        if (module.FormatVersion >= NativeFixedArrayVersion
+            && (module.NativeFixedArrayTypes.IsDefault
+                || !NativeFixedArrayContract.IsValidTable(module.Structures,
+                    module.NativeFixedArrayTypes)))
+        {
+            throw new ModuleContractException(
+                "Module fixed-array type identities do not match their retained layouts.");
         }
         if (program.Functions.Any(static function =>
                 function.Variables.Any(static variable =>
@@ -4688,7 +5196,14 @@ public static partial class ModuleCompiler
         {
             module = module with { FormatVersion = NativeCallableEntryVersion };
         }
-        module = module with { FormatVersion = NativeOutputContractVersion };
+        module = module with { FormatVersion = NativeFixedArrayVersion };
+        if (module.NativeFixedArrayTypes.IsDefault
+            || !NativeFixedArrayContract.IsValidTable(module.Structures,
+                module.NativeFixedArrayTypes))
+        {
+            throw new ModuleContractException(
+                "Module fixed-array type identities do not match their retained layouts.");
+        }
         ValidateUnsafeExpressionScopes(program, module);
         if (module.InvocationProfileId is null
             ? !module.InvocationBuffers.IsEmpty
@@ -4717,7 +5232,12 @@ public static partial class ModuleCompiler
             RejectManagedNodes(program);
         }
         using var stream = new MemoryStream();
-        using var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true);
+        using var writer = new ModuleWriter(stream) {
+            Structures = module.Structures,
+            NativeFunctionPointerSignatures = module.NativeFunctionPointerSignatures,
+            NativePointerTypes = module.NativePointerTypes,
+            NativeFixedArrayTypes = module.NativeFixedArrayTypes,
+        };
         writer.Write(Magic);
         writer.Write(module.FormatVersion);
         PutString(writer, RetainedNativeProfile(module));
@@ -4741,7 +5261,8 @@ public static partial class ModuleCompiler
                 or DirectNativeParameterVersion or NativeFunctionPointerVersion
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                or ArithmeticOperationVersion or NativeOutputContractVersion)
+                or ArithmeticOperationVersion or NativeOutputContractVersion
+                or NativeStorageAddressExtentVersion or NativeFixedArrayVersion)
             {
                 writer.Write((byte)structure.TokenSpanRole);
             }
@@ -4820,6 +5341,27 @@ public static partial class ModuleCompiler
                 }
             }
         }
+        if (module.FormatVersion >= NativeFixedArrayVersion)
+        {
+            var tableByteCount = checked(sizeof(int)
+                + ((long)module.NativeFixedArrayTypes.Length * 44));
+            if (module.NativeFixedArrayTypes.Length > MaximumNodes
+                || tableByteCount > MaximumBytes - stream.Length)
+            {
+                throw new ModuleFormatException(
+                    "Private fixed-array type table exceeds artifact limits.");
+            }
+            writer.Write(module.NativeFixedArrayTypes.Length);
+            foreach (var fixedArray in module.NativeFixedArrayTypes)
+            {
+                WritePrivateType(writer, fixedArray.ElementType);
+                writer.Write(fixedArray.ElementCount);
+                writer.Write(fixedArray.ElementStride);
+                writer.Write(fixedArray.ByteExtent);
+                writer.Write(fixedArray.Alignment);
+                writer.Write(fixedArray.RequiredAlignment);
+            }
+        }
         writer.Write(module.Functions.Length);
         var names = program.Functions.Select(function => function.Name).ToArray();
         var remaining = MaximumNodes;
@@ -4830,6 +5372,29 @@ public static partial class ModuleCompiler
             {
                 throw new ModuleFormatException(
                     "Expected native vtable bindings are only valid on imported consumer declarations.");
+            }
+            if (item.NativeOutputContracts.Any(output =>
+                    !IsRevision100RuntimeType(output.PointeeType,
+                        module.Structures, module.NativeFixedArrayTypes,
+                        module.NativePointerTypes,
+                        module.NativeFunctionPointerSignatures))
+                || (item.ImportedNativeVTableMethod
+                    is NativeVTableMethodDefinition importedMethod
+                    && (importedMethod.Parameters.Any(parameter =>
+                            !IsRevision100RuntimeType(parameter.PointeeType,
+                                module.Structures,
+                                module.NativeFixedArrayTypes,
+                                module.NativePointerTypes,
+                                module.NativeFunctionPointerSignatures))
+                        || importedMethod.Outputs.Any(output =>
+                            !IsRevision100RuntimeType(output.PointeeType,
+                                module.Structures,
+                                module.NativeFixedArrayTypes,
+                                module.NativePointerTypes,
+                                module.NativeFunctionPointerSignatures)))))
+            {
+                throw new ModuleContractException(
+                    "Private revision 100 cannot persist array-derived declaration contracts.");
             }
             PutString(writer, item.Name);
             PutString(writer, item.Contract);
@@ -4906,26 +5471,46 @@ public static partial class ModuleCompiler
             var importedTypes = ReadImportedTypes(reader, structures.Length, structureNames, expectedConsumer);
             var nativeFunctionPointerSignatures = ReadNativeFunctionPointerSignatures(reader);
             var nativePointerTypes = ReadNativePointerTypes(reader);
-            if (!NativePointerTypeContract.IsValidTable(nativePointerTypes, structures,
-                nativeFunctionPointerSignatures)
+            var nativeFixedArrayTypes = ReadNativeFixedArrayTypes(reader,
+                structures);
+            if (!NativePointerTypeContract.IsValidTable(nativePointerTypes,
+                    structures, nativeFunctionPointerSignatures,
+                    nativeFixedArrayTypes)
                 || (reader is ModuleReader { FormatVersion: NativePointerVersion }
                     && nativePointerTypes.IsEmpty))
             {
                 throw new ModuleFormatException("Module native pointer type table is invalid.");
+            }
+            if (NativeFixedArrayContract.HasMetadataOnlyArrayClassFields(
+                    classes, structures, nativeFixedArrayTypes,
+                    nativePointerTypes, nativeFunctionPointerSignatures))
+            {
+                throw new ModuleFormatException(
+                    "Module managed-class fields contain array-derived runtime contracts.");
+            }
+            if (reader is ModuleReader moduleReader)
+            {
+                moduleReader.Structures = structures;
+                moduleReader.NativeFunctionPointerSignatures =
+                    nativeFunctionPointerSignatures;
+                moduleReader.NativePointerTypes = nativePointerTypes;
+                moduleReader.NativeFixedArrayTypes = nativeFixedArrayTypes;
             }
             var count = Count(reader, MaximumFunctions);
             if (count == 0 || (expectedConsumer ? entry < 0 || entry >= count : entry != -1))
             {
                 throw new ModuleFormatException("Module entry point is invalid.");
             }
-            var items = ReadFunctions(reader, count, expectedConsumer, structures, classes,
-                nativeFunctionPointerSignatures, nativePointerTypes);
+            var items = ReadFunctions(reader, count, expectedConsumer, structures,
+                classes, nativeFunctionPointerSignatures, nativePointerTypes,
+                nativeFixedArrayTypes);
             var module = new Module(expectedConsumer, entry, structures, items) {
                 FormatVersion = reader.FormatVersion,
                 Classes = classes,
                 ImportedStructures = importedTypes,
                 NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
                 NativePointerTypes = nativePointerTypes,
+                NativeFixedArrayTypes = nativeFixedArrayTypes,
                 RequiresSourceGrant = requiresSourceGrant,
                 InvocationProfileId = invocationProfileId,
                 InvocationBuffers = invocationBuffers,
@@ -4965,7 +5550,8 @@ public static partial class ModuleCompiler
                     or DirectNativeParameterVersion or NativeFunctionPointerVersion
                     or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                     or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                    or ArithmeticOperationVersion or NativeOutputContractVersion))
+                    or ArithmeticOperationVersion or NativeOutputContractVersion
+                    or NativeStorageAddressExtentVersion or NativeFixedArrayVersion))
             {
                 ValidateProducer(module);
             }
@@ -4987,7 +5573,7 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Unknown module format or version.");
         }
         var version = reader.ReadInt32();
-        if (version != NativeOutputContractVersion
+        if (version != NativeFixedArrayVersion
             || reader is not ModuleReader moduleReader)
         {
             throw new ModuleFormatException("Unknown module format or version.");
@@ -5007,6 +5593,7 @@ public static partial class ModuleCompiler
                 or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                 or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
             or ArithmeticOperationVersion or NativeOutputContractVersion
+                or NativeStorageAddressExtentVersion or NativeFixedArrayVersion
                 ? 12 : 10);
         if ((invocationProfileId is not null
                 && (!requiresSourceGrant
@@ -5016,7 +5603,8 @@ public static partial class ModuleCompiler
                                 or NativeFunctionPointerVersion or NativePointerVersion or NativeVTableVersion
                                 or NativeVTableOffsetVersion or NativeVTableContractVersion
                                 or NativeVTableOutputVersion or NativeCallableEntryVersion
-                                or ArithmeticOperationVersion or NativeOutputContractVersion)
+                                or ArithmeticOperationVersion or NativeOutputContractVersion
+                                or NativeStorageAddressExtentVersion or NativeFixedArrayVersion)
                             || !ScalarFrontendHost.IsInvocationProfileIdentity(invocationProfileId)))))
             || (invocationProfileId is null && bufferCount != 0))
         {
@@ -5070,7 +5658,7 @@ public static partial class ModuleCompiler
                 && convention != NativeCallingConvention.Native)
             {
                 throw new ModuleFormatException(
-                    "Structured-module revision 92 contains an unsupported native calling convention.");
+                    "Structured-module revision 76 contains an unsupported native calling convention.");
             }
             var returnType = GetType(reader);
             var parameterCount = Count(reader, MaximumSlots);
@@ -5105,6 +5693,160 @@ public static partial class ModuleCompiler
         return pointerTypes.MoveToImmutable();
     }
 
+    private static ImmutableArray<BoundNativeFixedArrayType>
+        ReadNativeFixedArrayTypes(BinaryReader reader,
+            ImmutableArray<BoundStruct> structures)
+    {
+        if (reader is not ModuleReader {
+                FormatVersion: NativeFixedArrayVersion
+            })
+        {
+            return [];
+        }
+
+        var count = Count(reader, MaximumNodes);
+        var byteCount = checked((long)count * 44);
+        if (reader.BaseStream.CanSeek
+            && byteCount > reader.BaseStream.Length - reader.BaseStream.Position)
+        {
+            throw new ModuleFormatException(
+                "Fixed-array type table exceeds the remaining module extent.");
+        }
+
+        var fixedArrays =
+            ImmutableArray.CreateBuilder<BoundNativeFixedArrayType>(count);
+        for (var index = 0; index < count; index++)
+        {
+            fixedArrays.Add(new BoundNativeFixedArrayType(GetType(reader),
+                reader.ReadUInt64(), reader.ReadUInt64(), reader.ReadUInt64(),
+                reader.ReadUInt64(), reader.ReadUInt64()));
+        }
+
+        var result = fixedArrays.MoveToImmutable();
+        if (!NativeFixedArrayContract.IsValidTable(structures, result))
+        {
+            throw new ModuleFormatException(
+                "Module fixed-array type table is invalid.");
+        }
+        return result;
+    }
+
+    private static BoundNativeFixedArrayLayout GetPrivateFixedArrayLayout(
+        BinaryReader reader, PrimitiveType arrayType)
+    {
+        if (reader is not ModuleReader {
+                FormatVersion: NativeFixedArrayVersion,
+            } moduleReader
+            || !NativeFixedArrayTypes.IsType(arrayType))
+        {
+            throw new ModuleFormatException(
+                "Fixed-array types require private semantic revision 100.");
+        }
+
+        var index = NativeFixedArrayTypes.Index(arrayType);
+        if ((uint)index >= (uint)moduleReader.NativeFixedArrayTypes.Length)
+        {
+            throw new ModuleFormatException(
+                "Module references an absent fixed-array type row.");
+        }
+        var definition = moduleReader.NativeFixedArrayTypes[index];
+        if (!NativeFixedArrayContract.TryGetLayout(arrayType,
+                definition.ElementType, definition.ElementCount,
+                moduleReader.Structures, moduleReader.NativeFixedArrayTypes,
+                out var layout))
+        {
+            throw new ModuleFormatException(
+                "Module fixed-array type row has invalid geometry.");
+        }
+        return layout;
+    }
+
+    private static BoundNativeFixedArrayLayout GetPrivateFixedArrayLayout(
+        ModuleWriter writer, PrimitiveType arrayType)
+    {
+        if (!NativeFixedArrayTypes.IsType(arrayType))
+        {
+            throw new ModuleContractException(
+                "Private fixed-array operation has no array type identity.");
+        }
+
+        var index = NativeFixedArrayTypes.Index(arrayType);
+        if ((uint)index >= (uint)writer.NativeFixedArrayTypes.Length)
+        {
+            throw new ModuleContractException(
+                "Private fixed-array operation references an absent type row.");
+        }
+        var definition = writer.NativeFixedArrayTypes[index];
+        if (!NativeFixedArrayContract.TryGetLayout(arrayType,
+                definition.ElementType, definition.ElementCount,
+                writer.Structures, writer.NativeFixedArrayTypes,
+                out var layout))
+        {
+            throw new ModuleContractException(
+                "Private fixed-array operation has invalid layout geometry.");
+        }
+        return layout;
+    }
+
+    private static bool IsRevision100IndexType(PrimitiveType type)
+        => type is PrimitiveType.Int8 or PrimitiveType.Int16
+            or PrimitiveType.Int32 or PrimitiveType.Int64
+            or PrimitiveType.UInt8 or PrimitiveType.UInt16
+            or PrimitiveType.UInt32 or PrimitiveType.UInt64;
+
+    private static void ValidatePrivateFixedArrayLocal(ModuleWriter writer,
+        int variable, BoundNativeFixedArrayLayout layout, bool requireMutable)
+    {
+        if (variable < writer.CurrentParameterCount
+                + (writer.CurrentIsConstructor ? 1 : 0)
+            || (uint)variable >= (uint)writer.CurrentVariables.Length
+            || writer.CurrentVariables[variable].Type != layout.CarrierType
+            || writer.CurrentVariables[variable].NativeFixedArrayLayout
+                != layout
+            || (requireMutable && !writer.CurrentVariables[variable].IsMutable))
+        {
+            throw new ModuleContractException(
+                "Private fixed-array operation does not name its admitted local.");
+        }
+    }
+
+    private static void ValidatePrivateFixedArrayLocal(ModuleReader reader,
+        int variable, BoundNativeFixedArrayLayout layout, bool requireMutable)
+    {
+        if (variable < reader.CurrentParameterCount
+                + (reader.CurrentIsConstructor ? 1 : 0)
+            || (uint)variable >= (uint)reader.CurrentVariables.Length
+            || reader.CurrentVariables[variable].Type != layout.CarrierType
+            || reader.CurrentVariables[variable].NativeFixedArrayLayout
+                != layout
+            || (requireMutable && !reader.CurrentVariables[variable].IsMutable))
+        {
+            throw new ModuleFormatException(
+                "Private fixed-array operation does not name its admitted local.");
+        }
+    }
+
+    private static bool IsRevision100RuntimeArrayLayout(
+        BoundNativeFixedArrayLayout layout,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers)
+        => NativeFixedArrayContract.IsRevision100RuntimeArrayLayout(
+            layout, structures, fixedArrays, pointerTypes, functionPointers);
+
+    private static bool IsRevision100RuntimeType(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers)
+        => !NativeFixedArrayTypes.IsType(type)
+            && !NativeFixedArrayContract.HasMetadataOnlyArrayType(type,
+                structures, fixedArrays, pointerTypes, functionPointers);
+
     private static (ImmutableArray<BoundStruct> Structures, HashSet<string> Names) ReadStructures(BinaryReader reader)
     {
         var structureCount = Count(reader, MaximumFunctions);
@@ -5122,7 +5864,8 @@ public static partial class ModuleCompiler
                     or DirectNativeParameterVersion or NativeFunctionPointerVersion
                         or NativePointerVersion or NativeVTableVersion or NativeVTableOffsetVersion
                         or NativeVTableContractVersion or NativeVTableOutputVersion or NativeCallableEntryVersion
-                        or ArithmeticOperationVersion or NativeOutputContractVersion,
+                        or ArithmeticOperationVersion or NativeOutputContractVersion
+                        or NativeStorageAddressExtentVersion or NativeFixedArrayVersion,
             }
                 ? (TokenSpanTypeRole)reader.ReadByte() : TokenSpanTypeRole.None;
             if (role is < TokenSpanTypeRole.None or > TokenSpanTypeRole.Snapshot)
@@ -5541,7 +6284,8 @@ public static partial class ModuleCompiler
     private static ImmutableArray<ModuleFunction> ReadFunctions(BinaryReader reader, int count, bool expectedConsumer,
         ImmutableArray<BoundStruct> structures, ImmutableArray<BoundClass> classes,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes)
     {
         var items = ImmutableArray.CreateBuilder<ModuleFunction>(count);
         var seen = new HashSet<string>(count, StringComparer.Ordinal);
@@ -5566,6 +6310,26 @@ public static partial class ModuleCompiler
                 reader is ModuleReader { FormatVersion: >= NativeVTableContractVersion }
                     ? GetImportedNativeVTableMethod(reader, import, hasBody, contract, structures)
                     : null;
+            if (nativeOutputContracts.Any(output =>
+                    !IsRevision100RuntimeType(output.PointeeType,
+                        structures, nativeFixedArrayTypes, nativePointerTypes,
+                        nativeFunctionPointerSignatures))
+                || (importedNativeVTableMethod
+                    is NativeVTableMethodDefinition importedMethod
+                    && (importedMethod.Parameters.Any(parameter =>
+                            !IsRevision100RuntimeType(parameter.PointeeType,
+                                structures, nativeFixedArrayTypes,
+                                nativePointerTypes,
+                                nativeFunctionPointerSignatures))
+                        || importedMethod.Outputs.Any(output =>
+                            !IsRevision100RuntimeType(output.PointeeType,
+                                structures, nativeFixedArrayTypes,
+                                nativePointerTypes,
+                                nativeFunctionPointerSignatures)))))
+            {
+                throw new ModuleFormatException(
+                    "Module declaration contains an array-derived runtime contract.");
+            }
             if (name.Length == 0 || !seen.Add(name) || (expectedConsumer ? import == hasBody : !hasBody))
             {
                 throw new ModuleFormatException("Invalid module declaration.");
@@ -5594,7 +6358,8 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Consumer import lacks an accessible contract.");
             }
             if (function is not null && (function.Name != name
-                || Contract(function, structures, nativeFunctionPointerSignatures, nativePointerTypes) != contract
+                || Contract(function, structures, nativeFunctionPointerSignatures,
+                    nativePointerTypes, nativeFixedArrayTypes) != contract
                 || Compilation.HasOwnershipTransfer(function, structures) != ownershipTransfer))
             {
                 throw new ModuleFormatException("Function body contradicts its declaration.");
@@ -5616,7 +6381,7 @@ public static partial class ModuleCompiler
             if (function is not null && !HasOnlyRevision92NativeOutputDependencyContracts(function))
             {
                 throw new ModuleFormatException(
-                    "Function dependency contracts exceed structured-module revision 92 output metadata.");
+                    "Function dependency contracts exceed the selected private output metadata.");
             }
             if (function is not null && !nativeOutputContracts.IsEmpty
                 && function.DirectNativeImport is null)
@@ -5725,7 +6490,7 @@ public static partial class ModuleCompiler
         if (!method.Outputs.IsDefaultOrEmpty)
         {
             throw new ModuleFormatException(
-                "Native vtable output tuples are not supported by structured-module revision 92.");
+                "Native vtable output tuples are not supported by the selected private schema.");
         }
     }
 
@@ -5737,6 +6502,99 @@ public static partial class ModuleCompiler
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
     {
+        if (writer is not ModuleWriter moduleWriter)
+        {
+            throw new ModuleContractException(
+                "Structured-module function encoding requires its selected type tables.");
+        }
+        if (!IsRevision100RuntimeType(function.ReturnType,
+                moduleWriter.Structures, moduleWriter.NativeFixedArrayTypes,
+                moduleWriter.NativePointerTypes,
+                moduleWriter.NativeFunctionPointerSignatures)
+            || (function.NativeFunctionPointerType
+                is PrimitiveType nativeFunctionPointerType
+                && !IsRevision100RuntimeType(nativeFunctionPointerType,
+                    moduleWriter.Structures,
+                    moduleWriter.NativeFixedArrayTypes,
+                    moduleWriter.NativePointerTypes,
+                    moduleWriter.NativeFunctionPointerSignatures)))
+        {
+            throw new ModuleContractException(
+                "Private revision 100 cannot persist a runtime array-derived function type.");
+        }
+        if (function.NativeVTableMethod is NativeVTableMethodDefinition vtableMethod
+            && (vtableMethod.Parameters.Any(parameter =>
+                    !IsRevision100RuntimeType(parameter.PointeeType,
+                        moduleWriter.Structures,
+                        moduleWriter.NativeFixedArrayTypes,
+                        moduleWriter.NativePointerTypes,
+                        moduleWriter.NativeFunctionPointerSignatures))
+                || vtableMethod.Outputs.Any(output =>
+                    !IsRevision100RuntimeType(output.PointeeType,
+                        moduleWriter.Structures,
+                        moduleWriter.NativeFixedArrayTypes,
+                        moduleWriter.NativePointerTypes,
+                        moduleWriter.NativeFunctionPointerSignatures))))
+        {
+            throw new ModuleContractException(
+                "Private revision 100 cannot persist array-derived vtable contracts.");
+        }
+        if (function.DirectNativeImport is DirectNativeImport directImport
+            && (directImport.Parameters.Any(parameter =>
+                    !IsRevision100RuntimeType(parameter.PointeeType,
+                        moduleWriter.Structures,
+                        moduleWriter.NativeFixedArrayTypes,
+                        moduleWriter.NativePointerTypes,
+                        moduleWriter.NativeFunctionPointerSignatures))
+                || directImport.Outputs.Any(output =>
+                    !IsRevision100RuntimeType(output.PointeeType,
+                        moduleWriter.Structures,
+                        moduleWriter.NativeFixedArrayTypes,
+                        moduleWriter.NativePointerTypes,
+                        moduleWriter.NativeFunctionPointerSignatures))))
+        {
+            throw new ModuleContractException(
+                "Private revision 100 cannot persist array-derived native imports.");
+        }
+        for (var variableIndex = 0;
+            variableIndex < function.Variables.Length;
+            variableIndex++)
+        {
+            var variable = function.Variables[variableIndex];
+            if (NativeFixedArrayTypes.IsType(variable.Type))
+            {
+                if (function.IsExternal
+                    || function.IndexedBody is not null
+                    || variableIndex < function.ParameterCount
+                        + (function.IsConstructor ? 1 : 0)
+                    || variable.IsOut
+                    || variable.IsInit
+                    || variable.IsInitializationLocal
+                    || variable.NativeFixedArrayLayout
+                        is not BoundNativeFixedArrayLayout layout
+                    || !IsRevision100RuntimeArrayLayout(layout,
+                        moduleWriter.Structures,
+                        moduleWriter.NativeFixedArrayTypes,
+                        moduleWriter.NativePointerTypes,
+                        moduleWriter.NativeFunctionPointerSignatures))
+                {
+                    throw new ModuleContractException(
+                        "Private revision 100 cannot persist this fixed-array local.");
+                }
+            }
+            else if (!IsRevision100RuntimeType(variable.Type,
+                         moduleWriter.Structures,
+                         moduleWriter.NativeFixedArrayTypes,
+                         moduleWriter.NativePointerTypes,
+                         moduleWriter.NativeFunctionPointerSignatures))
+            {
+                throw new ModuleContractException(
+                    "Private revision 100 cannot persist an array-derived runtime local.");
+            }
+        }
+        moduleWriter.CurrentVariables = function.Variables;
+        moduleWriter.CurrentParameterCount = function.ParameterCount;
+        moduleWriter.CurrentIsConstructor = function.IsConstructor;
         PutString(writer, function.Name);
         WritePrivateType(writer, function.ReturnType);
         writer.Write(function.IsConstructor);
@@ -5813,7 +6671,7 @@ public static partial class ModuleCompiler
                 if (!method.Outputs.IsDefaultOrEmpty)
                 {
                     throw new ModuleContractException(
-                        "Native vtable output tuples are not supported by structured-module revision 92.");
+                        "Native vtable output tuples are not supported by the selected private schema.");
                 }
             }
         }
@@ -5870,6 +6728,19 @@ public static partial class ModuleCompiler
     {
         var name = GetString(reader);
         var type = GetType(reader);
+        if (reader is not ModuleReader typeReader
+            || !IsRevision100RuntimeType(type, typeReader.Structures,
+                typeReader.NativeFixedArrayTypes, typeReader.NativePointerTypes,
+                typeReader.NativeFunctionPointerSignatures)
+            || outputContracts.Any(contract =>
+                !IsRevision100RuntimeType(contract.PointeeType,
+                    typeReader.Structures, typeReader.NativeFixedArrayTypes,
+                    typeReader.NativePointerTypes,
+                    typeReader.NativeFunctionPointerSignatures)))
+        {
+            throw new ModuleFormatException(
+                "Private revision 100 does not admit array-derived function contracts.");
+        }
         var constructor = GetBool(reader);
         var isPrivate = GetBool(reader);
         var isInternal = GetBool(reader);
@@ -5894,6 +6765,14 @@ public static partial class ModuleCompiler
             && GetBool(reader))
         {
             nativeFunctionPointerType = GetType(reader);
+            if (!IsRevision100RuntimeType(nativeFunctionPointerType.Value,
+                    typeReader.Structures, typeReader.NativeFixedArrayTypes,
+                    typeReader.NativePointerTypes,
+                    typeReader.NativeFunctionPointerSignatures))
+            {
+                throw new ModuleFormatException(
+                    "Private revision 100 does not admit this native callable type.");
+            }
         }
         var nativeCallableEntryName = reader is ModuleReader {
             FormatVersion: >= NativeCallableEntryVersion,
@@ -5920,6 +6799,16 @@ public static partial class ModuleCompiler
             {
                 Outputs = [],
             };
+            if (nativeVTableMethod.Parameters.Any(parameter =>
+                    !IsRevision100RuntimeType(parameter.PointeeType,
+                        typeReader.Structures,
+                        typeReader.NativeFixedArrayTypes,
+                        typeReader.NativePointerTypes,
+                        typeReader.NativeFunctionPointerSignatures)))
+            {
+                throw new ModuleFormatException(
+                    "Private revision 100 does not admit array-derived vtable contracts.");
+            }
         }
         if (reader is ModuleReader { FormatVersion: >= DirectNativeImportVersion })
         {
@@ -5943,6 +6832,22 @@ public static partial class ModuleCompiler
                 directNativeImport = new DirectNativeImport(libraryName, exportName, outputs) {
                     Parameters = directParameters.ToImmutable(),
                 };
+                if (directNativeImport.Parameters.Any(parameter =>
+                        !IsRevision100RuntimeType(parameter.PointeeType,
+                            typeReader.Structures,
+                            typeReader.NativeFixedArrayTypes,
+                            typeReader.NativePointerTypes,
+                            typeReader.NativeFunctionPointerSignatures))
+                    || directNativeImport.Outputs.Any(output =>
+                        !IsRevision100RuntimeType(output.PointeeType,
+                            typeReader.Structures,
+                            typeReader.NativeFixedArrayTypes,
+                            typeReader.NativePointerTypes,
+                            typeReader.NativeFunctionPointerSignatures)))
+                {
+                    throw new ModuleFormatException(
+                        "Private revision 100 does not admit array-derived native imports.");
+                }
             }
             if (directNativeImport is not null && !isExternal)
             {
@@ -5964,11 +6869,54 @@ public static partial class ModuleCompiler
             var mutable = GetBool(reader);
             var isOut = GetBool(reader);
             var isInit = GetBool(reader);
-            variables.Add(new BoundVariable(variableName, variableType, mutable, GetSpan(reader)) {
+            var variableSpan = GetSpan(reader);
+            var variable = new BoundVariable(variableName, variableType,
+                mutable, variableSpan) {
                 IsOut = isOut,
                 IsInit = isInit,
-            });
+            };
+            if (!NativeFixedArrayTypes.IsType(variableType)
+                && !IsRevision100RuntimeType(variableType,
+                    typeReader.Structures, typeReader.NativeFixedArrayTypes,
+                    typeReader.NativePointerTypes,
+                    typeReader.NativeFunctionPointerSignatures))
+            {
+                throw new ModuleFormatException(
+                    "Private revision 100 does not admit an array-derived runtime local.");
+            }
+            if (NativeFixedArrayTypes.IsType(variableType))
+            {
+                if (i < parameters + (constructor ? 1 : 0) || isOut || isInit)
+                {
+                    throw new ModuleFormatException(
+                        "Revision-100 fixed arrays are limited to initialized direct locals.");
+                }
+                var fixedArrayLayout = GetPrivateFixedArrayLayout(reader,
+                    variableType);
+                if (reader is not ModuleReader layoutReader
+                    || !IsRevision100RuntimeArrayLayout(fixedArrayLayout,
+                        layoutReader.Structures,
+                        layoutReader.NativeFixedArrayTypes,
+                        layoutReader.NativePointerTypes,
+                        layoutReader.NativeFunctionPointerSignatures))
+                {
+                    throw new ModuleFormatException(
+                        "Revision-100 local uses an excluded fixed-array row.");
+                }
+                variable = variable with {
+                    NativeFixedArrayLayout = fixedArrayLayout,
+                };
+            }
+            variables.Add(variable);
         }
+        if (reader is not ModuleReader moduleReader)
+        {
+            throw new ModuleFormatException(
+                "Structured-module function decoding requires its selected type tables.");
+        }
+        moduleReader.CurrentVariables = variables.ToImmutable();
+        moduleReader.CurrentParameterCount = parameters;
+        moduleReader.CurrentIsConstructor = constructor;
         var body = GetStatement(reader, ref remaining, 0) as BoundBlock
             ?? throw new ModuleFormatException("Function requires a block body.");
         _ = Calls(body, visitVacantLocal: vacant => {
@@ -6362,6 +7310,17 @@ public static partial class ModuleCompiler
         ref int remaining, int depth, bool inUnsafe)
     {
         Step(ref remaining, depth);
+        if (writer is not ModuleWriter privateFixedArrayWriter
+            || (!NativeFixedArrayTypes.IsType(expression.Type)
+                && !IsRevision100RuntimeType(expression.Type,
+                    privateFixedArrayWriter.Structures,
+                    privateFixedArrayWriter.NativeFixedArrayTypes,
+                    privateFixedArrayWriter.NativePointerTypes,
+                    privateFixedArrayWriter.NativeFunctionPointerSignatures)))
+        {
+            throw new ModuleContractException(
+                "Private revision 100 cannot persist an array-derived runtime expression.");
+        }
         writer.Write(expression switch {
             BoundConstant => (byte)1,
             BoundRead => (byte)2,
@@ -6405,10 +7364,13 @@ public static partial class ModuleCompiler
             BoundNativePointerWrite => (byte)40,
             BoundNativeOutputReservation => (byte)41,
             BoundFieldMove => (byte)42,
-            BoundNativeFixedArrayInitialization or BoundNativeFixedArrayElement
-                or BoundNativeFixedArrayPointerAddress or BoundNativeFixedArrayWrite =>
-                    throw new ModuleContractException(
-                        "Native fixed-array expressions are not supported by private semantic modules."),
+            BoundNativeFixedArrayInitialization => (byte)43,
+            BoundNativeFixedArrayElement => (byte)44,
+            BoundNativeFixedArrayPointerAddress => (byte)45,
+            BoundNativeFixedArrayWrite => (byte)46,
+            BoundNativeFixedArrayPathElement or BoundNativeFixedArrayPathWrite =>
+                throw new ModuleContractException(
+                    "Nested fixed-array element paths are excluded from private revision 100."),
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         WritePrivateType(writer, expression.Type);
@@ -6448,6 +7410,102 @@ public static partial class ModuleCompiler
                 writer.Write(address.ByteExtent);
                 writer.Write(address.IsReadonly);
                 PutExpression(writer, address.Index, names, ref remaining, depth + 1, inUnsafe);
+                break;
+            case BoundNativeFixedArrayInitialization fixedArray:
+                if (writer is not ModuleWriter moduleWriter
+                    || fixedArray.Type != fixedArray.Layout.CarrierType
+                    || !IsRevision100RuntimeArrayLayout(fixedArray.Layout,
+                        moduleWriter.Structures,
+                        moduleWriter.NativeFixedArrayTypes,
+                        moduleWriter.NativePointerTypes,
+                        moduleWriter.NativeFunctionPointerSignatures)
+                    || fixedArray.Elements.IsDefault
+                    || (ulong)fixedArray.Elements.Length
+                        != fixedArray.Layout.ElementCount
+                    || fixedArray.Elements.Length > MaximumNodes
+                    || fixedArray.Elements.Any(element =>
+                        element is null
+                        || element.Type != fixedArray.Layout.ElementType))
+                {
+                    throw new ModuleContractException(
+                        "Private revision 100 cannot persist this fixed-array initializer.");
+                }
+                writer.Write(fixedArray.Elements.Length);
+                foreach (var element in fixedArray.Elements)
+                {
+                    PutExpression(writer, element, names, ref remaining,
+                        depth + 1, inUnsafe);
+                }
+                break;
+            case BoundNativeFixedArrayElement element:
+                if (writer is not ModuleWriter elementWriter
+                    || !IsRevision100RuntimeArrayLayout(element.Layout,
+                        elementWriter.Structures,
+                        elementWriter.NativeFixedArrayTypes,
+                        elementWriter.NativePointerTypes,
+                        elementWriter.NativeFunctionPointerSignatures)
+                    || element.Type != element.Layout.ElementType
+                    || !IsRevision100IndexType(element.Index.Type))
+                {
+                    throw new ModuleContractException(
+                        "Private revision 100 cannot persist this fixed-array read.");
+                }
+                ValidatePrivateFixedArrayLocal(elementWriter, element.Variable,
+                    element.Layout, requireMutable: false);
+                writer.Write(element.Variable);
+                WritePrivateType(writer, element.Layout.CarrierType);
+                PutExpression(writer, element.Index, names, ref remaining,
+                    depth + 1, inUnsafe);
+                break;
+            case BoundNativeFixedArrayPointerAddress address:
+                if (writer is not ModuleWriter addressWriter
+                    || !address.IsUnsafeAuthorized || !inUnsafe
+                    || !IsRevision100RuntimeArrayLayout(address.Layout,
+                        addressWriter.Structures,
+                        addressWriter.NativeFixedArrayTypes,
+                        addressWriter.NativePointerTypes,
+                        addressWriter.NativeFunctionPointerSignatures)
+                    || address.Layout.ByteExtent == 0
+                    || !NativePointerTypeContract.IsValidType(address.Type,
+                        addressWriter.NativePointerTypes)
+                    || addressWriter.NativePointerTypes[
+                        NativePointerTypes.Index(address.Type)].PointeeType
+                        != address.Layout.ElementType)
+                {
+                    throw new ModuleContractException(
+                        "Private revision 100 cannot persist this fixed-array element address.");
+                }
+                ValidatePrivateFixedArrayLocal(addressWriter,
+                    address.Variable, address.Layout,
+                    addressWriter.NativePointerTypes[
+                        NativePointerTypes.Index(address.Type)].IsWritable);
+                writer.Write(address.Variable);
+                WritePrivateType(writer, address.Layout.CarrierType);
+                PutExpression(writer, address.Index, names, ref remaining,
+                    depth + 1, inUnsafe);
+                break;
+            case BoundNativeFixedArrayWrite write:
+                if (writer is not ModuleWriter writeWriter
+                    || write.Type != PrimitiveType.Void
+                    || !IsRevision100RuntimeArrayLayout(write.Layout,
+                        writeWriter.Structures,
+                        writeWriter.NativeFixedArrayTypes,
+                        writeWriter.NativePointerTypes,
+                        writeWriter.NativeFunctionPointerSignatures)
+                    || write.Value.Type != write.Layout.ElementType
+                    || !IsRevision100IndexType(write.Index.Type))
+                {
+                    throw new ModuleContractException(
+                        "Private revision 100 cannot persist this fixed-array write.");
+                }
+                ValidatePrivateFixedArrayLocal(writeWriter, write.Variable,
+                    write.Layout, requireMutable: true);
+                writer.Write(write.Variable);
+                WritePrivateType(writer, write.Layout.CarrierType);
+                PutExpression(writer, write.Index, names, ref remaining,
+                    depth + 1, inUnsafe);
+                PutExpression(writer, write.Value, names, ref remaining,
+                    depth + 1, inUnsafe);
                 break;
             case BoundNativePointerAddress address:
                 if (!address.IsUnsafeAuthorized || !inUnsafe)
@@ -6690,6 +7748,16 @@ public static partial class ModuleCompiler
         var kind = reader.ReadByte();
         var type = GetType(reader);
         var span = GetSpan(reader);
+        if (reader is not ModuleReader typeReader
+            || (!NativeFixedArrayTypes.IsType(type)
+                && !IsRevision100RuntimeType(type, typeReader.Structures,
+                    typeReader.NativeFixedArrayTypes,
+                    typeReader.NativePointerTypes,
+                    typeReader.NativeFunctionPointerSignatures)))
+        {
+            throw new ModuleFormatException(
+                "Private revision 100 cannot decode an array-derived runtime expression.");
+        }
         switch (kind)
         {
             case 1:
@@ -6782,6 +7850,162 @@ public static partial class ModuleCompiler
                     GetExpression(reader, ref remaining, depth + 1) as BoundFieldRead
                         ?? throw new ModuleFormatException("Expected owning field place."),
                     type, span);
+            case 43:
+                if (reader is not ModuleReader initializationReader)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array initialization requires the selected private schema.");
+                }
+                var initializationLayout = GetPrivateFixedArrayLayout(reader,
+                    type);
+                if (!IsRevision100RuntimeArrayLayout(initializationLayout,
+                        initializationReader.Structures,
+                        initializationReader.NativeFixedArrayTypes,
+                        initializationReader.NativePointerTypes,
+                        initializationReader.NativeFunctionPointerSignatures))
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array initialization uses an excluded revision-100 row.");
+                }
+                var initializerCount = Count(reader, MaximumNodes);
+                if ((ulong)initializerCount
+                    != initializationLayout.ElementCount)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array initializer cardinality differs from its type row.");
+                }
+                var elements =
+                    ImmutableArray.CreateBuilder<BoundExpression>(
+                        initializerCount);
+                for (var index = 0; index < initializerCount; index++)
+                {
+                    var element = GetExpression(reader, ref remaining,
+                        depth + 1);
+                    if (element.Type != initializationLayout.ElementType)
+                    {
+                        throw new ModuleFormatException(
+                            "Fixed-array initializer element type differs from its type row.");
+                    }
+                    elements.Add(element);
+                }
+                return new BoundNativeFixedArrayInitialization(
+                    initializationLayout, elements.MoveToImmutable(), span);
+            case 44:
+                if (reader is not ModuleReader elementReader)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array selection requires the selected private schema.");
+                }
+                var elementVariable = reader.ReadInt32();
+                var elementArrayType = GetType(reader);
+                var elementLayout = GetPrivateFixedArrayLayout(reader,
+                    elementArrayType);
+                if (!IsRevision100RuntimeArrayLayout(elementLayout,
+                        elementReader.Structures,
+                        elementReader.NativeFixedArrayTypes,
+                        elementReader.NativePointerTypes,
+                        elementReader.NativeFunctionPointerSignatures)
+                    || type != elementLayout.ElementType)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array read type or row is invalid.");
+                }
+                ValidatePrivateFixedArrayLocal(elementReader,
+                    elementVariable, elementLayout, requireMutable: false);
+                var elementIndex = GetExpression(reader, ref remaining,
+                    depth + 1);
+                if (!IsRevision100IndexType(elementIndex.Type)
+                    || (elementIndex is BoundConstant
+                        && !NativeFixedArrayContract.IsConstantIndexInRange(
+                            elementIndex, elementLayout.ElementCount)))
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array read index is invalid.");
+                }
+                return new BoundNativeFixedArrayElement(elementVariable,
+                    elementLayout, elementIndex, span);
+            case 45:
+                if (reader is not ModuleReader addressReader)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array address requires the selected private schema.");
+                }
+                var addressVariable = reader.ReadInt32();
+                var addressArrayType = GetType(reader);
+                var addressLayout = GetPrivateFixedArrayLayout(reader,
+                    addressArrayType);
+                if (!IsRevision100RuntimeArrayLayout(addressLayout,
+                        addressReader.Structures,
+                        addressReader.NativeFixedArrayTypes,
+                        addressReader.NativePointerTypes,
+                        addressReader.NativeFunctionPointerSignatures)
+                    || addressLayout.ByteExtent == 0
+                    || !NativePointerTypeContract.IsValidType(type,
+                        addressReader.NativePointerTypes)
+                    || addressReader.NativePointerTypes[
+                        NativePointerTypes.Index(type)].PointeeType
+                        != addressLayout.ElementType)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array element address type or row is invalid.");
+                }
+                ValidatePrivateFixedArrayLocal(addressReader,
+                    addressVariable, addressLayout,
+                    addressReader.NativePointerTypes[
+                        NativePointerTypes.Index(type)].IsWritable);
+                var addressIndex = GetExpression(reader, ref remaining,
+                    depth + 1);
+                if (!IsRevision100IndexType(addressIndex.Type)
+                    || (addressIndex is BoundConstant
+                        && !NativeFixedArrayContract.IsConstantIndexInRange(
+                            addressIndex, addressLayout.ElementCount)))
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array address index is invalid.");
+                }
+                return new BoundNativeFixedArrayPointerAddress(
+                    addressVariable, addressLayout, addressIndex, type, span);
+            case 46:
+                if (reader is not ModuleReader writeReader
+                    || type != PrimitiveType.Void)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array element write result is invalid.");
+                }
+                var writeVariable = reader.ReadInt32();
+                var writeArrayType = GetType(reader);
+                var writeLayout = GetPrivateFixedArrayLayout(reader,
+                    writeArrayType);
+                if (!IsRevision100RuntimeArrayLayout(writeLayout,
+                        writeReader.Structures,
+                        writeReader.NativeFixedArrayTypes,
+                        writeReader.NativePointerTypes,
+                        writeReader.NativeFunctionPointerSignatures))
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array element write uses an excluded row.");
+                }
+                ValidatePrivateFixedArrayLocal(writeReader, writeVariable,
+                    writeLayout, requireMutable: true);
+                var writeIndex = GetExpression(reader, ref remaining,
+                    depth + 1);
+                if (!IsRevision100IndexType(writeIndex.Type)
+                    || (writeIndex is BoundConstant
+                        && !NativeFixedArrayContract.IsConstantIndexInRange(
+                            writeIndex, writeLayout.ElementCount)))
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array write index is invalid.");
+                }
+                var writeValue = GetExpression(reader, ref remaining,
+                    depth + 1);
+                if (writeValue.Type != writeLayout.ElementType)
+                {
+                    throw new ModuleFormatException(
+                        "Fixed-array write value type differs from its type row.");
+                }
+                return new BoundNativeFixedArrayWrite(writeVariable,
+                    writeLayout, writeIndex, writeValue, span);
             case 10:
                 return new BoundReceiverLoan(reader.ReadInt32(), type, span);
             case 11:
@@ -6841,21 +8065,25 @@ public static partial class ModuleCompiler
                 var spanView = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundSpanRead(spanView, GetExpression(reader, ref remaining, depth + 1), type, span);
             case 35:
-                if (reader is not ModuleReader { FormatVersion: >= DirectNativeImportVersion })
+                if (reader is not ModuleReader {
+                        FormatVersion: NativeStorageAddressExtentVersion
+                            or NativeFixedArrayVersion
+                    })
                 {
                     throw new ModuleFormatException(
-                        "Native storage addresses require semantic-module revision 79 or 80.");
+                        "Native storage addresses require the selected private revision.");
                 }
                 var storageVariable = reader.ReadInt32();
                 var carrierType = GetType(reader);
                 var elementType = GetType(reader);
-                var elementCount = reader.ReadInt32();
-                var elementStride = reader.ReadInt32();
-                var byteExtent = reader.ReadInt32();
+                var elementCount = reader.ReadUInt64();
+                var elementStride = reader.ReadUInt64();
+                var byteExtent = reader.ReadUInt64();
                 var isReadonly = GetBool(reader);
                 var storageIndex = GetExpression(reader, ref remaining, depth + 1);
                 return new BoundNativeStorageAddress(storageVariable, storageIndex,
-                    carrierType, elementType, type, elementCount, elementStride, byteExtent, isReadonly, span);
+                    carrierType, elementType, type, elementCount,
+                    elementStride, byteExtent, isReadonly, span);
             case 36:
                 if (reader is not ModuleReader { FormatVersion: >= NativeFunctionPointerVersion })
                 {
@@ -7182,6 +8410,33 @@ public static partial class ModuleCompiler
                 Index = ResolveExpression(address.Index, names, functions, structures,
                     valueTypes, inUnsafe, inUnsafeExpression),
             },
+            BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
+                Elements = [.. fixedArray.Elements.Select(element =>
+                    ResolveExpression(element, names, functions, structures,
+                        valueTypes, inUnsafe, inUnsafeExpression))],
+            },
+            BoundNativeFixedArrayElement fixedArrayElement =>
+                fixedArrayElement with {
+                    Index = ResolveExpression(fixedArrayElement.Index,
+                        names, functions, structures, valueTypes, inUnsafe,
+                        inUnsafeExpression),
+                },
+            BoundNativeFixedArrayPointerAddress pointerAddress =>
+                pointerAddress with {
+                    Index = ResolveExpression(pointerAddress.Index, names,
+                        functions, structures, valueTypes, inUnsafe,
+                        inUnsafeExpression),
+                    IsUnsafeAuthorized = inUnsafe || inUnsafeExpression,
+                },
+            BoundNativeFixedArrayWrite fixedArrayWrite =>
+                fixedArrayWrite with {
+                    Index = ResolveExpression(fixedArrayWrite.Index, names,
+                        functions, structures, valueTypes, inUnsafe,
+                        inUnsafeExpression),
+                    Value = ResolveExpression(fixedArrayWrite.Value, names,
+                        functions, structures, valueTypes, inUnsafe,
+                        inUnsafeExpression),
+                },
             BoundBufferRead buffer => buffer with {
                 Index = ResolveExpression(buffer.Index, names, functions, structures, valueTypes, inUnsafe, inUnsafeExpression),
             },
@@ -7213,7 +8468,7 @@ public static partial class ModuleCompiler
         if (IsCandidateWideScalarType(type))
         {
             throw new ModuleFormatException(
-                "Private revision 92 does not admit the candidate revision-94 scalar identities.");
+                "The selected private schema does not admit the candidate revision-94 scalar identities.");
         }
         return type;
     }
@@ -7292,6 +8547,7 @@ public static partial class ModuleCompiler
         public ImmutableArray<string> ImportedStructures { get; init; } = [];
         public ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
         public ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
+        public ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; init; } = [];
         public bool RequiresSourceGrant { get; init; }
         public string? InvocationProfileId { get; init; }
         public ImmutableArray<HostBuffer> InvocationBuffers { get; init; } = [];

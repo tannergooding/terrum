@@ -355,8 +355,8 @@ ownership contract.
 The current prototype still exposes a `checked-exceptions` runtime-policy
 switch and private `NoThrow` facts. Source `NoThrow` uses are now rejected
 provisionally. The structured semantic-module reader/writer now selects only
-provisional revision 92, which omits the general NoThrow field/tokens and
-persists direct-import aggregate outputs with their supported output-specific
+provisional revision 100, which inherits revision 92's omission of the general
+NoThrow field/tokens and persists direct-import aggregate outputs with their supported output-specific
 dependency rows. It rejects unsupported general Dependency contracts rather
 than dropping them; candidate revision 93 remains required for general
 Captures/provenance persistence. Native graph packages and consumer sets now
@@ -424,10 +424,60 @@ registered; registration does not establish implementation support.
 **Current/evidence:** [modules](modules.md#persisted-caller-unsafe-operations)
 and [native support](native.md) inventory current experimental native
 sections/clauses/Features, copied vtable bindings and private revisions.
-These do not yet implement the selected schema. Active
+These do not yet implement the selected schema. A separate, unapproved F+S
+prototype currently exercises initialized scalar Home storage addresses and
+one direct NativeParameter call through source-free reconstruction, API JIT
+and CLI AOT; it does not close this accepted-contract gap or approve the
+provisional schema. Active
 [function-pointer](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeFunctionPointerTests.cs)
 and [vtable](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeVTableCallTests.cs)
 cases are bounded implementation evidence, not approval.
+
+The original unapproved A1 fixed-array identity candidate was superseded for
+integrated nominal-array use by an independently drafted A2 Copy-evidence
+composition. Current A2 prototype code carries TypeSpec form `0x11`,
+Module-owned `0x0012`, Feature `20/1`, TypeDef flag `0x20`/Feature `2/1`,
+local scalar and Copy Sequential/Transparent Windows x64 geometry checks,
+and structural Home/Register PlaceSelection plus counted EC RegisterPlace
+validation. It rejects duplicate per-Module array layouts with structurally
+equivalent TypeSpec identities. The direct selected-provider path resolves an
+imported Copy TypeDef by its ModuleRef and ExportKey, compares its fields and
+all Layout variants, derives target geometry, and retains/revalidates the
+provider origin in the Standard native plan. The Debug fast A2/F+S/API/CLI/
+provider-binding selection passed 127/127 with zero skips; this is not array
+source-free or runtime evidence. A2, its allocations and Copy bit remain
+unapproved. Provider dependency chains, complete replacement/remapping,
+initialization, source-free reconstruction and A2 indexed native/runtime
+lowering remain open; the source-free loader still rejects Section `0x0012`
+and nonempty TypeDef tables.
+
+The separate unapproved source-contract proposal's `[E; N]` form is now
+provisionally parsed and bound for initialized local storage. The former
+`InlineArray` name recognizer, positive-only count rule and 4096-byte cap are
+removed; current tests cover exact initialization, zero extent, local `uint64`
+constants, scalar/pointer/committed-aggregate elements, zero-payload unit
+elements, nested scalar/unit local initialization and row replacement/copy,
+checked nested scalar/unit selection and positive-payload scalar addresses,
+references, and page-probed JIT/AOT frames. Unit
+arrays retain exact N-expression initialization and execute indexed reads and
+writes with a dynamic bounds-checked index; zero-extent element addresses are
+rejected. This does not approve the source contract or establish all required
+cases. Pointer-bearing nested-array provenance, distinct Copy
+Transparent-over-void nominal elements, ConstEval-call extent
+evaluation, A2 PlaceSelection index transport/remapping, full-width local-frame
+offsets, provenance/transformation, and other declaration contexts remain open.
+Private semantic revision 100 is a separate unapproved provisional schema
+that inherits revision 99's u64 tag-35 storage-address extents and adds
+structural array rows and flat direct-local operations. Nested and
+ptr-to-array runtime forms, and managed-class fields whose pointer or
+nested-class graph reaches array metadata, remain excluded as runtime carriers.
+This private path does not select or substitute for Standard A2. Full
+private artifacts preserve metadata-only nested/pointer/fnptr recipes and
+descriptive nominal array fields through ordinary, set and graph remapping;
+bodyless references prune unrooted recipes. The separate unapproved
+[artifact-local metadata boundary companion](../proposals/native-fixed-array-private-metadata-boundary.md)
+records that provisional boundary without adding type-only exports or
+relaxing runtime exclusions.
 
 **Routes/gate:** migrate declaration producers/readers, structural signature
 identity, unsafe regions, pointer/dependency facts, dependency materialization
@@ -1671,12 +1721,15 @@ complete end-to-end consumer checks remain open. The JIT consumer
 now resolves internal RootPin runtime fixups through the selected absolute path,
 validates the exact ABI, provider-image pointers, immutable info/domain and
 mapped-file identity, then pins and retains the process provider. A supervised
-synthetic JIT import passes with the production DLL and rejects a second path;
-source/compiler-produced fixups, failure/concurrency qualification and AOT
-resolution remain open. A second unapproved deployment proposal now recommends
-one host-selected absolute ASCII path P embedded in affected AOT PE imports and
-reused unchanged by JIT; it remains unapproved and has no AOT consumer
-implementation evidence. A separate unapproved
+synthetic JIT import passes with the production DLL and rejects a second path.
+An isolated child-process probe rejects a provider missing a required
+admission export, verifies that subsequent requests remain failed, and runs
+four concurrent same-path imports against a delayed getter successfully.
+These qualify bootstrap for the synthetic internal fixup; source/compiler-
+produced fixups and AOT resolution remain open. A second unapproved deployment
+proposal now recommends one host-selected absolute ASCII path P embedded in
+affected AOT PE imports and reused unchanged by JIT; it remains unapproved and
+has no AOT consumer implementation evidence. A separate unapproved
 fixed-array amendment extends that descriptor handoff and selects its
 V2/96-byte-node form. The standalone native admission implementation and
 supervised test use that V2 shape, including checked count/stride, nested
@@ -1699,9 +1752,9 @@ an injected destination allocation fails.
 The bounded native probe covers support cycles, repeated moves, overlapping
 and final-pin behavior, concurrent polling and allocation rollback. The older
 payload-substitution helper remains only a test address-change probe. This
-does not establish source operations, JIT/AOT provider resolution or
-execution. It is provisional test evidence, not normative adoption or
-complete runtime support.
+does not establish source operations, compiler-produced JIT/AOT fixups,
+production collector integration or general runtime execution. It is
+provisional test evidence, not normative adoption or complete runtime support.
 Canonical source contracts are in
 [language](../specs/language.md),
 [complete types](../specs/language/types-and-normalization.md),
@@ -1726,12 +1779,17 @@ the distinct foreign-invocation NativeAddress record. The test-only native
 probe exercises typed support-cell holds, per-thread frame registration,
 cooperative `Poll`, cross-thread frame tracing, call/result transfer, exception
 rollback, typed object-graph tracing and transactional test-only payload
-relocation. The provider ABI is exported and probe-tested, but JIT/AOT provider
-resolution, identity validation and lifetime retention remain open. Source
-operations, standard producer/consumer execution, production collector
-integration, compiler lowering and complete qualification remain open. These
-are scoped implementation facts, not a reason to weaken the accepted
-contracts or infer conformance from the private collector.
+relocation. The provider ABI is exported and probe-tested. The synthetic JIT
+resolver's exact selected path/file identity, same-provider ABI, process-
+lifetime retention, missing-export failure latch and concurrent same-path
+bootstrap are supervised; compiler-produced fixups and AOT provider
+resolution remain open. Source operations, standard producer/consumer
+execution, production collector integration, compiler lowering and complete
+qualification remain open. The supervised JIT provider selection passed 1/1
+with zero skips at
+`artifacts\tst\tagoo_GOODING-ZEN4_2026-10-30_05_04_25_net11.0.trx`. These are
+scoped implementation facts, not a reason to weaken the accepted contracts
+or infer conformance from the private collector.
 
 The separate unapproved
 [normal-backing candidate](../proposals/reference-normal-backing-support.md)
@@ -1758,8 +1816,52 @@ The selected agreement now executes local ordinary-reference descriptors in
 the candidate 16-byte/8-aligned form with a zero support word for stack/inline
 places. JIT/AOT regressions cover formation, Copy/rebind, reborrow, and
 scalar/inline-Copy reads and writes without extending referent lifetime.
-Support-bearing references to normal class/box subplaces, optional-reference
-operations and reference-bearing fields/aggregates remain unsupported.
+Support-bearing references to normal-backed class/box subplaces now capture
+the selected control and exact field address. Each local descriptor residence
+retains that control through Copy/rebind and releases it on lexical or checked
+exception exit. Readonly and writable references to class-handle slots retain
+the containing class, and writable stores preserve local roots and typed field
+retirement. JIT/AOT regressions cover direct class fields, child-handle
+selection versus the parent slot, class-handle slots and inline-Copy subplaces
+under both runtime policies.
+
+Stored ordinary reference descriptors are also implemented for normal-backed
+class fields and inline Copy aggregates. Class-object provenance is distinct
+from local handle-slot identity and follows copies, aliases, field updates and
+constructor publication. Each typed descriptor leaf has its own support hold;
+replacement stages new holds before releasing old values, construction
+rollback drains unpublished fields in reverse acquisition order, and published
+retirement releases descriptor supports iteratively. JIT/AOT tests cover direct
+and nested class fields, multi-leaf aggregate Copy/rebind/replacement,
+constructor self-reference failure, checked unwind and rejection of local
+backing escapes under both runtime policies. Optional ordinary references now
+support local values and typed leaves in normal-backed class/inline-Copy
+storage under the selected agreement. Absence is both words zero; present
+values retain/release their support through Copy, replacement, constructor
+rollback and retirement. The selected JIT/AOT optional integration passes
+15/15 with zero skips under both policies where applicable at
+`artifacts\\tst\\Debug\\normal-backing-optional-integration-v6\\normal-backing-optional-integration-v6.trx`.
+The source-bound direct nonforeign call ABI now stages required and optional
+ordinary reference inputs by value and returns support-bearing values through hidden
+16-byte storage. Reentrant frame-owned plans match generated entries, transfer
+input holds without count changes, publish result support only after cleanup,
+and settle pre-entry and checked-unwind failures. JIT/AOT qualification covers
+source-order staging and rebinding, nested results, multi-leaf aggregate
+inputs, backing retention after the source handle ends, later-argument failure,
+checked unwind and plan reuse. The complete Debug `NormalBacking` selection
+passes 65/65 with zero skips, including inline call-result reads through
+`BoundReferenceRead` descriptors. Spill-root discovery now traverses
+reference formation, reborrow and read descriptors to register nested call
+results. The combined normal-backing, lowering-agreement,
+dependency-source and checked-reference selection passes 117/117 with zero
+skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_04_16_55_net11.0.trx`.
+The latest focused Debug fast selection, including the complete NormalBacking
+suite and related TRRM identity/anchor tests, passed 100/100 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_05_41_24_net11.0.trx`.
+Optional ordinary references are included in direct formals/results and
+descriptor-bearing aggregate inputs, including absent results. Optional
+GC/init references remain unsupported.
 
 Normal class and optional-class handle fields support retaining assignment,
 replacement and typed iterative child retirement. The runtime tracks
@@ -1768,12 +1870,11 @@ initialized objects back in reverse acquisition order. A 65-object nested
 handle chain retires iteratively in both JIT and AOT tests, and a shared child
 remains live after replacing one field. Cleanup, tasks, foreign/native-callable
 routes, source grants, indexed semantic bodies, handle results, reference
-parameters/results and by-value handle arguments remain rejected;
-`build-native-import` is also fail-closed. Support-bearing descriptor-field
-Copy/drop, the 16-byte call ABI, arbitrary result/owner provenance, module
-relowering and cross-instance exchange remain unimplemented; this is not full
-normal-backing conformance. The agreement is not persisted or accepted by
-module/graph/TRRM routes.
+output parameters and by-value handle arguments remain rejected;
+`build-native-import` is also fail-closed. Arbitrary result/owner provenance,
+module relowering and cross-instance exchange remain unimplemented; this is
+not full normal-backing conformance.
+The agreement is not persisted or accepted by module/graph/TRRM routes.
 
 **Routes/gate:** preserve normal `C`/`box<T>` stable shared backing separately
 from GC-backed `gc C`, `gc box<T>` and `gc ref<T>`. Carry exact backing
@@ -1813,7 +1914,8 @@ emission, runtime behavior and profile admission.
 <a id="cg-028"></a>
 ## CG-028: Nominal enum values and persistence
 
-**Unapproved candidate; structural Standard support only.**
+**Unapproved candidate; selected Standard persistence slices and a bounded
+Windows x64 AOT ABI case.**
 [Nominal enum persistence](../proposals/nominal-enum-persistence.md)
 provisionally selects an exact `NominalEnumsDraft` profile with TypeDef kind
 4, required `EnumDef`/`EnumMemberDef` sections `0053/0054`, Feature 18/1
@@ -1829,9 +1931,38 @@ the exact enum/member snapshot and target Layout facts; missing providers,
 changed names/keys/values/Flags, target mismatches and ambiguity reject. The
 focused enum metadata/provider selection passed 73/73 with zero skips at
 `artifacts\\tst\\Debug\\nominal-enum-provider-binding-final\\tagoo_GOODING-ZEN4_2026-10-28_15_00_08_net11.0.trx`.
-This validates a bounded artifact path, not source enum parsing, Standard
-producer emission, frozen enum value materialization, replacement/packing,
-private-semantic revision 97, or ABI execution.
+A separate in-memory host-supplied `Sample.Palette` test emits and loads a
+Windows x64 DLL for `Echo(Palette) -> Palette`; the Winapi int32 carrier
+preserves `0x13572468` and `int32` minimum through both argument and result.
+That supervised `NativeEmitter` ABI case passes 1/1 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_05_16_01_net11.0.trx`; the
+complete `NativeCoreRegistrationTests` selection passed 63/63 with zero skips
+at `artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_05_16_19_net11.0.trx`. This
+does not validate source enum declaration parsing, general Standard producer
+emission, replacement/packing, private-semantic revision 97, JIT, imported
+enum calls, checked policy or other targets.
+
+The public Standard source producer now selects only the exact existing
+baseline or `NominalEnumsDraft` identity through `EmitStandard`; the CLI's
+`compile-trrm --trrm-schema` option forwards the selected identity without
+changing the default Development `Emit` route. The candidate producer covers
+complete enum declaration libraries and bounded parameterless scalar/enum
+constant-return libraries, including enum-free output with no Feature 18/1.
+The current Standard baseline executable producer requires target
+requirement 1.
+Blittable enum declarations require target requirement 1; declaration and
+constant-return output otherwise preserves explicit 0/1. The source-free
+scalar-return execution helper remains Windows x64-only.
+The Debug fast build passed; the related enum/API selection passed 21/21 with
+zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_06_11_04_net11.0.trx`.
+The selected CLI schema/default/error cases passed 24/24 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-10-30_06_13_17_net11.0.trx`.
+The analyzer-enabled Debug build remains blocked at 704 repository-wide
+errors before test-project analysis; no diagnostic maps to the new public API,
+CLI selector/parser or their test lines.
+General nonconstant enum Bodies, source enum declaration production,
+cross-provider replacement/remapping and private P+E remain open.
 
 **Routes/gate:** carry `(complete enum identity, int32 value)` through
 ConstantSource/FrozenValueNode, ConstantMap and TypeSpec use without
@@ -1840,4 +1971,4 @@ declaration keys and every Module's original provider expectation through
 Standard imports, private P+E, sets/graphs, replacement and decoded
 remapping. Qualify target representation and native calls separately from
 table validation or PE emission. No member DefId, source annotation schema,
-private revision fallback or runtime ABI is implied.
+private revision fallback or general runtime ABI is implied.

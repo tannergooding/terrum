@@ -99,11 +99,12 @@ public static partial class ModuleCompiler
         }
         var types = ImmutableArray.CreateBuilder<BoundStruct>();
         var functionNames = new HashSet<string>(functionCount, StringComparer.Ordinal);
-        var originals = new Dictionary<string, (BoundStruct Type, ImmutableArray<BoundStruct> Table,
+        var originals = new Dictionary<string, (int ReferenceIndex, BoundStruct Type, ImmutableArray<BoundStruct> Table,
             string? Origin, ImmutableArray<PrimitiveType> FunctionPointerMapping,
             ImmutableArray<PrimitiveType> NativePointerMapping,
             ImmutableArray<NativePointerTypeDefinition> NativePointerTypes,
-            ImmutableArray<NativeFunctionPointerSignatureDefinition> FunctionPointerSignatures)>(
+            ImmutableArray<NativeFunctionPointerSignatureDefinition> FunctionPointerSignatures,
+            ImmutableArray<BoundNativeFixedArrayType> FixedArrayTypes)>(
                 StringComparer.Ordinal);
         for (var provider = 0; provider < references.Count; provider++)
         {
@@ -116,25 +117,36 @@ public static partial class ModuleCompiler
                     if (origin is null || existing.Origin is null || origin != existing.Origin
                         || !SameStructure(structure, existing.Type, reference.Structures, existing.Table,
                             reference.NativeFunctionPointerSignatures, existing.FunctionPointerSignatures,
-                            reference.NativePointerTypes, existing.NativePointerTypes))
+                            reference.NativePointerTypes, existing.NativePointerTypes,
+                            reference.NativeFixedArrayTypes,
+                            existing.FixedArrayTypes))
                     {
                         throw new ModuleContractException($"Ambiguous graph type '{structure.Name}'.");
                     }
                     continue;
                 }
-                originals.Add(structure.Name, (structure, reference.Structures, origin,
+                originals.Add(structure.Name, (provider, structure, reference.Structures, origin,
                     functionPointerMappings[provider], nativePointerMappings[provider],
-                    reference.NativePointerTypes, reference.NativeFunctionPointerSignatures));
+                    reference.NativePointerTypes,
+                    reference.NativeFunctionPointerSignatures,
+                    reference.NativeFixedArrayTypes));
                 types.Add(structure);
             }
         }
         var destinationTypes = IndexTypes(types);
+        var nativeFixedArrayTypes = MergeNativeFixedArrayTypeDefinitions(
+            references, types, nativePointerMappings, functionPointerMappings,
+            out var fixedArrayMappings);
         for (var index = 0; index < types.Count; index++)
         {
             var original = originals[types[index].Name];
             types[index] = RemapNativeFunctionPointerTypes(
                 RemapNativePointerTypes(
-                    RemapStructure(original.Type, original.Table, types, destinationTypes),
+                    BoundTreeTraversal.RewriteTypes(
+                        RemapStructure(original.Type, original.Table, types,
+                            destinationTypes),
+                        type => RemapNativeFixedArrayType(type,
+                            fixedArrayMappings[original.ReferenceIndex])),
                     original.NativePointerMapping),
                 original.FunctionPointerMapping);
         }
@@ -151,16 +163,30 @@ public static partial class ModuleCompiler
                 }
                 functions.Add(RemapNativeFunctionPointerTypes(
                     RemapNativePointerTypes(
-                        RemapFunction(function, reference.Structures, combined, destinationTypes: destinationTypes),
+                        RemapNativeFixedArrayTypes(
+                            RemapFunction(function, reference.Structures,
+                                combined, destinationTypes: destinationTypes),
+                            fixedArrayMappings[provider]),
                         nativePointerMappings[provider]),
                     functionPointerMappings[provider]));
             }
         }
         var nativePointerTypes = MergeNativePointerTypeDefinitions(references, combined,
-            nativePointerMappings, functionPointerMappings);
+            nativePointerMappings, functionPointerMappings,
+            fixedArrayMappings);
+        if (!NativeFixedArrayContract.IsValidTable(combined,
+                nativeFixedArrayTypes)
+            || !NativePointerTypeContract.IsValidTable(nativePointerTypes,
+                combined, nativeFunctionPointerSignatures,
+                nativeFixedArrayTypes))
+        {
+            throw new ModuleContractException(
+                "Combined graph array and pointer metadata is invalid.");
+        }
         return new CompilationReference(combined, functions.MoveToImmutable(), references[0].RuntimePolicy,
             nativeFunctionPointerSignatures: nativeFunctionPointerSignatures,
-            nativePointerTypes: nativePointerTypes);
+            nativePointerTypes: nativePointerTypes,
+            nativeFixedArrayTypes: nativeFixedArrayTypes);
     }
 
     /// <summary>Stores a verified DLL implementation with symbolic imports and no fabricated entry point.</summary>
@@ -170,7 +196,7 @@ public static partial class ModuleCompiler
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exports);
         SemanticVerifier.RejectSourceNativeImports(program, "semantic modules",
-            allowDirectNativeImports: true);
+            allowDirectNativeImports: true, allowFixedArrayStorage: true);
         RejectCompilationLocalSpans(program);
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
         {
@@ -180,10 +206,13 @@ public static partial class ModuleCompiler
         _ = MapNativeFunctionPointerTypes(
             program.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
             program.Structures, dependencies.Structures, program.NativePointerTypes,
-            dependencies.NativePointerTypes);
+            dependencies.NativePointerTypes, program.NativeFixedArrayTypes,
+            dependencies.NativeFixedArrayTypes);
         _ = MapNativePointerTypes(program.NativePointerTypes, program.Structures,
             program.NativeFunctionPointerSignatures, dependencies.NativePointerTypes,
-            dependencies.Structures, dependencies.NativeFunctionPointerSignatures);
+            dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
+            program.NativeFixedArrayTypes,
+            dependencies.NativeFixedArrayTypes);
         if (program.EntryPoint != -1 || program.RequiresSourceGrant || !program.Buffers.IsDefaultOrEmpty
             || dependencies.RequiresSourceGrant
             || program.RuntimePolicy != dependencies.RuntimePolicy)
@@ -238,9 +267,12 @@ public static partial class ModuleCompiler
                 if (available is null || !available.TryGetValue(function.Name, out var actual)
                     || !CompatibleContract(
                         Contract(function, program.Structures, program.NativeFunctionPointerSignatures,
-                            program.NativePointerTypes),
+                            program.NativePointerTypes,
+                            program.NativeFixedArrayTypes),
                         Contract(actual, dependencies.Structures,
-                            dependencies.NativeFunctionPointerSignatures, dependencies.NativePointerTypes))
+                            dependencies.NativeFunctionPointerSignatures,
+                            dependencies.NativePointerTypes,
+                            dependencies.NativeFixedArrayTypes))
                     || !SameNativeOutputContracts(function.NativeOutputRole,
                         function.NativeOutputContracts, actual.NativeOutputRole,
                         actual.NativeOutputContracts, program.Structures, dependencies.Structures,
@@ -267,10 +299,13 @@ public static partial class ModuleCompiler
         var required = RequiredStructures(program.Functions.Select(static item =>
             item.IsExternal ? Declaration(item) : item), program.Structures,
             nativePointerTypes: program.NativePointerTypes,
-            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
+            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
+            nativeFixedArrayTypes: program.NativeFixedArrayTypes);
         var structures = SelectStructures(program.Structures, required);
         var nativePointerTypes = RemapNativePointerTypeDefinitions(program.NativePointerTypes,
             program.Structures, structures);
+        var nativeFixedArrayTypes = RemapNativeFixedArrayTypeDefinitions(
+            program.NativeFixedArrayTypes, program.Structures, structures);
         Dictionary<string, BoundStruct>? dependencyTypes = structures.IsEmpty || dependencies.Structures.IsEmpty
             ? null
             : dependencies.Structures.ToDictionary(static item => item.Name, StringComparer.Ordinal);
@@ -283,7 +318,9 @@ public static partial class ModuleCompiler
                 if (structure.IsPrivate || structure.IsInternal
                     || !SameStructure(structure, actual, structures, dependencies.Structures,
                         program.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
-                        nativePointerTypes, dependencies.NativePointerTypes))
+                        nativePointerTypes, dependencies.NativePointerTypes,
+                        nativeFixedArrayTypes,
+                        dependencies.NativeFixedArrayTypes))
                 {
                     throw new ModuleContractException($"Incompatible imported value layout '{structure.Name}'.");
                 }
@@ -295,7 +332,8 @@ public static partial class ModuleCompiler
         var publicTypes = RequiredStructures(program.Functions.Where(item => names.Contains(item.Name))
             .Select(Declaration), program.Structures,
             nativePointerTypes: program.NativePointerTypes,
-            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures);
+            nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
+            nativeFixedArrayTypes: program.NativeFixedArrayTypes);
         foreach (var structure in structures)
         {
             if (publicTypes.Contains(structure.Name) && structure.CleanupMethod is string cleanup
@@ -313,7 +351,7 @@ public static partial class ModuleCompiler
                 && (function.DirectNativeImport is null || function.IsModuleReference);
             functions.Add(new ModuleFunction(function.Name,
                 Contract(remapped, structures, program.NativeFunctionPointerSignatures,
-                    nativePointerTypes),
+                    nativePointerTypes, nativeFixedArrayTypes),
                 isGraphImport ? null : remapped, isGraphImport) {
                 HasOwnershipTransfer = isGraphImport
                     ? ownershipTransfers[index] : Compilation.HasOwnershipTransfer(function, program.Structures),
@@ -336,6 +374,7 @@ public static partial class ModuleCompiler
             ImportedStructures = importedTypes.ToImmutable(),
             NativeFunctionPointerSignatures = program.NativeFunctionPointerSignatures,
             NativePointerTypes = nativePointerTypes,
+            NativeFixedArrayTypes = nativeFixedArrayTypes,
             RuntimePolicy = program.RuntimePolicy,
         };
         var contract = Write(module, program);
@@ -379,7 +418,8 @@ public static partial class ModuleCompiler
             throw new ModuleFormatException("Graph export is missing from its semantic library.");
         }
         var projection = ProjectNativeContracts(declarations, module.Structures,
-            module.NativePointerTypes, module.NativeFunctionPointerSignatures);
+            module.NativePointerTypes, module.NativeFunctionPointerSignatures,
+            module.NativeFixedArrayTypes);
         var required = projection.RequiredStructures;
         var importedTypes = allowImportedCleanup && !module.ImportedStructures.IsEmpty
             ? module.ImportedStructures.ToHashSet(StringComparer.Ordinal) : null;
@@ -404,9 +444,11 @@ public static partial class ModuleCompiler
             mapped = RemapNativeFunctionPointerTypes(mapped, projection.FunctionPointerMapping);
             remappedDeclarations.Add(RemapNativePointerTypes(mapped, projection.PointerMapping));
         }
-        return new CompilationReference(structures, remappedDeclarations.MoveToImmutable(),
-            module.RuntimePolicy, nativeFunctionPointerSignatures: projection.FunctionPointerSignatures,
-            nativePointerTypes: projection.PointerTypes);
+        return CreateProjectedReference(structures,
+            remappedDeclarations.MoveToImmutable(), module.RuntimePolicy,
+            module.RequiresSourceGrant, module.InvocationProfileId,
+            projection.FunctionPointerSignatures, projection.PointerTypes,
+            []);
     }
 
     /// <summary>Validates a graph library against current dependency declarations, without emitting code.</summary>
@@ -425,10 +467,13 @@ public static partial class ModuleCompiler
         var dependencyFunctionPointerMapping = MapNativeFunctionPointerTypes(
             module.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
             module.Structures, dependencies.Structures, module.NativePointerTypes,
-            dependencies.NativePointerTypes);
+            dependencies.NativePointerTypes, module.NativeFixedArrayTypes,
+            dependencies.NativeFixedArrayTypes);
         var dependencyNativePointerMapping = MapNativePointerTypes(module.NativePointerTypes,
             module.Structures, module.NativeFunctionPointerSignatures, dependencies.NativePointerTypes,
-            dependencies.Structures, dependencies.NativeFunctionPointerSignatures);
+            dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
+            module.NativeFixedArrayTypes,
+            dependencies.NativeFixedArrayTypes);
         if (ValidateGraphImports(module, dependencies, hasPrivateManagedState,
             out var dependencyFunctions))
         {
@@ -457,6 +502,7 @@ public static partial class ModuleCompiler
             Classes = module.Classes,
             NativeFunctionPointerSignatures = module.NativeFunctionPointerSignatures,
             NativePointerTypes = module.NativePointerTypes,
+            NativeFixedArrayTypes = module.NativeFixedArrayTypes,
             RuntimePolicy = module.RuntimePolicy,
         };
         if (ContainsUnsupportedModuleCallerUnsafeContracts(program))
@@ -555,7 +601,8 @@ public static partial class ModuleCompiler
             if (!availableFunctions.TryGetValue(item.Name, out var actual)
                 || !CompatibleContract(item.Contract,
                     Contract(actual, dependencies.Structures, dependencies.NativeFunctionPointerSignatures,
-                        dependencies.NativePointerTypes))
+                        dependencies.NativePointerTypes,
+                        dependencies.NativeFixedArrayTypes))
                 || !SameNativeOutputContracts(item.NativeOutputRole, item.NativeOutputContracts,
                     actual.NativeOutputRole, actual.NativeOutputContracts,
                     module.Structures, dependencies.Structures,
@@ -580,7 +627,9 @@ public static partial class ModuleCompiler
                 && (!imported.Contains(structure.Name)
                 || !SameStructure(structure, actual, module.Structures, dependencies.Structures,
                     module.NativeFunctionPointerSignatures, dependencies.NativeFunctionPointerSignatures,
-                    module.NativePointerTypes, dependencies.NativePointerTypes)))
+                    module.NativePointerTypes, dependencies.NativePointerTypes,
+                    module.NativeFixedArrayTypes,
+                    dependencies.NativeFixedArrayTypes)))
             {
                 throw new ModuleContractException($"Incompatible graph dependency layout '{structure.Name}'.");
             }
@@ -629,12 +678,23 @@ public static partial class ModuleCompiler
             var imported = ReadImportedTypes(reader, structures.Length, names, expectedConsumer: true);
             var nativeFunctionPointerSignatures = ReadNativeFunctionPointerSignatures(reader);
             var nativePointerTypes = ReadNativePointerTypes(reader);
-            if (!NativePointerTypeContract.IsValidTable(nativePointerTypes, structures,
-                nativeFunctionPointerSignatures)
+            var nativeFixedArrayTypes = ReadNativeFixedArrayTypes(reader,
+                structures);
+            if (!NativePointerTypeContract.IsValidTable(nativePointerTypes,
+                    structures, nativeFunctionPointerSignatures,
+                    nativeFixedArrayTypes)
                 || (reader is ModuleReader { FormatVersion: NativePointerVersion }
                     && nativePointerTypes.IsEmpty))
             {
                 throw new ModuleFormatException("Graph native pointer type table is invalid.");
+            }
+            if (reader is ModuleReader moduleReader)
+            {
+                moduleReader.Structures = structures;
+                moduleReader.NativeFunctionPointerSignatures =
+                    nativeFunctionPointerSignatures;
+                moduleReader.NativePointerTypes = nativePointerTypes;
+                moduleReader.NativeFixedArrayTypes = nativeFixedArrayTypes;
             }
             var count = Count(reader, MaximumFunctions);
             if (count == 0)
@@ -642,13 +702,15 @@ public static partial class ModuleCompiler
                 throw new ModuleFormatException("Graph library has no functions.");
             }
             var functions = ReadFunctions(reader, count, expectedConsumer: true, structures, classes,
-                nativeFunctionPointerSignatures, nativePointerTypes);
+                nativeFunctionPointerSignatures, nativePointerTypes,
+                nativeFixedArrayTypes);
             var module = new Module(true, -1, structures, functions) {
                 FormatVersion = reader.FormatVersion,
                 Classes = classes,
                 ImportedStructures = imported,
                 NativeFunctionPointerSignatures = nativeFunctionPointerSignatures,
                 NativePointerTypes = nativePointerTypes,
+                NativeFixedArrayTypes = nativeFixedArrayTypes,
                 RequiresSourceGrant = requiresSourceGrant,
                 RuntimePolicy = policy,
             };

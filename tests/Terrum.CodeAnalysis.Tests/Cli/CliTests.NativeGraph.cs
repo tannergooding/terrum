@@ -27,7 +27,7 @@ public sealed partial class CliTests
         var root = Path.Combine(directory, "root.trng");
         try
         {
-            await File.WriteAllTextAsync(leafSource, "[NoThrow] public int32 Leaf() { return 40; }");
+            await File.WriteAllTextAsync(leafSource, " public int32 Leaf() { return 40; }");
             await File.WriteAllTextAsync(middleSource,
                 "public int32 Middle() { mut [uint32; 2] values = [0, 0]; "
                 + "return Leaf() + int32(values[0] + values[1]) + 1; }");

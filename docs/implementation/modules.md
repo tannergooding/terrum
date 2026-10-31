@@ -39,20 +39,82 @@ and writer model exact assigned pairs, ordinary unordered per-Module lists
 with identical-duplicate tolerance, canonical sorted/deduplicated output, and
 catalog-derived prerequisite closure. This executable path still uses
 separate development Feature assignments and compact Bodies; the Module and
-Feature migrations do not claim current-schema TRRM execution support.
+Feature migrations do not claim general current-schema TRRM execution support.
+An internal standard-schema loader executes one Windows x64 module with a
+single int32(void) entry and one Block with empty entry state. It accepts
+either a feature-free mapless `Return R14/R15` or a Feature 11/1 `ConstantMap`
+load of one exact int32 frozen scalar followed by tiny `Return R0`. The latter
+materializes only after checking the selected target and the existing
+BoundConstant layout, then both forms rehydrate and verify a bound constant
+return with PE/JIT coverage. This slice is not wired to the `run-trrm` CLI and
+does not establish general register-Body execution or re-emission.
 Artifact framing now selects the standard registry or the internal development
 executable profile explicitly before indexing/writing, without fallback between
 their section meanings. The standard index recognizes the current assignments
 through `0x004B`, including standard SourceMap Body slots; semantic table
-binding and standard execution remain incomplete. The structural validator
+binding and general standard execution remain incomplete. Separate exact,
+unapproved F/F+S selections now consume and emit bounded NativeAddress and
+scalar local-storage CallSite Bodies; this does not widen the default
+Development route or establish general standard register-Body execution. The structural validator
 currently reads standard `InterfaceDef` and `AssociatedTypeDef` rows and
 checks their owner, self-formal, range, name and complete default-type shape.
+The internal, unapproved
+[RootPinRuntimeDraft](../proposals/trrm-root-pin-schema-selection.md) selector
+now isolates candidate Feature 14/1, TargetProfile 2/1 and F0/record-0D
+ReferenceSupport from the four foreign-invocation profiles, which retain
+NativeAddress record 0D. This is schema and structural framing only: RootPin
+source binding, the runtime provider, relocation/pinning and native lowering
+are not implemented.
 InterfaceBase and InterfaceMethod rows validate their range ownership,
 ordinals, complete base TypeSpecRefs and directly declared instance MethodDef
-owners. Base-instance interface binding, associated Import/Export binding,
-ConstantSource payload/value semantics and associated-relation/witness
-execution remain incomplete. Standard ConstantSource rows validate tags and
-their selected target-table row bounds only. AssociatedTypeDef Import/Export
+owners. Base-instance interface binding, ownerless witness/query ConstantSource
+contexts and associated-relation/witness execution remain incomplete. Standard
+ConstantSource rows validate tags and their selected target-table row bounds
+only. The FrozenValueNode structural reader is integrated, and its provisional
+24-scalar codec validates exact widths, unit, Boolean, rune and raw payload
+bits. Selected standard register Body ConstantMap rows now require provisional
+Feature 11/1, tag-1/kind-1 source selection, exact scalar TypeSpecRef identity
+and Blob validity. Initialized InterfaceConstDef values apply the same
+Feature/type/payload checks using their owning Module; GenericParam constant
+defaults also resolve their owning TypeDef/MethodDef Module and bind exact
+scalar values. Selected Body TypeMap form-0x05 constant arguments also bind
+through tag-1 scalar sources using the Body's Module. Other declaration-owned
+TypeSpecRefs also traverse nested form-0x05 constant arguments under their
+owning Module, including method signatures/parameters, fields, generic
+defaults/constant types, kind-1 constraints, interface bases and constants,
+associated-type defaults, union fields, builder registrations and text
+targets/captures. Ownerless witness, predicate and query contexts still need
+their selected-use Module binding. Windows x64 materialization maps all 24
+provisional fixed-scalar carriers through `ScalarBits`, checks the selected
+Module target and exact native size/alignment, and preserves raw payload bits.
+The standard scalar loader executes an int32 ConstantMap load/return through
+JIT and PE emission. Private semantic modules now select exact revision 100:
+the revision-92 payload, three u64 tag-35 storage-address extents, and the
+mandatory structural array table with flat direct-local operations in tags
+43-46. The unapproved
+[fixed-array private-persistence proposal](../proposals/native-fixed-array-private-persistence.md)
+remains provisional; current evidence covers source-free flat scalar/unit
+JIT/AOT, set/graph packages, and CLI module run/link. Nested array values and
+ptr-to-array runtime carriers reject; nested and pointer-array recipes remain
+metadata-only. Full revision-100 artifacts now preserve descriptive nominal
+array fields and their nested/pointer/fnptr closure through writing, reading,
+ordinary linking, sets, graphs and source-free execution; bodyless provider
+references prune recipes not rooted by an admitted runtime contract. The
+unapproved [artifact-local metadata boundary companion](../proposals/native-fixed-array-private-metadata-boundary.md)
+records this provisional scope and adds no type-only export contract. CLI
+coverage includes native producer/consumer packages, sets, graphs, and direct
+source executable/library builds, plus a bounded `NativeImport` from an array
+element under both runtime policies; these remain separate from Standard A2.
+Managed-class fields whose pointer or nested-class graph reaches array metadata
+are rejected as runtime carriers.
+
+Private modules still reject the eight candidate revision-94 scalar
+identities; the unapproved
+[wide scalar value-carrier proposal](../proposals/scalar-wide-value-carriers.md)
+recommends the remaining private codec composition. Ownerless non-Body
+contexts, generic substitution, producer/remapping and general register
+execution remain incomplete; the proposal does not change normative
+registration. AssociatedTypeDef Import/Export
 identity has a provisional C# path; selected provider-owner equality and exact
 default comparison are not implemented. InterfaceConstDef
 and AssociatedConstDef rows validate their declaration ranges, owners, names
@@ -78,16 +140,17 @@ inventing one.
 It does not replace the `.trm`
 producer/consumer commands or add TRRM import linking. This page describes
 the existing development semantic/native module paths.
-The bounded native scalar frontend validates its versioned source projections,
-then lowers supported constructs to the same verified operations used by these
-module writers. Projection versions are not persisted semantic-module
+The test-only `frontend-component` command validates bounded scalar
+projections, then lowers supported constructs to the same verified operations
+used by these module writers. Projection versions are not persisted semantic-module
 revisions; the current source subset and projection compatibility gates are
 specified in the [native profile](native.md). The separately implemented
 development-TRRM loop envelope described above is a different wire format.
-Revision 76 is the semantic-module base. The current reader/writer prototypes
-also contain private span payloads in revisions 77 and 79–88, but persisted
-`Span<Token>` operations were not selected; those tags are prototype state,
-not an accepted schema. Private revisions also cover fixed-layout commitments,
+Revision 76 is the semantic-module base. Experimental readers once admitted
+private span payloads in revisions 77 and 79–89; current writers reject
+compilation-local `Span<Token>` roles, types and operations, readers reject
+span facts, and revisions 77/81 are rejected before decoding. Private
+revisions also cover fixed-layout commitments,
 direct imports/outputs, and `NativeParameter` inputs. Revision 82 adds
 concrete native function-pointer
 signature tables, native-callable function identities, and
@@ -112,7 +175,7 @@ Candidate revision 89 adds one checked/wrapping mode byte to unary, binary,
 update and compound-assignment arithmetic records. This private schema is
 provisionally implemented under the unapproved
 [private-persistence proposal](../proposals/source-arithmetic-private-persistence.md):
-the current exact revision 92 carries those operation modes, while revision
+the current exact revision 100 carries those operation modes, while revision
 89 is not selected independently. Candidate revision 92 composes the
 unapproved NoThrow-retirement delta on 89
 with the aggregate-output collection and reservation tag 41 described by the
@@ -120,16 +183,19 @@ separate [output persistence proposal](../proposals/aggregate-native-output-priv
 The retirement delta is specified in the unapproved
 [private NoThrow persistence proposal](../proposals/no-throw-private-persistence.md).
 This exact-schema implementation remains provisional: the current structured
-writer and reader select only 92; candidate revisions 90/91 and older
-revisions reject and require regeneration. Revision 92 omits the general
+writer and reader select only 100, which inherits revision 99's tag-35
+storage-address extents and revision 92's NoThrow/output contracts, then adds
+the selected fixed-array table and flat-operation records. Every other private
+revision rejects and requires regeneration; proposed
+revisions 93–98 are not implicitly composed. Revision 99 omits the general
 NoThrow field and contract tokens, persists direct-import NativeOutput
 declarations and output-specific dependency rows, and rejects general
 Dependency contracts it cannot represent. NativeCallable Captures and other
 general dependency contracts require the candidate revision 93 described in
 the [provenance proposal](../proposals/reference-provenance-carriers.md);
 standard TRRM and register-Body output persistence remain separate gaps. A
-provisional private revision-92 amendment now assigns expression tag 42 to
-typed `BoundFieldMove` field-place paths and carries them through serialization,
+The provisional revision-100 schema inherits revision 99's amendment assigning
+expression tag 42 to typed `BoundFieldMove` field-place paths and carries them through serialization,
 resolution, call traversal, linked verification and type-table remapping. This
 is private-only support under the unapproved
 [owning-field move persistence proposal](../proposals/owning-field-move-private-persistence.md),
@@ -148,7 +214,7 @@ validated six-byte IAT leaf thunk. TNPK, TNSP and TNGP consumers preserve the
 selected provider DLL route and compare the retained descriptor/output
 contracts on replacement. AOT is qualified for packages and sets; graphs also
 exercise root-only JIT, including a graph-owned direct-import export. This
-provisional path does not amend revision 92, source syntax or standard TRRM,
+provisional path does not amend revision 100, source syntax or standard TRRM,
 and remains subject to the proposal's unapproved status. Ordinary
 private-module replacement remains slot-flexible. These private
 formats preserve verified, typed, source-mapped structured IR and the
@@ -183,12 +249,14 @@ Existing unsafe-block operation support remains separate from the expression
 slices above.
 
 The private `Host.Source` grant, `scanner-10` invocation, scalar-frontend
-invocation profiles, and native source-grant companion are not selected.
-Existing implementations are prototype evidence only; they do not add a
-source-text runtime capability or amend the source-independent
-semantic-module execution contract. Compiler input remains source text, while
-JIT input is semantic metadata. No 16,384-code-unit grant limit or persisted
-scanner/frontend profile is part of the compiler contract, and no graph,
+invocation profiles, and native source-grant companion remain explicitly
+test-only prototypes. A private structured module may retain those tagged
+prototype profiles for their existing tests, but native packages and standard
+TRRM do not admit them, and frontend build/library/run commands do not use
+them. These profiles add no selected source-text runtime capability or amend
+the source-independent semantic-module contract. Compiler input remains
+original source text, while ordinary JIT input is semantic metadata. No
+16,384-code-unit grant limit, persisted `Span<Token>` representation or graph,
 module-set, native DLL, or persisted-AOT support follows.
 
 ## Current artifact and loading rules
@@ -270,13 +338,14 @@ path against the selected layouts before native address calculation.
 
 ## Experimental private token-span payloads (not selected)
 
-Prototype revisions and tests once persisted role/tag records for
-`Span<Token>` operations in development `.trm` modules. The user selected
-compilation-local span use instead; no private or standard persistence schema
-for token spans is accepted. Do not author new artifacts relying on those
-role/tag records. The existing reader/writer/tests are prototype evidence to
-remove or isolate during implementation cleanup; they do not establish a
-public span ABI, persisted capture protocol, or `.trrm` feature.
+Prototype revisions once persisted role/tag records for `Span<Token>`
+operations in development `.trm` modules. The current writer rejects such
+programs and the reader rejects those records; legacy revisions 77/81 fail
+before decoding. Keep token-span views compilation-local. Do not author new
+artifacts relying on the retired role/tag records; they establish no public
+span ABI, persisted capture protocol, or `.trrm` feature. Explicit
+source-grant profiles are a separate test-only prototype and do not restore
+span persistence.
 
 If a concrete persisted component consumer is later approved, it must receive
 a fresh design decision and independently reconstruct source provenance,
@@ -695,7 +764,7 @@ transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
 order, access and declared mutation authority. The current format retains the checked `IsMutable` flag per field; changing it
 in either direction changes the published value contract and is rejected
-during replacement. Structured-module revision 92 retains `DoesNotReturn` but
+during replacement. Structured-module revision 100 retains `DoesNotReturn` but
 does not persist a general `IsNoThrow` declaration or compare that retired
 promise during replacement. It still rejects weakening `DoesNotReturn`
 without inferring effects from replacement bodies. Native graph package and
@@ -818,9 +887,16 @@ which do not claim system-directory resolution.
 
 `NativeModuleCompiler` packages each separately compiled native producer DLL
 or consumer EXE with its corresponding semantic `.trm` contract. Producer and
-consumer containers use version 2 and include a machine-import table; producer
+consumer containers use version 3 and include a machine-import table; producer
 tables are empty, while consumer tables record imports reported by that
-emission. The reader accepts only version 2. The container records the exact
+emission. The reader accepts only version 3. A mandatory outer table also
+retains selected direct-import expectations for consumers, including unused
+declarations. Provider-owned direct-import exports are validated PE leaf
+thunks to their exact foreign IAT slots; consumers remain bound to the selected
+provider DLL/export rather than bypassing it. This is the provisional,
+unapproved extension described in the
+[direct-import provider-binding proposal](../proposals/native-output-direct-import-provider-binding.md).
+The container records the exact
 native profile (native-10 through native-20), runtime policy,
 single explicit provider identity and the exact PE and semantic bytes. The
 identity is 1–64 ASCII letters, digits or underscores, beginning with a

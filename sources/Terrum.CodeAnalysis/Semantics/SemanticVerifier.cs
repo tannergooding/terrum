@@ -168,9 +168,14 @@ public static partial class SemanticVerifier
             throw Invalid();
         }
         if (!NativePointerTypeContract.IsValidTable(program.NativePointerTypes, program.Structures,
-                program.NativeFunctionPointerSignatures))
+                program.NativeFunctionPointerSignatures,
+                program.NativeFixedArrayTypes))
         {
             throw InvalidEffect(default, "NativePointer");
+        }
+        if (!NativeFixedArrayContract.MatchesProgram(program))
+        {
+            throw InvalidEffect(default, "NativeImport");
         }
         if (!CheckedReferenceTypeContract.IsValidTable(program.CheckedReferenceTypes)
             || program.CheckedReferenceTypes.Any(referenceType =>
@@ -324,7 +329,8 @@ public static partial class SemanticVerifier
         }
         if (program.Structures.Any(static structure => structure is not null && structure.BlittableTargetRequirement != 0))
         {
-            _ = FixedLayoutStorage.Validate(program.Structures);
+            _ = FixedLayoutStorage.Validate(program.Structures,
+                program.NativeFixedArrayTypes);
         }
         var structNames = new HashSet<string>(program.Structures.Length, StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
@@ -346,6 +352,9 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             var offset = 0;
+            var maximumClassFieldSize = program.NativeLoweringAgreement
+                == CompilationOptions.WindowsX64NormalBackingAgreement
+                ? ValueLayout.MaximumStructureSize : ValueLayout.MaximumSize;
             var fieldNames = new HashSet<string>(@class.Fields.Length, StringComparer.Ordinal);
             foreach (var field in @class.Fields)
             {
@@ -355,6 +364,12 @@ public static partial class SemanticVerifier
                         or PrimitiveType.TokenSpan or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                         or PrimitiveType.MutableInt32BufferView
                     || NativeFixedArrayContract.IsCarrier(field.Type)
+                    || NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                        field.Type, program.Structures,
+                        program.NativeFixedArrayTypes,
+                        program.NativePointerTypes,
+                        program.NativeFunctionPointerSignatures,
+                        program.Classes)
                     || IsUnique(program, field.Type))
                 {
                     throw Invalid();
@@ -371,7 +386,7 @@ public static partial class SemanticVerifier
                         program.NativeLoweringAgreement);
                 offset = (offset + alignment - 1) & -alignment;
                 if (field.Size != width || field.Offset != offset || (field.IsMutable && !@class.IsMutable)
-                    || width is < 1 or > ValueLayout.MaximumSize
+                    || width < 1 || width > maximumClassFieldSize
                     || offset + width > ManagedClassTypes.MaximumPayload
                     || string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal))
@@ -423,8 +438,7 @@ public static partial class SemanticVerifier
             foreach (var field in structure.Fields)
             {
                 if (field is null || BoundGenericNominalTypeTypes.IsType(field.Type)
-                    || !ValidType(field.Type, allowVoid: false, program)
-                    || NativeFixedArrayContract.IsCarrier(field.Type))
+                    || !ValidType(field.Type, allowVoid: false, program))
                 {
                     throw Invalid();
                 }
@@ -434,6 +448,7 @@ public static partial class SemanticVerifier
                 }
                 var nested = !NativePointerTypes.IsType(field.Type) && !NativeFunctionPointerTypes.IsType(field.Type)
                     && !BoundEnumTypes.IsType(field.Type)
+                    && !NativeFixedArrayTypes.IsType(field.Type)
                     && (int)field.Type >= 100 && !ManagedClassTypes.IsClass(field.Type)
                     ? (int)field.Type - 100 : -1;
                 if (nested >= program.Structures.Length)
@@ -453,15 +468,46 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var width = ValueLayout.Size(field.Type, program.Structures,
-                    program.CheckedReferenceTypes, program.NativeLoweringAgreement);
-                var fieldAlignment = nested >= 0 ? alignments[nested]
-                    : ValueLayout.Alignment(field.Type, program.Structures,
-                        program.CheckedReferenceTypes, program.NativeLoweringAgreement);
+                var fixedArrayField = NativeFixedArrayTypes.IsType(field.Type);
+                int width;
+                int fieldAlignment;
+                if (fixedArrayField)
+                {
+                    var arrayIndex = NativeFixedArrayTypes.Index(field.Type);
+                    if ((uint)arrayIndex >= (uint)program.NativeFixedArrayTypes.Length)
+                    {
+                        throw Invalid();
+                    }
+
+                    var array = program.NativeFixedArrayTypes[arrayIndex];
+                    if (!NativeFixedArrayContract.TryGetLayout(field.Type,
+                            array.ElementType, array.ElementCount,
+                            program.Structures, program.NativeFixedArrayTypes,
+                            out var layout)
+                        || layout.ByteExtent > int.MaxValue
+                        || layout.Alignment > int.MaxValue)
+                    {
+                        throw Invalid();
+                    }
+
+                    width = (int)layout.ByteExtent;
+                    fieldAlignment = (int)layout.Alignment;
+                }
+                else
+                {
+                    width = ValueLayout.Size(field.Type, program.Structures,
+                        program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement);
+                    fieldAlignment = nested >= 0 ? alignments[nested]
+                        : ValueLayout.Alignment(field.Type,
+                            program.Structures, program.CheckedReferenceTypes,
+                            program.NativeLoweringAgreement);
+                }
                 var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
-                    || width == 0 || field.Size != width || field.Offset != alignedOffset
+                    || (width == 0 && !fixedArrayField)
+                    || field.Size != width || field.Offset != alignedOffset
                     || alignedOffset + width > ValueLayout.MaximumStructureSize)
                 {
                     throw Invalid();
@@ -480,7 +526,8 @@ public static partial class SemanticVerifier
                 throw Invalid();
             }
             var isSupportedFixedArrayElement = NativeFixedArrayContract.IsSupportedElementType(
-                (PrimitiveType)(100 + index), program.Structures);
+                (PrimitiveType)(100 + index), program.Structures,
+                program.NativeFixedArrayTypes);
             if (structure.Size > ValueLayout.MaximumSize
                 && structure.BlittableTargetRequirement == 0
                 && !isSupportedFixedArrayElement
@@ -528,6 +575,15 @@ public static partial class SemanticVerifier
                     && !function.RequiresUnsafeCaller)
                 || function.ReturnType == PrimitiveType.NativeStorageAddress
                 || NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                || NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                    function.ReturnType, program.Structures,
+                    program.NativeFixedArrayTypes, program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures)
+                || (function.NativeFunctionPointerType is PrimitiveType functionPointerType
+                    && NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                        functionPointerType, program.Structures,
+                        program.NativeFixedArrayTypes, program.NativePointerTypes,
+                        program.NativeFunctionPointerSignatures))
                 || !ValidType(function.ReturnType, allowVoid: true, program)
                 || (BoundGenericNominalTypeTypes.IsType(function.ReturnType)
                     && !function.IsExternal)
@@ -564,6 +620,12 @@ public static partial class SemanticVerifier
                                 || !NativeFixedArrayContract.MatchesProgram(program)))
                                 || (!NativeFixedArrayContract.IsCarrier(variable.Type)
                                     && variable.NativeFixedArrayLayout is not null)
+                                || (!NativeFixedArrayContract.IsCarrier(variable.Type)
+                                    && NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                                        variable.Type, program.Structures,
+                                        program.NativeFixedArrayTypes,
+                                        program.NativePointerTypes,
+                                        program.NativeFunctionPointerSignatures))
                                 || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                             && (!function.IsExternal || variableIndex >= function.ParameterCount)
                                     && !(function.RequiresUnsafeCaller
@@ -872,6 +934,8 @@ public static partial class SemanticVerifier
             CarriesCopyOrigin(function.ReturnType, program)
             || function.Variables.Any(variable => CarriesCopyOrigin(variable.Type, program)));
         var copyOriginSummaries = new BoundCopyOriginSummary?[program.Functions.Length];
+        var normalBackingClassConstructorSummaries =
+            new NormalBackingClassConstructorSummary?[program.Functions.Length];
         foreach (var function in program.Functions)
         {
             if (function.CopyOriginSummary is { } summary)
@@ -910,6 +974,7 @@ public static partial class SemanticVerifier
             {
                 backingDependencies = CreateBackingDependencies(functionIndex, function, program, hasSpanDependencies,
                     nativePointerCaptureEffects, copyOriginSummaries,
+                    normalBackingClassConstructorSummaries,
                     deriveCopyOriginSummaries && !recursiveCopyOriginFunctions[functionIndex],
                     hasCopyOriginValues);
             }
@@ -952,13 +1017,30 @@ public static partial class SemanticVerifier
                     initialized.SetPossibleFieldMask(i, fieldMasks[i]);
                 }
             }
+            if (program.NativeLoweringAgreement
+                    == CompilationOptions.WindowsX64NormalBackingAgreement
+                && function.DeclaringStruct is not null && !function.IsStatic
+                && function.Variables.Length != 0
+                && IsNormalBackingObjectType(function.Variables[0].Type)
+                && backingDependencies is not null)
+            {
+                var receiverSite = checked(functionIndex + 1);
+                backingDependencies.SetNormalBackingObjects(0,
+                    new HashSet<ProvenanceAnchor> {
+                        ProvenanceAnchor.ForNormalBackingObject(functionIndex,
+                            receiverSite, new StorageInstance(
+                                BackingDependencies.RootScopeActivation, receiverSite),
+                            function.Variables[0].Type),
+                    },
+                    mayBeUnknown: false);
+            }
             var declarations = new HashSet<int>();
             var functionRemaining = MaximumAnalysisVisits;
             try
             {
                 VerifyOwnerScopes(function.Body, function, program);
                 VerifySpanScopes(function);
-                VerifyManagedRoots(function);
+                VerifyManagedRoots(function, program);
                 var returns = Statement(function.Body, initialized, fieldMasks, declarations, function, program,
                     ref functionRemaining, 0);
                 VerifyViewScopes(functionIndex, function.Body, function,
@@ -983,6 +1065,18 @@ public static partial class SemanticVerifier
             {
                 exception.Data[FunctionIndexKey] = functionIndex;
                 throw;
+            }
+            if (program.NativeLoweringAgreement
+                    == CompilationOptions.WindowsX64NormalBackingAgreement
+                && function.IsClassConstructor && backingDependencies is not null)
+            {
+                var receiverSite = checked(functionIndex + 1);
+                backingDependencies.CaptureNormalBackingClassConstructorSummary(
+                    functionIndex,
+                    ProvenanceAnchor.ForNormalBackingObject(functionIndex,
+                        receiverSite, new StorageInstance(
+                            BackingDependencies.RootScopeActivation, receiverSite),
+                        function.Variables[0].Type));
             }
             if (deriveCopyOriginSummaries
                 && backingDependencies?.CopyOriginSummaryBuilder is { } summaryBuilder)
@@ -1063,14 +1157,14 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyManagedRoots(BoundFunction function)
+    private static void VerifyManagedRoots(BoundFunction function, BoundProgram program)
     {
         var retired = new HashSet<int>();
         var active = new HashSet<int>();
         var remaining = MaximumAnalysisVisits;
         for (var slot = 0; slot < function.ParameterCount + (function.IsConstructor ? 1 : 0); slot++)
         {
-            if (ManagedClassTypes.IsManaged(function.Variables[slot].Type))
+            if (IsManagedLifetimeValue(program, function.Variables[slot].Type))
             {
                 _ = active.Add(slot);
             }
@@ -1080,7 +1174,7 @@ public static partial class SemanticVerifier
         {
             if (slot < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                 || slot >= function.Variables.Length || slot < 0
-                || !ManagedClassTypes.IsManaged(function.Variables[slot].Type)
+                || !IsManagedLifetimeValue(program, function.Variables[slot].Type)
                 || !scope.Add(slot) || !active.Add(slot))
             {
                 throw InvalidEffect(span, "Ownership");
@@ -1096,13 +1190,13 @@ public static partial class SemanticVerifier
             }
             switch (expression)
             {
-                case BoundRead read when ManagedClassTypes.IsManaged(read.Type):
+                case BoundRead read when IsManagedLifetimeValue(program, read.Type):
                     if (!active.Contains(read.Variable))
                     {
                         throw InvalidEffect(read.Span, "Ownership");
                     }
                     break;
-                case BoundOutArgument output when ManagedClassTypes.IsManaged(output.Type):
+                case BoundOutArgument output when IsManagedLifetimeValue(program, output.Type):
                     if (output.DeclaresVariable)
                     {
                         Declare(output.Variable, scope, output.Span);
@@ -1158,8 +1252,24 @@ public static partial class SemanticVerifier
                 case BoundNativeFixedArrayElement fixedArrayElement:
                     Expression(fixedArrayElement.Index, scope, depth + 1);
                     break;
+                case BoundNativeFixedArrayPathElement pathElement:
+                    foreach (var projection in pathElement.Projections)
+                    {
+                        Expression(projection.Index, scope, depth + 1);
+                    }
+                    break;
                 case BoundNativeFixedArrayPointerAddress pointerAddress:
-                    Expression(pointerAddress.Index, scope, depth + 1);
+                    if (pointerAddress.Projections.IsDefaultOrEmpty)
+                    {
+                        Expression(pointerAddress.Index, scope, depth + 1);
+                    }
+                    else
+                    {
+                        foreach (var projection in pointerAddress.Projections)
+                        {
+                            Expression(projection.Index, scope, depth + 1);
+                        }
+                    }
                     break;
                 case BoundNativeStorageAddress address:
                     Expression(address.Index, scope, depth + 1);
@@ -1199,7 +1309,7 @@ public static partial class SemanticVerifier
                     {
                         throw InvalidEffect(pattern.Span, "Ownership");
                     }
-                    if (ManagedClassTypes.IsManaged(function.Variables[pattern.Variable].Type))
+                    if (IsManagedLifetimeValue(program, function.Variables[pattern.Variable].Type))
                     {
                         Declare(pattern.Variable, scope, pattern.Span);
                     }
@@ -1264,6 +1374,13 @@ public static partial class SemanticVerifier
                 case BoundNativeFixedArrayWrite write:
                     Expression(write.Index, scope, depth + 1);
                     Expression(write.Value, scope, depth + 1);
+                    break;
+                case BoundNativeFixedArrayPathWrite pathWrite:
+                    foreach (var projection in pathWrite.Projections)
+                    {
+                        Expression(projection.Index, scope, depth + 1);
+                    }
+                    Expression(pathWrite.Value, scope, depth + 1);
                     break;
                 case BoundConstant or BoundNull or BoundNativeFunctionAddress
                     or BoundRead or BoundMove or BoundReceiverLoan
@@ -1354,7 +1471,7 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (ManagedClassTypes.IsManaged(function.Variables[local.Variable].Type))
+                    if (IsManagedLifetimeValue(program, function.Variables[local.Variable].Type))
                     {
                         Declare(local.Variable, scope, local.Span);
                     }
@@ -1364,7 +1481,7 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (ManagedClassTypes.IsManaged(function.Variables[vacant.Variable].Type))
+                    if (IsManagedLifetimeValue(program, function.Variables[vacant.Variable].Type))
                     {
                         Declare(vacant.Variable, scope, vacant.Span);
                     }
@@ -1375,7 +1492,7 @@ public static partial class SemanticVerifier
                     {
                         throw Invalid();
                     }
-                    if (ManagedClassTypes.IsManaged(function.Variables[assignment.Variable].Type)
+                    if (IsManagedLifetimeValue(program, function.Variables[assignment.Variable].Type)
                         && !active.Contains(assignment.Variable))
                     {
                         throw InvalidEffect(assignment.Span, "Ownership");
@@ -1417,7 +1534,7 @@ public static partial class SemanticVerifier
         for (var slot = function.ParameterCount + (function.IsConstructor ? 1 : 0);
             slot < function.Variables.Length; slot++)
         {
-            if (ManagedClassTypes.IsManaged(function.Variables[slot].Type) && !retired.Contains(slot))
+            if (IsManagedLifetimeValue(program, function.Variables[slot].Type) && !retired.Contains(slot))
             {
                 throw InvalidEffect(function.Variables[slot].Span, "Ownership");
             }
@@ -1795,8 +1912,26 @@ public static partial class SemanticVerifier
                 case BoundNativeFixedArrayElement fixedArrayElement:
                     Expression(fixedArrayElement.Index, depth + 1, acquiringRoot);
                     break;
+                case BoundNativeFixedArrayPathElement pathElement:
+                    foreach (var projection in pathElement.Projections)
+                    {
+                        Expression(projection.Index, depth + 1, acquiringRoot);
+                    }
+                    break;
                 case BoundNativeFixedArrayPointerAddress pointerAddress:
-                    Expression(pointerAddress.Index, depth + 1, acquiringRoot);
+                    if (pointerAddress.Projections.IsDefaultOrEmpty)
+                    {
+                        Expression(pointerAddress.Index, depth + 1,
+                            acquiringRoot);
+                    }
+                    else
+                    {
+                        foreach (var projection in pointerAddress.Projections)
+                        {
+                            Expression(projection.Index, depth + 1,
+                                acquiringRoot);
+                        }
+                    }
                     break;
                 case BoundReferenceFormation formation:
                     Expression(formation.Place, depth + 1, acquiringRoot);
@@ -1821,6 +1956,13 @@ public static partial class SemanticVerifier
                 case BoundNativeFixedArrayWrite fixedArrayWrite:
                     Expression(fixedArrayWrite.Index, depth + 1, acquiringRoot);
                     Expression(fixedArrayWrite.Value, depth + 1, acquiringRoot);
+                    break;
+                case BoundNativeFixedArrayPathWrite pathWrite:
+                    foreach (var projection in pathWrite.Projections)
+                    {
+                        Expression(projection.Index, depth + 1, acquiringRoot);
+                    }
+                    Expression(pathWrite.Value, depth + 1, acquiringRoot);
                     break;
                 case BoundIsInitialized:
                     break;
@@ -2385,32 +2527,142 @@ public static partial class SemanticVerifier
     }
 
     internal static void RejectSourceNativeImports(BoundProgram program, string target,
-        bool allowDirectNativeImports = false)
+        bool allowDirectNativeImports = false,
+        bool allowFixedArrayStorage = false)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        var invalidFixedArrayUse = HasInvalidSourceFixedArrayUse(
+            program, allowFixedArrayStorage);
+        if (invalidFixedArrayUse)
+        {
+            throw new NotSupportedException(
+                $"Fixed-array runtime forms are not supported by {target}.");
+        }
         if ((!allowDirectNativeImports
                 && program.Functions.Any(static function => function.DirectNativeImport is not null
                     && (!function.IsModuleReference || function.ModuleImport is null)))
             || program.Functions.Any(static function => function.ReturnType is
                 PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                || NativeFixedArrayContract.IsCarrier(function.ReturnType)
                 || function.Variables.Any(variable => variable.Type is
-                    PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                    || NativeFixedArrayContract.IsCarrier(variable.Type)
-                    || variable.NativeFixedArrayLayout is not null))
+                    PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer))
             || (!program.Structures.IsDefaultOrEmpty && program.Structures.Any(
                 static structure => structure.Fields.Any(
                     static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                        || NativeFixedArrayContract.IsCarrier(field.Type))))
+                    )))
             || (!program.Classes.IsDefaultOrEmpty && program.Classes.Any(
                 static @class => @class.Fields.Any(
-                static field => field.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
-                            || NativeFixedArrayContract.IsCarrier(field.Type))))
-            || !program.NativeUtf16ZLiterals.IsEmpty || !program.NativeUtf8ZLiterals.IsEmpty)
+                    static field => field.Type is PrimitiveType.NativeUtf16ZPointer
+                        or PrimitiveType.NativeUtf8ZPointer)))
+            || !program.NativeUtf16ZLiterals.IsEmpty
+            || !program.NativeUtf8ZLiterals.IsEmpty)
         {
             throw new NotSupportedException($"Source native imports are not supported by {target}.");
         }
+    }
+
+    private static bool HasInvalidSourceFixedArrayUse(
+        BoundProgram program,
+        bool allowFixedArrayStorage)
+    {
+        var hasRetiredFixedArrayCarrier =
+            program.Functions.Any(static function =>
+                function.ReturnType == PrimitiveType.NativeFixedArray
+                || function.Variables.Any(static variable =>
+                    variable.Type == PrimitiveType.NativeFixedArray))
+            || program.Structures.Any(static structure =>
+                structure.Fields.Any(static field =>
+                    field.Type == PrimitiveType.NativeFixedArray))
+            || (!program.Classes.IsDefaultOrEmpty
+                && program.Classes.Any(static @class =>
+                    @class.Fields.Any(static field =>
+                        field.Type == PrimitiveType.NativeFixedArray)));
+        if (hasRetiredFixedArrayCarrier)
+        {
+            return true;
+        }
+
+        var hasFixedArrayData = !program.NativeFixedArrayTypes.IsDefaultOrEmpty
+            || program.Functions.Any(static function =>
+                NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                || function.Variables.Any(static variable =>
+                    NativeFixedArrayContract.IsCarrier(variable.Type)
+                    || variable.NativeFixedArrayLayout is not null))
+            || program.Structures.Any(static structure =>
+                structure.Fields.Any(static field =>
+                    NativeFixedArrayContract.IsCarrier(field.Type)))
+            || (!program.Classes.IsDefaultOrEmpty
+                && program.Classes.Any(static @class =>
+                    @class.Fields.Any(static field =>
+                        NativeFixedArrayContract.IsCarrier(field.Type))));
+        if (!hasFixedArrayData)
+        {
+            return false;
+        }
+
+        if (!allowFixedArrayStorage
+            || !NativeFixedArrayContract.MatchesProgram(program))
+        {
+            return true;
+        }
+
+        foreach (var function in program.Functions)
+        {
+            if (NativeFixedArrayContract.IsCarrier(function.ReturnType)
+                || NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                    function.ReturnType, program.Structures,
+                    program.NativeFixedArrayTypes, program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures)
+                || (function.NativeFunctionPointerType is PrimitiveType functionPointerType
+                    && NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                        functionPointerType, program.Structures,
+                        program.NativeFixedArrayTypes,
+                        program.NativePointerTypes,
+                        program.NativeFunctionPointerSignatures)))
+            {
+                return true;
+            }
+
+            var firstLocal = function.ParameterCount
+                + (function.IsConstructor ? 1 : 0);
+            for (var variableIndex = 0;
+                variableIndex < function.Variables.Length;
+                variableIndex++)
+            {
+                var variable = function.Variables[variableIndex];
+                if (!NativeFixedArrayContract.IsCarrier(variable.Type))
+                {
+                    if (variable.NativeFixedArrayLayout is not null
+                        || NativeFixedArrayContract.HasMetadataOnlyArrayType(
+                            variable.Type, program.Structures,
+                            program.NativeFixedArrayTypes,
+                            program.NativePointerTypes,
+                            program.NativeFunctionPointerSignatures))
+                    {
+                        return true;
+                    }
+                    continue;
+                }
+
+                if (function.IsExternal
+                    || function.IndexedBody is not null
+                    || variableIndex < firstLocal
+                    || variable.IsOut
+                    || variable.IsInit
+                    || variable.IsInitializationLocal
+                    || variable.NativeFixedArrayLayout
+                        is not BoundNativeFixedArrayLayout layout
+                    || !NativeFixedArrayContract.MatchesLayout(layout, program))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return !program.Classes.IsDefaultOrEmpty
+                && program.Classes.Any(static @class =>
+                    @class.Fields.Any(static field =>
+                        NativeFixedArrayContract.IsCarrier(field.Type)));
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
@@ -2608,6 +2860,19 @@ public static partial class SemanticVerifier
                     local.Initializer, initialized, local.Variable);
                 initialized.MarkAssigned(local.Variable);
                 initialized.SetNativeOutputResult(local.Variable, nativeOutputResult);
+                if (program.NativeLoweringAgreement
+                        == CompilationOptions.WindowsX64NormalBackingAgreement
+                    && IsNormalBackingObjectType(local.Initializer.Type)
+                    && initialized.Dependencies is BackingDependencies
+                        localObjectDependencies)
+                {
+                    var objects = NormalBackingObjectsOfExpression(
+                        local.Initializer, localObjectDependencies, initialized,
+                        function, program, ref remaining, depth + 1,
+                        out var mayBeUnknown);
+                    localObjectDependencies.SetNormalBackingObjects(
+                        local.Variable, objects, mayBeUnknown);
+                }
                 if (CheckedReferenceTypeContract.IsValidType(
                         local.Initializer.Type, program.CheckedReferenceTypes))
                 {
@@ -2899,6 +3164,19 @@ public static partial class SemanticVerifier
                 }
                 initialized.MarkAssigned(assignment.Variable);
                 initialized.SetNativeOutputResult(assignment.Variable, nativeOutputAssignmentResult);
+                if (program.NativeLoweringAgreement
+                        == CompilationOptions.WindowsX64NormalBackingAgreement
+                    && IsNormalBackingObjectType(assignment.Value.Type)
+                    && initialized.Dependencies is BackingDependencies
+                        assignmentObjectDependencies)
+                {
+                    var objects = NormalBackingObjectsOfExpression(
+                        assignment.Value, assignmentObjectDependencies,
+                        initialized, function, program, ref remaining, depth + 1,
+                        out var mayBeUnknown);
+                    assignmentObjectDependencies.SetNormalBackingObjects(
+                        assignment.Variable, objects, mayBeUnknown);
+                }
                 if (CheckedReferenceTypeContract.IsValidType(
                         assignment.Value.Type, program.CheckedReferenceTypes))
                 {
@@ -2980,7 +3258,7 @@ public static partial class SemanticVerifier
                 return false;
             case BoundOptionalAssignment optionalAssignment:
                 if (optionalAssignment.Place is null || optionalAssignment.Value is null
-                    || !ManagedClassTypes.IsOptional(optionalAssignment.Place.Type)
+                    || !IsSupportedOptionalType(optionalAssignment.Place.Type, program)
                     || optionalAssignment.Value.Type != optionalAssignment.Place.Type)
                 {
                     throw Invalid(optionalAssignment.Span);
@@ -3029,6 +3307,46 @@ public static partial class SemanticVerifier
                 if (!valueCompletes)
                 {
                     return true;
+                }
+                if (optionalAssignment.Place is BoundRead optionalReferenceLocal
+                    && CheckedReferenceTypeContract.IsValidType(
+                        optionalReferenceLocal.Type, program.CheckedReferenceTypes)
+                    && program.CheckedReferenceTypes[
+                        CheckedReferenceTypes.Index(optionalReferenceLocal.Type)].IsOptional)
+                {
+                    if (assignedState.Dependencies is not BackingDependencies
+                        optionalReferenceDependencies)
+                    {
+                        throw InvalidEffect(optionalAssignment.Span, "CheckedReference");
+                    }
+                    var referenceValue = ReferenceFieldValueOfDescriptorExpression(
+                        optionalAssignment.Value, optionalReferenceDependencies,
+                        assignedState, function, program, ref remaining,
+                        depth + 1, assignedMasks);
+                    if (!referenceValue.IsAvailable)
+                    {
+                        throw InvalidEffect(optionalAssignment.Span, "CheckedReference");
+                    }
+                    optionalReferenceDependencies.SetReferenceTargets(
+                        optionalReferenceLocal.Variable, referenceValue.Targets);
+                    optionalReferenceDependencies.SetReferenceObligations(
+                        optionalReferenceLocal.Variable, referenceValue.Obligations);
+                    optionalReferenceDependencies.SetReferenceBackingSources(
+                        optionalReferenceLocal.Variable, referenceValue.BackingSources);
+                }
+                else if (optionalAssignment.Place is BoundFieldRead optionalReferenceField
+                    && IsOrdinaryStoredReferenceType(optionalReferenceField.Type, program)
+                    && TryGetNormalBackingClassPlace(optionalReferenceField,
+                        function, program, out var optionalFieldRoot,
+                        out var optionalFieldProjection)
+                    && assignedState.Dependencies is BackingDependencies
+                        optionalFieldDependencies)
+                {
+                    SetReferenceFieldValuesFromExpression(
+                        optionalFieldRoot, optionalFieldProjection,
+                        optionalReferenceField.Type, optionalAssignment.Value,
+                        optionalFieldDependencies, assignedState, function,
+                        program, ref remaining, depth + 1, assignedMasks);
                 }
                 for (var index = 0; index < initialized.Length; index++)
                 {
@@ -3122,6 +3440,18 @@ public static partial class SemanticVerifier
                 var fieldPlaceProjection = new StorageProjection(
                     StorageProjectionKind.InlineFieldPath, 0, 0, fieldProjectionPath);
                 var fieldSegments = fieldProjectionPath.Segments;
+                var normalBackingPartialReferenceAggregate =
+                    program.NativeLoweringAgreement
+                        == CompilationOptions.WindowsX64NormalBackingAgreement
+                    && (function.IsConstructor || function.IsClassConstructor)
+                    && fieldAssignment.Variable == 0
+                    && ManagedClassTypes.IsClass(ownerType)
+                    && fieldSegments.Length > 1
+                    && IsInlineStructStorage(
+                        Fields(program, ownerType)[fieldAssignment.Field].Type, program)
+                    && ReferenceFieldLeaves(
+                        Fields(program, ownerType)[fieldAssignment.Field].Type,
+                        program, ref remaining, depth + 1).Count != 0;
                 var fieldOwnerPath = FieldPathPrefix(fieldProjectionPath,
                     fieldSegments.Length - 1);
                 var fieldOwnerType = fieldSegments[^1].OwnerType;
@@ -3177,12 +3507,14 @@ public static partial class SemanticVerifier
                         var ownerPath = FieldPathPrefix(fieldProjectionPath, index);
                         var (_, ownerPossible) = FieldPathOwnerMasks(fieldAssignment.Variable,
                             ownerPath, segment.OwnerType, initialized, fieldMasks, program);
-                        if ((ownerPossible & (1u << segment.Field)) == 0)
+                        if ((ownerPossible & (1u << segment.Field)) == 0
+                            && !(normalBackingPartialReferenceAggregate && index == 0))
                         {
                             throw InvalidEffect(fieldAssignment.Span, "Ownership");
                         }
                     }
                     if (!fieldPathIsUnique
+                        && !normalBackingPartialReferenceAggregate
                         && (fieldMasks[fieldAssignment.Variable] & rootFieldBit) == 0)
                     {
                         throw InvalidEffect(fieldAssignment.Span, "Ownership");
@@ -3388,7 +3720,16 @@ public static partial class SemanticVerifier
                         fieldProjectionPath, live: true, initialized, fieldMasks,
                         function, program, fieldAssignment.Span);
                 }
-                if (IsInlineStructStorage(ownerType, program)
+                else if (normalBackingPartialReferenceAggregate)
+                {
+                    SetNestedFieldLiveness(fieldAssignment.Variable,
+                        fieldProjectionPath, live: true, initialized, fieldMasks,
+                        function, program, fieldAssignment.Span);
+                }
+                if ((IsInlineStructStorage(ownerType, program)
+                        || (program.NativeLoweringAgreement
+                                == CompilationOptions.WindowsX64NormalBackingAgreement
+                            && IsNormalBackingObjectType(ownerType)))
                     && (IsOrdinaryStoredReferenceType(targetField.Type, program)
                         || IsInlineStructStorage(targetField.Type, program))
                     && initialized.Dependencies is BackingDependencies fieldReferenceDependencies)
@@ -3397,6 +3738,19 @@ public static partial class SemanticVerifier
                         fieldPlaceProjection, targetField.Type, fieldAssignment.Value,
                         fieldReferenceDependencies, initialized, function, program,
                         ref remaining, depth + 1, fieldMasks);
+                }
+                if (program.NativeLoweringAgreement
+                        == CompilationOptions.WindowsX64NormalBackingAgreement
+                    && ManagedClassTypes.IsClass(ownerType)
+                    && IsNormalBackingObjectType(targetField.Type)
+                    && initialized.Dependencies is BackingDependencies
+                        classFieldObjectDependencies)
+                {
+                    SetNormalBackingClassFieldValueFromExpression(
+                        fieldAssignment.Variable, fieldPlaceProjection,
+                        targetField.Type, fieldAssignment.Value,
+                        classFieldObjectDependencies, initialized,
+                        function, program, ref remaining, depth + 1);
                 }
                 return false;
             case BoundBufferAssignment bufferWrite:
@@ -3462,7 +3816,8 @@ public static partial class SemanticVerifier
                 var effect = UnwrapUnsafeExpression(expressionStatement.Expression);
                 if (effect is not (BoundCall or BoundIndirectCall or BoundViewRead or BoundUpdate
                     or BoundNominalUpdate or BoundCompoundAssignment or BoundNativeFixedArrayWrite
-                    or BoundNativePointerWrite or BoundReferenceWrite))
+                    or BoundNativeFixedArrayPathWrite or BoundNativePointerWrite
+                    or BoundReferenceWrite))
                 {
                     throw Invalid();
                 }
@@ -3524,6 +3879,8 @@ public static partial class SemanticVerifier
                 var thenReachable = CanBe(conditional.Condition, true, ref remaining, initialized);
                 var elseReachable = CanBe(conditional.Condition, false, ref remaining, initialized);
                 var thenState = Outcome(conditional.Condition, beforeCondition, true, ref remaining);
+                CopyOptionalReferencePatternFacts(
+                    conditional.Condition, initialized, thenState, program);
                 var thenMasks = (uint[])fieldMasks.Clone();
                 MarkOutMasks(thenState, thenMasks, function, program);
                 var thenReturns = Statement(conditional.Then, thenState, thenMasks, declarations, function, program, ref remaining, depth + 1,
@@ -4997,10 +5354,27 @@ public static partial class SemanticVerifier
             }
 
             var fullMask = FullMask(Program, type);
+            return NestedOwnerFields(variable, ownerPath, type, fullMask);
+        }
+
+        internal NestedOwnerFieldState NestedOwnerFields(
+            int variable, FieldProjectionPath ownerPath, PrimitiveType type,
+            uint initialMask)
+        {
+            if ((uint)variable >= (uint)Length
+                || ownerPath.Segments.IsEmpty
+                || !SupportsNestedOwnerFieldState(type)
+                || (initialMask & ~FullMask(Program, type)) != 0)
+            {
+                throw Invalid();
+            }
+
+            var fullMask = FullMask(Program, type);
             var key = new NestedOwnerStateKey(variable, ownerPath);
             if (!_nestedOwnerStates.TryGetValue(key, out var fields))
             {
-                return new NestedOwnerFieldState(type, fullMask, fullMask, fullMask);
+                return new NestedOwnerFieldState(
+                    type, fullMask, initialMask, initialMask);
             }
             if (fields.Type != type || fields.FullMask != fullMask
                 || (fields.DefiniteMask & ~fields.PossibleMask) != 0
@@ -5016,7 +5390,7 @@ public static partial class SemanticVerifier
             int variable, FieldProjectionPath ownerPath, NestedOwnerFieldState fields)
         {
             if ((uint)variable >= (uint)Length || ownerPath.Segments.IsEmpty
-                || !IsUnique(Program, fields.Type) || !HasFields(Program, fields.Type)
+                || !SupportsNestedOwnerFieldState(fields.Type)
                 || fields.FullMask != FullMask(Program, fields.Type)
                 || (fields.DefiniteMask & ~fields.PossibleMask) != 0
                 || (fields.DefiniteMask & ~fields.FullMask) != 0
@@ -5026,7 +5400,7 @@ public static partial class SemanticVerifier
             }
 
             var key = new NestedOwnerStateKey(variable, ownerPath);
-            if (fields.IsComplete)
+            if (fields.IsComplete && IsUnique(Program, fields.Type))
             {
                 _ = _nestedOwnerStates.Remove(key);
             }
@@ -5035,6 +5409,14 @@ public static partial class SemanticVerifier
                 _nestedOwnerStates[key] = fields;
             }
         }
+
+        private bool SupportsNestedOwnerFieldState(PrimitiveType type) =>
+            HasFields(Program, type) && !ManagedClassTypes.IsClass(type)
+            && (IsUnique(Program, type)
+                || (Program.NativeLoweringAgreement
+                        == CompilationOptions.WindowsX64NormalBackingAgreement
+                    && (int)type >= 100
+                    && (int)type - 100 < Program.Structures.Length));
 
         internal void ResetNestedOwnerStates(int variable)
         {
@@ -5673,6 +6055,15 @@ public static partial class SemanticVerifier
             return;
         }
 
+        if (place is BoundRead constructorReceiver
+            && (function.IsConstructor || function.IsClassConstructor)
+            && constructorReceiver.Variable == 0
+            && constructorReceiver.Type == function.Variables[0].Type
+            && ManagedClassTypes.IsClass(constructorReceiver.Type))
+        {
+            return;
+        }
+
         if (place is BoundRead read && IsUnique(program, read.Type))
         {
             if ((uint)read.Variable >= (uint)initialized.Length
@@ -5784,6 +6175,21 @@ public static partial class SemanticVerifier
             var fields = initialized.NestedOwnerFields(rootVariable, ownerPath, ownerType);
             return (fields.DefiniteMask, fields.PossibleMask);
         }
+        if (program.NativeLoweringAgreement
+                == CompilationOptions.WindowsX64NormalBackingAgreement
+            && IsInlineStructStorage(ownerType, program))
+        {
+            var initialMask = FullMask(program, ownerType);
+            var rootSegment = ownerPath.Segments[0];
+            if (ManagedClassTypes.IsClass(rootSegment.OwnerType)
+                && (fieldMasks[rootVariable] & (1u << rootSegment.Field)) == 0)
+            {
+                initialMask = 0;
+            }
+            var fields = initialized.NestedOwnerFields(
+                rootVariable, ownerPath, ownerType, initialMask);
+            return (fields.DefiniteMask, fields.PossibleMask);
+        }
         var fullMask = FullMask(program, ownerType);
         return (fullMask, fullMask);
     }
@@ -5833,8 +6239,12 @@ public static partial class SemanticVerifier
 
         var leaf = segments[^1];
         var ownerPath = FieldPathPrefix(fieldPath, segments.Length - 1);
-        var ownerState = initialized.NestedOwnerFields(
-            rootVariable, ownerPath, leaf.OwnerType);
+        var (ownerDefinite, ownerPossible) = FieldPathOwnerMasks(
+            rootVariable, ownerPath, leaf.OwnerType, initialized,
+            fieldMasks, program);
+        var ownerState = new NestedOwnerFieldState(
+            leaf.OwnerType, FullMask(program, leaf.OwnerType),
+            ownerDefinite, ownerPossible);
         var fieldBit = 1u << leaf.Field;
         var definite = live
             ? ownerState.DefiniteMask | fieldBit
@@ -5855,8 +6265,12 @@ public static partial class SemanticVerifier
     {
         while (!ownerPath.Segments.IsEmpty)
         {
-            var ownerState = initialized.NestedOwnerFields(
-                rootVariable, ownerPath, ownerType);
+            var (ownerDefiniteMask, ownerPossibleMask) = FieldPathOwnerMasks(
+                rootVariable, ownerPath, ownerType, initialized,
+                fieldMasks, program);
+            var ownerState = new NestedOwnerFieldState(
+                ownerType, FullMask(program, ownerType),
+                ownerDefiniteMask, ownerPossibleMask);
             var ownerIsComplete = ownerState.IsComplete;
             var ownerSegment = ownerPath.Segments[^1];
             var parentPath = FieldPathPrefix(ownerPath, ownerPath.Segments.Length - 1);
@@ -5881,12 +6295,20 @@ public static partial class SemanticVerifier
             }
 
             var parentType = ownerSegment.OwnerType;
-            if (!IsUnique(program, parentType) || !HasFields(program, parentType))
+            if ((!IsUnique(program, parentType)
+                    && !(program.NativeLoweringAgreement
+                            == CompilationOptions.WindowsX64NormalBackingAgreement
+                        && IsInlineStructStorage(parentType, program)))
+                || !HasFields(program, parentType))
             {
                 throw Invalid(span);
             }
-            var parentState = initialized.NestedOwnerFields(
-                rootVariable, parentPath, parentType);
+            var (parentDefiniteMask, parentPossibleMask) = FieldPathOwnerMasks(
+                rootVariable, parentPath, parentType, initialized,
+                fieldMasks, program);
+            var parentState = new NestedOwnerFieldState(
+                parentType, FullMask(program, parentType),
+                parentDefiniteMask, parentPossibleMask);
             var parentDefinite = ownerIsComplete
                 ? parentState.DefiniteMask | fieldBit
                 : parentState.DefiniteMask & ~fieldBit;
@@ -6227,7 +6649,11 @@ public static partial class SemanticVerifier
         if (expression is null || !ValidType(expression.Type,
             allowVoid: expression is BoundCall or BoundIndirectCall
                 or BoundUnsafeExpression { Type: PrimitiveType.Void }
-                or BoundNativeFixedArrayWrite or BoundNativePointerWrite or BoundReferenceWrite, program))
+                or BoundConstant { Type: PrimitiveType.Void }
+                or BoundNativeFixedArrayElement { Type: PrimitiveType.Void }
+                or BoundNativeFixedArrayPathElement { Type: PrimitiveType.Void }
+                or BoundNativeFixedArrayWrite or BoundNativeFixedArrayPathWrite
+                or BoundNativePointerWrite or BoundReferenceWrite, program))
         {
             throw Invalid();
         }
@@ -6382,16 +6808,21 @@ public static partial class SemanticVerifier
                 var hasIncomingPlace = TryGetIncomingReferencePlace(
                     formation.Place, function, program, ref remaining,
                     depth + 1, out _, out incomingWritable);
-                var hasLocalPlace = !hasIncomingPlace
+                var hasNormalBackingPlace = !hasIncomingPlace
+                    && TryGetNormalBackingClassPlace(
+                        formation.Place, function, program, out _, out _);
+                var hasLocalPlace = !hasIncomingPlace && !hasNormalBackingPlace
                     && TryGetReferencePlaceStorage(
                         formation.Place, function, program, out _, out _);
                 var placeWritable = hasLocalPlace
                     ? IsWritableReferencePlace(formation.Place, function, program)
-                    : incomingWritable;
+                    : hasNormalBackingPlace
+                        ? IsWritableReferencePlace(formation.Place, function, program)
+                        : incomingWritable;
                 if (formedReference.IsGarbageCollected || formedReference.IsInitialization
                     || formedReference.IsOptional
                     || formation.Place.Type != formedReference.ReferentType
-                    || (!hasLocalPlace && !hasIncomingPlace)
+                    || (!hasLocalPlace && !hasNormalBackingPlace && !hasIncomingPlace)
                     || (formedReference.IsWritable && !placeWritable))
                 {
                     throw InvalidEffect(formation.Span, "CheckedReference");
@@ -6986,12 +7417,22 @@ public static partial class SemanticVerifier
                 VerifyNativeFixedArrayElement(fixedArrayElement, initialized, fieldMasks, declarations,
                     function, program, ref remaining, depth + 1, failures);
                 break;
+            case BoundNativeFixedArrayPathElement pathElement:
+                VerifyNativeFixedArrayPathElement(pathElement, initialized,
+                    fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                break;
             case BoundNativeFixedArrayWrite fixedArrayWrite:
                 VerifyNativeFixedArrayWrite(fixedArrayWrite, initialized, fieldMasks, declarations,
                     function, program, ref remaining, depth + 1, failures);
                 break;
+            case BoundNativeFixedArrayPathWrite pathWrite:
+                VerifyNativeFixedArrayPathWrite(pathWrite, initialized,
+                    fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+                break;
             case BoundNull:
-                if (!ManagedClassTypes.IsOptional(expression.Type))
+                if (!IsSupportedOptionalType(expression.Type, program))
                 {
                     throw Invalid();
                 }
@@ -7001,8 +7442,8 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, failures, statementCompound, cleanupCounterStep);
                 break;
             case BoundOptionalLift lift:
-                if (!ManagedClassTypes.IsOptional(lift.Type)
-                    || lift.Value is null || lift.Value.Type != ManagedClassTypes.Required(lift.Type))
+                if (!TryGetOptionalPayloadType(lift.Type, program, out var liftedType)
+                    || lift.Value is null || lift.Value.Type != liftedType)
                 {
                     throw Invalid();
                 }
@@ -7011,16 +7452,16 @@ public static partial class SemanticVerifier
                 break;
             case BoundCoalesce coalesce:
                 if (coalesce.Optional is null || coalesce.Fallback is null
-                    || !ManagedClassTypes.IsOptional(coalesce.Optional.Type)
-                    || !ManagedClassTypes.IsManaged(coalesce.Type)
-                    || (coalesce.Type != ManagedClassTypes.Required(coalesce.Optional.Type)
-                        && !(ManagedClassTypes.IsWritable(ManagedClassTypes.Required(coalesce.Optional.Type))
-                            && coalesce.Type == ManagedClassTypes.Readonly(
-                                ManagedClassTypes.Required(coalesce.Optional.Type)))
-                        && !(ManagedClassTypes.IsOptional(coalesce.Type)
+                    || !TryGetOptionalPayloadType(
+                        coalesce.Optional.Type, program, out var coalescePayloadType)
+                    || (coalesce.Type != coalescePayloadType
+                        && !SourceOptionalTypes.IsReadonlyProjection(
+                            coalescePayloadType, coalesce.Type, program.CheckedReferenceTypes)
+                        && !(IsSupportedOptionalType(coalesce.Type, program)
                             && (coalesce.Type == coalesce.Optional.Type
-                                || (ManagedClassTypes.IsWritable(coalesce.Optional.Type)
-                                    && coalesce.Type == ManagedClassTypes.Readonly(coalesce.Optional.Type)))))
+                                || SourceOptionalTypes.IsReadonlyProjection(
+                                    coalesce.Optional.Type, coalesce.Type,
+                                    program.CheckedReferenceTypes))))
                     || coalesce.Fallback.Type != coalesce.Type)
                 {
                     throw Invalid();
@@ -7075,8 +7516,10 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundReadonlyProjection projection:
-                if (projection.Value is null || !ManagedClassTypes.IsWritable(projection.Value.Type)
-                    || projection.Type != ManagedClassTypes.Readonly(projection.Value.Type))
+                if (projection.Value is null
+                    || !SourceOptionalTypes.IsReadonlyProjection(
+                        projection.Value.Type, projection.Type,
+                        program.CheckedReferenceTypes))
                 {
                     throw Invalid();
                 }
@@ -7084,7 +7527,7 @@ public static partial class SemanticVerifier
                     ref remaining, depth + 1, failures);
                 break;
             case BoundIsNull test:
-                if (test.Value is null || !ManagedClassTypes.IsOptional(test.Value.Type))
+                if (test.Value is null || !IsSupportedOptionalType(test.Value.Type, program))
                 {
                     throw Invalid();
                 }
@@ -7102,10 +7545,11 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundIsSome pattern:
-                if (pattern.Value is null || !ManagedClassTypes.IsOptional(pattern.Value.Type)
+                if (pattern.Value is null
+                    || !TryGetOptionalPayloadType(pattern.Value.Type, program, out var somePayloadType)
                     || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || pattern.Variable < 0 || pattern.Variable >= initialized.Length
-                    || function.Variables[pattern.Variable].Type != ManagedClassTypes.Required(pattern.Value.Type)
+                    || function.Variables[pattern.Variable].Type != somePayloadType
                     || function.Variables[pattern.Variable].IsOut
                     || function.Variables[pattern.Variable].IsMutable
                     || declarations.Contains(pattern.Variable))
@@ -7114,27 +7558,35 @@ public static partial class SemanticVerifier
                 }
                 Expression(pattern.Value, initialized, fieldMasks, declarations, function, program,
                     ref remaining, depth + 1, failures);
+                SetOptionalReferencePatternFacts(pattern.Value, pattern.Variable,
+                    initialized, fieldMasks, function, program, ref remaining);
                 _ = declarations.Add(pattern.Variable);
                 break;
             case BoundIsVariablePattern pattern:
-                var optionalPattern = pattern.Value is not null
-                    && ManagedClassTypes.IsOptional(pattern.Value.Type);
-                var supportedValuePattern = pattern.Value?.Type is PrimitiveType.Bool
+                var patternValue = pattern.Value;
+                var optionalPattern = patternValue is not null
+                    && IsSupportedOptionalType(patternValue.Type, program);
+                var optionalPayloadType = default(PrimitiveType);
+                var hasOptionalPayload = patternValue is not null && optionalPattern
+                    && TryGetOptionalPayloadType(
+                        patternValue.Type, program, out optionalPayloadType);
+                var supportedValuePattern = patternValue?.Type is PrimitiveType.Bool
                     or PrimitiveType.Char16 or PrimitiveType.Int32 or PrimitiveType.UInt32
                     or PrimitiveType.Int64 or PrimitiveType.UInt64;
-                if (pattern.Value is null || (!optionalPattern && !supportedValuePattern)
-                    || (optionalPattern && !pattern.IncludeNull && pattern.Value is not BoundRead)
+                if (patternValue is null || (!optionalPattern && !supportedValuePattern)
+                    || (optionalPattern && !pattern.IncludeNull && patternValue is not BoundRead)
                     || pattern.Variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                     || pattern.Variable < 0 || pattern.Variable >= initialized.Length
+                    || (optionalPattern && !hasOptionalPayload)
                     || function.Variables[pattern.Variable].Type != (optionalPattern && !pattern.IncludeNull
-                        ? ManagedClassTypes.Required(pattern.Value.Type) : pattern.Value.Type)
+                        ? optionalPayloadType : patternValue.Type)
                     || function.Variables[pattern.Variable].IsOut
                     || function.Variables[pattern.Variable].IsInitializationLocal
                     || declarations.Contains(pattern.Variable))
                 {
                     throw Invalid(pattern.Span);
                 }
-                if (pattern.Value is BoundRead sourceRead)
+                if (patternValue is BoundRead sourceRead)
                 {
                     if (sourceRead.Variable < 0 || sourceRead.Variable >= initialized.Length
                         || (sourceRead.Variable >= function.ParameterCount
@@ -7146,9 +7598,11 @@ public static partial class SemanticVerifier
                 }
                 else
                 {
-                    Expression(pattern.Value, initialized, fieldMasks, declarations, function, program,
+                    Expression(patternValue, initialized, fieldMasks, declarations, function, program,
                         ref remaining, depth + 1, failures);
                 }
+                SetOptionalReferencePatternFacts(patternValue, pattern.Variable,
+                    initialized, fieldMasks, function, program, ref remaining);
                 _ = declarations.Add(pattern.Variable);
                 break;
             case BoundCast cast:
@@ -8776,6 +9230,9 @@ public static partial class SemanticVerifier
                                 initialized.SetPossibleFieldMask(output, fieldMasks[output]);
                             }
                         }
+                        SetNormalBackingFactoryObjectIdentity(
+                            call, output, function.Variables[output].Type,
+                            initialized, succeeds: true);
                     }
                 }
                 finally
@@ -8964,6 +9421,120 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static bool IsSupportedOptionalType(
+        PrimitiveType type,
+        BoundProgram program) =>
+        SourceOptionalTypes.IsSupported(type, program.CheckedReferenceTypes,
+            program.Structures, program.Classes, program.EnumDefinitions.Length,
+            program.NativeLoweringAgreement);
+
+    private static bool TryGetOptionalPayloadType(
+        PrimitiveType type,
+        BoundProgram program,
+        out PrimitiveType payloadType)
+    {
+        if (IsSupportedOptionalType(type, program))
+        {
+            return SourceOptionalTypes.TryGetRequired(
+                type, program.CheckedReferenceTypes, out payloadType);
+        }
+        payloadType = default;
+        return false;
+    }
+
+    private static void SetOptionalReferencePatternFacts(
+        BoundExpression value,
+        int variable,
+        InitializationState initialized,
+        uint[] fieldMasks,
+        BoundFunction function,
+        BoundProgram program,
+        ref int remaining)
+    {
+        if (!CheckedReferenceTypeContract.IsValidType(
+                value.Type, program.CheckedReferenceTypes)
+            || !program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(value.Type)].IsOptional)
+        {
+            return;
+        }
+        if (initialized.Dependencies is not BackingDependencies facts)
+        {
+            throw InvalidEffect(value.Span, "CheckedReference");
+        }
+
+        var targets = ReferenceTargetsOfExpression(value, facts, initialized,
+            function, program, ref remaining, 0, fieldMasks);
+        var obligations = ReferenceObligationsOfExpression(value, facts,
+            initialized, function, program, ref remaining, 0, fieldMasks);
+        var referenceValue = ReferenceFieldValueOfDescriptorExpression(value,
+            facts, initialized, function, program, ref remaining, 0, fieldMasks);
+        if (!referenceValue.IsAvailable)
+        {
+            throw InvalidEffect(value.Span, "CheckedReference");
+        }
+        facts.SetReferenceTargets(variable, targets);
+        facts.SetReferenceObligations(variable, obligations);
+        facts.SetReferenceBackingSources(variable, referenceValue.BackingSources);
+    }
+
+    private static void CopyOptionalReferencePatternFacts(
+        BoundExpression condition,
+        InitializationState source,
+        InitializationState destination,
+        BoundProgram program)
+    {
+        if (source.Dependencies is not BackingDependencies sourceFacts
+            || destination.Dependencies is not BackingDependencies destinationFacts)
+        {
+            return;
+        }
+
+        var pending = new Stack<BoundExpression>();
+        pending.Push(condition);
+        var remaining = MaximumAnalysisVisits;
+        while (pending.TryPop(out var expression))
+        {
+            if (--remaining < 0 || !expression.HasValidNestedExpressions)
+            {
+                throw InvalidEffect(condition.Span, "CheckedReference");
+            }
+
+            var value = expression switch {
+                BoundIsSome pattern => pattern.Value,
+                BoundIsVariablePattern pattern => pattern.Value,
+                _ => null,
+            };
+            var variable = expression switch {
+                BoundIsSome pattern => pattern.Variable,
+                BoundIsVariablePattern pattern => pattern.Variable,
+                _ => -1,
+            };
+            if (value is not null && (uint)variable < (uint)destination.Length
+                && destination[variable]
+                && CheckedReferenceTypeContract.IsValidType(
+                    value.Type, program.CheckedReferenceTypes)
+                && program.CheckedReferenceTypes[
+                    CheckedReferenceTypes.Index(value.Type)].IsOptional)
+            {
+                destinationFacts.SetReferenceTargets(
+                    variable, sourceFacts.ReferenceTargets[variable]
+                        ?? EmptyBackingSources);
+                destinationFacts.SetReferenceObligations(
+                    variable, sourceFacts.ReferenceObligations[variable]
+                        ?? EmptyBackingSources);
+                destinationFacts.SetReferenceBackingSources(
+                    variable, sourceFacts.ReferenceBackingSources[variable]
+                        ?? EmptyBackingSources);
+            }
+
+            foreach (var nested in expression.NestedExpressions)
+            {
+                pending.Push(nested);
+            }
+        }
+    }
+
     private static bool ValidType(PrimitiveType type, bool allowVoid, BoundProgram program) =>
         type is PrimitiveType.Char8 or PrimitiveType.Char16 or PrimitiveType.Char32 or PrimitiveType.Rune
             or PrimitiveType.Int8 or PrimitiveType.Int16 or PrimitiveType.Int32 or PrimitiveType.UInt8
@@ -9015,6 +9586,49 @@ public static partial class SemanticVerifier
             || BoundGenericNominalTypeContract.IsCoreTaskType(type, program)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
                 && program.Structures[(int)type - 100].IsUnique);
+
+    private static bool IsManagedLifetimeValue(BoundProgram program, PrimitiveType type)
+    {
+        if (ManagedClassTypes.IsManaged(type))
+        {
+            return true;
+        }
+        if (program.NativeLoweringAgreement
+                != CompilationOptions.WindowsX64NormalBackingAgreement)
+        {
+            return false;
+        }
+        return ContainsNormalBackingReference(program, type, []);
+    }
+
+    private static bool ContainsNormalBackingReference(
+        BoundProgram program, PrimitiveType type, HashSet<int> activeStructures)
+    {
+        if (CheckedReferenceTypes.IsType(type))
+        {
+            if (!CheckedReferenceTypeContract.IsValidType(
+                type, program.CheckedReferenceTypes))
+            {
+                return false;
+            }
+            var reference = program.CheckedReferenceTypes[
+                CheckedReferenceTypes.Index(type)];
+            return !reference.IsGarbageCollected && !reference.IsInitialization
+                && !reference.IsOptional;
+        }
+
+        var structureIndex = (int)type - 100;
+        if (structureIndex < 0 || structureIndex >= program.Structures.Length
+            || ManagedClassTypes.IsClass(type) || BoundEnumTypes.IsType(type)
+            || !activeStructures.Add(structureIndex))
+        {
+            return false;
+        }
+        var contains = program.Structures[structureIndex].Fields.Any(field =>
+            ContainsNormalBackingReference(program, field.Type, activeStructures));
+        _ = activeStructures.Remove(structureIndex);
+        return contains;
+    }
 
     private static bool IsCopyStruct(BoundProgram program, PrimitiveType type) =>
         (int)type >= 100 && (int)type - 100 < program.Structures.Length
@@ -9240,6 +9854,39 @@ public static partial class SemanticVerifier
         }
     }
 
+    private static void SetNormalBackingFactoryObjectIdentity(
+        BoundCall call, int variable, PrimitiveType type,
+        InitializationState state, bool succeeds)
+    {
+        var program = state.Program;
+        if (program.NativeLoweringAgreement
+                != CompilationOptions.WindowsX64NormalBackingAgreement
+            || (uint)call.Function >= (uint)program.Functions.Length
+            || program.Functions[call.Function].Intrinsic
+                != BoundIntrinsic.ClassTryCreate
+            || !IsNormalBackingObjectType(type)
+            || state.Dependencies is not BackingDependencies dependencies)
+        {
+            return;
+        }
+        if (!succeeds)
+        {
+            dependencies.SetNormalBackingObjects(variable,
+                new HashSet<ProvenanceAnchor>(), mayBeUnknown: false);
+            return;
+        }
+        var allocationSite = checked(call.Span.Start + 1);
+        var objectIdentity = ProvenanceAnchor.ForNormalBackingObject(
+            dependencies.FunctionActivation, allocationSite,
+            new StorageInstance(state.ScopeActivation, allocationSite), type);
+        dependencies.SetNormalBackingObjects(variable,
+            new HashSet<ProvenanceAnchor> { objectIdentity },
+            mayBeUnknown: false);
+        dependencies.ApplyNormalBackingClassConstructorSummary(
+            program.Functions[call.Function].ClassConstructor,
+            objectIdentity, program);
+    }
+
     private static InitializationState Outcome(BoundExpression expression, InitializationState initialized, bool result, ref int remaining)
     {
         var hasOutcomeEffects = HasOutcomeEffects(expression, initialized.FlowFacts, ref remaining);
@@ -9420,6 +10067,8 @@ public static partial class SemanticVerifier
                 {
                     state.InvalidateNativeOutputVariable(output.Variable);
                     state[output.Variable] = call.Type != PrimitiveType.Bool || result;
+                    SetNormalBackingFactoryObjectIdentity(call, output.Variable,
+                        output.Type, state, succeeds: call.Type != PrimitiveType.Bool || result);
                 }
                 else
                 {
@@ -9569,8 +10218,27 @@ public static partial class SemanticVerifier
             case BoundNativeFixedArrayElement fixedArrayElement:
                 VacateNestedOutputs(fixedArrayElement.Index, state, ref remaining);
                 break;
+            case BoundNativeFixedArrayPathElement pathElement:
+                foreach (var projection in pathElement.Projections)
+                {
+                    VacateNestedOutputs(projection.Index, state,
+                        ref remaining);
+                }
+                break;
             case BoundNativeFixedArrayPointerAddress pointerAddress:
-                VacateNestedOutputs(pointerAddress.Index, state, ref remaining);
+                if (pointerAddress.Projections.IsDefaultOrEmpty)
+                {
+                    VacateNestedOutputs(pointerAddress.Index, state,
+                        ref remaining);
+                }
+                else
+                {
+                    foreach (var projection in pointerAddress.Projections)
+                    {
+                        VacateNestedOutputs(projection.Index, state,
+                            ref remaining);
+                    }
+                }
                 break;
             case BoundNativeStorageAddress address:
                 VacateNestedOutputs(address.Index, state, ref remaining);
@@ -9600,6 +10268,14 @@ public static partial class SemanticVerifier
             case BoundNativeFixedArrayWrite write:
                 VacateNestedOutputs(write.Index, state, ref remaining);
                 VacateNestedOutputs(write.Value, state, ref remaining);
+                break;
+            case BoundNativeFixedArrayPathWrite pathWrite:
+                foreach (var projection in pathWrite.Projections)
+                {
+                    VacateNestedOutputs(projection.Index, state,
+                        ref remaining);
+                }
+                VacateNestedOutputs(pathWrite.Value, state, ref remaining);
                 break;
             case BoundIsInitialized:
                 break;
@@ -9710,11 +10386,23 @@ public static partial class SemanticVerifier
                 FlowFacts(fixedArray.Elements, flowFacts, ref remaining),
             BoundNativeFixedArrayElement fixedArrayElement =>
                 FlowFacts(fixedArrayElement.Index, flowFacts, ref remaining),
+            BoundNativeFixedArrayPathElement pathElement =>
+                FlowFacts([.. pathElement.Projections.Select(
+                    static projection => projection.Index)],
+                    flowFacts, ref remaining),
             BoundNativeFixedArrayPointerAddress pointerAddress =>
-                FlowFacts(pointerAddress.Index, flowFacts, ref remaining),
+                pointerAddress.Projections.IsDefaultOrEmpty
+                    ? FlowFacts(pointerAddress.Index, flowFacts, ref remaining)
+                    : FlowFacts([.. pointerAddress.Projections.Select(
+                        static projection => projection.Index)],
+                        flowFacts, ref remaining),
             BoundNativeFixedArrayWrite fixedArrayWrite => AddFlowFact(
                 FlowFacts(fixedArrayWrite.Index, flowFacts, ref remaining),
                 fixedArrayWrite.Value, flowFacts, ref remaining),
+            BoundNativeFixedArrayPathWrite pathWrite =>
+                FlowFacts([.. pathWrite.Projections.Select(
+                    static projection => projection.Index), pathWrite.Value],
+                    flowFacts, ref remaining),
             BoundNativeStorageAddress address => FlowFacts(address.Index, flowFacts, ref remaining),
             BoundReferenceFormation formation => FlowFacts(formation.Place, flowFacts, ref remaining),
             BoundReferenceReborrow reborrow =>
@@ -10438,7 +11126,8 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static ArgumentException Invalid() => new("Invalid bound program.", "program");
+    private static ArgumentException Invalid() =>
+        new("Invalid bound program.", "program");
     private static ArgumentException Invalid(TextSpan span)
     {
         var exception = Invalid();

@@ -404,7 +404,7 @@ public sealed class NativePointerModuleTests
             }
 
             int32 Main() {
-                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                [uint32; {{backingCount}}] values = [{{values}}];
                 unsafe {
                     mut PointerHolder holder = new PointerHolder(null);
                     holder.Value = &values[0];
@@ -474,7 +474,7 @@ public sealed class NativePointerModuleTests
             }
 
             unsafe int32 Forward(ptr<uint32> opaque, bool chooseOpaque) {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
                     mut PointerHolder holder = new PointerHolder(null);
                     if (chooseOpaque) {
@@ -516,7 +516,7 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 3> values = [42, 42, 42];
+                [uint32; 3] values = [42, 42, 42];
                 mut ptr<uint32> pointer = null;
                 unsafe {
                     write ptr<ptr<uint32>> cell = &pointer;
@@ -553,9 +553,9 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 3> values = [42, 42, 42];
+                [uint32; 3] values = [42, 42, 42];
                 unsafe {
-                    InlineArray<ptr<uint32>, 2> pointers = [
+                    [ptr<uint32>; 2] pointers = [
                         &values[0], &values[2]];
                     return Observe(pointers[{{index}}]);
                 }
@@ -585,9 +585,9 @@ public sealed class NativePointerModuleTests
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const string source = """
             int32 Main() {
-                InlineArray<uint32, 3> values = [4, 5, 6];
+                [uint32; 3] values = [4, 5, 6];
                 unsafe {
-                    InlineArray<ptr<uint32>, 2> pointers = [
+                    [ptr<uint32>; 2] pointers = [
                         &values[0], &values[1]];
                     return int32(*pointers[1]);
                 }
@@ -620,9 +620,9 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 3> values = [42, 42, 42];
+                [uint32; 3] values = [42, 42, 42];
                 unsafe {
-                    InlineArray<PointerHolder, 2> holders = [
+                    [PointerHolder; 2] holders = [
                         new PointerHolder(&values[0]),
                         new PointerHolder(&values[2])];
                     return Observe(holders[{{index}}].Value);
@@ -657,10 +657,10 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Check(int32 index) {
-                InlineArray<uint32, 2> shorter = [1, 2];
-                InlineArray<uint32, 3> longer = [1, 2, 3];
+                [uint32; 2] shorter = [1, 2];
+                [uint32; 3] longer = [1, 2, 3];
                 unsafe {
-                    InlineArray<ptr<uint32>, 2> pointers = [
+                    [ptr<uint32>; 2] pointers = [
                         &shorter[0], &longer[0]];
                     return Observe(pointers[index]);
                 }
@@ -696,10 +696,10 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Check(bool useShorter) {
-                InlineArray<uint32, 2> shorter = [1, 2];
-                InlineArray<uint32, 3> longer = [1, 2, 3];
+                [uint32; 2] shorter = [1, 2];
+                [uint32; 3] longer = [1, 2, 3];
                 unsafe {
-                    mut InlineArray<ptr<uint32>, 1> pointers = [&longer[0]];
+                    mut [ptr<uint32>; 1] pointers = [&longer[0]];
                     if (useShorter) {
                         pointers[0] = &shorter[0];
                     }
@@ -737,10 +737,10 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Check(int32 index) {
-                InlineArray<uint32, 2> shorter = [1, 2];
-                InlineArray<uint32, 3> longer = [1, 2, 3];
+                [uint32; 2] shorter = [1, 2];
+                [uint32; 3] longer = [1, 2, 3];
                 unsafe {
-                    mut InlineArray<ptr<uint32>, 2> pointers = [
+                    mut [ptr<uint32>; 2] pointers = [
                         &longer[0], &longer[0]];
                     pointers[index] = &shorter[0];
                     return Observe(pointers[0]);
@@ -777,11 +777,11 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
-                    InlineArray<ptr<uint32>, 2> pointers = [
+                    [ptr<uint32>; 2] pointers = [
                         &values[0], &values[1]];
-                    InlineArray<ptr<ptr<uint32>>, 2> cells = [
+                    [ptr<ptr<uint32>>; 2] cells = [
                         &pointers[0], &pointers[1]];
                     ptr<uint32> value = *cells[{{index}}];
                     return Observe(value);
@@ -816,9 +816,9 @@ public sealed class NativePointerModuleTests
             extern int32 ObserveCells(ptr<ptr<uint32>> cells);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
-                    InlineArray<ptr<uint32>, 2> pointers = [
+                    [ptr<uint32>; 2] pointers = [
                         &values[0], &values[1]];
                     return ObserveCells(&pointers[0]);
                 }
@@ -856,9 +856,9 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
-                    mut InlineArray<ptr<uint32>, 2> pointers = [
+                    mut [ptr<uint32>; 2] pointers = [
                         &values[0], &values[1]];
                     write ptr<ptr<uint32>> cell = &pointers[1];
                     int32 status = Overwrite(cell);
@@ -899,7 +899,7 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
                     mut ptr<uint32> pointer = &values[0];
                     int32 status = Overwrite(&pointer);
@@ -938,9 +938,9 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
-                    mut InlineArray<ptr<uint32>, 2> pointers = [
+                    mut [ptr<uint32>; 2] pointers = [
                         &values[0], &values[1]];
                     int32 status = Overwrite(&pointers[0]);
                     {{reassignment}}
@@ -983,7 +983,7 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 unsafe {
                     mut ptr<uint32> pointer = &values[0];
                     mut int32 status = 0;
@@ -1023,7 +1023,7 @@ public sealed class NativePointerModuleTests
             extern int32 Observe(ptr<uint32> value, int32 status);
 
             int32 Main() {
-                InlineArray<uint32, 2> values = [42, 42];
+                [uint32; 2] values = [42, 42];
                 mut ptr<uint32> pointer = null;
                 unsafe {
                     pointer = &values[0];
@@ -1062,7 +1062,7 @@ public sealed class NativePointerModuleTests
             unsafe PointerPair Identity(PointerPair value) { return value; }
 
             unsafe int32 Forward(ptr<uint32> opaque) {
-                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                [uint32; {{backingCount}}] values = [{{values}}];
                 unsafe {
                     PointerPair pair = new PointerPair(&values[0], opaque);
                     PointerPair copy = Identity(pair);
@@ -1105,7 +1105,7 @@ public sealed class NativePointerModuleTests
             }
 
             unsafe int32 Forward() {
-                InlineArray<uint32, {{backingCount}}> values = [{{values}}];
+                [uint32; {{backingCount}}] values = [{{values}}];
                 unsafe {
                     PointerHolder holder = new PointerHolder(&values[0]);
                     return Observe(holder.ReadValue());
@@ -2215,14 +2215,14 @@ public sealed class NativePointerModuleTests
     }
 
     [Test]
-    public void PrivateModulesRejectNativeFixedArrayPointerAddresses()
+    public void PrivateModulesPersistNativeFixedArrayPointerAddresses()
     {
         var compilation = Compilation.Create([SyntaxTree.Parse("""
-            int32 Export() {
-                InlineArray<uint32, 2> values = [4, 5];
+            public int32 Export() {
+                [uint32; 2] values = [4, 5];
                 unsafe {
                     ptr<uint32> first = &values[0];
-                    return 0;
+                    return int32(*first);
                 }
             }
             int32 Main() { return 0; }
@@ -2230,10 +2230,19 @@ public sealed class NativePointerModuleTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
 
-        var exception = Assert.Throws<NotSupportedException>(() =>
-            ModuleCompiler.CreateProducer(compilation.Program!, ["Export"]));
-        Assert.That(exception!.Message,
-            Does.Contain("Source native imports are not supported by semantic modules."));
+        var producer = ModuleCompiler.CreateProducer(
+            compilation.Program!, ["Export"]);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Export(); }"),
+            ModuleCompiler.CreateReference(producer),
+            BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        Assert.That(NativeJit.Execute(linked,
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(4));
     }
 
     [Test]
@@ -2277,7 +2286,7 @@ public sealed class NativePointerModuleTests
         using var stream = new MemoryStream(module, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(92));
+        Assert.That(reader.ReadInt32(), Is.EqualTo(100));
         SkipString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();
