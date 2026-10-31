@@ -110,6 +110,45 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void A3RegisterBodyRecordAccessChargesItsRangeAndOffsetFields()
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+        var entryState = new byte[8];
+        entryState[0] = 0x01;
+        byte[] code = [0x17, 0];
+        var bodyBytes = TrRmRegisterBodyWriter.Encode(default, default,
+            default, default, default,
+            [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
+            [entryState], code, schema: schema);
+        var ledger = new TrRmA3LayoutResourceLedger();
+        var body = new TrRmRegisterBodyReader(bodyBytes, schema: schema,
+            resourceLedger: ledger);
+
+        ledger.ConsumeWork(ledger.WorkRemaining - 12);
+        Assert.That(ledger.WorkRemaining, Is.EqualTo(12));
+        _ = body.GetRecord(0);
+        Assert.That(ledger.WorkRemaining, Is.Zero);
+
+        TrRmResourceLimitException? exception = null;
+        try
+        {
+            _ = body.GetRecord(0);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            exception = caught;
+        }
+
+        Assert.That(exception, Is.Not.Null);
+        Assert.That(exception!.Dimension, Is.EqualTo("work"));
+        Assert.That(ledger.WorkRemaining, Is.Zero);
+        Assert.That(exception.Required,
+            Is.GreaterThan(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit)));
+    }
+
+    [Test]
     public void DerivesA2PointerCellLayoutForNominalPointee()
     {
         var artifact = CreateAggregateArrayArtifact(declaredCopy: true,

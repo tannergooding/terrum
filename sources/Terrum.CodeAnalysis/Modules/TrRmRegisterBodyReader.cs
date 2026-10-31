@@ -195,7 +195,7 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     internal ReadOnlySpan<byte> GetRecord(int recordIndex)
     {
-        _resourceLedger?.ConsumeWork();
+        _resourceLedger?.ConsumeWork(2);
         if ((uint)recordIndex >= (uint)_recordCount)
         {
             throw InvalidBody();

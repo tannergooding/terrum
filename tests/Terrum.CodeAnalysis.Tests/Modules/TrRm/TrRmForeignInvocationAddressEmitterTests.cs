@@ -169,7 +169,17 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             }
         }
         Assert.That(caller, Is.GreaterThan(0));
+        var a3Ledger = tables.A3LayoutResourceLedger;
+        var workRemainingBeforeBodyValidation = usesGenericSchema
+            ? a3Ledger?.WorkRemaining
+            : null;
         tables.ValidateRegisterBodyMapsForMethod(caller);
+        if (usesGenericSchema)
+        {
+            Assert.That(a3Ledger, Is.Not.Null);
+            Assert.That(a3Ledger!.WorkRemaining,
+                Is.LessThan(workRemainingBeforeBodyValidation!.Value));
+        }
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(caller), tables.Contracts.Count);
         var hasStorageAddressRecord = false;
