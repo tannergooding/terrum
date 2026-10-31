@@ -294,6 +294,53 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2SourceTypeExportsRequireNominalClosureMappings()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-type-export-closure";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Element {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Container {
+                public [Element; 2] Values;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+                schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Container", "container")]));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1,
+        [
+            new TrRmSourceTypeExport("", "Container", "container"),
+            new TrRmSourceTypeExport("", "Element", "element"),
+        ]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "container",
+            out var containerDefinition), Is.True);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, "element",
+            out var elementDefinition), Is.True);
+        Assert.That(containerDefinition, Is.EqualTo(0x1300_0002u));
+        Assert.That(elementDefinition, Is.EqualTo(0x1300_0001u));
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(loaded.Structures, Has.Length.EqualTo(2));
+        Assert.That(NativeFixedArrayContract.MatchesProgram(loaded), Is.True);
+    }
+
+    [Test]
     public void StandardA2SourceTypeExportsRejectHandBuiltAndDuplicateMappings()
     {
         const string schemaIdentity

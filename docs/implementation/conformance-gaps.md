@@ -477,10 +477,11 @@ The [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-ty
 remains unapproved. Its local A2 `EmitStandard` export-map slice is
 implemented provisionally: source-bound public ordinary Copy declarations
 require explicit namespace/name selection and an exact caller-supplied key;
-there is no name-derived default or alias. The full
-`TrRmForeignInvocationAddressEmitterTests` class passed 38/38 with zero skips,
-covering explicit keys, empty-map behavior, provider-side Export rows, local
-LoadStandard and invalid/unbound/duplicate selections. Source `CreateStandardReference`
+exported roots also require explicit keys for every local nominal child in
+their field/array closure. There is no name-derived default or alias. The full
+`TrRmForeignInvocationAddressEmitterTests` class passed 39/39 with zero skips,
+covering explicit keys, closure, empty-map behavior, provider-side Export rows,
+local LoadStandard and invalid/unbound/duplicate selections. Source `CreateStandardReference`
 type-key projection, imported origins/original expectations and replacement
 remapping remain open.
 Compatible provider replacement,

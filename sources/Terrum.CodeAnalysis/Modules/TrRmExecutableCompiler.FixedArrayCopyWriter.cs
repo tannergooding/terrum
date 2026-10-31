@@ -63,7 +63,9 @@ public static partial class TrRmExecutableCompiler
             foreach (var field in structure.Fields)
             {
                 var structureIndex = (int)field.Type - 100;
-                var isStructure = structureIndex >= 0
+                var isStructure = !ManagedClassTypes.IsClass(field.Type)
+                    && !BoundEnumTypes.IsType(field.Type)
+                    && structureIndex >= 0
                     && structureIndex < typeDefCount;
                 var isArray = NativeFixedArrayTypes.IsType(field.Type);
                 var isValidArray = isArray
@@ -462,6 +464,67 @@ public static partial class TrRmExecutableCompiler
                 getStringRow(export.ExportKey)));
         }
 
+        var pendingStructures = new Stack<int>(selectedStructures);
+        var checkedStructures = new HashSet<int>();
+        while (pendingStructures.TryPop(out var structureIndex))
+        {
+            if (!checkedStructures.Add(structureIndex))
+            {
+                continue;
+            }
+
+            foreach (var field in program.Structures[structureIndex].Fields)
+            {
+                AddNominalDependencies(field.Type);
+            }
+        }
+
         return rows;
+
+        void AddNominalDependencies(PrimitiveType type)
+        {
+            if (NativeFixedArrayTypes.IsType(type))
+            {
+                var arrayIndex = NativeFixedArrayTypes.Index(type);
+                if ((uint)arrayIndex
+                    >= (uint)program.NativeFixedArrayTypes.Length)
+                {
+                    throw Unsupported(
+                        "A source TypeDef export has an invalid fixed-array closure.");
+                }
+
+                AddNominalDependencies(
+                    program.NativeFixedArrayTypes[arrayIndex].ElementType);
+                return;
+            }
+
+            var structureIndex = (int)type - 100;
+            if (ManagedClassTypes.IsClass(type)
+                || BoundEnumTypes.IsType(type)
+                || structureIndex < 0
+                || structureIndex >= program.Structures.Length)
+            {
+                return;
+            }
+
+            if (!selectedStructures.Contains(structureIndex))
+            {
+                throw Unsupported(
+                    "Every local nominal type in an exported A2 storage closure requires an explicit ExportKey.");
+            }
+
+            var structure = program.Structures[structureIndex];
+            if (structure.IsPrivate || structure.IsInternal
+                || structure.IsUnique || structure.CleanupMethod is not null)
+            {
+                throw Unsupported(
+                    "An exported A2 storage closure contains an ineligible nominal type.");
+            }
+
+            if (!checkedStructures.Contains(structureIndex))
+            {
+                pendingStructures.Push(structureIndex);
+            }
+        }
     }
 }
