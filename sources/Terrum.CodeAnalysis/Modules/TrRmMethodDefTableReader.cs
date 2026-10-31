@@ -17,6 +17,7 @@ public readonly ref struct TrRmMethodDefTableReader
     private readonly int _recordCount;
     private readonly int _contractCount;
     private readonly int[] _bodyOwners;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of Contract rows.</summary>
     public int ContractCount => _contractCount;
@@ -26,7 +27,18 @@ public readonly ref struct TrRmMethodDefTableReader
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
         int contractCount, int bodyCount)
+        : this(section, recordCount, strings, modules, types, signatures,
+            contractCount, bodyCount, null)
     {
+    }
+
+    internal TrRmMethodDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmModuleTableReader modules, TrRmTypeDefTableReader types,
+        TrRmMethodSigTableReader signatures, int contractCount, int bodyCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(7);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != modules.MethodDefCount
             || contractCount is < 0 or > 0xFF_FFFF || bodyCount is < 0 or > 0xFF_FFFF
@@ -41,6 +53,9 @@ public readonly ref struct TrRmMethodDefTableReader
         _modules = modules;
         _recordCount = recordCount;
         _contractCount = contractCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)bodyCount + 1UL
+            + (ulong)signatures.Count + 1UL));
         _bodyOwners = new int[bodyCount + 1];
         var usedGenericSignatures = new bool[signatures.Count + 1];
         var module = 1;
@@ -50,8 +65,10 @@ public readonly ref struct TrRmMethodDefTableReader
         var hasModuleRange = false;
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             while (!hasModuleRange || row >= moduleRange.End)
             {
+                _resourceLedger?.ConsumeWork();
                 if (hasModuleRange)
                 {
                     module++;
@@ -65,6 +82,7 @@ public readonly ref struct TrRmMethodDefTableReader
                 hasModuleRange = true;
             }
 
+            _resourceLedger?.ConsumeWork();
             if (row < moduleRange.Start)
             {
                 throw InvalidMethod();
@@ -78,6 +96,7 @@ public readonly ref struct TrRmMethodDefTableReader
             var first = Read(data, 16);
             var count = Read(data, 20);
             var body = Read(data, 24);
+            _resourceLedger?.ConsumeWork(8);
             if (owner > types.Count
                 || (owner != 0 && (owner < (uint)moduleTypeRange.Start
                     || owner >= (uint)moduleTypeRange.End))
@@ -96,16 +115,19 @@ public readonly ref struct TrRmMethodDefTableReader
 
             if (signatures.GetGenericCount((int)signature) != 0)
             {
+                _resourceLedger?.ConsumeWork();
                 if (usedGenericSignatures[signature])
                 {
                     throw InvalidMethod();
                 }
 
+                _resourceLedger?.ConsumeWork();
                 usedGenericSignatures[signature] = true;
             }
 
             if (body != 0)
             {
+                _resourceLedger?.ConsumeWork(2);
                 _bodyOwners[body] = row;
             }
 
@@ -114,6 +136,7 @@ public readonly ref struct TrRmMethodDefTableReader
 
         for (var body = 1; body <= bodyCount; body++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_bodyOwners[body] == 0)
             {
                 throw InvalidMethod();
@@ -124,6 +147,7 @@ public readonly ref struct TrRmMethodDefTableReader
     /// <summary>Gets the decoded name for a MethodDef row.</summary>
     public string GetName(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidMethod();
@@ -157,6 +181,7 @@ public readonly ref struct TrRmMethodDefTableReader
     /// <summary>Gets the MethodDef row owning a body row.</summary>
     public int GetBodyOwnerMethod(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row >= _bodyOwners.Length)
         {
             throw InvalidMethod();
@@ -180,6 +205,7 @@ public readonly ref struct TrRmMethodDefTableReader
         var high = _modules.Count;
         while (low <= high)
         {
+            _resourceLedger?.ConsumeWork();
             var middle = low + ((high - low) / 2);
             var (start, end) = _modules.GetMethodDefRange(middle);
             if (row < start)
@@ -204,6 +230,7 @@ public readonly ref struct TrRmMethodDefTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidMethod();
@@ -212,8 +239,12 @@ public readonly ref struct TrRmMethodDefTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static bool ValidRange(uint first, uint count, int tableCount)
         => count == 0 ? first == 0

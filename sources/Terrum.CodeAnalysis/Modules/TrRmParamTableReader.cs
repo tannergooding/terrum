@@ -12,6 +12,7 @@ public readonly ref struct TrRmParamTableReader
 {
     private const int RowSize = 16;
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Validates Param rows using the Standard schema.</summary>
     /// <param name="section">The fixed-width Param row section.</param>
@@ -20,14 +21,17 @@ public readonly ref struct TrRmParamTableReader
     /// <param name="types">The validated TypeSpec table.</param>
     public TrRmParamTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader types)
-        : this(section, recordCount, signatures, types, TrRmArtifactSchema.Standard)
+        : this(section, recordCount, signatures, types,
+            TrRmArtifactSchema.Standard, null)
     {
     }
 
     internal TrRmParamTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader types,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork(5);
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || recordCount != signatures.ParamCount
             || (long)recordCount * RowSize != section.Length
@@ -35,21 +39,31 @@ public readonly ref struct TrRmParamTableReader
                 or TrRmArtifactSchema.Development
                 or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
                 or TrRmArtifactSchema.CopyOriginDraft
-                or TrRmArtifactSchema.ForeignInvocationDraft))
+                or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                or TrRmArtifactSchema.ScalarFrozenValuesDraft
+                or TrRmArtifactSchema.NominalEnumsDraft
+                or TrRmArtifactSchema.RootPinRuntimeDraft
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
         {
             throw InvalidParam();
         }
 
         _rows = section;
+        _resourceLedger = resourceLedger;
         var previousOwner = 0;
         var ordinal = 0;
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = section.Slice((row - 1) * RowSize, RowSize);
             var owner = Read(data, 0);
             var expectedOwner = signatures.GetParamOwner(row);
             ordinal = expectedOwner == previousOwner ? ordinal + 1 : 0;
             var type = Read(data, 8);
+            _resourceLedger?.ConsumeWork(7);
             if (owner != expectedOwner || Read(data, 4) != ordinal
                 || !ValidModeAndFlags(data, type, types, schema))
             {
@@ -65,6 +79,7 @@ public readonly ref struct TrRmParamTableReader
     /// <param name="row">The one-based Param row.</param>
     public byte GetMode(int row)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (row <= 0 || (long)row * RowSize > _rows.Length)
         {
             throw InvalidParam();
@@ -75,6 +90,7 @@ public readonly ref struct TrRmParamTableReader
 
     internal byte GetFlags(int row)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (row <= 0 || (long)row * RowSize > _rows.Length)
         {
             throw InvalidParam();
@@ -87,6 +103,7 @@ public readonly ref struct TrRmParamTableReader
     /// <param name="row">The one-based Param row.</param>
     public uint GetTypeSpec(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || (long)row * RowSize > _rows.Length)
         {
             throw InvalidParam();
@@ -95,8 +112,12 @@ public readonly ref struct TrRmParamTableReader
         return Read(_rows.Slice((row - 1) * RowSize, RowSize), 8);
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static bool ValidModeAndFlags(ReadOnlySpan<byte> data, uint typeSpecRef,
         TrRmTypeSpecTableReader types, TrRmArtifactSchema schema)

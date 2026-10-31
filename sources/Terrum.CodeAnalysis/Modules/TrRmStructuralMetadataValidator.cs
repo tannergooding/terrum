@@ -1346,12 +1346,14 @@ public static class TrRmStructuralMetadataValidator
             : default;
         var signatures = methodSigCount == 0 ? default
             : new TrRmMethodSigTableReader(methodSigBytes, methodSigCount,
-                typeSpecs, paramCount, genericParamCount);
+                typeSpecs, paramCount, genericParamCount,
+                selectedA3LayoutResourceLedger);
         var parameters = paramCount == 0 ? default
             : new TrRmParamTableReader(paramBytes, paramCount, signatures,
-                typeSpecs, index.Schema);
+                typeSpecs, index.Schema, selectedA3LayoutResourceLedger);
         var methods = new TrRmMethodDefTableReader(methodDefBytes, methodDefCount,
-            strings, modules, types, signatures, contractCount, bodyCount);
+            strings, modules, types, signatures, contractCount, bodyCount,
+            selectedA3LayoutResourceLedger);
         var eagerGroups = index.Schema.UsesGeneralPredicateGraphs()
             ? new TrRmEagerGroupTableReader(eagerGroupBytes, eagerGroupCount,
                 typeDefCount, eagerInitializerCount, methodDefCount, index.Schema)
@@ -1627,20 +1629,23 @@ public static class TrRmStructuralMetadataValidator
         var contracts = developmentProfile
             ? new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs,
-                index.Schema)
+                index.Schema, selectedA3LayoutResourceLedger)
             : new TrRmContractTableReader(contractBytes, contractCount,
                 types, methods, signatures, parameters, typeSpecs, fieldPathCount,
                 features, modules, index.Schema, predicateGraphs.Count,
                 eagerGroups, staticFields, staticFieldContracts,
-                eagerInitializers, lazyUnits);
+                eagerInitializers, lazyUnits,
+                selectedA3LayoutResourceLedger);
         if (index.Schema.SupportsDeclaredCopyEvidence())
         {
             for (var typeDef = 1; typeDef <= types.Count; typeDef++)
             {
+                selectedA3LayoutResourceLedger?.ConsumeWork();
                 var hasCleanup = false;
                 var (first, count) = types.GetContractRange(typeDef);
                 for (var offset = 0; offset < count; offset++)
                 {
+                    selectedA3LayoutResourceLedger?.ConsumeWork(2);
                     if (BinaryPrimitives.ReadUInt16LittleEndian(
                             contracts.GetRow(first + offset)[4..]) == 5)
                     {
