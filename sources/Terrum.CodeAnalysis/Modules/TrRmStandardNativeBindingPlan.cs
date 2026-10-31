@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
-using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -122,38 +121,62 @@ internal sealed class TrRmStandardNativeBindingPlan
     internal (BoundProgram Program, ImmutableArray<NativeImportBinding> Bindings)
         CreateLoweringInputs(TrRmStandardNativeOperation operation)
     {
+        _a3LayoutResourceLedger?.ConsumeWork(2);
         if (_schemaIdentities.IsDefaultOrEmpty
             || _schemaIdentities.Length != _artifacts.Length)
         {
             throw new InvalidDataException(
                 "The Standard native binding plan has incomplete schema selections.");
         }
+        _a3LayoutResourceLedger?.ConsumeWork(5);
         if (operation != Operation || RuntimePolicy != NativeRuntimePolicy.FailFast
             || RootProgram.RuntimePolicy != BoundRuntimePolicy.FailFast
-            || _modules.IsDefaultOrEmpty
-            || !_modules.Any(module => module.ArtifactIndex == 0
-                && module.ModuleRow == RootModuleRow
-                && StringComparer.Ordinal.Equals(module.Identity,
-                    ModuleIdentity)))
+            || _modules.IsDefaultOrEmpty)
         {
             throw new InvalidDataException(
                 "The Standard native binding plan has invalid operation or Module context.");
         }
 
+        var hasRootModuleContext = false;
+        foreach (var module in _modules)
+        {
+            _a3LayoutResourceLedger?.ConsumeWork();
+            if (module.ArtifactIndex == 0
+                && module.ModuleRow == RootModuleRow)
+            {
+                _a3LayoutResourceLedger?.ConsumeWork(
+                    GetStringComparisonWork(module.Identity, ModuleIdentity));
+                if (StringComparer.Ordinal.Equals(module.Identity,
+                        ModuleIdentity))
+                {
+                    hasRootModuleContext = true;
+                    break;
+                }
+            }
+        }
+        if (!hasRootModuleContext)
+        {
+            throw new InvalidDataException(
+                "The Standard native binding plan has invalid operation or Module context.");
+        }
+
+        _a3LayoutResourceLedger?.ConsumeWork(
+            checked((ulong)_schemaIdentities.Length + 1UL));
         foreach (var schemaIdentity in _schemaIdentities)
         {
-            if (schemaIdentity is not (ForeignInvocationSchemaIdentity
-                or ForeignInvocationStorageAddressSchemaIdentity
-                or ForeignInvocationStorageFixedArrayCopySchemaIdentity
-                or ForeignInvocationStorageGenericFixedArraySchemaIdentity))
+            if (!IsSelectedSchemaIdentity(schemaIdentity))
             {
                 throw new InvalidDataException(
                     "The Standard native binding plan has an unselected schema.");
             }
         }
+
+        _a3LayoutResourceLedger?.ConsumeWork(
+            checked((ulong)_modules.Length + 1UL));
         TrRmStandardModuleSelection? rootSelection = null;
         foreach (var module in _modules)
         {
+            _a3LayoutResourceLedger?.ConsumeWork(8);
             if (module.ArtifactIndex < 0
                 || module.ArtifactIndex >= _artifacts.Length
                 || module.ModuleRow <= 0
@@ -175,9 +198,9 @@ internal sealed class TrRmStandardNativeBindingPlan
             }
         }
 
+        _a3LayoutResourceLedger?.ConsumeWork();
         if (rootSelection is not TrRmStandardModuleSelection selectedRoot
-            || !StringComparer.Ordinal.Equals(selectedRoot.Identity,
-                ModuleIdentity))
+            || !AreEqualOrdinal(selectedRoot.Identity, ModuleIdentity))
         {
             throw new InvalidDataException(
                 "The Standard native binding plan lost its selected root Module.");
@@ -185,23 +208,16 @@ internal sealed class TrRmStandardNativeBindingPlan
 
         if (!_typeProviderBindings.IsDefaultOrEmpty)
         {
-            if (_schemaIdentities[0] is not (
-                    ForeignInvocationStorageFixedArrayCopySchemaIdentity
-                    or ForeignInvocationStorageGenericFixedArraySchemaIdentity))
+            _a3LayoutResourceLedger?.ConsumeWork();
+            var rootSchemaIdentity = _schemaIdentities[0];
+            if (!IsFixedArraySchemaIdentity(rootSchemaIdentity))
             {
                 throw new InvalidDataException(
                     "The Standard native binding plan has fixed-array type bindings under another schema.");
             }
 
-            var rootSchema = _schemaIdentities[0] switch
-            {
-                ForeignInvocationStorageFixedArrayCopySchemaIdentity
-                    => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft,
-                ForeignInvocationStorageGenericFixedArraySchemaIdentity
-                    => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
-                _ => throw new InvalidDataException(
-                    "The Standard native binding plan has an unselected fixed-array schema."),
-            };
+            var rootSchema = GetFixedArraySchema(rootSchemaIdentity);
+            _a3LayoutResourceLedger?.ConsumeWork(2);
             var rootIndex = rootSchema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
@@ -219,10 +235,38 @@ internal sealed class TrRmStandardNativeBindingPlan
                 : TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
                         rootIndex);
+            _a3LayoutResourceLedger?.ConsumeWork(checked(
+                (ulong)_artifacts.Length + (ulong)_schemaIdentities.Length
+                + 2UL));
             var typeProviderBindings = TrRmFixedArrayProviderBindingValidator
                 .Validate(rootTables, [.. _artifacts], [.. _schemaIdentities],
                     _modules, RootModuleRow);
-            if (!typeProviderBindings.SequenceEqual(_typeProviderBindings))
+            var typeProviderBindingsMatch
+                = typeProviderBindings.Length == _typeProviderBindings.Length;
+            _a3LayoutResourceLedger?.ConsumeWork();
+            if (typeProviderBindingsMatch)
+            {
+                _a3LayoutResourceLedger?.ConsumeWork(checked(
+                    (ulong)typeProviderBindings.Length + 1UL));
+                for (var index = 0; index < typeProviderBindings.Length; index++)
+                {
+                    var expectedBinding = _typeProviderBindings[index];
+                    var actualBinding = typeProviderBindings[index];
+                    _a3LayoutResourceLedger?.ConsumeWork(checked(9UL
+                        + GetStringComparisonWork(
+                            expectedBinding.ProducerIdentity,
+                            actualBinding.ProducerIdentity)
+                        + GetStringComparisonWork(expectedBinding.ExportKey,
+                            actualBinding.ExportKey)));
+                    if (expectedBinding != actualBinding)
+                    {
+                        typeProviderBindingsMatch = false;
+                        break;
+                    }
+                }
+            }
+
+            if (!typeProviderBindingsMatch)
             {
                 var exception = new InvalidDataException(
                     "The Standard native binding plan changed a fixed-array type provider binding.");
@@ -394,5 +438,52 @@ internal sealed class TrRmStandardNativeBindingPlan
         }
 
         return (program, nativeBindings.ToImmutable());
+    }
+
+    private bool IsSelectedSchemaIdentity(string? schemaIdentity)
+        => AreEqualOrdinal(schemaIdentity, ForeignInvocationSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageAddressSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopySchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageGenericFixedArraySchemaIdentity);
+
+    private bool IsFixedArraySchemaIdentity(string? schemaIdentity)
+        => AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopySchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageGenericFixedArraySchemaIdentity);
+
+    private TrRmArtifactSchema GetFixedArraySchema(string? schemaIdentity)
+    {
+        if (AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageGenericFixedArraySchemaIdentity))
+        {
+            return TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+        }
+
+        if (AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopySchemaIdentity))
+        {
+            return TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        }
+
+        throw new InvalidDataException(
+            "The Standard native binding plan has an unselected fixed-array schema.");
+    }
+
+    private bool AreEqualOrdinal(string? left, string right)
+    {
+        _a3LayoutResourceLedger?.ConsumeWork(
+            GetStringComparisonWork(left, right));
+        return StringComparer.Ordinal.Equals(left, right);
+    }
+
+    private static ulong GetStringComparisonWork(string? left, string? right)
+    {
+        var characterCount = checked((ulong)(left?.Length ?? 0)
+            + (ulong)(right?.Length ?? 0));
+        return checked((characterCount * sizeof(char)) + 1UL);
     }
 }
