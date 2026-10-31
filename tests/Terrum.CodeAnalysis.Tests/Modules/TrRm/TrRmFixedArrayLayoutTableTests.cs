@@ -110,6 +110,27 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void A3RootLedgerValidatesSelectedA2ProviderAtExactWorkBoundary()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
+            stride: 8, extent: 16, alignment: 4);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(
+                            artifact),
+                    ledger);
+
+            Assert.That(tables.A3LayoutResourceLedger, Is.SameAs(ledger));
+            Assert.That(tables.FixedArrayLayouts.GetRow(1).ByteExtent,
+                Is.EqualTo(16));
+        });
+    }
+
+    [Test]
     public void A3RegisterBodyRecordAccessChargesItsRangeAndOffsetFields()
     {
         const TrRmArtifactSchema schema
@@ -569,6 +590,116 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         Assert.That(exception!.Required,
             Is.EqualTo(new System.Numerics.BigInteger(
                 TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+    }
+
+    [Test]
+    public void A3ProviderReplacementRevalidationWorkLimitIsExact()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+        var consumerArtifact = CreateA3GenericArrayConsumerArtifact();
+        var providerArtifact = CreateA3GenericCopyProviderArtifact();
+        byte[][] artifacts = [consumerArtifact, providerArtifact];
+        string[] schemaIdentities = [schemaIdentity, schemaIdentity];
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 1, 1, 2),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                        consumerArtifact));
+        var typeBindings = TrRmFixedArrayProviderBindingValidator.Validate(
+            tables, artifacts, schemaIdentities, modules, 1);
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 42; }"));
+        Assert.That(compilation.HasErrors, Is.False);
+        var rootProgram = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var replacement = CreateA3GenericCopyProviderArtifact(
+            declaredCopy: false);
+        Assert.That(replacement.Length, Is.EqualTo(providerArtifact.Length));
+        Array.Copy(replacement, providerArtifact, providerArtifact.Length);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
+                artifacts, schemaIdentities, modules, 1,
+                TrRmStandardNativeOperation.EmitExecutable,
+                NativeRuntimePolicy.FailFast, null, typeBindings,
+                resourceLedger);
+
+            try
+            {
+                plan.CreateLoweringInputs(
+                    TrRmStandardNativeOperation.EmitExecutable);
+                Assert.Fail("Expected changed provider bindings to be rejected.");
+            }
+            catch (TrRmResourceLimitException)
+            {
+                throw;
+            }
+            catch (InvalidDataException exception)
+            {
+                Assert.That(exception.Message,
+                    Does.Contain("fixed-array TypeDef provider binding"));
+            }
+        });
+    }
+
+    [Test]
+    public void A3BindingPlanRevalidationWorkLimitIsExact()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+        var consumerArtifact = CreateA3GenericArrayConsumerArtifact();
+        var providerArtifact = CreateA3GenericCopyProviderArtifact();
+        byte[][] artifacts = [consumerArtifact, providerArtifact];
+        string[] schemaIdentities = [schemaIdentity, schemaIdentity];
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 1, 1, 2),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 42; }"));
+        Assert.That(compilation.HasErrors, Is.False);
+        var rootProgram = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                            consumerArtifact),
+                    resourceLedger);
+            var typeBindings = TrRmFixedArrayProviderBindingValidator.Validate(
+                tables, artifacts, schemaIdentities, modules, 1);
+            var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
+                artifacts, schemaIdentities, modules, 1,
+                TrRmStandardNativeOperation.EmitExecutable,
+                NativeRuntimePolicy.FailFast, null, typeBindings,
+                resourceLedger);
+
+            try
+            {
+                plan.CreateLoweringInputs(
+                    TrRmStandardNativeOperation.EmitExecutable);
+                Assert.Fail("Expected a no-import rejection.");
+            }
+            catch (NotSupportedException exception)
+            {
+                if (exception is TrRmResourceLimitException)
+                {
+                    throw;
+                }
+
+                Assert.That(exception.Message,
+                    Does.Contain("no direct NativeImport"));
+            }
+        });
     }
 
     [Test]
