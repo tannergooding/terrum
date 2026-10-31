@@ -474,6 +474,11 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>Validated value layouts; type identifiers are 100 + declaration index.</summary>
     public ImmutableArray<BoundStruct> Structures { get; init; } = [];
 
+    internal ImmutableArray<BoundSourceTypeDeclaration> SourceTypeDeclarations
+    {
+        get; init;
+    } = [];
+
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
 
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
@@ -520,6 +525,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
     /// <summary>The runtime behavior verified for this program and its imports.</summary>
     public BoundRuntimePolicy RuntimePolicy { get; init; }
 }
+
+internal sealed record BoundSourceTypeDeclaration(int StructureIndex,
+    string Namespace, string Name, BoundStruct DeclarationSnapshot);
 
 /// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
 public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)

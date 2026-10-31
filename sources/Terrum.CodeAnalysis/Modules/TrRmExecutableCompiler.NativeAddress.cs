@@ -13,7 +13,8 @@ public static partial class TrRmExecutableCompiler
 {
     internal static byte[] EmitForeignInvocationDraftNativeAddressLibrary(
         BoundProgram program, string moduleIdentity,
-        TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft)
+        TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -23,6 +24,14 @@ public static partial class TrRmExecutableCompiler
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
+        }
+        if (sourceTypeExports is { Count: > 0 }
+            && (schema
+                    != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                || program.EntryPoint != -1 || !program.Functions.IsEmpty))
+        {
+            throw Unsupported(
+                "Explicit A2 TypeDef exports require a type-only source library.");
         }
         if (program.EntryPoint < 0)
         {
@@ -39,7 +48,7 @@ public static partial class TrRmExecutableCompiler
             && !program.Structures.IsEmpty)
         {
             return EmitForeignInvocationStorageFixedArrayCopyDeclarations(
-                program, moduleIdentity);
+                program, moduleIdentity, sourceTypeExports);
         }
 
         if (program.Functions.Length != 2

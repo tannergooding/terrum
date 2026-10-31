@@ -43,6 +43,7 @@ internal sealed partial class Binder
     private readonly List<BoundStruct> _structs = [];
     private readonly Dictionary<PrimitiveType, int> _structureAlignments = [];
     private readonly Dictionary<int, (SyntaxTree Tree, SyntaxNode Declaration)> _structDeclarations = [];
+    private readonly Dictionary<int, (string Namespace, string Name)> _sourceStructNames = [];
     private readonly HashSet<int> _layingOut = [];
     private readonly HashSet<int> _laidOut = [];
     private readonly Dictionary<string, PrimitiveType> _structNames = new(StringComparer.Ordinal);
@@ -538,6 +539,11 @@ internal sealed partial class Binder
                     IsInternal = !isPublic,
                 });
                 _structDeclarations.Add(index, (tree, structure));
+                var separator = qualified.LastIndexOf('.',
+                    StringComparison.Ordinal);
+                _sourceStructNames.Add(index, (separator < 0
+                    ? "" : qualified[..separator], separator < 0
+                    ? qualified : qualified[(separator + 1)..]));
             }
         }
 
@@ -857,8 +863,21 @@ internal sealed partial class Binder
         {
             return null;
         }
+        var sourceTypeDeclarations = ImmutableArray
+            .CreateBuilder<BoundSourceTypeDeclaration>(
+                _sourceStructNames.Count);
+        for (var index = 0; index < _structs.Count; index++)
+        {
+            if (_sourceStructNames.TryGetValue(index, out var identity))
+            {
+                sourceTypeDeclarations.Add(new BoundSourceTypeDeclaration(
+                    index, identity.Namespace, identity.Name, _structs[index]));
+            }
+        }
+
         var program = new BoundProgram(bound.ToImmutable(), entryPoint) {
             Structures = [.. _structs],
+            SourceTypeDeclarations = sourceTypeDeclarations.MoveToImmutable(),
             EnumDefinitions = [.. _enumDefinitions],
             NativeCoreRegistration = _nativeCoreRegistration,
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],

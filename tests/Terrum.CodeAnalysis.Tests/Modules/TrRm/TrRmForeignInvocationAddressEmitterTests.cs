@@ -238,6 +238,143 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2SourceTypeExportsUseExplicitKeysOnly()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-explicit-type-exports";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct SourceName {
+                public int32 Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var noExports = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1);
+        var noExportsWithEmptyMap = TrRmExecutableCompiler.EmitStandard(
+            program, moduleIdentity, schemaIdentity, 1, []);
+        var noExportTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(noExports));
+        var emptyMapTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        noExportsWithEmptyMap));
+        Assert.That(noExportTables.Exports.TryGetDefinitionForKey(1,
+            "SourceName", out _), Is.False);
+        Assert.That(emptyMapTables.Exports.TryGetDefinitionForKey(1,
+            "SourceName", out _), Is.False);
+
+        const string exportKey = "library/types/source-name-v1";
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1,
+            [new TrRmSourceTypeExport("", "SourceName", exportKey)]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+            "unselected", out _), Is.False);
+        Assert.That(tables.Exports.TryGetDefinitionForKey(1, exportKey,
+            out var definition), Is.True);
+        Assert.That(definition, Is.EqualTo(0x1300_0001u));
+        Assert.That(tables.Exports.TryGetExportKeyForDefinition(1,
+            definition, out var retainedKey), Is.True);
+        Assert.That(retainedKey, Is.EqualTo(exportKey));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        Assert.That(loaded.Structures.Single().Name, Is.EqualTo("SourceName"));
+    }
+
+    [Test]
+    public void StandardA2SourceTypeExportsRejectHandBuiltAndDuplicateMappings()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-invalid-type-exports";
+        var handBuilt = new BoundProgram([], -1)
+        {
+            Structures = [
+                new BoundStruct("Manual", [
+                    new BoundStructField("Value", PrimitiveType.Int32, 0, 4),
+                ], 4)
+                {
+                    IsSequential = true,
+                    BlittableTargetRequirement = 1,
+                },
+            ],
+        };
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(handBuilt,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Manual", "manual")]));
+
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct First {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Second {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            struct Internal {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public unique struct Unique {
+                public int32 Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var changedProgram = program with {
+            Structures = program.Structures.SetItem(0,
+                program.Structures[0] with { Name = "Changed" }),
+        };
+
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, 1,
+            [
+                new TrRmSourceTypeExport("", "First", "duplicate"),
+                new TrRmSourceTypeExport("", "Second", "duplicate"),
+            ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, 1,
+            [
+                new TrRmSourceTypeExport("", "First", "first"),
+                new TrRmSourceTypeExport("", "First", "second"),
+            ]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(changedProgram,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "First", "changed")]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Internal", "internal")]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Unique", "unique")]));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "First", "")]));
+    }
+
+    [Test]
     public void StandardA2DeclarationProducerDoesNotClaimCopyForUniqueStructs()
     {
         const string schemaIdentity

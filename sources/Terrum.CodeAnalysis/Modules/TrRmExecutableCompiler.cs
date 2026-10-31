@@ -11,6 +11,13 @@ using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
+/// <summary>Explicitly assigns an ExportKey to one source-authored nominal type declaration.</summary>
+/// <param name="Namespace">The declaration's exact source namespace, or empty for the global namespace.</param>
+/// <param name="Name">The declaration's exact simple source name.</param>
+/// <param name="ExportKey">The producer-selected TRRM export key; it is not derived from the source name.</param>
+public sealed record TrRmSourceTypeExport(
+    string Namespace, string Name, string ExportKey);
+
 /// <summary>Emits and audits root-free fail-fast scalar compact TRRM bodies.</summary>
 public static partial class TrRmExecutableCompiler
 {
@@ -77,6 +84,63 @@ public static partial class TrRmExecutableCompiler
     /// <exception cref="NotSupportedException">The selected schema cannot represent the program.</exception>
     public static byte[] EmitStandard(BoundProgram program, string moduleIdentity,
         string schemaIdentity, uint moduleTargetRequirement)
+        => EmitStandardCore(program, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement, null);
+
+    /// <summary>Emits an A2 type library with explicit source TypeDef exports.</summary>
+    /// <param name="program">The checked source-bound type library to serialize.</param>
+    /// <param name="moduleIdentity">The output Module identity.</param>
+    /// <param name="schemaIdentity">The exact out-of-band Standard schema identity.</param>
+    /// <param name="moduleTargetRequirement">The selected Module target requirement.</param>
+    /// <param name="typeExports">The explicit source declaration-to-ExportKey mappings.</param>
+    /// <returns>The complete validated TRRM artifact.</returns>
+    /// <exception cref="ArgumentNullException">An argument or mapping is null.</exception>
+    /// <exception cref="ArgumentException">An identity or mapping is invalid or duplicated.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">The target requirement is unassigned.</exception>
+    /// <exception cref="NotSupportedException">The selected operation or schema cannot represent the program.</exception>
+    public static byte[] EmitStandard(BoundProgram program, string moduleIdentity,
+        string schemaIdentity, uint moduleTargetRequirement,
+        IReadOnlyList<TrRmSourceTypeExport> typeExports)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(typeExports);
+        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        ArgumentException.ThrowIfNullOrEmpty(schemaIdentity);
+        var typeExportSnapshot = new TrRmSourceTypeExport[typeExports.Count];
+        for (var index = 0; index < typeExportSnapshot.Length; index++)
+        {
+            typeExportSnapshot[index] = typeExports[index]
+                ?? throw new ArgumentException(
+                    "Source TypeDef export mappings cannot contain null entries.",
+                    nameof(typeExports));
+        }
+
+        if (typeExportSnapshot.Length == 0)
+        {
+            return EmitStandard(program, moduleIdentity, schemaIdentity,
+                moduleTargetRequirement);
+        }
+        if (!StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationStorageFixedArraySchemaIdentity))
+        {
+            throw Unsupported(
+                "Explicit source TypeDef exports require the exact A2 schema.");
+        }
+        if (program.EntryPoint != -1 || !program.Functions.IsEmpty
+            || program.Structures.IsEmpty)
+        {
+            throw Unsupported(
+                "Explicit source TypeDef exports require a type-only source library.");
+        }
+
+        return EmitStandardCore(program, moduleIdentity, schemaIdentity,
+            moduleTargetRequirement, typeExportSnapshot);
+    }
+
+    private static byte[] EmitStandardCore(BoundProgram program,
+        string moduleIdentity, string schemaIdentity,
+        uint moduleTargetRequirement,
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -120,7 +184,8 @@ public static partial class TrRmExecutableCompiler
             StandardForeignInvocationStorageFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,
-                    TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft),
+                    TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft,
+                    sourceTypeExports),
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,

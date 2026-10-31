@@ -3,14 +3,19 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
 
 public static partial class TrRmExecutableCompiler
 {
+    private static readonly UTF8Encoding s_sourceTypeExportKeyEncoding
+        = new(false, true);
+
     private static byte[] EmitForeignInvocationStorageFixedArrayCopyDeclarations(
-        BoundProgram program, string moduleIdentity)
+        BoundProgram program, string moduleIdentity,
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -116,6 +121,9 @@ public static partial class TrRmExecutableCompiler
 
             return row;
         }
+
+        var exportRows = CreateA2SourceTypeExportRows(program,
+            sourceTypeExports, structureTypeDefRows, GetStringRow);
 
         uint GetFieldTypeSpecRef(PrimitiveType type)
         {
@@ -293,6 +301,10 @@ public static partial class TrRmExecutableCompiler
             typeDefs, targetProfiles, layoutFieldRows.Count);
         var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
             layoutFieldRows, layouts, typeDefs, fields);
+        var exportBytes = exportRows.Count == 0 ? []
+            : TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
+                default, default, default, default, default, default,
+                features, modules, schema);
         var sections = new List<TrRmSection>
         {
             new(0x0001, 0, 1, moduleBytes),
@@ -305,6 +317,11 @@ public static partial class TrRmExecutableCompiler
                 layoutFieldBytes),
             new(0x0048, 0, 1, targetProfileBytes),
         };
+        if (exportRows.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001D, 0,
+                (uint)exportRows.Count, exportBytes));
+        }
         if (fixedArrayLayoutRows.Count != 0)
         {
             var fixedArrayLayoutBytes
@@ -328,5 +345,123 @@ public static partial class TrRmExecutableCompiler
                 TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
         return artifact;
+    }
+
+    private static List<TrRmExportRow> CreateA2SourceTypeExportRows(
+        BoundProgram program,
+        IReadOnlyList<TrRmSourceTypeExport>? typeExports,
+        Dictionary<int, int> structureTypeDefRows,
+        Func<string, int> getStringRow)
+    {
+        var rows = new List<TrRmExportRow>(
+            typeExports?.Count ?? 0);
+        if (typeExports is null || typeExports.Count == 0)
+        {
+            return rows;
+        }
+
+        var sourceDeclarations = program.SourceTypeDeclarations;
+        if (sourceDeclarations.IsDefault
+            || sourceDeclarations.Length != program.Structures.Length)
+        {
+            throw Unsupported(
+                "Explicit A2 TypeDef exports require a source-bound local declaration set.");
+        }
+
+        var declarationByName
+            = new Dictionary<(string Namespace, string Name),
+                BoundSourceTypeDeclaration>(sourceDeclarations.Length);
+        var structureIndexes = new bool[program.Structures.Length];
+        foreach (var declaration in sourceDeclarations)
+        {
+            if ((uint)declaration.StructureIndex
+                    >= (uint)program.Structures.Length
+                || structureIndexes[declaration.StructureIndex])
+            {
+                throw new ArgumentException(
+                    "The source TypeDef declaration map is inconsistent.",
+                    nameof(program));
+            }
+
+            var structure = program.Structures[declaration.StructureIndex];
+            var qualifiedName = declaration.Namespace.Length == 0
+                ? declaration.Name
+                : $"{declaration.Namespace}.{declaration.Name}";
+            if (!StringComparer.Ordinal.Equals(structure.Name, qualifiedName)
+                || declaration.DeclarationSnapshot != structure
+                || !declarationByName.TryAdd(
+                    (declaration.Namespace, declaration.Name), declaration))
+            {
+                throw new ArgumentException(
+                    "The source TypeDef declaration map no longer matches the checked program.",
+                    nameof(program));
+            }
+
+            structureIndexes[declaration.StructureIndex] = true;
+        }
+
+        var selectedStructures = new HashSet<int>();
+        var exportKeys = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < typeExports.Count; index++)
+        {
+            var export = typeExports[index];
+            if (export is null || export.Namespace is null
+                || string.IsNullOrEmpty(export.Name)
+                || string.IsNullOrEmpty(export.ExportKey)
+                || export.Namespace.Contains('\0',
+                    StringComparison.Ordinal)
+                || export.Name.Contains('\0', StringComparison.Ordinal)
+                || export.ExportKey.Contains('\0', StringComparison.Ordinal))
+            {
+                throw new ArgumentException(
+                    "A source TypeDef export mapping contains invalid text.",
+                    nameof(typeExports));
+            }
+
+            try
+            {
+                _ = s_sourceTypeExportKeyEncoding.GetByteCount(
+                    export.ExportKey);
+            }
+            catch (EncoderFallbackException exception)
+            {
+                throw new ArgumentException(
+                    "A source TypeDef ExportKey must be well-formed scalar text.",
+                    nameof(typeExports), exception);
+            }
+
+            if (!declarationByName.TryGetValue(
+                    (export.Namespace, export.Name),
+                    out var declaration))
+            {
+                throw new ArgumentException(
+                    "A source TypeDef export mapping does not select one source declaration.",
+                    nameof(typeExports));
+            }
+
+            var structure = program.Structures[declaration.StructureIndex];
+            if (structure.IsPrivate || structure.IsInternal
+                || structure.IsUnique || structure.CleanupMethod is not null)
+            {
+                throw new ArgumentException(
+                    "A source TypeDef export must select a public ordinary Copy struct.",
+                    nameof(typeExports));
+            }
+            if (!selectedStructures.Add(declaration.StructureIndex)
+                || !exportKeys.Add(export.ExportKey))
+            {
+                throw new ArgumentException(
+                    "Source TypeDef declarations and ExportKeys must be unique.",
+                    nameof(typeExports));
+            }
+
+            var typeDefRow = structureTypeDefRows[
+                declaration.StructureIndex];
+            rows.Add(new TrRmExportRow(
+                0x1300_0000u | checked((uint)typeDefRow),
+                getStringRow(export.ExportKey)));
+        }
+
+        return rows;
     }
 }

@@ -473,9 +473,16 @@ array identities, checks target geometry and preserves wide counts. Its
 synthetic consumer and combined TRRM array suites passed 151/151 with zero
 skips. External/imported Copy provider origins remain unsupported, and neither
 path constructs executable array TypeMap entries or PlaceSelection/EC Bodies.
-The source TypeDef ExportKey/origin mapping remains an unapproved candidate in
-the [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-type-identity.md);
-no key is derived from a declaration name.
+The [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-type-identity.md)
+remains unapproved. Its local A2 `EmitStandard` export-map slice is
+implemented provisionally: source-bound public ordinary Copy declarations
+require explicit namespace/name selection and an exact caller-supplied key;
+there is no name-derived default or alias. The full
+`TrRmForeignInvocationAddressEmitterTests` class passed 38/38 with zero skips,
+covering explicit keys, empty-map behavior, provider-side Export rows, local
+LoadStandard and invalid/unbound/duplicate selections. Source `CreateStandardReference`
+type-key projection, imported origins/original expectations and replacement
+remapping remain open.
 Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact
