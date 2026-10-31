@@ -55,6 +55,10 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             => expectation.UsingModule.ModuleIdentity == "Provider"
                 && expectation.ImportRow == 1
                 && expectation.ExportKey == "LeafKey"), Is.True);
+        var remappedPair = BoundTreeTraversal.RewriteTypes(pair, static type
+            => type == (PrimitiveType)101 ? (PrimitiveType)100 : type);
+        Assert.That(remappedPair.Fields[0].Type, Is.EqualTo((PrimitiveType)100));
+        Assert.That(remappedPair.StandardTypeOrigin, Is.SameAs(pairOrigin));
 
         var leaf = reference.Structures.Single(static structure
             => structure.Name == "Leaf");
