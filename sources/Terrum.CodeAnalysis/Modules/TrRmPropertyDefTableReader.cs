@@ -14,12 +14,25 @@ public readonly ref struct TrRmPropertyDefTableReader
     private readonly ReadOnlySpan<byte> _rows;
     private readonly TrRmStringTableReader _strings;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public TrRmPropertyDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures)
+        : this(section, recordCount, strings, types, typeSpecs, methods,
+            signatures, deferGetterTypeIdentity: false,
+            resourceLedger: null)
     {
+    }
+
+    internal TrRmPropertyDefTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmStringTableReader strings, TrRmTypeDefTableReader types,
+        TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures, bool deferGetterTypeIdentity,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount <= 0 || recordCount > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
         {
@@ -29,38 +42,67 @@ public readonly ref struct TrRmPropertyDefTableReader
         _rows = section;
         _strings = strings;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
-            var data = section.Slice((row - 1) * RowSize, RowSize);
+            resourceLedger?.ConsumeWork();
+            var data = GetRow(row);
             var owner = Read(data, 0);
             var name = Read(data, 4);
             var type = Read(data, 8);
             var getter = Read(data, 12);
             var flags = Read(data, 16);
+            resourceLedger?.ConsumeWork(6);
             if (owner == 0 || owner > types.Count
                 || name is 0 or > 0xFF_FFFF
                 || flags > 2
                 || getter == 0 || getter > methods.Count
                 || methods.GetOwnerType((int)getter) != owner
-                || !typeSpecs.AreEquivalentTypeSpecRefs(type,
-                    signatures.GetResultTypeSpec(methods.GetSignature((int)getter))))
+                || (!deferGetterTypeIdentity
+                    && !typeSpecs.AreEquivalentTypeSpecRefs(type,
+                        signatures.GetResultTypeSpec(
+                            methods.GetSignature((int)getter)))))
             {
                 throw InvalidProperty();
             }
 
             _ = typeSpecs.GetTypeSpecRef(type);
+            _ = typeSpecs.GetTypeSpecRef(signatures.GetResultTypeSpec(
+                methods.GetSignature((int)getter)));
+            resourceLedger?.ConsumeWork();
             _ = _strings.DecodeName((int)name);
+        }
+    }
+
+    internal void ValidateGetterTypeIdentity(
+        TrRmMethodDefTableReader methods,
+        TrRmMethodSigTableReader signatures,
+        TrRmNativeFunctionPointerAnchorTableReader anchors)
+    {
+        for (var row = 1; row <= _recordCount; row++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var data = GetRow(row);
+            var propertyType = Read(data, 8);
+            var getter = checked((int)Read(data, 12));
+            var getterType = signatures.GetResultTypeSpec(
+                methods.GetSignature(getter));
+            if (!anchors.AreEquivalentTypeSpecRefs(propertyType, getterType))
+            {
+                throw InvalidProperty();
+            }
         }
     }
 
     public string GetName(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidProperty();
         }
 
-        var name = Read(_rows.Slice((row - 1) * RowSize, RowSize), 4);
+        var name = Read(GetRow(row), 4);
         if (name is 0 or > 0xFF_FFFF)
         {
             throw InvalidProperty();
@@ -69,7 +111,14 @@ public readonly ref struct TrRmPropertyDefTableReader
         return _strings.DecodeName((int)name);
     }
 
-    public int Count => _recordCount;
+    public int Count
+    {
+        get
+        {
+            _resourceLedger?.ConsumeWork();
+            return _recordCount;
+        }
+    }
 
     public int GetOwnerType(int row)
         => (int)Read(GetRow(row), 0);
@@ -82,6 +131,7 @@ public readonly ref struct TrRmPropertyDefTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidProperty();
@@ -90,8 +140,12 @@ public readonly ref struct TrRmPropertyDefTableReader
         return _rows.Slice((row - 1) * RowSize, RowSize);
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidProperty()
         => new("Invalid TRRM PropertyDef table.");

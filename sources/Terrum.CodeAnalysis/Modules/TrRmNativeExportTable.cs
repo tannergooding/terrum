@@ -75,6 +75,7 @@ public readonly ref struct TrRmNativeExportTableReader
     private readonly int[] _rowByMethod;
     private readonly int[] _rowByField;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Validates NativeExport rows, exact static owners and callable-clause references.</summary>
     /// <param name="section">The borrowed 16-byte-row section.</param>
@@ -95,7 +96,21 @@ public readonly ref struct TrRmNativeExportTableReader
         TrRmImportTableReader imports, TrRmModuleTableReader modules,
         TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader typeSpecs,
         TrRmContractTableReader contracts, TrRmLayoutTableReader layouts)
+        : this(section, recordCount, strings, methods, fields, typeDefs,
+            imports, modules, signatures, typeSpecs, contracts, layouts, null)
     {
+    }
+
+    internal TrRmNativeExportTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmMethodDefTableReader methods, TrRmFieldDefTableReader fields,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports,
+        TrRmModuleTableReader modules, TrRmMethodSigTableReader signatures,
+        TrRmTypeSpecTableReader typeSpecs, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * 16 != section.Length
             || (recordCount == 0 && !section.IsEmpty))
@@ -108,19 +123,27 @@ public readonly ref struct TrRmNativeExportTableReader
         _methods = methods;
         _fields = fields;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)methods.Count + 1UL
+            + (ulong)fields.Count + 1UL + (ulong)recordCount));
         _rowByMethod = new int[methods.Count + 1];
         _rowByField = new int[fields.Count + 1];
+        _resourceLedger?.ConsumeWork();
         var entryNames = new HashSet<string>(StringComparer.Ordinal);
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = GetRowBytes(row);
+            _resourceLedger?.ConsumeWork(4);
             var ownerKind = data[0];
             var flags = data[1];
+            _resourceLedger?.ConsumeWork(3);
             var reserved = BinaryPrimitives.ReadUInt16LittleEndian(data[2..]);
             var ownerRef = Read(data, 4);
             var entryNameRef = Read(data, 8);
             var nativeCallableContractRef = Read(data, 12);
+            _resourceLedger?.ConsumeWork(6);
             if (flags != 0 || reserved != 0
                 || ownerRef is 0 or > 0xFF_FFFF
                 || entryNameRef > 0xFF_FFFF || entryNameRef > strings.Count
@@ -136,11 +159,12 @@ public readonly ref struct TrRmNativeExportTableReader
                     (int)nativeCallableContractRef, methods, signatures, contracts),
                 FieldDefOwnerKind => ValidateField((int)ownerRef,
                     (int)nativeCallableContractRef, fields, typeDefs, imports, modules,
-                    typeSpecs, contracts, layouts),
+                    typeSpecs, contracts, layouts, _resourceLedger),
                 _ => throw InvalidNativeExport(),
             };
             if (ownerKind == MethodDefOwnerKind)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (_rowByMethod[ownerRef] != 0)
                 {
                     throw InvalidNativeExport();
@@ -150,6 +174,7 @@ public readonly ref struct TrRmNativeExportTableReader
             }
             else
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (_rowByField[ownerRef] != 0)
                 {
                     throw InvalidNativeExport();
@@ -160,6 +185,8 @@ public readonly ref struct TrRmNativeExportTableReader
 
             var entryName = entryNameRef == 0
                 ? declarationName : strings.DecodeName((int)entryNameRef);
+            _resourceLedger?.ConsumeWork(checked(
+                ((ulong)entryName.Length * sizeof(char)) + 2UL));
             if (entryName.Length == 0 || !entryNames.Add(entryName))
             {
                 throw InvalidNativeExport();
@@ -175,7 +202,9 @@ public readonly ref struct TrRmNativeExportTableReader
     /// <returns>The decoded fixed-row fields.</returns>
     public TrRmNativeExportRow GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         var data = GetRowBytes(row);
+        _resourceLedger?.ConsumeWork(4);
         return new TrRmNativeExportRow(data[0], (int)Read(data, 4),
             (int)Read(data, 8), (int)Read(data, 12));
     }
@@ -184,15 +213,23 @@ public readonly ref struct TrRmNativeExportTableReader
     /// <param name="methodDefRow">The one-based MethodDef row.</param>
     /// <returns><see langword="true"/> if the method has a NativeExport row.</returns>
     public bool HasExportForMethod(int methodDefRow)
-        => _rowByMethod is not null && methodDefRow > 0
-            && methodDefRow < _rowByMethod.Length && _rowByMethod[methodDefRow] != 0;
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return _rowByMethod is not null && methodDefRow > 0
+            && methodDefRow < _rowByMethod.Length
+            && _rowByMethod[methodDefRow] != 0;
+    }
 
     /// <summary>Determines whether a FieldDef has a native export row.</summary>
     /// <param name="fieldDefRow">The one-based FieldDef row.</param>
     /// <returns><see langword="true"/> if the field has a NativeExport row.</returns>
     public bool HasExportForField(int fieldDefRow)
-        => _rowByField is not null && fieldDefRow > 0
-            && fieldDefRow < _rowByField.Length && _rowByField[fieldDefRow] != 0;
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return _rowByField is not null && fieldDefRow > 0
+            && fieldDefRow < _rowByField.Length
+            && _rowByField[fieldDefRow] != 0;
+    }
 
     /// <summary>Gets the NativeExport row for a method.</summary>
     /// <param name="methodDefRow">The one-based MethodDef row.</param>
@@ -215,6 +252,7 @@ public readonly ref struct TrRmNativeExportTableReader
     /// <returns>The exact declaration or explicit entry name.</returns>
     public string GetEntryName(int row)
     {
+        _resourceLedger?.ConsumeWork();
         var export = GetRow(row);
         if (export.EntryNameStringRow != 0)
         {
@@ -248,15 +286,17 @@ public readonly ref struct TrRmNativeExportTableReader
         int nativeCallableContractRef, TrRmFieldDefTableReader fields,
         TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports,
         TrRmModuleTableReader modules, TrRmTypeSpecTableReader typeSpecs,
-        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts)
+        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork(3);
         if (ownerRef <= 0 || ownerRef > fields.Count
             || nativeCallableContractRef != 0
             || (fields.GetFlags(ownerRef) & 0x08) == 0
             || !TrRmNativeImportTableReader.IsNativeAbiFieldType(typeSpecs,
                 fields.GetTypeSpecRef(ownerRef),
                 fields.GetOwnerTypeDef(ownerRef), typeDefs, imports,
-                modules, contracts, layouts))
+                modules, contracts, layouts, resourceLedger))
         {
             throw InvalidNativeExport();
         }
@@ -266,6 +306,7 @@ public readonly ref struct TrRmNativeExportTableReader
 
     private ReadOnlySpan<byte> GetRowBytes(int row)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidNativeExport();
@@ -274,8 +315,12 @@ public readonly ref struct TrRmNativeExportTableReader
         return _rows.Slice((row - 1) * 16, 16);
     }
 
-    private static uint Read(ReadOnlySpan<byte> bytes, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> bytes, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            bytes.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidNativeExport()
         => new("Invalid standard TRRM NativeExport table.");

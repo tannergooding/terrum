@@ -15,6 +15,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     private readonly bool[] _isAnchorMethodDef;
     private readonly TrRmTypeSpecTableReader _typeSpecs;
     private readonly TrRmTypeDefTableReader _typeDefs;
+    private readonly TrRmEnumDefTableReader _enumDefs;
     private readonly TrRmGenericParamTableReader _genericParams;
     private readonly TrRmMethodDefTableReader _methods;
     private readonly TrRmMethodSigTableReader _signatures;
@@ -24,10 +25,14 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     private readonly TrRmConstantSourceTableReader _constantSources;
     private readonly TrRmFrozenValueNodeTableReader _frozenValueNodes;
     private readonly TrRmBlobTableReader _blobs;
+    private readonly TrRmFeatureTableReader _features;
+    private readonly TrRmModuleTableReader _modules;
     private readonly byte[] _predicateSelectorKinds;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     internal TrRmNativeFunctionPointerAnchorTableReader(
         TrRmTypeSpecTableReader typeSpecs, TrRmTypeDefTableReader typeDefs,
+        TrRmEnumDefTableReader enumDefs,
         TrRmGenericParamTableReader genericParams, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmContractTableReader contracts, TrRmImportTableReader imports,
@@ -39,10 +44,12 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         TrRmExportTableReader exports, TrRmPropertyDefTableReader properties,
         TrRmInterfaceMethodTableReader interfaceMethods,
         TrRmNativeImportTableReader nativeImports,
-        TrRmNativeExportTableReader nativeExports)
+        TrRmNativeExportTableReader nativeExports,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         _typeSpecs = typeSpecs;
         _typeDefs = typeDefs;
+        _enumDefs = enumDefs;
         _genericParams = genericParams;
         _methods = methods;
         _signatures = signatures;
@@ -52,13 +59,22 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         _constantSources = constantSources;
         _frozenValueNodes = frozenValueNodes;
         _blobs = blobs;
+        _features = features;
+        _modules = modules;
         _predicateSelectorKinds = predicateSelectorKinds;
+        _resourceLedger = resourceLedger;
+        var typeSpecEntries = checked((ulong)typeSpecs.Count + 1UL);
+        var typeSpecStateWork = checked(typeSpecEntries * 2UL);
+        var methodStateWork = checked((ulong)methods.Count + 1UL);
+        _resourceLedger?.ConsumeWork(
+            checked(typeSpecStateWork + methodStateWork));
         _methodByTypeSpecRow = new int[typeSpecs.Count + 1];
         _conventionByTypeSpecRow = new byte[typeSpecs.Count + 1];
         _isAnchorMethodDef = new bool[methods.Count + 1];
         var types = typeSpecs;
         for (var typeSpecRow = 1; typeSpecRow <= typeSpecs.Count; typeSpecRow++)
         {
+            _resourceLedger?.ConsumeWork();
             if (!types.TryGetNativeFunctionPointerAnchor(typeSpecRow,
                 out var callingConvention, out var methodDefRow))
             {
@@ -98,6 +114,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
                 }
             }
 
+            _resourceLedger?.ConsumeWork(3);
             _methodByTypeSpecRow[typeSpecRow] = methodDefRow;
             _conventionByTypeSpecRow[typeSpecRow] = callingConvention;
             _isAnchorMethodDef[methodDefRow] = true;
@@ -107,26 +124,160 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     }
 
     internal bool IsAnchorMethodDef(int methodDefRow)
-        => _isAnchorMethodDef is not null && methodDefRow > 0
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return _isAnchorMethodDef is not null && methodDefRow > 0
             && methodDefRow < _isAnchorMethodDef.Length
             && _isAnchorMethodDef[methodDefRow];
+    }
 
     internal bool HasAnchorForTypeSpec(int typeSpecRow)
-        => _methodByTypeSpecRow is not null && typeSpecRow > 0
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return _methodByTypeSpecRow is not null && typeSpecRow > 0
             && typeSpecRow < _methodByTypeSpecRow.Length
             && _methodByTypeSpecRow[typeSpecRow] != 0;
+    }
 
     internal int GetAnchorMethodDefRow(int typeSpecRow)
-        => HasAnchorForTypeSpec(typeSpecRow)
-            ? _methodByTypeSpecRow[typeSpecRow] : throw InvalidAnchor();
+    {
+        if (!HasAnchorForTypeSpec(typeSpecRow))
+        {
+            throw InvalidAnchor();
+        }
+
+        _resourceLedger?.ConsumeWork();
+        return _methodByTypeSpecRow[typeSpecRow];
+    }
 
     internal byte GetCallingConvention(int typeSpecRow)
-        => HasAnchorForTypeSpec(typeSpecRow)
-            ? _conventionByTypeSpecRow[typeSpecRow] : throw InvalidAnchor();
+    {
+        if (!HasAnchorForTypeSpec(typeSpecRow))
+        {
+            throw InvalidAnchor();
+        }
+
+        _resourceLedger?.ConsumeWork();
+        return _conventionByTypeSpecRow[typeSpecRow];
+    }
+
+    internal bool AreEquivalentAnchorContracts(int methodRow,
+        TrRmNativeFunctionPointerAnchorTableReader other,
+        int otherMethodRow)
+    {
+        var leftNativeParameters = _contracts.GetNativeParameters(methodRow);
+        var rightNativeParameters
+            = other._contracts.GetNativeParameters(otherMethodRow);
+        var leftDependencies = _contracts.GetDependencyContracts(methodRow);
+        var rightDependencies
+            = other._contracts.GetDependencyContracts(otherMethodRow);
+        _resourceLedger?.ConsumeWork(checked(
+            (ulong)(leftNativeParameters.Length + rightNativeParameters.Length
+                + leftDependencies.Length + rightDependencies.Length) + 1UL));
+        _resourceLedger?.ConsumeWork(2);
+        var leftNativeParameterSet
+            = new HashSet<TrRmNativeParameterContract>(leftNativeParameters);
+        var rightNativeParameterSet
+            = new HashSet<TrRmNativeParameterContract>(rightNativeParameters);
+        _resourceLedger?.ConsumeWork(checked(
+            (ulong)(leftDependencies.Length + rightDependencies.Length) + 2UL));
+        var leftDependencySet
+            = new HashSet<TrRmDependencyContract>(leftDependencies);
+        var rightDependencySet
+            = new HashSet<TrRmDependencyContract>(rightDependencies);
+        return _contracts.GetEffectsMask(methodRow)
+                == other._contracts.GetEffectsMask(otherMethodRow)
+            && SamePredicateContracts(methodRow, other, otherMethodRow)
+            && SameOutputStateContracts(methodRow, other, otherMethodRow)
+            && leftNativeParameters.Length == rightNativeParameters.Length
+            && leftNativeParameterSet.SetEquals(rightNativeParameterSet)
+            && leftDependencies.Length == rightDependencies.Length
+            && leftDependencySet.SetEquals(rightDependencySet);
+    }
+
+    private bool SamePredicateContracts(int methodRow,
+        TrRmNativeFunctionPointerAnchorTableReader other,
+        int otherMethodRow)
+    {
+        var left = _contracts.GetPredicateGraphContracts(methodRow);
+        var right = other._contracts.GetPredicateGraphContracts(
+            otherMethodRow);
+        _resourceLedger?.ConsumeWork(checked((ulong)(left.Length + right.Length)
+            + 1UL));
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        foreach (var predicate in left)
+        {
+            _resourceLedger?.ConsumeWork();
+            var identity = GetPredicateIdentity(predicate);
+            var found = false;
+            foreach (var candidate in right)
+            {
+                _resourceLedger?.ConsumeWork();
+                if (identity == other.GetPredicateIdentity(candidate))
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private bool SameOutputStateContracts(int methodRow,
+        TrRmNativeFunctionPointerAnchorTableReader other,
+        int otherMethodRow)
+    {
+        var left = _contracts.GetOutputStateContracts(methodRow);
+        var right = other._contracts.GetOutputStateContracts(otherMethodRow);
+        _resourceLedger?.ConsumeWork(checked((ulong)(left.Length + right.Length)
+            + 1UL));
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        foreach (var outputState in left)
+        {
+            _resourceLedger?.ConsumeWork();
+            var identity = (outputState.ParameterOrdinal, outputState.State,
+                GetPredicateIdentity(methodRow,
+                    outputState.PredicateGraphRow));
+            var found = false;
+            foreach (var candidate in right)
+            {
+                _resourceLedger?.ConsumeWork();
+                if (identity == (candidate.ParameterOrdinal, candidate.State,
+                        other.GetPredicateIdentity(otherMethodRow,
+                            candidate.PredicateGraphRow)))
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     internal bool MatchesAddressableMethod(int methodDefRow, int typeSpecRow,
         byte? targetConvention)
     {
+        _resourceLedger?.ConsumeWork(4);
         if (!HasAnchorForTypeSpec(typeSpecRow)
             || methodDefRow <= 0 || methodDefRow > _methods.Count
             || IsAnchorMethodDef(methodDefRow)
@@ -159,6 +310,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         for (var ordinal = 0; ordinal < targetCount; ordinal++)
         {
+            _resourceLedger?.ConsumeWork(3);
             var targetParameter = targetFirst + ordinal;
             var anchorParameter = anchorFirst + ordinal;
             if (_parameters.GetMode(targetParameter) != 0
@@ -175,19 +327,26 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     }
 
     internal bool AreEquivalentTypeSpecRefs(uint left, uint right)
-        => AreEquivalentTypeSpecRefs(left, right, false,
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return AreEquivalentTypeSpecRefs(left, right, false,
             new HashSet<(uint Left, uint Right, bool AllowInitQualifier)>(),
             new HashSet<(int Left, int Right)>());
+    }
 
     private bool AreEquivalentTypeSpecRefs(uint left, uint right,
         bool allowInitQualifier,
         HashSet<(uint Left, uint Right, bool AllowInitQualifier)> activeTypes,
         HashSet<(int Left, int Right)> activeAnchors)
     {
+        using var frame = _resourceLedger is null
+            ? default : _resourceLedger.EnterFrame();
+        _resourceLedger?.ConsumeWork(2);
         var leftType = _typeSpecs.GetTypeSpecRef(left,
             allowInitQualifier: allowInitQualifier);
         var rightType = _typeSpecs.GetTypeSpecRef(right,
             allowInitQualifier: allowInitQualifier);
+        _resourceLedger?.ConsumeWork();
         if (leftType.Qualifiers != rightType.Qualifiers)
         {
             return false;
@@ -209,8 +368,13 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         var nominalReferencePair = leftType.Form is 0x02 or 0x03
             && rightType.Form is 0x02 or 0x03;
-        if ((leftType.Form != rightType.Form && !nominalReferencePair)
-            || !activeTypes.Add((left, right, allowInitQualifier)))
+        _resourceLedger?.ConsumeWork(2);
+        if (leftType.Form != rightType.Form && !nominalReferencePair)
+        {
+            return false;
+        }
+        _resourceLedger?.ConsumeWork(2);
+        if (!activeTypes.Add((left, right, allowInitQualifier)))
         {
             return false;
         }
@@ -248,6 +412,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         }
         finally
         {
+            _resourceLedger?.ConsumeWork();
             _ = activeTypes.Remove((left, right, allowInitQualifier));
         }
     }
@@ -257,7 +422,9 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         HashSet<(uint Left, uint Right, bool AllowInitQualifier)> activeTypes,
         HashSet<(int Left, int Right)> activeAnchors)
     {
+        _resourceLedger?.ConsumeWork();
         var row = _typeSpecs.GetRow(indexed.Row);
+        _resourceLedger?.ConsumeWork();
         return row[2] == inline.TypeCode
             && AreEquivalentTypeSpecRefs(Read(row, 3),
                 0xF200_0000u | inline.ArgumentCode, row[2] == 0x8A,
@@ -291,6 +458,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         for (var ordinal = 0; ordinal < formalCount; ordinal++)
         {
+            _resourceLedger?.ConsumeWork();
             var formal = formalFirst + ordinal;
             var leftArgument = _typeSpecs.GetConstructedArgument(leftType.Row, ordinal);
             var rightArgument = _typeSpecs.GetConstructedArgument(rightType.Row, ordinal);
@@ -322,37 +490,46 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         HashSet<(uint Left, uint Right, bool AllowInitQualifier)> activeTypes,
         HashSet<(int Left, int Right)> activeAnchors)
     {
+        _resourceLedger?.ConsumeWork(2);
         if (_constantSources.GetKind(checked((int)left)) != 1
             || _constantSources.GetKind(checked((int)right)) != 1)
         {
             return false;
         }
 
-        var leftNode = checked((int)_constantSources.GetPayloadReference(checked((int)left)));
-        var rightNode = checked((int)_constantSources.GetPayloadReference(checked((int)right)));
-        if (_frozenValueNodes.GetKind(leftNode) != 1
-            || _frozenValueNodes.GetKind(rightNode) != 1
-            || !AreEquivalentTypeSpecRefs(_genericParams.GetConstantTypeSpecRef(formal),
-                _frozenValueNodes.GetTypeSpecRef(leftNode), false,
+        var expectedTypeSpecRef = _genericParams.GetConstantTypeSpecRef(formal);
+        if (!AreEquivalentTypeSpecRefs(expectedTypeSpecRef,
+                _frozenValueNodes.GetTypeSpecRef(checked((int)_constantSources
+                    .GetPayloadReference(checked((int)left)))), false,
                 activeTypes, activeAnchors)
-            || !AreEquivalentTypeSpecRefs(_genericParams.GetConstantTypeSpecRef(formal),
-                _frozenValueNodes.GetTypeSpecRef(rightNode), false,
+            || !AreEquivalentTypeSpecRefs(expectedTypeSpecRef,
+                _frozenValueNodes.GetTypeSpecRef(checked((int)_constantSources
+                    .GetPayloadReference(checked((int)right)))), false,
                 activeTypes, activeAnchors))
         {
             return false;
         }
 
-        var leftType = _typeSpecs.GetTypeSpecRef(
-            _frozenValueNodes.GetTypeSpecRef(leftNode));
-        if (leftType.Form != 0x01 || leftType.Qualifiers != 0
-            || !TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(
-                leftType.TypeCode))
+        var owner = _genericParams.GetOwnerDefId(formal);
+        var ownerRow = checked((int)(owner & 0x00FF_FFFF));
+        var ownerModule = (byte)(owner >> 24) switch
         {
-            return false;
-        }
+            0x13 => _typeDefs.GetOwnerModule(ownerRow),
+            0x16 => _methods.GetOwnerModule(ownerRow),
+            _ => throw InvalidAnchor(),
+        };
+        var leftPayload = TrRmConstantSourceValueValidator.GetFrozenScalarPayload(
+            checked((int)left), expectedTypeSpecRef, ownerModule,
+            _constantSources, _frozenValueNodes, _blobs, _typeSpecs,
+            _features, _modules, _typeDefs, _enumDefs, _imports);
+        var rightPayload = TrRmConstantSourceValueValidator.GetFrozenScalarPayload(
+            checked((int)right), expectedTypeSpecRef, ownerModule,
+            _constantSources, _frozenValueNodes, _blobs, _typeSpecs,
+            _features, _modules, _typeDefs, _enumDefs, _imports);
 
-        return _frozenValueNodes.GetScalarPayload(leftNode, _blobs)
-            .SequenceEqual(_frozenValueNodes.GetScalarPayload(rightNode, _blobs));
+        _resourceLedger?.ConsumeWork(checked((ulong)leftPayload.Length
+            + (ulong)rightPayload.Length + 1UL));
+        return leftPayload.SequenceEqual(rightPayload);
     }
 
     private bool EquivalentAnchors(int leftTypeSpecRow, int rightTypeSpecRow,
@@ -368,6 +545,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         var leftMethod = GetAnchorMethodDefRow(leftTypeSpecRow);
         var rightMethod = GetAnchorMethodDefRow(rightTypeSpecRow);
         var anchorKey = (leftMethod, rightMethod);
+        _resourceLedger?.ConsumeWork(2);
         if (_conventionByTypeSpecRow[leftTypeSpecRow]
                 != _conventionByTypeSpecRow[rightTypeSpecRow]
             || !activeAnchors.Add(anchorKey))
@@ -410,6 +588,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         }
         finally
         {
+            _resourceLedger?.ConsumeWork();
             _ = activeAnchors.Remove(anchorKey);
         }
     }
@@ -438,6 +617,8 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     {
         var left = _contracts.GetPredicateGraphContracts(leftMethod);
         var right = _contracts.GetPredicateGraphContracts(rightMethod);
+        _resourceLedger?.ConsumeWork(checked((ulong)(left.Length + right.Length)
+            + 1UL));
         if (left.Length != right.Length)
         {
             return false;
@@ -445,10 +626,12 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         foreach (var candidate in left)
         {
+            _resourceLedger?.ConsumeWork();
             var identity = GetPredicateIdentity(candidate);
             var found = false;
             foreach (var other in right)
             {
+                _resourceLedger?.ConsumeWork();
                 if (identity == GetPredicateIdentity(other))
                 {
                     found = true;
@@ -469,6 +652,8 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     {
         var left = _contracts.GetOutputStateContracts(leftMethod);
         var right = _contracts.GetOutputStateContracts(rightMethod);
+        _resourceLedger?.ConsumeWork(checked((ulong)(left.Length + right.Length)
+            + 1UL));
         if (left.Length != right.Length)
         {
             return false;
@@ -476,11 +661,13 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         foreach (var candidate in left)
         {
+            _resourceLedger?.ConsumeWork();
             var identity = (candidate.ParameterOrdinal, candidate.State,
                 GetPredicateIdentity(leftMethod, candidate.PredicateGraphRow));
             var found = false;
             foreach (var other in right)
             {
+                _resourceLedger?.ConsumeWork();
                 if (identity == (other.ParameterOrdinal, other.State,
                     GetPredicateIdentity(rightMethod, other.PredicateGraphRow)))
                 {
@@ -502,33 +689,43 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     {
         var left = _contracts.GetNativeParameters(leftMethod);
         var right = _contracts.GetNativeParameters(rightMethod);
-        return left.Length == right.Length
-            && new HashSet<TrRmNativeParameterContract>(left).SetEquals(right);
+        _resourceLedger?.ConsumeWork(checked((ulong)(left.Length + right.Length)
+            + 3UL));
+        var leftSet = new HashSet<TrRmNativeParameterContract>(left);
+        var rightSet = new HashSet<TrRmNativeParameterContract>(right);
+        return left.Length == right.Length && leftSet.SetEquals(rightSet);
     }
 
     private bool SameDependencyContracts(int leftMethod, int rightMethod)
     {
         var left = _contracts.GetDependencyContracts(leftMethod);
         var right = _contracts.GetDependencyContracts(rightMethod);
-        return left.Length == right.Length
-            && new HashSet<TrRmDependencyContract>(left).SetEquals(right);
+        _resourceLedger?.ConsumeWork(checked((ulong)(left.Length + right.Length)
+            + 3UL));
+        var leftSet = new HashSet<TrRmDependencyContract>(left);
+        var rightSet = new HashSet<TrRmDependencyContract>(right);
+        return left.Length == right.Length && leftSet.SetEquals(rightSet);
     }
 
     private bool DependenciesSatisfy(int actualMethod, int expectedMethod)
     {
         var actual = _contracts.GetDependencyContracts(actualMethod);
         var expected = _contracts.GetDependencyContracts(expectedMethod);
+        _resourceLedger?.ConsumeWork(checked(4UL
+            + (ulong)actual.Length + (ulong)expected.Length));
         var actualGroups = new HashSet<(byte DestinationKind,
             uint DestinationOrdinal, byte Phase)>();
         var expectedGroups = new HashSet<(byte DestinationKind,
             uint DestinationOrdinal, byte Phase)>();
         foreach (var dependency in actual)
         {
+            _resourceLedger?.ConsumeWork(2);
             _ = actualGroups.Add((dependency.DestinationKind,
                 dependency.DestinationOrdinal, dependency.Phase));
         }
         foreach (var dependency in expected)
         {
+            _resourceLedger?.ConsumeWork(2);
             _ = expectedGroups.Add((dependency.DestinationKind,
                 dependency.DestinationOrdinal, dependency.Phase));
         }
@@ -539,10 +736,12 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
         foreach (var group in expectedGroups)
         {
+            _resourceLedger?.ConsumeWork(4);
             var actualRows = new List<TrRmDependencyContract>();
             var expectedRows = new List<TrRmDependencyContract>();
             foreach (var dependency in actual)
             {
+                _resourceLedger?.ConsumeWork();
                 if ((dependency.DestinationKind, dependency.DestinationOrdinal,
                     dependency.Phase) == group)
                 {
@@ -551,6 +750,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
             }
             foreach (var dependency in expected)
             {
+                _resourceLedger?.ConsumeWork();
                 if ((dependency.DestinationKind, dependency.DestinationOrdinal,
                     dependency.Phase) == group)
                 {
@@ -569,9 +769,11 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
             foreach (var actualDependency in actualRows)
             {
+                _resourceLedger?.ConsumeWork();
                 var found = false;
                 foreach (var expectedDependency in expectedRows)
                 {
+                    _resourceLedger?.ConsumeWork();
                     if (expectedDependency.SourceKind
                             != actualDependency.SourceKind
                         || expectedDependency.SourceOrdinal
@@ -609,6 +811,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         TrRmPredicateGraphContract predicate)
     {
         var graph = predicate.PredicateGraphRow;
+        _resourceLedger?.ConsumeWork(3);
         if (graph <= 0 || graph >= _predicateSelectorKinds.Length
             || _predicateSelectorKinds[graph] == 0)
         {
@@ -624,6 +827,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     {
         foreach (var predicate in _contracts.GetPredicateGraphContracts(method))
         {
+            _resourceLedger?.ConsumeWork();
             if (predicate.PredicateGraphRow == graphRow)
             {
                 return GetPredicateIdentity(predicate);
@@ -635,11 +839,13 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
 
     private void ValidateAnchorCycles()
     {
+        _resourceLedger?.ConsumeWork(2);
         var activeTypeRows = new HashSet<int>();
         var activeMethods = new HashSet<int>();
         for (var typeSpecRow = 1; typeSpecRow < _methodByTypeSpecRow.Length;
              typeSpecRow++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_methodByTypeSpecRow[typeSpecRow] != 0)
             {
                 VisitTypeSpec((uint)typeSpecRow, activeTypeRows, activeMethods);
@@ -650,12 +856,16 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     private void VisitTypeSpec(uint typeSpecRef, HashSet<int> activeTypeRows,
         HashSet<int> activeMethods)
     {
+        using var frame = _resourceLedger is null
+            ? default : _resourceLedger.EnterFrame();
+        _resourceLedger?.ConsumeWork();
         var type = _typeSpecs.GetTypeSpecRef(typeSpecRef,
             allowInitQualifier: true);
         if (!type.IsRow)
         {
             return;
         }
+        _resourceLedger?.ConsumeWork(2);
         if (!activeTypeRows.Add(type.Row))
         {
             throw InvalidAnchor();
@@ -708,6 +918,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         }
         finally
         {
+            _resourceLedger?.ConsumeWork();
             _ = activeTypeRows.Remove(type.Row);
         }
     }
@@ -715,6 +926,9 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
     private void VisitAnchorMethod(int method, HashSet<int> activeTypeRows,
         HashSet<int> activeMethods)
     {
+        using var frame = _resourceLedger is null
+            ? default : _resourceLedger.EnterFrame();
+        _resourceLedger?.ConsumeWork(2);
         if (!activeMethods.Add(method))
         {
             throw InvalidAnchor();
@@ -734,15 +948,17 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         }
         finally
         {
+            _resourceLedger?.ConsumeWork();
             _ = activeMethods.Remove(method);
         }
     }
 
-    private static bool HasPropertyAccessor(TrRmPropertyDefTableReader properties,
+    private bool HasPropertyAccessor(TrRmPropertyDefTableReader properties,
         int methodDefRow)
     {
         for (var property = 1; property <= properties.Count; property++)
         {
+            _resourceLedger?.ConsumeWork();
             if (properties.GetGetterMethod(property) == methodDefRow)
             {
                 return true;
@@ -752,11 +968,12 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         return false;
     }
 
-    private static bool HasInterfaceMethod(
+    private bool HasInterfaceMethod(
         TrRmInterfaceMethodTableReader interfaceMethods, int methodDefRow)
     {
         for (var row = 1; row <= interfaceMethods.Count; row++)
         {
+            _resourceLedger?.ConsumeWork(2);
             if (interfaceMethods.GetMethodDefRow(row) == methodDefRow)
             {
                 return true;
@@ -766,9 +983,12 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
         return false;
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
             data.Slice(offset, sizeof(uint)));
+    }
 
     private static bool HasUnsupportedContract(TrRmContractTableReader contracts,
         TrRmMethodDefTableReader methods, int methodDefRow)
@@ -780,7 +1000,7 @@ internal readonly ref struct TrRmNativeFunctionPointerAnchorTableReader
                 contracts.GetRow(first + offset)[4..]);
             if (kind is not (1 or 2 or 4 or 0x0B)
                 && !(kind == 0x0E
-                    && contracts.Schema == TrRmArtifactSchema.ForeignInvocationDraft))
+                    && contracts.Schema.UsesForeignInvocationContracts()))
             {
                 return true;
             }

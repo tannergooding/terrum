@@ -21,6 +21,7 @@ public readonly ref struct TrRmAssociatedTypeDefTableReader
     private const int RowSize = 12;
 
     private readonly ReadOnlySpan<byte> _rows;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated AssociatedTypeDef rows.</summary>
     public int Count { get; }
@@ -34,7 +35,17 @@ public readonly ref struct TrRmAssociatedTypeDefTableReader
     public TrRmAssociatedTypeDefTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmStringTableReader strings, TrRmTypeSpecTableReader types,
         TrRmInterfaceDefTableReader interfaces)
+        : this(section, recordCount, strings, types, interfaces, null)
     {
+    }
+
+    internal TrRmAssociatedTypeDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmTypeSpecTableReader types,
+        TrRmInterfaceDefTableReader interfaces,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(3);
         if (recordCount is < 0 or > 0xFF_FFFF
             || recordCount != interfaces.AssociatedTypeCount
             || (long)recordCount * RowSize != section.Length)
@@ -44,12 +55,15 @@ public readonly ref struct TrRmAssociatedTypeDefTableReader
 
         _rows = section;
         Count = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = GetRow(row);
             var ownerInterface = Read(data, 0);
             var name = Read(data, 4);
             var defaultType = Read(data, 8);
+            _resourceLedger?.ConsumeWork(4);
             if (ownerInterface is 0 or > 0xFF_FFFF
                 || ownerInterface > interfaces.Count
                 || interfaces.GetAssociatedTypeOwner(row) != ownerInterface
@@ -80,6 +94,7 @@ public readonly ref struct TrRmAssociatedTypeDefTableReader
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > Count)
         {
             throw InvalidAssociatedTypeDef();
@@ -91,8 +106,12 @@ public readonly ref struct TrRmAssociatedTypeDefTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidAssociatedTypeDef()
         => new("Invalid TRRM AssociatedTypeDef table.");

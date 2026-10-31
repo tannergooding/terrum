@@ -41,6 +41,7 @@ public readonly ref struct TrRmInterfaceDefTableReader
     private readonly int _methodCount;
     private readonly int _associatedConstCount;
     private readonly int _interfaceConstCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated InterfaceDef rows.</summary>
     public int Count => _recordCount;
@@ -74,7 +75,20 @@ public readonly ref struct TrRmInterfaceDefTableReader
         TrRmTypeDefTableReader types, TrRmGenericParamTableReader formals,
         int interfaceBaseCount, int interfaceMethodCount, int associatedTypeCount,
         int associatedConstCount, int interfaceConstCount)
+        : this(section, recordCount, types, formals, interfaceBaseCount,
+            interfaceMethodCount, associatedTypeCount, associatedConstCount,
+            interfaceConstCount, null)
     {
+    }
+
+    internal TrRmInterfaceDefTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeDefTableReader types,
+        TrRmGenericParamTableReader formals, int interfaceBaseCount,
+        int interfaceMethodCount, int associatedTypeCount,
+        int associatedConstCount, int interfaceConstCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(8);
         if (!ValidCount(recordCount) || !ValidCount(interfaceBaseCount)
             || !ValidCount(interfaceMethodCount) || !ValidCount(associatedTypeCount)
             || !ValidCount(associatedConstCount) || !ValidCount(interfaceConstCount)
@@ -89,14 +103,19 @@ public readonly ref struct TrRmInterfaceDefTableReader
         _methodCount = interfaceMethodCount;
         _associatedConstCount = associatedConstCount;
         _interfaceConstCount = interfaceConstCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)associatedTypeCount + 1UL
+            + (ulong)types.Count + 1UL));
         _associatedTypeOwners = new int[associatedTypeCount + 1];
         _interfaceOwners = new int[types.Count + 1];
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = GetRow(row);
             var ownerTypeDef = Read(data, 0);
             var selfFormal = Read(data, 4);
+            _resourceLedger?.ConsumeWork(4);
             if (ownerTypeDef is 0 or > 0xFF_FFFF || ownerTypeDef > types.Count
                 || ((types.GetFlags((int)ownerTypeDef) >> 2) & 3) != 3
                 || _interfaceOwners[ownerTypeDef] != 0)
@@ -104,6 +123,7 @@ public readonly ref struct TrRmInterfaceDefTableReader
                 throw InvalidInterfaceDef();
             }
 
+            _resourceLedger?.ConsumeWork();
             _interfaceOwners[ownerTypeDef] = row;
             if (selfFormal != 0)
             {
@@ -145,17 +165,20 @@ public readonly ref struct TrRmInterfaceDefTableReader
                 associatedRow < associatedTypeFirst + associatedTypeRangeCount;
                 associatedRow++)
             {
+                _resourceLedger?.ConsumeWork(2);
                 if (_associatedTypeOwners[associatedRow] != 0)
                 {
                     throw InvalidInterfaceDef();
                 }
 
+                _resourceLedger?.ConsumeWork();
                 _associatedTypeOwners[associatedRow] = row;
             }
         }
 
         for (var typeDef = 1; typeDef <= types.Count; typeDef++)
         {
+            _resourceLedger?.ConsumeWork(2);
             var isInterface = ((types.GetFlags(typeDef) >> 2) & 3) == 3;
             if (isInterface != (_interfaceOwners[typeDef] != 0))
             {
@@ -165,6 +188,7 @@ public readonly ref struct TrRmInterfaceDefTableReader
 
         for (var associatedType = 1; associatedType <= associatedTypeCount; associatedType++)
         {
+            _resourceLedger?.ConsumeWork();
             if (_associatedTypeOwners[associatedType] == 0)
             {
                 throw InvalidInterfaceDef();
@@ -178,11 +202,13 @@ public readonly ref struct TrRmInterfaceDefTableReader
 
     internal int GetInterfaceDefForTypeDef(int typeDef)
     {
+        _resourceLedger?.ConsumeWork();
         if (typeDef <= 0 || typeDef >= _interfaceOwners.Length)
         {
             throw InvalidInterfaceDef();
         }
 
+        _resourceLedger?.ConsumeWork();
         return _interfaceOwners[typeDef];
     }
 
@@ -213,16 +239,19 @@ public readonly ref struct TrRmInterfaceDefTableReader
     /// <summary>Gets the InterfaceDef row that owns an AssociatedTypeDef row.</summary>
     public int GetAssociatedTypeOwner(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row >= _associatedTypeOwners.Length)
         {
             throw InvalidInterfaceDef();
         }
 
+        _resourceLedger?.ConsumeWork();
         return _associatedTypeOwners[row];
     }
 
     private ReadOnlySpan<byte> GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidInterfaceDef();
@@ -234,8 +263,12 @@ public readonly ref struct TrRmInterfaceDefTableReader
     private uint ReadRow(int row, int offset)
         => Read(GetRow(row), offset);
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static bool ValidCount(int count)
         => count is >= 0 and <= 0xFF_FFFF;

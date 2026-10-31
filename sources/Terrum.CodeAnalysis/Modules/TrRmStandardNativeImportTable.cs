@@ -81,6 +81,7 @@ public readonly ref struct TrRmNativeImportTableReader
     private readonly int[] _rowByMethod;
     private readonly int[] _rowByField;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Validates standard NativeImport rows and their exact static owners.</summary>
     /// <param name="section">The borrowed 16-byte-row section.</param>
@@ -103,7 +104,22 @@ public readonly ref struct TrRmNativeImportTableReader
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
         TrRmLayoutTableReader layouts)
+        : this(section, recordCount, strings, methods, fields, typeDefs,
+            imports, modules, signatures, parameters, types, contracts,
+            layouts, null)
     {
+    }
+
+    internal TrRmNativeImportTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmStringTableReader strings,
+        TrRmMethodDefTableReader methods, TrRmFieldDefTableReader fields,
+        TrRmTypeDefTableReader typeDefs, TrRmImportTableReader imports,
+        TrRmModuleTableReader modules, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmTypeSpecTableReader types,
+        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(4);
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * 16 != section.Length
             || types.NativeFunctionPointerSignatureCount != 0
@@ -117,12 +133,17 @@ public readonly ref struct TrRmNativeImportTableReader
         _methods = methods;
         _fields = fields;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
+        _resourceLedger?.ConsumeWork(checked((ulong)methods.Count + 1UL
+            + (ulong)fields.Count + 1UL));
         _rowByMethod = new int[methods.Count + 1];
         _rowByField = new int[fields.Count + 1];
 
         for (var row = 1; row <= recordCount; row++)
         {
+            _resourceLedger?.ConsumeWork();
             var data = GetRowBytes(row);
+            _resourceLedger?.ConsumeWork(4);
             var ownerKind = data[0];
             var resolutionMode = data[1];
             var resolutionPolicy = data[2];
@@ -155,12 +176,15 @@ public readonly ref struct TrRmNativeImportTableReader
             {
                 case MethodDefOwnerKind:
                     ValidateMethod((int)ownerRef, callConv, methods, signatures,
-                        parameters, types, contracts, layouts);
+                        parameters, types, contracts, layouts,
+                        _resourceLedger);
+                    _resourceLedger?.ConsumeWork(2);
                     if (_rowByMethod[ownerRef] != 0)
                     {
                         throw InvalidNativeImport();
                     }
 
+                    _resourceLedger?.ConsumeWork();
                     _rowByMethod[ownerRef] = row;
                     break;
                 case FieldDefOwnerKind:
@@ -168,12 +192,13 @@ public readonly ref struct TrRmNativeImportTableReader
                         || (fields.GetFlags((int)ownerRef) & 0x08) == 0
                         || !IsNativeAbiFieldType(types, (uint)fields.GetTypeSpecRef((int)ownerRef),
                         fields.GetOwnerTypeDef((int)ownerRef), typeDefs, imports,
-                        modules, contracts, layouts)
+                        modules, contracts, layouts, _resourceLedger)
                         || _rowByField[ownerRef] != 0)
                     {
                         throw InvalidNativeImport();
                     }
 
+                    _resourceLedger?.ConsumeWork();
                     _rowByField[ownerRef] = row;
                     break;
                 default:
@@ -190,7 +215,9 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <returns>The decoded fixed-row fields.</returns>
     public TrRmNativeImportRow GetRow(int row)
     {
+        _resourceLedger?.ConsumeWork();
         var data = GetRowBytes(row);
+        _resourceLedger?.ConsumeWork(4);
         return new TrRmNativeImportRow(data[0], data[1], data[2], data[3],
             (int)Read(data, 4), (int)Read(data, 8), (int)Read(data, 12));
     }
@@ -199,15 +226,23 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <param name="methodDefRow">The one-based MethodDef row.</param>
     /// <returns><see langword="true"/> if the method has an import.</returns>
     public bool HasImportForMethod(int methodDefRow)
-        => _rowByMethod is not null && methodDefRow > 0
-            && methodDefRow < _rowByMethod.Length && _rowByMethod[methodDefRow] != 0;
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return _rowByMethod is not null && methodDefRow > 0
+            && methodDefRow < _rowByMethod.Length
+            && _rowByMethod[methodDefRow] != 0;
+    }
 
     /// <summary>Determines whether a FieldDef has a data import row.</summary>
     /// <param name="fieldDefRow">The one-based FieldDef row.</param>
     /// <returns><see langword="true"/> if the field has an import.</returns>
     public bool HasImportForField(int fieldDefRow)
-        => _rowByField is not null && fieldDefRow > 0
-            && fieldDefRow < _rowByField.Length && _rowByField[fieldDefRow] != 0;
+    {
+        _resourceLedger?.ConsumeWork(2);
+        return _rowByField is not null && fieldDefRow > 0
+            && fieldDefRow < _rowByField.Length
+            && _rowByField[fieldDefRow] != 0;
+    }
 
     /// <summary>Gets the import row for a method.</summary>
     /// <param name="methodDefRow">The one-based MethodDef row.</param>
@@ -229,13 +264,18 @@ public readonly ref struct TrRmNativeImportTableReader
     /// <param name="row">A validated import row.</param>
     /// <returns>The exact decoded library name.</returns>
     public string GetLibraryName(TrRmNativeImportRow row)
-        => _strings.DecodeName(row.LibraryNameStringRow);
+    {
+        _resourceLedger?.ConsumeWork();
+        return _strings.DecodeName(row.LibraryNameStringRow);
+    }
 
     /// <summary>Gets the explicit entry name or exact owner declaration name.</summary>
     /// <param name="row">A validated import row.</param>
     /// <returns>The exact decoded entry name.</returns>
     public string GetEntryName(TrRmNativeImportRow row)
-        => row.EntryNameStringRow != 0
+    {
+        _resourceLedger?.ConsumeWork();
+        return row.EntryNameStringRow != 0
             ? _strings.DecodeName(row.EntryNameStringRow)
             : row.OwnerKind switch
             {
@@ -243,12 +283,15 @@ public readonly ref struct TrRmNativeImportTableReader
                 FieldDefOwnerKind => _fields.GetName(row.OwnerRef),
                 _ => throw InvalidNativeImport(),
             };
+    }
 
     private static void ValidateMethod(int ownerRef, byte callConv,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader types,
-        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts)
+        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork(3);
         if (ownerRef <= 0 || ownerRef > methods.Count
             || callConv is < 1 or > 4
             || methods.GetBodyRow(ownerRef) != 0)
@@ -273,8 +316,10 @@ public readonly ref struct TrRmNativeImportTableReader
     internal static bool IsNativeAbiFieldType(TrRmTypeSpecTableReader types,
         uint typeSpecRef, int fieldOwnerTypeDef, TrRmTypeDefTableReader typeDefs,
         TrRmImportTableReader imports, TrRmModuleTableReader modules,
-        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts)
+        TrRmContractTableReader contracts, TrRmLayoutTableReader layouts,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork();
         if (TrRmNativeImportTypeContract.IsNativeAbiValueType(types, typeSpecRef))
         {
             return true;
@@ -295,6 +340,7 @@ public readonly ref struct TrRmNativeImportTableReader
         var (contractFirst, contractCount) = typeDefs.GetContractRange(typeDefRow);
         for (var contract = contractFirst; contract < contractFirst + contractCount; contract++)
         {
+            resourceLedger?.ConsumeWork(3);
             if (BinaryPrimitives.ReadUInt16LittleEndian(contracts.GetRow(contract)[4..]) == 5)
             {
                 return false;
@@ -311,6 +357,7 @@ public readonly ref struct TrRmNativeImportTableReader
 
     private ReadOnlySpan<byte> GetRowBytes(int row)
     {
+        _resourceLedger?.ConsumeWork();
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidNativeImport();
@@ -340,8 +387,12 @@ public readonly ref struct TrRmNativeImportTableReader
         return true;
     }
 
-    private static uint Read(ReadOnlySpan<byte> bytes, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> bytes, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            bytes.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidNativeImport()
         => new("Invalid standard TRRM NativeImport table.");

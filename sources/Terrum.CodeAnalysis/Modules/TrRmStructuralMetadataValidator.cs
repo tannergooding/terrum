@@ -1380,7 +1380,8 @@ public static class TrRmStructuralMetadataValidator
         var properties = propertyCount == 0 ? default
             : new TrRmPropertyDefTableReader(propertyBytes, propertyCount,
                 strings, types, typeSpecs, methods, signatures,
-                deferGetterTypeIdentity: !developmentProfile);
+                deferGetterTypeIdentity: !developmentProfile,
+                resourceLedger: selectedA3LayoutResourceLedger);
         var selectedConstantSourceCount = developmentProfile ? 0 : constantSourceCount;
         var generics = new TrRmGenericParamTableReader(genericParamBytes, genericParamCount,
             strings, types, methods, signatures, typeSpecs, constraintCount,
@@ -1511,7 +1512,7 @@ public static class TrRmStructuralMetadataValidator
             interfaces = new TrRmInterfaceDefTableReader(interfaceDefBytes,
                 interfaceDefCount, types, generics, interfaceBaseCount,
                 interfaceMethodCount, associatedTypeCount, associatedConstCount,
-                interfaceConstCount);
+                interfaceConstCount, selectedA3LayoutResourceLedger);
             interfaceBases = new TrRmInterfaceBaseTableReader(interfaceBaseBytes,
                 interfaceBaseCount, typeSpecs, interfaces);
             interfaceMethods = new TrRmInterfaceMethodTableReader(interfaceMethodBytes,
@@ -1544,7 +1545,7 @@ public static class TrRmStructuralMetadataValidator
             }
             associatedTypeDefs = new TrRmAssociatedTypeDefTableReader(
                 associatedTypeBytes, associatedTypeCount, strings, typeSpecs,
-                interfaces);
+                interfaces, selectedA3LayoutResourceLedger);
             imports = new TrRmImportTableReader(importBytes, importCount,
                 strings, moduleRefs, types, methods, properties,
                 interfaces, associatedTypeDefs, fields, features, modules,
@@ -1881,12 +1882,14 @@ public static class TrRmStructuralMetadataValidator
         var standardNativeImports = !developmentProfile && !copyOriginDraft
             ? new TrRmNativeImportTableReader(standardNativeImportBytes,
                 standardNativeImportCount, strings, methods, fields, types, imports,
-                modules, signatures, parameters, typeSpecs, contracts, layouts)
+                modules, signatures, parameters, typeSpecs, contracts, layouts,
+                selectedA3LayoutResourceLedger)
             : default;
         var nativeExports = !developmentProfile
             ? new TrRmNativeExportTableReader(nativeExportBytes, nativeExportCount,
                 strings, methods, fields, types, imports, modules, signatures,
-                typeSpecs, contracts, layouts)
+                typeSpecs, contracts, layouts,
+                selectedA3LayoutResourceLedger)
             : default;
         var nativeFunctionPointerAnchors = !developmentProfile
             ? new TrRmNativeFunctionPointerAnchorTableReader(typeSpecs, types,
@@ -1894,7 +1897,7 @@ public static class TrRmStructuralMetadataValidator
                 constantSources, frozenValueNodes, blobs, features, index.Schema,
                 predicateSelectorKinds, modules,
                 exports, properties, interfaceMethods, standardNativeImports,
-                nativeExports)
+                nativeExports, selectedA3LayoutResourceLedger)
             : default;
         if (!developmentProfile)
         {
