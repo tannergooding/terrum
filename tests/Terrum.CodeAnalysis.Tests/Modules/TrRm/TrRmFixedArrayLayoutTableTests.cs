@@ -327,6 +327,26 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void PropagatesArrayIndexValueAcrossBlocks()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            crossBlockRegisterIndex: true);
+
+        ValidateBodyMaps(artifact);
+    }
+
+    [Test]
+    public void RejectsMismatchedArrayIndexValueAtBlockEntry()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            crossBlockRegisterIndex: true,
+            mismatchedCrossBlockIndexType: true);
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
+    [Test]
     public void MergesNestedArrayPlaceHandleOriginsAcrossBranches()
     {
         var artifact = CreateNestedArrayPlaceArtifact(
@@ -4296,9 +4316,11 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         ulong requiredElementCount = 1,
         bool zeroRequiredElementCount = false,
         bool crossBlockPlaceSelection = false,
+        bool crossBlockRegisterIndex = false,
         bool branchJoinPlaceSelection = false,
         bool loopPlaceSelection = false,
-        bool missingBranchPlaceHandle = false)
+        bool missingBranchPlaceHandle = false,
+        bool mismatchedCrossBlockIndexType = false)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -4332,8 +4354,13 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             new TrRmFixedArrayLayoutRow(1, 1, 1, 4, 8, 4),
             new TrRmFixedArrayLayoutRow(1, 2, 1, 8, 24, 4),
         ], typeSpecs, targetProfiles, features, modules);
-        var hasControlFlowParameter
-            = branchJoinPlaceSelection || loopPlaceSelection;
+        var hasControlFlowParameter = crossBlockRegisterIndex
+            || branchJoinPlaceSelection || loopPlaceSelection;
+        var controlFlowParameterType = crossBlockRegisterIndex
+            ? mismatchedCrossBlockIndexType
+                ? 0xF200_0001u
+                : 0xF200_000Du
+            : 0xF200_0001u;
         var methodSignatureBytes = TrRmMethodSigTableWriter.Encode([
             new TrRmMethodSigRow(0xF200_0000, 0,
                 hasControlFlowParameter ? 1 : 0,
@@ -4343,7 +4370,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             1, typeSpecs, hasControlFlowParameter ? 1 : 0, 0);
         var parameterBytes = hasControlFlowParameter
             ? TrRmParamTableWriter.Encode([
-                new TrRmParamRow(1, 0, 0xF200_0001, 0),
+                new TrRmParamRow(1, 0, controlFlowParameterType, 0),
             ], signatures, typeSpecs, schema)
             : [];
         var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
@@ -4392,6 +4419,12 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 destinationIndex: 1, baseIndex: 0, indexKind: 2,
                 targetRefKind: 3, indexIndex: 2, targetRef: 1,
                 referentTypeMapIndex: 2, schema);
+        var registerIndexSelection
+            = TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                targetKind: 3, accessKind: 1, destinationKind: 1, baseKind: 2,
+                destinationIndex: 0, baseIndex: 0, indexKind: 1,
+                targetRefKind: 3, indexIndex: 1, targetRef: 2,
+                referentTypeMapIndex: 1, schema);
         var address = TrRmRegisterBodyRecordWriter.EncodeStorageAddress(
             sourceKind: 1, resultKind: 1, sourceIndex: 1, resultIndex: 2,
             pointerTypeMapIndex: 3,
@@ -4400,7 +4433,26 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         TrRmRegisterBodyBlock[] blocks;
         ReadOnlyMemory<byte>[] records;
         byte[] code;
-        if (loopPlaceSelection)
+        if (crossBlockRegisterIndex)
+        {
+            blocks = [
+                new TrRmRegisterBodyBlock(0, 4, 0),
+                new TrRmRegisterBodyBlock(4, 6, 1),
+            ];
+            records = [
+                new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    1, 0, 2, 0, 0 },
+                registerIndexSelection,
+            ];
+            code = [
+                0x11, 0x01,
+                0xB0, 1,
+                0xD8, 0, 2, 0,
+                0xB7, 0,
+            ];
+        }
+        else if (loopPlaceSelection)
         {
             blocks = [
                 new TrRmRegisterBodyBlock(0, 6, 0),

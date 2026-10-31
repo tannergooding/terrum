@@ -1508,7 +1508,7 @@ internal static class TrRmRegisterBodyMapValidator
                 {
                     ConsumeWork(body);
                     var expected = successorEntryStates[register];
-                    if (!expected.IsPlaceHandle)
+                    if (!expected.IsKnown)
                     {
                         continue;
                     }
@@ -1519,12 +1519,18 @@ internal static class TrRmRegisterBodyMapValidator
                     }
 
                     var incoming = outputStates[sourceBlock][register];
-                    if (!incoming.IsPlaceHandle
-                        || incoming.PlaceOrigins.Length == 0
-                        || expected.AccessKind != incoming.AccessKind
+                    if (!incoming.IsKnown
+                        || expected.IsPlaceHandle != incoming.IsPlaceHandle
                         || !typeSpecs.AreEquivalentTypeSpecRefs(
                             GetRegisterTypeSpecRef(body, expected),
                             GetRegisterTypeSpecRef(body, incoming)))
+                    {
+                        throw InvalidMap();
+                    }
+
+                    if (expected.IsPlaceHandle
+                        && (incoming.PlaceOrigins.Length == 0
+                            || expected.AccessKind != incoming.AccessKind))
                     {
                         throw InvalidMap();
                     }
