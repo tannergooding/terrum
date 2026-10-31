@@ -157,6 +157,27 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             _a3ResourceLedger?.ConsumeWork();
             var pendingTypes = new Queue<TypeOriginPair>();
+            if (_consumer.Schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
+            {
+                var (typeDefStart, typeDefEnd)
+                    = _consumer.Modules.GetTypeDefRange(rootModuleRow);
+                for (var typeDefRow = typeDefStart;
+                    typeDefRow < typeDefEnd; typeDefRow++)
+                {
+                    var (fieldStart, fieldEnd)
+                        = _consumer.TypeDefs.GetFieldRange(typeDefRow);
+                    for (var fieldRow = fieldStart; fieldRow < fieldEnd;
+                        fieldRow++)
+                    {
+                        ConsumeWork();
+                        CollectStorageType(0, rootModuleRow,
+                            _consumer.Fields.GetTypeSpecRef(fieldRow),
+                            pendingTypes);
+                    }
+                }
+            }
+
             for (var layoutRow = 1;
                 layoutRow <= _consumer.FixedArrayLayouts.Count; layoutRow++)
             {

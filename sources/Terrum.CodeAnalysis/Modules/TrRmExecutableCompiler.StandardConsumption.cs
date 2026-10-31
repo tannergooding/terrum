@@ -259,7 +259,8 @@ public static partial class TrRmExecutableCompiler
             return LoadForeignInvocationDraftNativeAddressLibrary(
                 artifacts[0], rootModuleRow, null, verifySemantics,
                 schema: GetForeignInvocationSchema(schemaIdentities[0]),
-                a3LayoutResourceLedger: a3LayoutResourceLedger);
+                a3LayoutResourceLedger: a3LayoutResourceLedger,
+                typeProviderBindings: typeProviderBindings);
         }
 
         var expectedDefinition = tables.Imports

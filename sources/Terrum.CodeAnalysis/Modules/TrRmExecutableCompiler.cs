@@ -3206,7 +3206,8 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyList<BoundNativeFixedArrayType>? fixedArrayTypes = null,
         Dictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
         HashSet<int>? selectedTypeDefRows = null,
-        ImmutableArray<BoundStruct>? previousStructures = null)
+        ImmutableArray<BoundStruct>? previousStructures = null,
+        TrRmImportTableReader imports = default)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -3325,7 +3326,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     fieldType = FromNativeValueRow(typeSpecs,
                         fieldTypeSpecRef, nativePointerTypes,
-                        structureTypeByTypeDef);
+                        structureTypeByTypeDef, imports);
                 }
                 var fieldFlags = fields.GetFlags(fieldRow);
                 structureFields.Add(new BoundStructField(fields.GetName(fieldRow),
@@ -3359,7 +3360,8 @@ public static partial class TrRmExecutableCompiler
 
     private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
         uint typeSpecRef, List<NativePointerTypeDefinition> nativePointerTypes,
-        int[] structureTypeByTypeDef)
+        int[] structureTypeByTypeDef,
+        TrRmImportTableReader imports = default)
     {
         var type = types.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 4 && type[0] == 0x01 && type[2] == 0x8C)
@@ -3379,7 +3381,7 @@ public static partial class TrRmExecutableCompiler
         {
             var pointeeRef = BinaryPrimitives.ReadUInt32LittleEndian(type[3..]);
             var pointeeType = FromNativeValueRow(types, pointeeRef,
-                nativePointerTypes, structureTypeByTypeDef);
+                nativePointerTypes, structureTypeByTypeDef, imports);
             return pointeeType == PrimitiveType.Void && type[1] == 0
                 ? PrimitiveType.NativeRawPointer
                 : GetNativePointerType(nativePointerTypes, pointeeType, type[1] != 0);
@@ -3395,6 +3397,34 @@ public static partial class TrRmExecutableCompiler
             }
 
             throw Invalid("A native pointer refers to an unrepresented structure type.");
+        }
+
+        if (type.Length == 6 && type[0] == 0x03 && type[1] == 0)
+        {
+            if (imports.Count == 0)
+            {
+                throw Invalid(
+                    "A native value references an Import without a selected provider context.");
+            }
+
+            var importRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(type[2..]));
+            var definition
+                = imports.GetExpectedDefinitionForImportRow(importRow);
+            if (definition >> 24 != 0x13)
+            {
+                throw Invalid("A native value Import is not a TypeDef.");
+            }
+
+            var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+            if ((uint)typeDefRow < (uint)structureTypeByTypeDef.Length
+                && structureTypeByTypeDef[typeDefRow] >= 0)
+            {
+                return (PrimitiveType)(100
+                    + structureTypeByTypeDef[typeDefRow]);
+            }
+
+            throw Invalid("An imported TypeDef has no represented local expectation.");
         }
 
         if (type.Length == 6 && type[0] == 0x0D && type[1] == 0)
@@ -3413,9 +3443,10 @@ public static partial class TrRmExecutableCompiler
 
     private static PrimitiveType FromNativeValueRow(TrRmTypeSpecTableReader types,
         int row, List<NativePointerTypeDefinition> nativePointerTypes,
-        int[] structureTypeByTypeDef)
+        int[] structureTypeByTypeDef,
+        TrRmImportTableReader imports = default)
         => FromNativeValueRow(types, checked((uint)row), nativePointerTypes,
-            structureTypeByTypeDef);
+            structureTypeByTypeDef, imports);
 
     private static PrimitiveType GetNativePointerType(
         List<NativePointerTypeDefinition> nativePointerTypes,

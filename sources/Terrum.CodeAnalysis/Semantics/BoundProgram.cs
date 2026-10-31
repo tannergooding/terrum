@@ -544,9 +544,15 @@ internal sealed record BoundSourceTypeProviderSnapshot(
     ImmutableArray<BoundSourceTypeFeature> Features,
     ImmutableArray<BoundSourceTypeTargetProfile> TargetProfiles);
 
+internal sealed record BoundSourceTypeExpectation(
+    BoundSourceTypeProviderSnapshot UsingModule, int ImportRow,
+    uint ExpectedDefinitionId, string ProducerIdentity, string ExportKey,
+    uint TargetRequirement, uint RuntimePolicy);
+
 internal sealed record BoundStandardTypeOrigin(
     BoundSourceTypeProviderSnapshot Provider, uint DefinitionId,
-    ImmutableArray<string> ExportKeys, bool IsLookupRoot);
+    ImmutableArray<string> ExportKeys, bool IsLookupRoot,
+    ImmutableArray<BoundSourceTypeExpectation> Expectations = default);
 
 /// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
 public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)
@@ -879,8 +885,6 @@ internal sealed record DirectNativeParameter(int ParameterIndex, PrimitiveType P
 /// <param name="Span">The declaration range.</param>
 public sealed record BoundVariable(string Name, PrimitiveType Type, bool IsMutable, TextSpan Span)
 {
-    internal BoundNativeFixedArrayLayout? NativeFixedArrayLayout { get; init; }
-
     /// <summary>Whether this parameter receives a value only on a true bool return.</summary>
     public bool IsOut { get; init; }
 

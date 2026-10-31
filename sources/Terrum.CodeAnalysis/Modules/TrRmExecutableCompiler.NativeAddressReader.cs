@@ -33,7 +33,9 @@ public static partial class TrRmExecutableCompiler
         ReadOnlySpan<byte> artifact, int selectedModuleRow,
         BoundModuleImport? selectedModuleImport, bool verifySemantics,
         TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
-        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings
+            = default)
     {
         var index = schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
@@ -116,7 +118,7 @@ public static partial class TrRmExecutableCompiler
             && selectedModuleImport is null)
         {
             return LoadForeignInvocationFixedArrayTypeLibrary(tables,
-                selectedModuleRow, verifySemantics);
+                selectedModuleRow, verifySemantics, typeProviderBindings);
         }
 
         if (tables.Schema != schema
@@ -1560,7 +1562,8 @@ public static partial class TrRmExecutableCompiler
     private static PrimitiveType ReadForeignInvocationType(
         TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        TrRmImportTableReader imports = default)
     {
         var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
         if (type.Length == 7 && type[0] == 0x0D)
@@ -1579,24 +1582,28 @@ public static partial class TrRmExecutableCompiler
         }
 
         return FromNativeValueRow(typeSpecs, typeSpecRef,
-            nativePointerTypeDefinitions, structureTypeByTypeDef);
+            nativePointerTypeDefinitions, structureTypeByTypeDef, imports);
     }
 
     private static BoundProgram LoadForeignInvocationFixedArrayTypeLibrary(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
-        int selectedModuleRow, bool verifySemantics)
+        int selectedModuleRow, bool verifySemantics,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
     {
+        var (typeDefStart, typeDefEnd)
+            = tables.Modules.GetTypeDefRange(selectedModuleRow);
+        var (moduleRefStart, moduleRefEnd)
+            = tables.Modules.GetModuleRefRange(selectedModuleRow);
         if (tables.Schema
                 != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             || tables.Modules.Count != 1 || selectedModuleRow != 1
+            || typeDefStart != 1
+            || typeDefEnd - typeDefStart != tables.TypeDefs.Count
             || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
             || tables.Modules.GetEntryMethod(selectedModuleRow) != 0
-            || tables.Modules.GetModuleRefRange(selectedModuleRow) is
-                not (Start: 1, End: 1)
             || tables.TypeDefs.Count == 0 || tables.Fields.Count == 0
             || tables.Methods.Count != 0 || tables.Bodies.Count != 0
             || tables.Signatures.Count != 0
-            || tables.Imports.Count != 0 || tables.ModuleRefs.Count != 0
             || tables.Contracts.Count != 0 || tables.GenericParams.Count != 0
             || tables.Constraints.Count != 0 || tables.EnumDefs.Count != 0
             || tables.EnumMembers.Count != 0 || tables.Interfaces.Count != 0
@@ -1610,6 +1617,70 @@ public static partial class TrRmExecutableCompiler
                 "The bounded A2 type-library loader supports one local Copy declaration Module without executable or provider records.");
         }
 
+        var bindingsByImportRow
+            = new Dictionary<int, TrRmStandardTypeProviderBinding>();
+        if (!typeProviderBindings.IsDefaultOrEmpty)
+        {
+            foreach (var binding in typeProviderBindings)
+            {
+                if (binding.ConsumerArtifactIndex != 0
+                    || binding.ConsumerModuleRow != selectedModuleRow
+                    || !bindingsByImportRow.TryAdd(binding.ImportRow, binding))
+                {
+                    if (binding.ConsumerArtifactIndex == 0
+                        && binding.ConsumerModuleRow == selectedModuleRow)
+                    {
+                        throw Invalid(
+                            "An A2 TypeDef Import has multiple provider bindings.");
+                    }
+                }
+            }
+        }
+
+        var usedModuleRefs = new bool[tables.ModuleRefs.Count + 1];
+        var typeDefImports = new HashSet<int>();
+        for (var importRow = 1; importRow <= tables.Imports.Count;
+            importRow++)
+        {
+            var moduleRefRow
+                = tables.Imports.GetModuleRefForImportRow(importRow);
+            if (tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                != selectedModuleRow)
+            {
+                continue;
+            }
+
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            if (expectedDefinition >> 24 != 0x13
+                || !bindingsByImportRow.TryGetValue(importRow,
+                    out var binding)
+                || binding.ExpectedTypeDefRow != checked((int)(
+                    expectedDefinition & 0x00FF_FFFF)))
+            {
+                throw Unsupported(
+                    "The A2 type-library loader requires a checked provider binding for every TypeDef Import.");
+            }
+
+            _ = typeDefImports.Add(importRow);
+            usedModuleRefs[moduleRefRow] = true;
+        }
+
+        for (var moduleRefRow = moduleRefStart;
+            moduleRefRow < moduleRefEnd; moduleRefRow++)
+        {
+            if (!usedModuleRefs[moduleRefRow])
+            {
+                throw Invalid(
+                    "The A2 type Module has an unconsumed ModuleRef.");
+            }
+        }
+        if (typeDefImports.Count != bindingsByImportRow.Count)
+        {
+            throw Invalid(
+                "A2 provider bindings do not belong to the selected type Module.");
+        }
+
         if (!tables.TargetProfiles.TryGetProfile(
                 TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
                 TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
@@ -1618,9 +1689,11 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The A2 type library has no Windows x64 TargetProfile.");
         }
 
-        for (var typeDefRow = 1; typeDefRow <= tables.TypeDefs.Count;
-            typeDefRow++)
+        var selectedTypeDefRows = new HashSet<int>();
+        for (var typeDefRow = typeDefStart;
+            typeDefRow < typeDefEnd; typeDefRow++)
         {
+            _ = selectedTypeDefRows.Add(typeDefRow);
             var (genericFirst, genericCount)
                 = tables.TypeDefs.GetGenericRange(typeDefRow);
             var (layoutFirst, layoutCount)
@@ -1654,8 +1727,8 @@ public static partial class TrRmExecutableCompiler
             tables.Fields, tables.Layouts, tables.LayoutFields,
             tables.TargetProfiles, tables.TypeSpecs, [],
             nativePointerTypeDefinitions, out var structureTypeByTypeDef,
-            fixedArrayTypes, arrayTypeByTypeSpecRow,
-            materializedTypeDefRows);
+            fixedArrayTypes, arrayTypeByTypeSpecRow, materializedTypeDefRows,
+            imports: tables.Imports);
         var materializedTypeDefs = new bool[tables.TypeDefs.Count + 1];
         var pendingArrayLayouts = new List<TrRmFixedArrayLayoutRow>();
         for (var row = 1; row <= tables.FixedArrayLayouts.Count; row++)
@@ -1671,7 +1744,7 @@ public static partial class TrRmExecutableCompiler
         pendingArrayLayouts.Sort(static (left, right)
             => left.ArrayTypeSpecRow.CompareTo(right.ArrayTypeSpecRow));
         while (pendingArrayLayouts.Count != 0
-            || materializedTypeDefRows.Count != tables.TypeDefs.Count)
+            || materializedTypeDefRows.Count != selectedTypeDefRows.Count)
         {
             var madeProgress = false;
             for (var index = 0; index < pendingArrayLayouts.Count; index++)
@@ -1682,7 +1755,7 @@ public static partial class TrRmExecutableCompiler
                         signatureIndexByAnchorMethod,
                         structureTypeByTypeDef, materializedTypeDefs,
                         structures, fixedArrayTypes,
-                        arrayTypeByTypeSpecRow))
+                        arrayTypeByTypeSpecRow, tables.Imports))
                 {
                     continue;
                 }
@@ -1693,14 +1766,14 @@ public static partial class TrRmExecutableCompiler
             }
 
             var newlyMaterializedRows = new List<int>();
-            for (var typeDefRow = 1;
-                typeDefRow <= tables.TypeDefs.Count; typeDefRow++)
+            for (var typeDefRow = typeDefStart;
+                typeDefRow < typeDefEnd; typeDefRow++)
             {
                 if (!materializedTypeDefs[typeDefRow]
                     && ForeignInvocationA2TypeDefDependenciesAreReady(
                         tables, typeDefRow, (uint)profileRow,
                         materializedTypeDefs,
-                        arrayTypeByTypeSpecRow))
+                        arrayTypeByTypeSpecRow, tables.Imports))
                 {
                     newlyMaterializedRows.Add(typeDefRow);
                 }
@@ -1718,7 +1791,7 @@ public static partial class TrRmExecutableCompiler
                     tables.TargetProfiles, tables.TypeSpecs, [],
                     nativePointerTypeDefinitions, out var updatedTypeMap,
                     fixedArrayTypes, arrayTypeByTypeSpecRow,
-                    materializedTypeDefRows, structures);
+                    materializedTypeDefRows, structures, tables.Imports);
                 if (!structureTypeByTypeDef.SequenceEqual(updatedTypeMap))
                 {
                     throw Invalid(
@@ -1846,7 +1919,8 @@ public static partial class TrRmExecutableCompiler
         int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
         bool[]? materializedTypeDefs, IReadOnlyList<BoundStruct> structures,
         List<BoundNativeFixedArrayType> fixedArrayTypes,
-        Dictionary<int, PrimitiveType> arrayTypeByTypeSpecRow)
+        Dictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
+        TrRmImportTableReader imports = default)
     {
         if (!tables.TypeSpecs.TryGetFixedInlineArray(
                 (uint)layoutRow.ArrayTypeSpecRow,
@@ -1870,7 +1944,8 @@ public static partial class TrRmExecutableCompiler
         else
         {
             if (TryGetForeignInvocationTypeDefRow(tables.TypeSpecs,
-                    elementTypeSpecRef, out var elementTypeDefRow))
+                    elementTypeSpecRef, imports,
+                    out var elementTypeDefRow))
             {
                 if ((uint)elementTypeDefRow
                         >= (uint)structureTypeByTypeDef.Length
@@ -1886,7 +1961,7 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             else if (elementTypeReference.IsRow
-                && elementTypeReference.Form is 0x03 or 0x05)
+                && elementTypeReference.Form == 0x05)
             {
                 throw Unsupported(
                     "The array element uses an unsupported nominal TypeSpec form.");
@@ -1894,7 +1969,8 @@ public static partial class TrRmExecutableCompiler
 
             elementType = ReadForeignInvocationType(tables.TypeSpecs,
                 elementTypeSpecRef, nativePointerTypeDefinitions,
-                signatureIndexByAnchorMethod, structureTypeByTypeDef);
+                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                imports);
         }
 
         if (!NativeFixedArrayContract.TryCreateType(elementType,
@@ -1925,7 +2001,8 @@ public static partial class TrRmExecutableCompiler
     private static bool ForeignInvocationA2TypeDefDependenciesAreReady(
         TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
         int typeDefRow, uint profileRow, bool[] materializedTypeDefs,
-        Dictionary<int, PrimitiveType> arrayTypeByTypeSpecRow)
+        Dictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
+        TrRmImportTableReader imports)
     {
         var layoutRow = tables.Layouts.GetLayoutForProfile(typeDefRow,
             profileRow);
@@ -1943,7 +2020,7 @@ public static partial class TrRmExecutableCompiler
                 }
             }
             else if (TryGetForeignInvocationTypeDefRow(tables.TypeSpecs,
-                         typeSpecRef, out var fieldTypeDefRow)
+                         typeSpecRef, imports, out var fieldTypeDefRow)
                 && !materializedTypeDefs[fieldTypeDefRow])
             {
                 return false;
@@ -1955,6 +2032,7 @@ public static partial class TrRmExecutableCompiler
 
     private static bool TryGetForeignInvocationTypeDefRow(
         TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef,
+        TrRmImportTableReader imports,
         out int typeDefRow)
     {
         var type = typeSpecs.GetTypeSpecBytes(typeSpecRef);
@@ -1963,6 +2041,25 @@ public static partial class TrRmExecutableCompiler
             typeDefRow = checked((int)
                 BinaryPrimitives.ReadUInt32LittleEndian(type[2..]));
             return true;
+        }
+
+        if (type.Length == 6 && type[0] == 0x03 && type[1] == 0)
+        {
+            if (imports.Count == 0)
+            {
+                typeDefRow = 0;
+                return false;
+            }
+
+            var importRow = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(type[2..]));
+            var definition
+                = imports.GetExpectedDefinitionForImportRow(importRow);
+            if (definition >> 24 == 0x13)
+            {
+                typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+                return true;
+            }
         }
 
         typeDefRow = 0;

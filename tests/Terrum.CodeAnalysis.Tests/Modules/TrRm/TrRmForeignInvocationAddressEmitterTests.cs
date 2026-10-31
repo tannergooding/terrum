@@ -413,7 +413,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         _ = Assert.Throws<ArgumentException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(providerInput,
                 moduleIdentity, [], ["missing-key"]));
-        _ = Assert.Throws<NotSupportedException>(() =>
+        _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(providerInput,
                 moduleIdentity, [providerInput], ["container-key"]));
 

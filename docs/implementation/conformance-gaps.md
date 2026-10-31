@@ -471,8 +471,9 @@ A2 Section `0x0012` and TargetProfile rows for selected-Module scalar, unit,
 direct-pointer, function-pointer and nested-array types; it rebuilds bound
 array identities, checks target geometry and preserves wide counts. Its
 synthetic consumer and combined TRRM array suites passed 151/151 with zero
-skips. External/imported Copy provider origins remain unsupported, and neither
-path constructs executable array TypeMap entries or PlaceSelection/EC Bodies.
+skips. The executable NativeAddress path still does not bind external/imported
+Copy provider origins, and neither route constructs executable array TypeMap
+entries or PlaceSelection/EC Bodies.
 The [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-type-identity.md)
 remains unapproved. Its local A2 `EmitStandard` export-map slice is
 implemented provisionally: source-bound public ordinary Copy declarations
@@ -485,10 +486,14 @@ the selected roots and their required public nominal/array closure. Closure-
 only declarations are not exposed through source name lookup. Projected types
 retain the schema, artifact snapshot, Module requirements, TypeDef identity,
 and selected/closure ExportKeys; Standard and private module producers reject
-the projection rather than losing that origin. Separate provider artifacts,
-imported-origin expectations, replacement/remapping and executable Body
-consumption remain open. The combined A2 emitter/reference/layout selection
-passed 161/161 with zero skips.
+the projection rather than losing that origin. Separately supplied A2
+providers now bind through the checked Copy/layout contract, and imported
+closure types retain both actual provider identity and the original using-
+Module Import/ModuleRef expectation. Direct field and fixed-array imports,
+compatible TypeDef relocation, incompatible packing, source-name lookup and
+snapshot immutability are covered. Multi-hop origin propagation, alias views,
+replacement/remapping, source-free Bodies, CLI and runtime remain open. The
+combined A2 provider/reference/layout selection passed 162/162 with zero skips.
 Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact

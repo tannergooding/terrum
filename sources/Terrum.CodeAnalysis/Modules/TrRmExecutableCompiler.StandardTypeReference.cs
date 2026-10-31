@@ -77,52 +77,53 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "Explicit TypeDef roots require the exact A2 schema.");
         }
-        if (artifacts.Length != 1)
+        if (schemaIdentities.Skip(1).Any(schemaIdentity =>
+                !StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity)))
         {
             throw Unsupported(
-                "The bounded A2 type-reference projection does not yet bind separate provider artifacts.");
+                "The bounded A2 type-reference projection requires A2 provider artifacts.");
         }
 
-        return CreateA2SourceTypeReference(artifacts[0],
-            schemaIdentities[0], moduleIdentity, exportKeys);
+        var program = LoadStandardProgram(artifacts, schemaIdentities,
+            moduleIdentity, verifySemantics: true, out _,
+            out var typeProviderBindings, out var moduleValidation, out _);
+        return CreateA2SourceTypeReference(artifacts, schemaIdentities,
+            moduleIdentity, exportKeys, program, moduleValidation,
+            typeProviderBindings);
     }
 
     private static CompilationReference CreateA2SourceTypeReference(
-        byte[] artifact, string schemaIdentity, string moduleIdentity,
-        string[] exportKeys)
+        byte[][] artifacts, string[] schemaIdentities, string moduleIdentity,
+        string[] exportKeys, BoundProgram program,
+        StandardModuleValidation moduleValidation,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
     {
-        var artifacts = new[] { artifact };
-        var schemaIdentities = new[] { schemaIdentity };
-        var program = LoadStandardProgram(artifacts, schemaIdentities,
-            moduleIdentity, verifySemantics: true, out _, out _,
-            out var moduleValidation, out var a3LayoutResourceLedger);
+        var artifact = artifacts[0];
+        var schemaIdentity = schemaIdentities[0];
         var tables = ValidateForeignInvocationArtifact(
             CreateForeignInvocationIndex(artifact, schemaIdentity),
-            schemaIdentity, a3LayoutResourceLedger,
+            schemaIdentity, null,
             createA3ResourceLedger: false);
         var moduleRow = moduleValidation.RootModuleRow;
         var (typeDefStart, typeDefEnd)
             = tables.Modules.GetTypeDefRange(moduleRow);
         var (methodStart, methodEnd)
             = tables.Modules.GetMethodDefRange(moduleRow);
-        var (moduleRefStart, moduleRefEnd)
-            = tables.Modules.GetModuleRefRange(moduleRow);
         if (tables.Schema
                 != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             || tables.Modules.Count != 1 || moduleRow != 1
-            || typeDefStart != 1
-            || typeDefEnd - typeDefStart != tables.TypeDefs.Count
-            || program.Structures.Length != tables.TypeDefs.Count
+            || typeDefStart <= 0 || typeDefEnd - typeDefStart
+                != program.Structures.Length
             || methodStart != methodEnd
-            || tables.Imports.Count != 0 || tables.ModuleRefs.Count != 0
-            || moduleRefStart != moduleRefEnd)
+            || tables.Modules.GetEntryMethod(moduleRow) != 0)
         {
             throw Unsupported(
-                "The A2 type-reference projection requires one local type-only Module.");
+                "The A2 type-reference projection requires one type-only root Module.");
         }
 
-        var (targetRequirement, runtimePolicy)
-            = tables.Modules.GetRequirements(moduleRow);
+        var runtimePolicy
+            = tables.Modules.GetRequirements(moduleRow).RuntimePolicy;
         var keysByTypeDefRow = new Dictionary<int, List<string>>();
         var rootTypeDefRows = new HashSet<int>();
         foreach (var exportKey in exportKeys)
@@ -162,34 +163,34 @@ public static partial class TrRmExecutableCompiler
             selectedKeys.Add(exportKey);
         }
 
-        var (providerFeatureFirst, providerFeatureCount)
-            = tables.Modules.GetFeatureRange(moduleRow);
-        var providerFeatures = ImmutableArray.CreateBuilder<
-            BoundSourceTypeFeature>(providerFeatureCount);
-        for (var offset = 0; offset < providerFeatureCount; offset++)
+        var providerSnapshot = CreateA2SourceTypeProviderSnapshot(
+            tables, artifact, schemaIdentity, moduleRow);
+        var providerSnapshots = new Dictionary<(int ArtifactIndex, int ModuleRow),
+            BoundSourceTypeProviderSnapshot>
         {
-            var feature = tables.Features.GetFeature(
-                providerFeatureFirst + offset);
-            providerFeatures.Add(new BoundSourceTypeFeature(
-                feature.FeatureId, feature.RuleRevision));
-        }
-
-        var targetProfiles = ImmutableArray.CreateBuilder<
-            BoundSourceTypeTargetProfile>(tables.TargetProfiles.Count);
-        for (var row = 1; row <= tables.TargetProfiles.Count; row++)
+            [(0, moduleRow)] = providerSnapshot,
+        };
+        var bindingsByExpectedTypeDef = new Dictionary<int,
+            List<TrRmStandardTypeProviderBinding>>();
+        var originsByTypeDefRow = new Dictionary<int,
+            BoundStandardTypeOrigin>();
+        foreach (var binding in typeProviderBindings)
         {
-            var profile = tables.TargetProfiles.GetProfile(row);
-            targetProfiles.Add(new BoundSourceTypeTargetProfile(
-                profile.ProfileId, profile.RuleRevision));
-        }
+            if (binding.ConsumerArtifactIndex != 0
+                || binding.ConsumerModuleRow != moduleRow)
+            {
+                continue;
+            }
 
-        var providerSnapshot = new BoundSourceTypeProviderSnapshot(
-            schemaIdentity, [.. artifact], moduleRow,
-            tables.Modules.GetIdentity(moduleRow),
-            tables.Modules.GetGoverningRuleEdition(moduleRow),
-            targetRequirement, runtimePolicy,
-            providerFeatures.MoveToImmutable(),
-            targetProfiles.MoveToImmutable());
+            if (!bindingsByExpectedTypeDef.TryGetValue(
+                    binding.ExpectedTypeDefRow, out var bindings))
+            {
+                bindings = [];
+                bindingsByExpectedTypeDef.Add(
+                    binding.ExpectedTypeDefRow, bindings);
+            }
+            bindings.Add(binding);
+        }
         var selectedStructures = new HashSet<int>();
         var selectedArrayTypes = new HashSet<int>();
         var selectedPointerTypes = new HashSet<int>();
@@ -260,16 +261,86 @@ public static partial class TrRmExecutableCompiler
                 var typeDefRow = typeDefStart + structureIndex;
                 if (!keysByTypeDefRow.ContainsKey(typeDefRow))
                 {
-                    if (!tables.Exports.TryGetExportKeyForDefinition(
-                            moduleRow,
-                            0x1300_0000u | checked((uint)typeDefRow),
-                            out var childExportKey))
+                    if (bindingsByExpectedTypeDef.TryGetValue(
+                            typeDefRow, out var importBindings))
+                    {
+                        var firstBinding = importBindings[0];
+                        if (importBindings.Any(binding =>
+                                binding.ProviderArtifactIndex
+                                    != firstBinding.ProviderArtifactIndex
+                                || binding.ProviderModuleRow
+                                    != firstBinding.ProviderModuleRow
+                                || binding.ProviderTypeDefRow
+                                    != firstBinding.ProviderTypeDefRow
+                                || !StringComparer.Ordinal.Equals(
+                                    binding.ProducerIdentity,
+                                    firstBinding.ProducerIdentity)
+                                || binding.TargetRequirement
+                                    != firstBinding.TargetRequirement
+                                || binding.RuntimePolicy
+                                    != firstBinding.RuntimePolicy))
+                        {
+                            throw Invalid(
+                                "One imported A2 TypeDef has conflicting provider origins.");
+                        }
+
+                        var providerKey = (firstBinding.ProviderArtifactIndex,
+                            firstBinding.ProviderModuleRow);
+                        if (!providerSnapshots.TryGetValue(providerKey,
+                                out var importedProviderSnapshot))
+                        {
+                            var providerArtifact
+                                = artifacts[firstBinding.ProviderArtifactIndex];
+                            var providerSchema = schemaIdentities[
+                                firstBinding.ProviderArtifactIndex];
+                            var providerTables
+                                = ValidateForeignInvocationArtifact(
+                                    CreateForeignInvocationIndex(
+                                        providerArtifact, providerSchema),
+                                    providerSchema, null,
+                                    createA3ResourceLedger: false);
+                            importedProviderSnapshot
+                                = CreateA2SourceTypeProviderSnapshot(
+                                    providerTables, providerArtifact,
+                                    providerSchema,
+                                    firstBinding.ProviderModuleRow);
+                            providerSnapshots.Add(providerKey,
+                                importedProviderSnapshot);
+                        }
+
+                        var importExpectation = importBindings.Select(binding =>
+                            new BoundSourceTypeExpectation(
+                                providerSnapshot, binding.ImportRow,
+                                0x1300_0000u
+                                    | checked((uint)typeDefRow),
+                                binding.ProducerIdentity, binding.ExportKey,
+                                binding.TargetRequirement,
+                                binding.RuntimePolicy)).ToImmutableArray();
+                        var importedKeys = importBindings.Select(
+                                static binding => binding.ExportKey)
+                            .Distinct(StringComparer.Ordinal).ToList();
+                        keysByTypeDefRow.Add(typeDefRow, importedKeys);
+                        originsByTypeDefRow.Add(typeDefRow,
+                            new BoundStandardTypeOrigin(
+                                importedProviderSnapshot,
+                                0x1300_0000u
+                                    | checked((uint)firstBinding.ProviderTypeDefRow),
+                                [.. importedKeys], false,
+                                importExpectation));
+                    }
+                    else if (tables.Exports.TryGetExportKeyForDefinition(
+                                 moduleRow,
+                                 0x1300_0000u
+                                     | checked((uint)typeDefRow),
+                                 out var childExportKey))
+                    {
+                        keysByTypeDefRow.Add(typeDefRow, [childExportKey]);
+                    }
+                    else
                     {
                         throw Unsupported(
                             "A nominal child has no one unambiguous public TypeDef ExportKey.");
                     }
-
-                    keysByTypeDefRow.Add(typeDefRow, [childExportKey]);
                 }
 
                 if (!tables.TypeDefs.HasDeclaredCopy(typeDefRow)
@@ -411,11 +482,13 @@ public static partial class TrRmExecutableCompiler
 
             projectedStructures.Add(original with {
                 Fields = fields.MoveToImmutable(),
-                StandardTypeOrigin = new BoundStandardTypeOrigin(
-                    providerSnapshot,
-                    0x1300_0000u | checked((uint)typeDefRow),
-                    [.. keysByTypeDefRow[typeDefRow]],
-                    rootTypeDefRows.Contains(typeDefRow)),
+                StandardTypeOrigin = originsByTypeDefRow.TryGetValue(
+                        typeDefRow, out var origin)
+                    ? origin
+                    : new BoundStandardTypeOrigin(providerSnapshot,
+                        0x1300_0000u | checked((uint)typeDefRow),
+                        [.. keysByTypeDefRow[typeDefRow]],
+                        rootTypeDefRows.Contains(typeDefRow)),
             });
         }
 
@@ -443,5 +516,40 @@ public static partial class TrRmExecutableCompiler
         return new CompilationReference(structures, [], (BoundRuntimePolicy)runtimePolicy,
             nativePointerTypes: pointerTypes,
             nativeFixedArrayTypes: fixedArrays);
+    }
+
+    private static BoundSourceTypeProviderSnapshot
+        CreateA2SourceTypeProviderSnapshot(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        byte[] artifact, string schemaIdentity, int moduleRow)
+    {
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(moduleRow);
+        var (featureFirst, featureCount)
+            = tables.Modules.GetFeatureRange(moduleRow);
+        var features = ImmutableArray.CreateBuilder<BoundSourceTypeFeature>(
+            featureCount);
+        for (var offset = 0; offset < featureCount; offset++)
+        {
+            var feature = tables.Features.GetFeature(featureFirst + offset);
+            features.Add(new BoundSourceTypeFeature(feature.FeatureId,
+                feature.RuleRevision));
+        }
+
+        var targetProfiles
+            = ImmutableArray.CreateBuilder<BoundSourceTypeTargetProfile>(
+                tables.TargetProfiles.Count);
+        for (var row = 1; row <= tables.TargetProfiles.Count; row++)
+        {
+            var profile = tables.TargetProfiles.GetProfile(row);
+            targetProfiles.Add(new BoundSourceTypeTargetProfile(
+                profile.ProfileId, profile.RuleRevision));
+        }
+
+        return new BoundSourceTypeProviderSnapshot(schemaIdentity, [.. artifact],
+            moduleRow, tables.Modules.GetIdentity(moduleRow),
+            tables.Modules.GetGoverningRuleEdition(moduleRow),
+            targetRequirement, runtimePolicy, features.MoveToImmutable(),
+            targetProfiles.MoveToImmutable());
     }
 }
