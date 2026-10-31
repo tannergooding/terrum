@@ -385,6 +385,16 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void AcceptsMaximumU32AddressCountForArrayLargerThanU32()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            requiredElementCount: uint.MaxValue,
+            selectedArrayElementCount: (ulong)uint.MaxValue + 100);
+
+        ValidateBodyMaps(artifact);
+    }
+
+    [Test]
     public void RejectsEmptyCountedAddressFromAnArrayElement()
     {
         var artifact = CreateNestedArrayPlaceArtifact(
@@ -4314,6 +4324,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
     private static byte[] CreateNestedArrayPlaceArtifact(
         ulong requiredElementCount = 1,
+        ulong selectedArrayElementCount = 2,
         bool zeroRequiredElementCount = false,
         bool crossBlockPlaceSelection = false,
         bool crossBlockRegisterIndex = false,
@@ -4339,7 +4350,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var modules = new TrRmModuleTableReader(modulesBytes, 1, strings,
             0, 0, 1, 0, 1);
         var typeSpecsBytes = TrRmTypeSpecTableWriter.Encode([
-            TrRmTypeSpecTableWriter.FixedInlineArray(0xF200_000D, 2),
+            TrRmTypeSpecTableWriter.FixedInlineArray(0xF200_000D,
+                selectedArrayElementCount),
             TrRmTypeSpecTableWriter.FixedInlineArray(1, 3),
             TrRmTypeSpecTableWriter.InlineFamily(0x8C, 0x0D),
         ], 0, 0, 0, 0, schema);
@@ -4350,9 +4362,14 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         ], schema);
         var targetProfiles = new TrRmTargetProfileTableReader(
             targetProfilesBytes, 1, schema);
+        var selectedArrayByteExtent = checked(selectedArrayElementCount
+            * sizeof(uint));
+        var outerArrayByteExtent = checked(selectedArrayByteExtent * 3);
         var fixedArrayLayoutsBytes = TrRmFixedArrayLayoutTableWriter.Encode([
-            new TrRmFixedArrayLayoutRow(1, 1, 1, 4, 8, 4),
-            new TrRmFixedArrayLayoutRow(1, 2, 1, 8, 24, 4),
+            new TrRmFixedArrayLayoutRow(1, 1, 1, sizeof(uint),
+                selectedArrayByteExtent, sizeof(uint)),
+            new TrRmFixedArrayLayoutRow(1, 2, 1,
+                selectedArrayByteExtent, outerArrayByteExtent, sizeof(uint)),
         ], typeSpecs, targetProfiles, features, modules);
         var hasControlFlowParameter = crossBlockRegisterIndex
             || branchJoinPlaceSelection || loopPlaceSelection;
