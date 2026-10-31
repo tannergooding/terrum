@@ -682,10 +682,53 @@ public static partial class TrRmExecutableCompiler
                     = tables.Modules.GetModuleRefRange(moduleRow);
                 var isSelectedRoot = index == 0
                     && moduleRow == rootModuleRow;
-                if (!isSelectedRoot && moduleRefEnd != moduleRefStart)
+                var isA2TypeOnlyModule
+                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                    && methodEnd == methodStart && typeEnd > typeStart;
+                if (!isSelectedRoot && moduleRefEnd != moduleRefStart
+                    && !isA2TypeOnlyModule)
                 {
                     throw Unsupported(
-                        "Only the selected root Module may retain a provider Import in this F slice.");
+                        "Only A2 type-only provider Modules may retain provider Imports in this F slice.");
+                }
+
+                if (isA2TypeOnlyModule)
+                {
+                    var usedModuleRefs
+                        = new bool[tables.ModuleRefs.Count + 1];
+                    for (var importRow = 1;
+                        importRow <= tables.Imports.Count; importRow++)
+                    {
+                        var importModuleRef
+                            = tables.Imports.GetModuleRefForImportRow(
+                                importRow);
+                        if (tables.ModuleRefs.GetOwnerModule(importModuleRef)
+                            != moduleRow)
+                        {
+                            continue;
+                        }
+
+                        if ((tables.Imports
+                                .GetExpectedDefinitionForImportRow(importRow)
+                                >> 24) != 0x13)
+                        {
+                            throw Unsupported(
+                                "An A2 type-only provider may retain only TypeDef Imports.");
+                        }
+
+                        usedModuleRefs[importModuleRef] = true;
+                    }
+
+                    for (var moduleRefRow = moduleRefStart;
+                        moduleRefRow < moduleRefEnd; moduleRefRow++)
+                    {
+                        if (!usedModuleRefs[moduleRefRow])
+                        {
+                            throw Invalid(
+                                "An A2 type-only provider has an unconsumed ModuleRef.");
+                        }
+                    }
                 }
 
                 if (!isSelectedRoot && methodEnd != methodStart)

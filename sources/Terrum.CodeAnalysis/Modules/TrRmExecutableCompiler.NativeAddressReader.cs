@@ -1596,9 +1596,10 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetModuleRefRange(selectedModuleRow);
         if (tables.Schema
                 != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-            || tables.Modules.Count != 1 || selectedModuleRow != 1
-            || typeDefStart != 1
-            || typeDefEnd - typeDefStart != tables.TypeDefs.Count
+            || selectedModuleRow <= 0
+            || selectedModuleRow > tables.Modules.Count
+            || typeDefStart <= 0 || typeDefEnd <= typeDefStart
+            || typeDefEnd - typeDefStart > tables.TypeDefs.Count
             || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
             || tables.Modules.GetEntryMethod(selectedModuleRow) != 0
             || tables.TypeDefs.Count == 0 || tables.Fields.Count == 0
@@ -1728,7 +1729,8 @@ public static partial class TrRmExecutableCompiler
             tables.TargetProfiles, tables.TypeSpecs, [],
             nativePointerTypeDefinitions, out var structureTypeByTypeDef,
             fixedArrayTypes, arrayTypeByTypeSpecRow, materializedTypeDefRows,
-            imports: tables.Imports);
+            imports: tables.Imports,
+            includedTypeDefRows: selectedTypeDefRows);
         var materializedTypeDefs = new bool[tables.TypeDefs.Count + 1];
         var pendingArrayLayouts = new List<TrRmFixedArrayLayoutRow>();
         for (var row = 1; row <= tables.FixedArrayLayouts.Count; row++)
@@ -1791,7 +1793,8 @@ public static partial class TrRmExecutableCompiler
                     tables.TargetProfiles, tables.TypeSpecs, [],
                     nativePointerTypeDefinitions, out var updatedTypeMap,
                     fixedArrayTypes, arrayTypeByTypeSpecRow,
-                    materializedTypeDefRows, structures, tables.Imports);
+                    materializedTypeDefRows, structures, tables.Imports,
+                    selectedTypeDefRows);
                 if (!structureTypeByTypeDef.SequenceEqual(updatedTypeMap))
                 {
                     throw Invalid(

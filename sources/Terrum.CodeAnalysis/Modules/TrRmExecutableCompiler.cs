@@ -3207,7 +3207,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, PrimitiveType>? arrayTypeByTypeSpecRow = null,
         HashSet<int>? selectedTypeDefRows = null,
         ImmutableArray<BoundStruct>? previousStructures = null,
-        TrRmImportTableReader imports = default)
+        TrRmImportTableReader imports = default,
+        HashSet<int>? includedTypeDefRows = null)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -3228,7 +3229,9 @@ public static partial class TrRmExecutableCompiler
         Array.Fill(structureTypeByTypeDef, -1);
         for (var row = 1; row <= typeDefs.Count; row++)
         {
-            if (!layouts.HasBlittableLayout(row, 1, 1))
+            if ((includedTypeDefRows is not null
+                    && !includedTypeDefRows.Contains(row))
+                || !layouts.HasBlittableLayout(row, 1, 1))
             {
                 continue;
             }

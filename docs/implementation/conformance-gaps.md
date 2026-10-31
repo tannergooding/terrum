@@ -491,9 +491,13 @@ providers now bind through the checked Copy/layout contract, and imported
 closure types retain both actual provider identity and the original using-
 Module Import/ModuleRef expectation. Direct field and fixed-array imports,
 compatible TypeDef relocation, incompatible packing, source-name lookup and
-snapshot immutability are covered. Multi-hop origin propagation, alias views,
-replacement/remapping, source-free Bodies, CLI and runtime remain open. The
-combined A2 provider/reference/layout selection passed 162/162 with zero skips.
+snapshot immutability are covered. Provider-owned TypeDef Import chains now
+project through separately supplied or co-located A2 type-only Modules,
+retaining both provider and consumer expectations. Alias/multiple-view
+handling, origin replacement/remapping, canonical re-encoding, source-free
+Bodies, CLI and runtime remain open. The combined A2 provider/reference/layout
+selection passed 162/162 with zero skips; the provider-chain selection passed
+163/163 with zero skips.
 Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact

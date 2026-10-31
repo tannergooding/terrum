@@ -112,7 +112,7 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetMethodDefRange(moduleRow);
         if (tables.Schema
                 != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-            || tables.Modules.Count != 1 || moduleRow != 1
+            || moduleRow <= 0 || moduleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd - typeDefStart
                 != program.Structures.Length
             || methodStart != methodEnd
@@ -170,6 +170,27 @@ public static partial class TrRmExecutableCompiler
         {
             [(0, moduleRow)] = providerSnapshot,
         };
+
+        BoundSourceTypeProviderSnapshot GetProviderSnapshot(
+            int artifactIndex, int providerModuleRow)
+        {
+            var key = (artifactIndex, providerModuleRow);
+            if (providerSnapshots.TryGetValue(key, out var snapshot))
+            {
+                return snapshot;
+            }
+
+            var providerArtifact = artifacts[artifactIndex];
+            var providerSchema = schemaIdentities[artifactIndex];
+            var providerTables = ValidateForeignInvocationArtifact(
+                CreateForeignInvocationIndex(providerArtifact, providerSchema),
+                providerSchema, null, createA3ResourceLedger: false);
+            snapshot = CreateA2SourceTypeProviderSnapshot(providerTables,
+                providerArtifact, providerSchema, providerModuleRow);
+            providerSnapshots.Add(key, snapshot);
+            return snapshot;
+        }
+
         var bindingsByExpectedTypeDef = new Dictionary<int,
             List<TrRmStandardTypeProviderBinding>>();
         var originsByTypeDefRow = new Dictionary<int,
@@ -284,38 +305,49 @@ public static partial class TrRmExecutableCompiler
                                 "One imported A2 TypeDef has conflicting provider origins.");
                         }
 
-                        var providerKey = (firstBinding.ProviderArtifactIndex,
+                        var importedProviderSnapshot = GetProviderSnapshot(
+                            firstBinding.ProviderArtifactIndex,
                             firstBinding.ProviderModuleRow);
-                        if (!providerSnapshots.TryGetValue(providerKey,
-                                out var importedProviderSnapshot))
+                        var importExpectations
+                            = ImmutableArray.CreateBuilder<
+                                BoundSourceTypeExpectation>(
+                                importBindings.Count
+                                    + typeProviderBindings.Length);
+                        foreach (var binding in importBindings)
                         {
-                            var providerArtifact
-                                = artifacts[firstBinding.ProviderArtifactIndex];
-                            var providerSchema = schemaIdentities[
-                                firstBinding.ProviderArtifactIndex];
-                            var providerTables
-                                = ValidateForeignInvocationArtifact(
-                                    CreateForeignInvocationIndex(
-                                        providerArtifact, providerSchema),
-                                    providerSchema, null,
-                                    createA3ResourceLedger: false);
-                            importedProviderSnapshot
-                                = CreateA2SourceTypeProviderSnapshot(
-                                    providerTables, providerArtifact,
-                                    providerSchema,
-                                    firstBinding.ProviderModuleRow);
-                            providerSnapshots.Add(providerKey,
-                                importedProviderSnapshot);
+                            importExpectations.Add(
+                                new BoundSourceTypeExpectation(providerSnapshot,
+                                    binding.ImportRow,
+                                    0x1300_0000u
+                                        | checked((uint)typeDefRow),
+                                    binding.ProducerIdentity,
+                                    binding.ExportKey,
+                                    binding.TargetRequirement,
+                                    binding.RuntimePolicy));
                         }
+                        foreach (var binding in typeProviderBindings)
+                        {
+                            if (binding.ConsumerArtifactIndex
+                                    != firstBinding.ProviderArtifactIndex
+                                || binding.ConsumerModuleRow
+                                    != firstBinding.ProviderModuleRow)
+                            {
+                                continue;
+                            }
 
-                        var importExpectation = importBindings.Select(binding =>
-                            new BoundSourceTypeExpectation(
-                                providerSnapshot, binding.ImportRow,
-                                0x1300_0000u
-                                    | checked((uint)typeDefRow),
-                                binding.ProducerIdentity, binding.ExportKey,
-                                binding.TargetRequirement,
-                                binding.RuntimePolicy)).ToImmutableArray();
+                            importExpectations.Add(
+                                new BoundSourceTypeExpectation(
+                                    GetProviderSnapshot(
+                                        binding.ConsumerArtifactIndex,
+                                        binding.ConsumerModuleRow),
+                                    binding.ImportRow,
+                                    0x1300_0000u
+                                        | checked((uint)binding.ExpectedTypeDefRow),
+                                    binding.ProducerIdentity,
+                                    binding.ExportKey,
+                                    binding.TargetRequirement,
+                                    binding.RuntimePolicy));
+                        }
                         var importedKeys = importBindings.Select(
                                 static binding => binding.ExportKey)
                             .Distinct(StringComparer.Ordinal).ToList();
@@ -326,7 +358,7 @@ public static partial class TrRmExecutableCompiler
                                 0x1300_0000u
                                     | checked((uint)firstBinding.ProviderTypeDefRow),
                                 [.. importedKeys], false,
-                                importExpectation));
+                                importExpectations.ToImmutable()));
                     }
                     else if (tables.Exports.TryGetExportKeyForDefinition(
                                  moduleRow,

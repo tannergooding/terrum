@@ -157,22 +157,57 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             _a3ResourceLedger?.ConsumeWork();
             var pendingTypes = new Queue<TypeOriginPair>();
-            if (_consumer.Schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
+            for (var moduleIndex = 0; moduleIndex < _modules.Length;
+                moduleIndex++)
             {
+                var module = _modules[moduleIndex];
+                if (!StringComparer.Ordinal.Equals(
+                        _schemaIdentities[module.ArtifactIndex],
+                        FixedArraySchemaIdentity))
+                {
+                    continue;
+                }
+
+                var moduleTables = GetTables(module.ArtifactIndex);
+                for (var importRow = 1;
+                    importRow <= moduleTables.Imports.Count; importRow++)
+                {
+                    ConsumeWork();
+                    var moduleRefRow = moduleTables.Imports
+                        .GetModuleRefForImportRow(importRow);
+                    if (moduleTables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != module.ModuleRow)
+                    {
+                        continue;
+                    }
+
+                    if ((moduleTables.Imports
+                            .GetExpectedDefinitionForImportRow(importRow)
+                            >> 24) != 0x13)
+                    {
+                        continue;
+                    }
+
+                    var resolution = ResolveImport(module.ArtifactIndex,
+                        module.ModuleRow, moduleTables, importRow);
+                    AddTypePair(resolution.Expected, resolution.Actual,
+                        isInlineStorage: false, pendingTypes);
+                }
+
                 var (typeDefStart, typeDefEnd)
-                    = _consumer.Modules.GetTypeDefRange(rootModuleRow);
+                    = moduleTables.Modules.GetTypeDefRange(module.ModuleRow);
                 for (var typeDefRow = typeDefStart;
                     typeDefRow < typeDefEnd; typeDefRow++)
                 {
                     var (fieldStart, fieldEnd)
-                        = _consumer.TypeDefs.GetFieldRange(typeDefRow);
+                        = moduleTables.TypeDefs.GetFieldRange(typeDefRow);
                     for (var fieldRow = fieldStart; fieldRow < fieldEnd;
                         fieldRow++)
                     {
                         ConsumeWork();
-                        CollectStorageType(0, rootModuleRow,
-                            _consumer.Fields.GetTypeSpecRef(fieldRow),
+                        CollectStorageType(module.ArtifactIndex,
+                            module.ModuleRow,
+                            moduleTables.Fields.GetTypeSpecRef(fieldRow),
                             pendingTypes);
                     }
                 }
