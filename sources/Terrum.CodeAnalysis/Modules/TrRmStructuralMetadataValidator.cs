@@ -2102,6 +2102,7 @@ public static class TrRmStructuralMetadataValidator
         _ = contracts;
         _ = sourceFiles;
         _ = sourceMaps;
+        selectedA3LayoutResourceLedger?.ConsumeWork();
         var executionTables = new ValidatedExecutionTables(strings, features,
             modules, moduleRefs,
             types, enumDefs, enumMembers, typeSpecs,

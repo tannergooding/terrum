@@ -63,6 +63,7 @@ internal sealed class TrRmStandardNativeBindingPlan
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
+        a3LayoutResourceLedger?.ConsumeWork();
         RootProgram = rootProgram ?? throw new ArgumentNullException(nameof(rootProgram));
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         ArgumentNullException.ThrowIfNull(artifacts);
