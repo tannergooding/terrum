@@ -783,7 +783,7 @@ internal static class TrRmFixedArrayLayoutValidator
                 throw InvalidLayout();
             }
 
-            ConsumeWork();
+            ConsumeWork(checked((ulong)formalCount + 1UL));
             var arguments = new Dictionary<int, TypeSpecContext>(formalCount);
             for (var ordinal = 0; ordinal < formalCount; ordinal++)
             {
@@ -800,7 +800,6 @@ internal static class TrRmFixedArrayLayoutValidator
                     argument, context.OwnerModule,
                     context.Substitutions));
                 ValidateGenericActual(formal, actual);
-                ConsumeWork();
                 arguments.Add(formal, actual);
             }
 

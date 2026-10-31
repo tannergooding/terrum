@@ -181,12 +181,11 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 ValidateTypePair(pair, pendingTypes);
             }
 
-            _a3ResourceLedger?.ConsumeWork();
+            ConsumeWork(checked((ulong)_imports.Count + 1UL));
             var orderedBindings
                 = new List<TrRmStandardTypeProviderBinding>(_imports.Count);
             foreach (var resolution in _imports.Values)
             {
-                ConsumeWork();
                 orderedBindings.Add(resolution.Binding);
             }
 
@@ -205,17 +204,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 return left.ImportRow.CompareTo(right.ImportRow);
             });
 
-            _a3ResourceLedger?.ConsumeWork();
-            var resultBindings
-                = ImmutableArray.CreateBuilder<TrRmStandardTypeProviderBinding>(
-                    orderedBindings.Count);
-            foreach (var binding in orderedBindings)
-            {
-                ConsumeWork();
-                resultBindings.Add(binding);
-            }
-
-            return resultBindings.MoveToImmutable();
+            ConsumeWork(checked((ulong)orderedBindings.Count + 1UL));
+            return [.. orderedBindings];
         }
 
         private void CollectStorageType(int artifactIndex, int moduleRow,
