@@ -16,14 +16,21 @@ public static class FixedLayoutStorage
     /// <exception cref="ArgumentException">A commitment, transitive field, or recorded layout is invalid.</exception>
     /// <exception cref="NotSupportedException">The declaration graph exceeds verification limits.</exception>
     public static ImmutableArray<int> Validate(ImmutableArray<BoundStruct> structures)
-        => Compute(structures, validateRecordedLayout: true).Alignments;
+        => Validate(structures, ImmutableArray<BoundNativeFixedArrayType>.Empty);
+
+    internal static ImmutableArray<int> Validate(
+        ImmutableArray<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        => Compute(structures, validateRecordedLayout: true, fixedArrays).Alignments;
 
     internal static ImmutableArray<BoundStruct> Materialize(
         ImmutableArray<BoundStruct> structures)
-        => Compute(structures, validateRecordedLayout: false).Structures;
+        => Compute(structures, validateRecordedLayout: false,
+            ImmutableArray<BoundNativeFixedArrayType>.Empty).Structures;
 
     private static (ImmutableArray<BoundStruct> Structures, ImmutableArray<int> Alignments)
-        Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout)
+        Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout,
+            IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
     {
         if (structures.IsDefault)
         {
@@ -102,8 +109,30 @@ public static class FixedLayoutStorage
                 }
                 int width;
                 int fieldAlignment;
-                if (field.Type is PrimitiveType.Bool or PrimitiveType.Char16
-                    or PrimitiveType.Int32 or PrimitiveType.UInt32 or PrimitiveType.Int64 or PrimitiveType.UInt64
+                if (NativeFixedArrayTypes.IsType(field.Type))
+                {
+                    var arrayIndex = NativeFixedArrayTypes.Index(field.Type);
+                    if ((uint)arrayIndex >= (uint)fixedArrays.Count)
+                    {
+                        throw Invalid();
+                    }
+
+                    var array = fixedArrays[arrayIndex];
+                    if (!NativeFixedArrayContract.TryGetLayout(field.Type,
+                            array.ElementType, array.ElementCount, structures,
+                            fixedArrays, out var layout)
+                        || layout.ByteExtent > int.MaxValue
+                        || layout.Alignment > int.MaxValue)
+                    {
+                        throw Invalid();
+                    }
+
+                    width = (int)layout.ByteExtent;
+                    fieldAlignment = (int)layout.Alignment;
+                }
+                else if (field.Type is PrimitiveType.Bool or PrimitiveType.Char16
+                    or PrimitiveType.Int32 or PrimitiveType.UInt32
+                    or PrimitiveType.Int64 or PrimitiveType.UInt64
                     or PrimitiveType.Float32 or PrimitiveType.Float64
                     or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                     or PrimitiveType.NativeRawPointer
