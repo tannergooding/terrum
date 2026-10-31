@@ -200,6 +200,76 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2DeclarationProducerPublishesCheckedCopyEvidence()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-copy-declarations";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Scalar {
+                public int32 Value;
+            }
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Pair {
+                public Scalar Low;
+                public Scalar High;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(2));
+        Assert.That(tables.TypeDefs.HasDeclaredCopy(1), Is.True);
+        Assert.That(tables.TypeDefs.HasDeclaredCopy(2), Is.True);
+        Assert.That(tables.TypeDefs.GetFlags(1) & 0x20, Is.EqualTo(0x20));
+        Assert.That(tables.Features.TryGetFeature(
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+            out var feature), Is.True);
+        Assert.That(feature.RuleRevision, Is.EqualTo(1));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.Zero);
+    }
+
+    [Test]
+    public void StandardA2DeclarationProducerDoesNotClaimCopyForUniqueStructs()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-unique-declarations";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public unique struct UniquePayload {
+                public int32 Value;
+            }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.Structures.Single().IsUnique,
+            Is.True);
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+
+        Assert.That(tables.TypeDefs.Count, Is.EqualTo(1));
+        Assert.That(tables.TypeDefs.HasDeclaredCopy(1), Is.False);
+        Assert.That(tables.TypeDefs.GetFlags(1) & 0x20, Is.Zero);
+        Assert.That(tables.Features.TryGetFeature(
+            TrRmFeatureTableReader.RootlessNativeValuesFeatureId,
+            out _), Is.False);
+    }
+
+    [Test]
     public void StandardA2LoaderReconstructsNestedAndWideArrayTypes()
     {
         const string schemaIdentity

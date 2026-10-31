@@ -129,8 +129,10 @@ public static partial class SemanticVerifier
         bool allowGenericProofDependencies = false, bool deriveCopyOriginSummaries = false)
     {
         ArgumentNullException.ThrowIfNull(program);
-        if (program.Functions.IsDefaultOrEmpty || (requireEntryPoint
-            ? program.EntryPoint < 0 || program.EntryPoint >= program.Functions.Length : program.EntryPoint != -1))
+        if (program.Functions.IsDefault || (requireEntryPoint
+            ? program.Functions.IsEmpty || program.EntryPoint < 0
+                || program.EntryPoint >= program.Functions.Length
+            : program.EntryPoint != -1))
         {
             throw Invalid();
         }

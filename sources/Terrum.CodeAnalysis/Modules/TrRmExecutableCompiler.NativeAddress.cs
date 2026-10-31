@@ -33,6 +33,15 @@ public static partial class TrRmExecutableCompiler
             SemanticVerifier.VerifyWithDirectNativeImports(program);
         }
 
+        if (schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            && program.EntryPoint < 0 && program.Functions.IsEmpty
+            && !program.Structures.IsEmpty)
+        {
+            return EmitForeignInvocationStorageFixedArrayCopyDeclarations(
+                program, moduleIdentity);
+        }
+
         if (program.Functions.Length != 2
             || !program.Structures.IsEmpty || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty || !program.NativeUtf16ZLiterals.IsEmpty
