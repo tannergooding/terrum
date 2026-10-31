@@ -323,7 +323,10 @@ public static partial class TrRmExecutableCompiler
                                     binding.ProducerIdentity,
                                     binding.ExportKey,
                                     binding.TargetRequirement,
-                                    binding.RuntimePolicy));
+                                    binding.RuntimePolicy,
+                                    importedProviderSnapshot,
+                                    0x1300_0000u
+                                        | checked((uint)binding.ProviderTypeDefRow)));
                         }
                         foreach (var binding in typeProviderBindings)
                         {
@@ -346,7 +349,12 @@ public static partial class TrRmExecutableCompiler
                                     binding.ProducerIdentity,
                                     binding.ExportKey,
                                     binding.TargetRequirement,
-                                    binding.RuntimePolicy));
+                                    binding.RuntimePolicy,
+                                    GetProviderSnapshot(
+                                        binding.ProviderArtifactIndex,
+                                        binding.ProviderModuleRow),
+                                    0x1300_0000u
+                                        | checked((uint)binding.ProviderTypeDefRow)));
                         }
                         var importedKeys = importBindings.Select(
                                 static binding => binding.ExportKey)
@@ -358,7 +366,8 @@ public static partial class TrRmExecutableCompiler
                                 0x1300_0000u
                                     | checked((uint)firstBinding.ProviderTypeDefRow),
                                 [.. importedKeys], false,
-                                importExpectations.ToImmutable()));
+                                importExpectations.ToImmutable(),
+                                providerSnapshot));
                     }
                     else if (tables.Exports.TryGetExportKeyForDefinition(
                                  moduleRow,
@@ -512,15 +521,24 @@ public static partial class TrRmExecutableCompiler
                 fields.Add(field with { Type = RemapType(field.Type) });
             }
 
+            var projectedFields = fields.MoveToImmutable();
+            var origin = originsByTypeDefRow.TryGetValue(typeDefRow,
+                out var importedOrigin)
+                ? importedOrigin
+                : new BoundStandardTypeOrigin(providerSnapshot,
+                    0x1300_0000u | checked((uint)typeDefRow),
+                    [.. keysByTypeDefRow[typeDefRow]],
+                    rootTypeDefRows.Contains(typeDefRow),
+                    ReferenceRoot: providerSnapshot);
+            var expectedDeclaration = original with {
+                Fields = projectedFields,
+                StandardTypeOrigin = null,
+            };
             projectedStructures.Add(original with {
-                Fields = fields.MoveToImmutable(),
-                StandardTypeOrigin = originsByTypeDefRow.TryGetValue(
-                        typeDefRow, out var origin)
-                    ? origin
-                    : new BoundStandardTypeOrigin(providerSnapshot,
-                        0x1300_0000u | checked((uint)typeDefRow),
-                        [.. keysByTypeDefRow[typeDefRow]],
-                        rootTypeDefRows.Contains(typeDefRow)),
+                Fields = projectedFields,
+                StandardTypeOrigin = origin with {
+                    ExpectedDeclaration = expectedDeclaration,
+                },
             });
         }
 

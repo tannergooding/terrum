@@ -497,10 +497,19 @@ retaining both provider and consumer expectations. Distinct A2 TypeDef Import
 triples for the same expected TypeDef retain each ExportKey and Import
 expectation; they bind only when all keys resolve to the same actual provider
 TypeDef, while duplicate triples and split aliases reject. Distinct expected
-views, origin replacement/remapping, canonical re-encoding, source-free Bodies,
-CLI and runtime remain open. The combined A2 provider/reference/layout
-selection passed 163/163 with zero skips, including alias and split-alias cases.
-Compatible provider replacement,
+views now remain separate expected stubs while their established alias keys are
+cross-linked to the same actual provider definition. Origin replacement/
+remapping across arbitrary row/context permutations, canonical row
+re-encoding, source-free Bodies, CLI and runtime remain open. Type-only source
+consumers now re-emit origin-backed TypeDef stubs, ModuleRefs, Imports,
+imported TypeSpec uses and fixed-array recipes without losing them when no
+local ExportKey map is supplied. Explicit local exports preserve the same
+imports; provider-owned alias keys survive two consumer re-projection
+generations; compatible provider TypeDef relocation succeeds; changed imported
+declarations, split alias replacements and incompatible layouts reject. The
+combined A2 provider/reference/layout selection passed 164/164 with zero
+skips, including distinct-view and re-encoding cases.
+General provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact
 uniqueness-amended A3 identity is

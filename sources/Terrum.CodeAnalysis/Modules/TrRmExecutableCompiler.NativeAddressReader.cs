@@ -1730,7 +1730,8 @@ public static partial class TrRmExecutableCompiler
             nativePointerTypeDefinitions, out var structureTypeByTypeDef,
             fixedArrayTypes, arrayTypeByTypeSpecRow, materializedTypeDefRows,
             imports: tables.Imports,
-            includedTypeDefRows: selectedTypeDefRows);
+            includedTypeDefRows: selectedTypeDefRows,
+            allowDuplicateImportedViews: true);
         var materializedTypeDefs = new bool[tables.TypeDefs.Count + 1];
         var pendingArrayLayouts = new List<TrRmFixedArrayLayoutRow>();
         for (var row = 1; row <= tables.FixedArrayLayouts.Count; row++)
@@ -1794,7 +1795,8 @@ public static partial class TrRmExecutableCompiler
                     nativePointerTypeDefinitions, out var updatedTypeMap,
                     fixedArrayTypes, arrayTypeByTypeSpecRow,
                     materializedTypeDefRows, structures, tables.Imports,
-                    selectedTypeDefRows);
+                    selectedTypeDefRows,
+                    allowDuplicateImportedViews: true);
                 if (!structureTypeByTypeDef.SequenceEqual(updatedTypeMap))
                 {
                     throw Invalid(
@@ -1837,7 +1839,19 @@ public static partial class TrRmExecutableCompiler
         }
         if (verifySemantics)
         {
-            SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
+            var duplicateNameViewIndexes = new HashSet<int>();
+            foreach (var typeDefRow in materializedTypeDefRows)
+            {
+                if (tables.Imports.IsExpectedDefinition(
+                        0x1300_0000u | checked((uint)typeDefRow)))
+                {
+                    _ = duplicateNameViewIndexes.Add(
+                        structureTypeByTypeDef[typeDefRow]);
+                }
+            }
+
+            SemanticVerifier.VerifyLibraryWithDirectNativeImports(program,
+                duplicateNameViewIndexes: duplicateNameViewIndexes);
         }
 
         return program;

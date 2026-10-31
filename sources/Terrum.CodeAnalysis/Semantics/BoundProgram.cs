@@ -547,12 +547,15 @@ internal sealed record BoundSourceTypeProviderSnapshot(
 internal sealed record BoundSourceTypeExpectation(
     BoundSourceTypeProviderSnapshot UsingModule, int ImportRow,
     uint ExpectedDefinitionId, string ProducerIdentity, string ExportKey,
-    uint TargetRequirement, uint RuntimePolicy);
+    uint TargetRequirement, uint RuntimePolicy,
+    BoundSourceTypeProviderSnapshot Provider, uint ProviderDefinitionId);
 
 internal sealed record BoundStandardTypeOrigin(
     BoundSourceTypeProviderSnapshot Provider, uint DefinitionId,
     ImmutableArray<string> ExportKeys, bool IsLookupRoot,
-    ImmutableArray<BoundSourceTypeExpectation> Expectations = default);
+    ImmutableArray<BoundSourceTypeExpectation> Expectations = default,
+    BoundSourceTypeProviderSnapshot? ReferenceRoot = null,
+    BoundStruct? ExpectedDeclaration = null);
 
 /// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
 public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)

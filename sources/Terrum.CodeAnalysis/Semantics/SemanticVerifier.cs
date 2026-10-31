@@ -64,11 +64,12 @@ public static partial class SemanticVerifier
     }
 
     internal static void VerifyLibraryWithDirectNativeImports(BoundProgram program,
-        string? nativeLoweringAgreement = null)
+        string? nativeLoweringAgreement = null,
+        IReadOnlySet<int>? duplicateNameViewIndexes = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         VerifyDirectNativeImports(program, requireEntryPoint: false,
-            nativeLoweringAgreement);
+            nativeLoweringAgreement, duplicateNameViewIndexes);
     }
 
     internal static void VerifyWithDirectNativeImports(BoundProgram program,
@@ -79,8 +80,9 @@ public static partial class SemanticVerifier
             nativeLoweringAgreement);
     }
 
-    private static void VerifyDirectNativeImports(BoundProgram program, bool requireEntryPoint,
-        string? nativeLoweringAgreement)
+    private static void VerifyDirectNativeImports(BoundProgram program,
+        bool requireEntryPoint, string? nativeLoweringAgreement,
+        IReadOnlySet<int>? duplicateNameViewIndexes = null)
     {
         ValidateNativeLoweringAgreement(program, nativeLoweringAgreement);
         if (program.Functions.Any(static function =>
@@ -88,7 +90,8 @@ public static partial class SemanticVerifier
         {
             throw Invalid();
         }
-        _ = VerifyCore(program, requireEntryPoint, allowExternal: true);
+        _ = VerifyCore(program, requireEntryPoint, allowExternal: true,
+            duplicateNameViewIndexes: duplicateNameViewIndexes);
     }
 
     internal static void VerifyReferences(BoundProgram program)
@@ -126,7 +129,9 @@ public static partial class SemanticVerifier
 
     private static ImmutableArray<BoundCopyOriginSummary?> VerifyCore(
         BoundProgram program, bool requireEntryPoint, bool allowExternal = false,
-        bool allowGenericProofDependencies = false, bool deriveCopyOriginSummaries = false)
+        bool allowGenericProofDependencies = false,
+        bool deriveCopyOriginSummaries = false,
+        IReadOnlySet<int>? duplicateNameViewIndexes = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         if (program.Functions.IsDefault || (requireEntryPoint
@@ -332,9 +337,10 @@ public static partial class SemanticVerifier
         if (program.Structures.Any(static structure => structure is not null && structure.BlittableTargetRequirement != 0))
         {
             _ = FixedLayoutStorage.Validate(program.Structures,
-                program.NativeFixedArrayTypes);
+                program.NativeFixedArrayTypes, duplicateNameViewIndexes);
         }
-        var structNames = new HashSet<string>(program.Structures.Length, StringComparer.Ordinal);
+        var structNames = new Dictionary<string, bool>(program.Structures.Length,
+            StringComparer.Ordinal);
         var layoutStates = new byte[program.Structures.Length];
         var alignments = new int[program.Structures.Length];
         var layoutHeights = new int[program.Structures.Length];
@@ -347,7 +353,8 @@ public static partial class SemanticVerifier
         {
             if (@class is null || string.IsNullOrWhiteSpace(@class.Name)
                 || @class.Name is NativeManagedNodeIntrinsics.TypeName or NativeManagedNodeIntrinsics.HeapName
-                || !classNames.Add(@class.Name) || structNames.Contains(@class.Name)
+                || !classNames.Add(@class.Name)
+                || structNames.ContainsKey(@class.Name)
                 || @class.Fields.IsDefaultOrEmpty || @class.Fields.Length > ManagedClassTypes.MaximumFields
                 || @class.Size is < 8 or > ManagedClassTypes.MaximumPayload || (@class.Size & 7) != 0)
             {
@@ -427,12 +434,26 @@ public static partial class SemanticVerifier
             if (structure is null || string.IsNullOrWhiteSpace(structure.Name)
                 || structure.Name is NativeBufferIntrinsics.TypeName or NativeManagedNodeIntrinsics.TypeName
                     or NativeManagedNodeIntrinsics.HeapName
-                || !structNames.Add(structure.Name)
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty
                 || structure.Size is < 1 or > ValueLayout.MaximumStructureSize)
             {
                 throw Invalid();
+            }
+            var isDuplicateNameView
+                = (duplicateNameViewIndexes?.Contains(index) ?? false)
+                    || structure.StandardTypeOrigin?.IsLookupRoot == false;
+            if (structNames.TryGetValue(structure.Name,
+                    out var existingDuplicateNameView))
+            {
+                if (!existingDuplicateNameView || !isDuplicateNameView)
+                {
+                    throw Invalid();
+                }
+            }
+            else
+            {
+                structNames.Add(structure.Name, isDuplicateNameView);
             }
             var offset = 0;
             var alignment = 1;

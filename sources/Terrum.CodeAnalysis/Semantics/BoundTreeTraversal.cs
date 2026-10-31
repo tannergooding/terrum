@@ -308,12 +308,32 @@ internal static class BoundTreeTraversal
         function with { Body = (BoundBlock)RewriteExpressions(function.Body, rewrite) };
 
     internal static BoundStruct RewriteTypes(BoundStruct structure,
-        Func<PrimitiveType, PrimitiveType> rewriteType) =>
-        structure with {
-            Fields = [.. structure.Fields.Select(field => field with {
-                Type = rewriteType(field.Type),
-            })],
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+    {
+        var fields = RewriteFields(structure.Fields, rewriteType);
+        var origin = structure.StandardTypeOrigin;
+        if (origin?.ExpectedDeclaration is BoundStruct expectedDeclaration)
+        {
+            origin = origin with {
+                ExpectedDeclaration = expectedDeclaration with {
+                    Fields = RewriteFields(expectedDeclaration.Fields,
+                        rewriteType),
+                },
+            };
+        }
+
+        return structure with {
+            Fields = fields,
+            StandardTypeOrigin = origin,
         };
+    }
+
+    private static ImmutableArray<BoundStructField> RewriteFields(
+        ImmutableArray<BoundStructField> fields,
+        Func<PrimitiveType, PrimitiveType> rewriteType)
+        => [.. fields.Select(field => field with {
+            Type = rewriteType(field.Type),
+        })];
 
     internal static BoundNativeFixedArrayType RewriteTypes(
         BoundNativeFixedArrayType fixedArray,

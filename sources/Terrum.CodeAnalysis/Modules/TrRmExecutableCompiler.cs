@@ -3208,7 +3208,8 @@ public static partial class TrRmExecutableCompiler
         HashSet<int>? selectedTypeDefRows = null,
         ImmutableArray<BoundStruct>? previousStructures = null,
         TrRmImportTableReader imports = default,
-        HashSet<int>? includedTypeDefRows = null)
+        HashSet<int>? includedTypeDefRows = null,
+        bool allowDuplicateImportedViews = false)
     {
         fixedArrayTypes ??= ImmutableArray<BoundNativeFixedArrayType>.Empty;
         if (!targetProfiles.TryGetProfile(1, 1, out var windowsX64ProfileRow))
@@ -3347,11 +3348,27 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
+        HashSet<int>? duplicateNameViewIndexes = null;
+        if (allowDuplicateImportedViews)
+        {
+            duplicateNameViewIndexes = [];
+            foreach (var row in structureRows)
+            {
+                if (imports.IsExpectedDefinition(
+                        0x1300_0000u | checked((uint)row)))
+                {
+                    _ = duplicateNameViewIndexes.Add(
+                        structureTypeByTypeDef[row]);
+                }
+            }
+        }
+
         try
         {
             var result = FixedLayoutStorage.Materialize([.. structures],
-                fixedArrayTypes);
-            _ = FixedLayoutStorage.Validate(result, fixedArrayTypes);
+                fixedArrayTypes, duplicateNameViewIndexes);
+            _ = FixedLayoutStorage.Validate(result, fixedArrayTypes,
+                duplicateNameViewIndexes);
             return result;
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException)

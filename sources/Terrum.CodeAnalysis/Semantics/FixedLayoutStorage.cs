@@ -20,8 +20,10 @@ public static class FixedLayoutStorage
 
     internal static ImmutableArray<int> Validate(
         ImmutableArray<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
-        => Compute(structures, validateRecordedLayout: true, fixedArrays).Alignments;
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlySet<int>? duplicateNameViewIndexes = null)
+        => Compute(structures, validateRecordedLayout: true, fixedArrays,
+            duplicateNameViewIndexes).Alignments;
 
     internal static ImmutableArray<BoundStruct> Materialize(
         ImmutableArray<BoundStruct> structures)
@@ -30,13 +32,15 @@ public static class FixedLayoutStorage
 
     internal static ImmutableArray<BoundStruct> Materialize(
         ImmutableArray<BoundStruct> structures,
-        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlySet<int>? duplicateNameViewIndexes = null)
         => Compute(structures, validateRecordedLayout: false,
-            fixedArrays).Structures;
+            fixedArrays, duplicateNameViewIndexes).Structures;
 
     private static (ImmutableArray<BoundStruct> Structures, ImmutableArray<int> Alignments)
         Compute(ImmutableArray<BoundStruct> structures, bool validateRecordedLayout,
-            IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+            IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+            IReadOnlySet<int>? duplicateNameViewIndexes = null)
     {
         if (structures.IsDefault)
         {
@@ -50,7 +54,7 @@ public static class FixedLayoutStorage
         var alignments = new int[structures.Length];
         var heights = new int[structures.Length];
         var computedStructures = new BoundStruct[structures.Length];
-        var names = new HashSet<string>(StringComparer.Ordinal);
+        var names = new Dictionary<string, bool>(StringComparer.Ordinal);
         var remaining = SemanticVerifier.MaximumAnalysisVisits;
         for (var index = 0; index < structures.Length; index++)
         {
@@ -85,8 +89,27 @@ public static class FixedLayoutStorage
                 return;
             }
             var structure = structures[index];
-            if (structure is null || string.IsNullOrWhiteSpace(structure.Name) || !names.Add(structure.Name)
-                || structure.BlittableTargetRequirement != WindowsX64TargetRequirement
+            if (structure is null || string.IsNullOrWhiteSpace(structure.Name))
+            {
+                throw Invalid();
+            }
+
+            var isHiddenImportedView
+                = (duplicateNameViewIndexes?.Contains(index) ?? false)
+                    || structure.StandardTypeOrigin?.IsLookupRoot == false;
+            if (names.TryGetValue(structure.Name, out var existingHiddenView))
+            {
+                if (!existingHiddenView || !isHiddenImportedView)
+                {
+                    throw Invalid();
+                }
+            }
+            else
+            {
+                names.Add(structure.Name, isHiddenImportedView);
+            }
+
+            if (structure.BlittableTargetRequirement != WindowsX64TargetRequirement
                 || structure.IsSequential == structure.IsTransparent
                 || (structure.IsTransparent && structure.Fields.Length != 1)
                 || (structure.CleanupMethod is not null && !structure.IsUnique)

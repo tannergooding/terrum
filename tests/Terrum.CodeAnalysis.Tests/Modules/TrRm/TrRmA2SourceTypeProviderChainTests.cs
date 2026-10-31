@@ -63,7 +63,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         Assert.That(pairOrigin.Expectations.Any(static expectation
             => expectation.UsingModule.ModuleIdentity == "Provider"
                 && expectation.ImportRow == 1
-                && expectation.ExportKey == "LeafKey"), Is.True);
+                && expectation.ExportKey == "ProviderLeafKey"), Is.True);
         var splitAliasProviderArtifact = CreateProviderArtifact(
             splitPairAlias: true);
         var splitAliasException = Assert.Throws<InvalidDataException>(() =>
@@ -82,7 +82,12 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var remappedPair = BoundTreeTraversal.RewriteTypes(pair, static type
             => type == (PrimitiveType)101 ? (PrimitiveType)100 : type);
         Assert.That(remappedPair.Fields[0].Type, Is.EqualTo((PrimitiveType)100));
-        Assert.That(remappedPair.StandardTypeOrigin, Is.SameAs(pairOrigin));
+        Assert.That(remappedPair.StandardTypeOrigin!.Provider,
+            Is.SameAs(pairOrigin.Provider));
+        Assert.That(remappedPair.StandardTypeOrigin.ReferenceRoot,
+            Is.SameAs(pairOrigin.ReferenceRoot));
+        Assert.That(remappedPair.StandardTypeOrigin.ExpectedDeclaration!
+            .Fields[0].Type, Is.EqualTo((PrimitiveType)100));
 
         var leaf = reference.Structures.Single(static structure
             => structure.Name == "Leaf");
@@ -121,6 +126,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Consumer {
                 public Container Value;
+                public [Container; 2] Values;
             }
             """), reference);
         Assert.That(sourceConsumer.HasErrors, Is.False,
@@ -133,7 +139,171 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             """), reference);
         Assert.That(hiddenDependency.HasErrors, Is.True);
 
+        var sourceProgram = sourceConsumer.Program!;
         var replacementLeaf = CreateLeafProviderArtifact(pack: 8);
+        var importedPairIndex = Enumerable.Range(0,
+            sourceProgram.Structures.Length).Single(index
+            => sourceProgram.Structures[index].Name == "Pair");
+        var importedPair = sourceProgram.Structures[importedPairIndex];
+        var alteredPair = importedPair with {
+            Fields = importedPair.Fields.SetItem(0,
+                importedPair.Fields[0] with { Type = PrimitiveType.Int32 }),
+        };
+        var alteredProgram = sourceProgram with {
+            Structures = sourceProgram.Structures.SetItem(
+                importedPairIndex, alteredPair),
+        };
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(alteredProgram, "Consumer",
+                SchemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]));
+
+        var unexportedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceProgram, "Consumer", SchemaIdentity, 1);
+        var unexportedConsumerProgram = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(SchemaIdentity,
+                unexportedConsumerArtifact),
+            "Consumer",
+            [
+                new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ]);
+        Assert.That(unexportedConsumerProgram.Structures,
+            Has.Length.EqualTo(4));
+        Assert.That(unexportedConsumerProgram.NativeFixedArrayTypes,
+            Has.Length.EqualTo(1));
+
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceProgram, "Consumer", SchemaIdentity, 1,
+            [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]);
+        var consumerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, consumerArtifact),
+            "Consumer",
+            [
+                new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ],
+            ["ConsumerKey"]);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "Consumer",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        rootArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        replacementLeaf),
+                ],
+                ["ConsumerKey"]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "Consumer",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        rootArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        splitAliasProviderArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        leafArtifact),
+                ],
+                ["ConsumerKey"]));
+        var relocatedProviderArtifact = CreateProviderArtifact(
+            relocatePair: true);
+        var relocatedConsumerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "Consumer",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        rootArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        relocatedProviderArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        leafArtifact),
+                ],
+                ["ConsumerKey"]);
+        Assert.That(relocatedConsumerReference.Structures.Single(
+            static structure => structure.Name == "Pair")
+            .StandardTypeOrigin!.DefinitionId, Is.EqualTo(0x1300_0002u));
+        var reencodedContainer = consumerReference.Structures.Single(
+            static structure => structure.Name == "Container");
+        Assert.That(reencodedContainer.StandardTypeOrigin!.IsLookupRoot,
+            Is.False);
+        Assert.That(reencodedContainer.StandardTypeOrigin.Provider
+            .ModuleIdentity, Is.EqualTo("Root"));
+        Assert.That(reencodedContainer.StandardTypeOrigin.Expectations.Any(
+            static expectation
+                => expectation.UsingModule.ModuleIdentity == "Consumer"
+                    && expectation.ExportKey == "ContainerKey"), Is.True);
+        Assert.That(consumerReference.NativeFixedArrayTypes,
+            Has.Length.EqualTo(1));
+        Assert.That(consumerReference.NativeFixedArrayTypes[0].ElementCount,
+            Is.EqualTo(2UL));
+        var reencodedPair = consumerReference.Structures.Single(
+            static structure => structure.Name == "Pair");
+        Assert.That(reencodedPair.StandardTypeOrigin!.ExportKeys,
+            Is.EquivalentTo(new[] { "PairKey", "PairAlias" }));
+        Assert.That(reencodedPair.StandardTypeOrigin.Expectations.Count(
+            static expectation
+                => expectation.UsingModule.ModuleIdentity == "Consumer"),
+            Is.EqualTo(2));
+        var reencodedLeaf = consumerReference.Structures.Single(
+            static structure => structure.Name == "Leaf");
+        Assert.That(reencodedLeaf.StandardTypeOrigin!.ExportKeys,
+            Is.EquivalentTo(new[] { "LeafKey", "ProviderLeafKey" }));
+        var hiddenReencodedDependency = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Consumer {
+                    public Container Value;
+                }
+                """), consumerReference);
+        Assert.That(hiddenReencodedDependency.HasErrors, Is.True);
+
+        var secondSourceConsumer = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Consumer2 {
+                    public Consumer Value;
+                }
+                """), consumerReference);
+        Assert.That(secondSourceConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                secondSourceConsumer.Diagnostics));
+        var secondConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            secondSourceConsumer.Program!, "Consumer2", SchemaIdentity, 1,
+            [new TrRmSourceTypeExport("", "Consumer2", "Consumer2Key")]);
+        var secondConsumerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    secondConsumerArtifact),
+                "Consumer2",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        consumerArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        rootArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        leafArtifact),
+                ],
+                ["Consumer2Key"]);
+        var secondReencodedLeaf = secondConsumerReference.Structures.Single(
+            static structure => structure.Name == "Leaf");
+        Assert.That(secondReencodedLeaf.StandardTypeOrigin!.ExportKeys,
+            Is.EquivalentTo(new[] { "LeafKey", "ProviderLeafKey" }));
+
         _ = Assert.Throws<InvalidDataException>(() =>
             TrRmExecutableCompiler.CreateStandardReference(
                 new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
@@ -161,55 +331,171 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             .SequenceEqual(leafSnapshot.AsSpan()), Is.True);
     }
 
-    private static byte[] CreateRootArtifact(bool duplicatePairAlias = false)
+    [Test]
+    public void StandardA2SourceReencodingPreservesDistinctExpectedViews()
+    {
+        var rootArtifact = CreateRootArtifact(multiplePairViews: true);
+        var providerArtifact = CreateProviderArtifact();
+        var leafArtifact = CreateLeafProviderArtifact();
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+            "Root",
+            [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ],
+            ["ContainerKey"]);
+        var pairs = reference.Structures.Where(static structure
+                => structure.Name == "Pair")
+            .ToArray();
+        Assert.That(pairs, Has.Length.EqualTo(2));
+        Assert.That(pairs.Select(static structure
+                => structure.StandardTypeOrigin!.DefinitionId)
+            .Distinct().ToArray(), Has.Length.EqualTo(1));
+        Assert.That(pairs.Any(static structure
+            => structure.StandardTypeOrigin!.Expectations.Any(
+                static expectation => expectation.ImportRow == 1
+                    && expectation.ExportKey == "PairKey")), Is.True);
+        Assert.That(pairs.Any(static structure
+            => structure.StandardTypeOrigin!.Expectations.Any(
+                static expectation => expectation.ImportRow == 2
+                    && expectation.ExportKey == "PairAlias")), Is.True);
+
+        var sourceConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Consumer {
+                public Container Value;
+            }
+            """), reference);
+        Assert.That(sourceConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            sourceConsumer.Program!, "Consumer", SchemaIdentity, 1,
+            [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]);
+        var consumerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, consumerArtifact),
+            "Consumer",
+            [
+                new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ],
+            ["ConsumerKey"]);
+        var reencodedPairs = consumerReference.Structures.Where(
+                static structure => structure.Name == "Pair")
+            .ToArray();
+        Assert.That(reencodedPairs, Has.Length.EqualTo(2));
+        Assert.That(reencodedPairs.All(static structure
+            => structure.StandardTypeOrigin!.ExportKeys.ToHashSet(
+                StringComparer.Ordinal).SetEquals(
+                new[] { "PairKey", "PairAlias" })), Is.True);
+        Assert.That(reencodedPairs.SelectMany(static structure
+                => structure.StandardTypeOrigin!.Expectations)
+            .Where(static expectation
+                => expectation.UsingModule.ModuleIdentity == "Consumer")
+            .Select(static expectation => expectation.ExpectedDefinitionId)
+            .Distinct().ToArray(), Has.Length.EqualTo(2));
+
+        var splitAliasProvider = CreateProviderArtifact(
+            splitPairAlias: true);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "Consumer",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        rootArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        splitAliasProvider),
+                    new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+                ],
+                ["ConsumerKey"]));
+    }
+
+    private static byte[] CreateRootArtifact(bool duplicatePairAlias = false,
+        bool multiplePairViews = false)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Root", 0), ("Provider", 0), ("LeafProvider", 0),
             ("Pair", 0), ("Leaf", 0), ("Value", 0), ("PairKey", 0),
             ("LeafKey", 0), ("Container", 0), ("Child", 0), ("Data", 0),
-            ("ContainerKey", 0), ("PairAlias", 0),
+            ("ContainerKey", 0), ("PairAlias", 0), ("Left", 0),
+            ("Right", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringsBytes, 14);
+        var strings = new TrRmStringTableReader(stringsBytes, 16);
         var featuresBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
         ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
         var features = new TrRmFeatureTableReader(featuresBytes, 1,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        var typeDefCount = multiplePairViews ? 4 : 3;
+        var fieldCount = multiplePairViews ? 5 : 3;
+        var layoutCount = typeDefCount * 2;
         var modulesBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
                 FeatureFirst: 1, FeatureCount: 1),
-        ], strings, 2, 3, 0, 0, 1);
+        ], strings, 2, typeDefCount, 0, 0, 1);
         var modules = new TrRmModuleTableReader(modulesBytes, 1, strings,
-            2, 3, 0, 0, 1);
+            2, typeDefCount, 0, 0, 1);
         var moduleRefsBytes = TrRmModuleRefTableWriter.Encode([
             new TrRmModuleRefRow(3, 1, 0),
             new TrRmModuleRefRow(4, 1, 0),
         ], strings, modules);
         var moduleRefs = new TrRmModuleRefTableReader(moduleRefsBytes, 2,
             strings, modules);
-        var typeSpecsBytes = TrRmTypeSpecTableWriter.Encode([
+        var typeSpecRows = new List<ReadOnlyMemory<byte>> {
             TrRmTypeSpecTableWriter.Builtin(0x0D),
             TrRmTypeSpecTableWriter.Reference(0x03, 1),
             TrRmTypeSpecTableWriter.Reference(0x03, 3),
-        ], 3, 3, 0, 0,
+        };
+        if (multiplePairViews)
+        {
+            typeSpecRows.Add(
+                TrRmTypeSpecTableWriter.Reference(0x03, 2));
+        }
+        var typeSpecsBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+            typeDefCount, 3, 0, 0,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
-        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes, 3, 3, 3,
-            0, 0, TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
-        var typeDefsBytes = TrRmTypeDefTableWriter.Encode([
-            new TrRmTypeDefRow(1, 5, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
-            new TrRmTypeDefRow(1, 6, 0x26, 2, 1, 0, 0, 3, 2, 0, 0),
-            new TrRmTypeDefRow(1, 10, 0x26, 3, 1, 0, 0, 5, 2, 0, 0),
-        ], strings, modules, 3, 0, 6, 0,
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes,
+            typeSpecRows.Count, typeDefCount, 3, 0, 0,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
-        var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes, 3, strings,
-            modules, 3, 0, 6, 0,
+        var typeDefRows = multiplePairViews
+            ? new[] {
+                new TrRmTypeDefRow(1, 5, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
+                new TrRmTypeDefRow(1, 5, 0x26, 2, 1, 0, 0, 3, 2, 0, 0),
+                new TrRmTypeDefRow(1, 6, 0x26, 3, 1, 0, 0, 5, 2, 0, 0),
+                new TrRmTypeDefRow(1, 10, 0x26, 4, 2, 0, 0, 7, 2, 0, 0),
+            }
+            : [
+                new TrRmTypeDefRow(1, 5, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
+                new TrRmTypeDefRow(1, 6, 0x26, 2, 1, 0, 0, 3, 2, 0, 0),
+                new TrRmTypeDefRow(1, 10, 0x26, 3, 1, 0, 0, 5, 2, 0, 0),
+            ];
+        var typeDefsBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
+            strings, modules, fieldCount, 0, layoutCount, 0,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
-        var fieldsBytes = TrRmFieldDefTableWriter.Encode([
-            new TrRmFieldDefRow(1, 11, 3, 0),
-            new TrRmFieldDefRow(2, 12, 1, 0),
-            new TrRmFieldDefRow(3, 11, 2, 0),
-        ], strings, typeDefs, typeSpecs);
-        var fields = new TrRmFieldDefTableReader(fieldsBytes, 3, strings,
+        var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes,
+            typeDefCount, strings, modules, fieldCount, 0, layoutCount, 0,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        var fieldRows = multiplePairViews
+            ? new[] {
+                new TrRmFieldDefRow(1, 11, 3, 0),
+                new TrRmFieldDefRow(2, 11, 3, 0),
+                new TrRmFieldDefRow(3, 12, 1, 0),
+                new TrRmFieldDefRow(4, 15, 2, 0),
+                new TrRmFieldDefRow(4, 16, 4, 0),
+            }
+            : [
+                new TrRmFieldDefRow(1, 11, 3, 0),
+                new TrRmFieldDefRow(2, 12, 1, 0),
+                new TrRmFieldDefRow(3, 11, 2, 0),
+            ];
+        var fieldsBytes = TrRmFieldDefTableWriter.Encode(fieldRows, strings,
+            typeDefs, typeSpecs);
+        var fields = new TrRmFieldDefTableReader(fieldsBytes, fieldCount, strings,
             typeDefs, typeSpecs);
         var targetProfilesBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(1, 1),
@@ -218,15 +504,23 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             targetProfilesBytes, 1,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
         var (layoutBytes, layoutFieldBytes)
-            = CreateSingleFieldLayouts(typeDefs, fields, targetProfiles, 3);
-        var layouts = new TrRmLayoutTableReader(layoutBytes, 6, typeDefs,
-            targetProfiles, 6);
-        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes, 6,
+            = CreateSingleFieldLayouts(typeDefs, fields, targetProfiles,
+                typeDefCount);
+        var layoutFieldCount = multiplePairViews ? 10 : 6;
+        var layouts = new TrRmLayoutTableReader(layoutBytes, layoutCount,
+            typeDefs, targetProfiles, layoutFieldCount);
+        var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
+            layoutFieldCount,
             layouts, typeDefs, fields);
+        var secondPairExpected = multiplePairViews
+            ? 0x1300_0002u : 0x1300_0001u;
+        var leafExpected = 0x1300_0000u
+            | checked((uint)(multiplePairViews ? 3 : 2));
         var importsBytes = TrRmImportTableWriter.Encode([
             new TrRmImportRow(1, 8, 0x1300_0001),
-            new TrRmImportRow(1, duplicatePairAlias ? 8 : 14, 0x1300_0001),
-            new TrRmImportRow(2, 9, 0x1300_0002),
+            new TrRmImportRow(1, duplicatePairAlias ? 8 : 14,
+                secondPairExpected),
+            new TrRmImportRow(2, 9, leafExpected),
         ], strings, moduleRefs, typeDefs, default, default, default, default,
             fields, features, modules,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
@@ -235,34 +529,37 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             features, modules,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
         var exportsBytes = TrRmExportTableWriter.Encode([
-            new TrRmExportRow(0x1300_0003, 13),
+            new TrRmExportRow(0x1300_0000u | (uint)typeDefCount, 13),
         ], strings, typeDefs, default, default, imports);
 
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, modulesBytes),
-            new TrRmSection(0x0002, 0, 14, stringsBytes),
+            new TrRmSection(0x0002, 0, 16, stringsBytes),
             new TrRmSection(0x0004, 0, 1, featuresBytes),
             new TrRmSection(0x0010, 0, 2, moduleRefsBytes),
-            new TrRmSection(0x0011, 0, 3, typeSpecsBytes),
-            new TrRmSection(0x0013, 0, 3, typeDefsBytes),
-            new TrRmSection(0x0014, 0, 3, fieldsBytes),
-            new TrRmSection(0x0015, 0, 6, layoutBytes),
+            new TrRmSection(0x0011, 0, (uint)typeSpecRows.Count,
+                typeSpecsBytes),
+            new TrRmSection(0x0013, 0, (uint)typeDefCount, typeDefsBytes),
+            new TrRmSection(0x0014, 0, (uint)fieldCount, fieldsBytes),
+            new TrRmSection(0x0015, 0, (uint)layoutCount, layoutBytes),
             new TrRmSection(0x001C, 0, 3, importsBytes),
             new TrRmSection(0x001D, 0, 1, exportsBytes),
-            new TrRmSection(0x0023, 0, 6, layoutFieldBytes),
+            new TrRmSection(0x0023, 0, (uint)layoutFieldCount,
+                layoutFieldBytes),
             new TrRmSection(0x0048, 0, 1, targetProfilesBytes),
         ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
     }
 
     private static byte[] CreateProviderArtifact(bool coLocateLeafProvider = false,
-        bool splitPairAlias = false)
+        bool splitPairAlias = false, bool relocatePair = false)
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("Provider", 0), ("LeafProvider", 0), ("Pair", 0),
             ("Leaf", 0), ("Child", 0), ("Data", 0), ("LeafKey", 0),
-            ("PairKey", 0), ("PairAlias", 0),
+            ("PairKey", 0), ("PairAlias", 0), ("ProviderLeafKey", 0),
+            ("Padding", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringsBytes, 10);
+        var strings = new TrRmStringTableReader(stringsBytes, 12);
         var featuresBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
         ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
@@ -277,7 +574,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 new TrRmModuleRow(2, 1, 0, 0, 1, 1, 1, 1,
                     FeatureFirst: 1, FeatureCount: 1),
             ];
-        var typeDefCount = coLocateLeafProvider || splitPairAlias ? 3 : 2;
+        var typeDefCount = coLocateLeafProvider || splitPairAlias
+            || relocatePair ? 3 : 2;
         var modulesBytes = TrRmModuleTableWriter.Encode(moduleRows,
             strings, 1, typeDefCount, 0, 0, 1);
         var modules = new TrRmModuleTableReader(modulesBytes,
@@ -295,27 +593,40 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecsBytes, 2,
             typeDefCount, 1, 0, 0,
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
-        var typeDefRows = new List<TrRmTypeDefRow>
+        var typeDefRows = new List<TrRmTypeDefRow>();
+        var fieldRows = new List<TrRmFieldDefRow>();
+        if (relocatePair)
         {
-            new(1, 4, 0x26, 1, 1, 0, 0, 1, 2, 0, 0),
-            new(1, 5, 0x26, 2, 1, 0, 0, 3, 2, 0, 0),
-        };
-        var fieldRows = new List<TrRmFieldDefRow>
-        {
-            new(1, 6, 2, 0),
-            new(2, 7, 1, 0),
-        };
-        if (coLocateLeafProvider)
-        {
+            typeDefRows.Add(new TrRmTypeDefRow(1, 12, 0x26, 1, 1,
+                0, 0, 1, 2, 0, 0));
+            typeDefRows.Add(new TrRmTypeDefRow(1, 4, 0x26, 2, 1,
+                0, 0, 3, 2, 0, 0));
             typeDefRows.Add(new TrRmTypeDefRow(1, 5, 0x26, 3, 1,
                 0, 0, 5, 2, 0, 0));
+            fieldRows.Add(new TrRmFieldDefRow(1, 7, 1, 0));
+            fieldRows.Add(new TrRmFieldDefRow(2, 6, 2, 0));
             fieldRows.Add(new TrRmFieldDefRow(3, 7, 1, 0));
         }
-        else if (splitPairAlias)
+        else
         {
-            typeDefRows.Add(new TrRmTypeDefRow(1, 4, 0x26, 3, 1,
-                0, 0, 5, 2, 0, 0));
-            fieldRows.Add(new TrRmFieldDefRow(3, 6, 2, 0));
+            typeDefRows.Add(new TrRmTypeDefRow(1, 4, 0x26, 1, 1,
+                0, 0, 1, 2, 0, 0));
+            typeDefRows.Add(new TrRmTypeDefRow(1, 5, 0x26, 2, 1,
+                0, 0, 3, 2, 0, 0));
+            fieldRows.Add(new TrRmFieldDefRow(1, 6, 2, 0));
+            fieldRows.Add(new TrRmFieldDefRow(2, 7, 1, 0));
+            if (coLocateLeafProvider)
+            {
+                typeDefRows.Add(new TrRmTypeDefRow(1, 5, 0x26, 3, 1,
+                    0, 0, 5, 2, 0, 0));
+                fieldRows.Add(new TrRmFieldDefRow(3, 7, 1, 0));
+            }
+            else if (splitPairAlias)
+            {
+                typeDefRows.Add(new TrRmTypeDefRow(1, 4, 0x26, 3, 1,
+                    0, 0, 5, 2, 0, 0));
+                fieldRows.Add(new TrRmFieldDefRow(3, 6, 2, 0));
+            }
         }
 
         var layoutCount = typeDefCount * 2;
@@ -343,18 +654,21 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var layoutFields = new TrRmLayoutFieldTableReader(layoutFieldBytes,
             layoutCount, layouts, typeDefs, fields);
         var importsBytes = TrRmImportTableWriter.Encode([
-            new TrRmImportRow(1, 8, 0x1300_0002),
+            new TrRmImportRow(1, 11,
+                0x1300_0000u | (uint)(relocatePair ? 3 : 2)),
         ], strings, moduleRefs, typeDefs, default, default);
         var imports = new TrRmImportTableReader(importsBytes, 1, strings,
             moduleRefs, typeDefs, default, default);
         var exportRows = new List<TrRmExportRow>
         {
-            new(0x1300_0001, 9),
-            new(splitPairAlias ? 0x1300_0003u : 0x1300_0001u, 10),
+            new(0x1300_0000u | (uint)(relocatePair ? 2 : 1), 9),
+            new(splitPairAlias ? 0x1300_0003u
+                : 0x1300_0000u | (uint)(relocatePair ? 2 : 1), 10),
         };
         if (coLocateLeafProvider)
         {
             exportRows.Add(new TrRmExportRow(0x1300_0003, 8));
+            exportRows.Add(new TrRmExportRow(0x1300_0003, 11));
         }
         var exportsBytes = TrRmExportTableWriter.Encode(exportRows, strings,
             typeDefs, default, default, imports);
@@ -362,7 +676,7 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, (uint)moduleRows.Length,
                 modulesBytes),
-            new TrRmSection(0x0002, 0, 10, stringsBytes),
+            new TrRmSection(0x0002, 0, 12, stringsBytes),
             new TrRmSection(0x0004, 0, 1, featuresBytes),
             new TrRmSection(0x0010, 0, 1, moduleRefsBytes),
             new TrRmSection(0x0011, 0, 2, typeSpecsBytes),
@@ -381,9 +695,9 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
     {
         var stringsBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("LeafProvider", 0), ("Leaf", 0), ("Data", 0),
-            ("LeafKey", 0),
+            ("LeafKey", 0), ("ProviderLeafKey", 0),
         ]);
-        var strings = new TrRmStringTableReader(stringsBytes, 5);
+        var strings = new TrRmStringTableReader(stringsBytes, 6);
         var featuresBytes = TrRmFeatureTableWriter.Encode([
             TrRmFeatureRow.RootlessNativeValues,
         ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
@@ -426,17 +740,18 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
             layouts, typeDefs, fields);
         var exportsBytes = TrRmExportTableWriter.Encode([
             new TrRmExportRow(0x1300_0001, 5),
+            new TrRmExportRow(0x1300_0001, 6),
         ], strings, typeDefs, default, default, default);
 
         return TrRmArtifactWriter.Encode([
             new TrRmSection(0x0001, 0, 1, modulesBytes),
-            new TrRmSection(0x0002, 0, 5, stringsBytes),
+            new TrRmSection(0x0002, 0, 6, stringsBytes),
             new TrRmSection(0x0004, 0, 1, featuresBytes),
             new TrRmSection(0x0011, 0, 1, typeSpecsBytes),
             new TrRmSection(0x0013, 0, 1, typeDefsBytes),
             new TrRmSection(0x0014, 0, 1, fieldsBytes),
             new TrRmSection(0x0015, 0, 2, layoutBytes),
-            new TrRmSection(0x001D, 0, 1, exportsBytes),
+            new TrRmSection(0x001D, 0, 2, exportsBytes),
             new TrRmSection(0x0023, 0, 2, layoutFieldBytes),
             new TrRmSection(0x0048, 0, 1, targetProfilesBytes),
         ], TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
@@ -452,16 +767,24 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var layoutFields = new List<TrRmLayoutFieldRow>(typeDefCount * 2);
         for (var typeDefRow = 1; typeDefRow <= typeDefCount; typeDefRow++)
         {
+            var (fieldStart, fieldEnd) = typeDefs.GetFieldRange(typeDefRow);
+            var fieldCount = fieldEnd - fieldStart;
             var defaultLayoutRow = layouts.Count + 1;
             layouts.Add(new TrRmLayoutRow(typeDefRow, 0, 1, 0, 0, pack,
-                layoutFields.Count + 1, 1));
-            layoutFields.Add(new TrRmLayoutFieldRow(defaultLayoutRow, 0,
-                typeDefRow));
+                layoutFields.Count + 1, fieldCount));
+            for (var fieldRow = fieldStart; fieldRow < fieldEnd; fieldRow++)
+            {
+                layoutFields.Add(new TrRmLayoutFieldRow(defaultLayoutRow,
+                    fieldRow - fieldStart, fieldRow));
+            }
             var targetLayoutRow = layouts.Count + 1;
             layouts.Add(new TrRmLayoutRow(typeDefRow, 1, 1, 1, 0, pack,
-                layoutFields.Count + 1, 1));
-            layoutFields.Add(new TrRmLayoutFieldRow(targetLayoutRow, 0,
-                typeDefRow));
+                layoutFields.Count + 1, fieldCount));
+            for (var fieldRow = fieldStart; fieldRow < fieldEnd; fieldRow++)
+            {
+                layoutFields.Add(new TrRmLayoutFieldRow(targetLayoutRow,
+                    fieldRow - fieldStart, fieldRow));
+            }
         }
 
         var layoutBytes = TrRmLayoutTableWriter.Encode(layouts, typeDefs,

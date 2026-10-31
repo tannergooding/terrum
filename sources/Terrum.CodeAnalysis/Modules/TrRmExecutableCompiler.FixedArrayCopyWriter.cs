@@ -13,6 +13,11 @@ public static partial class TrRmExecutableCompiler
     private static readonly UTF8Encoding s_sourceTypeExportKeyEncoding
         = new(false, true);
 
+    private sealed record A2SourceTypeImportPlan(
+        List<TrRmModuleRefRow> ModuleRefs,
+        List<TrRmImportRow> Imports,
+        Dictionary<int, int> FirstImportRowByStructure);
+
     private static byte[] EmitForeignInvocationStorageFixedArrayCopyDeclarations(
         BoundProgram program, string moduleIdentity,
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
@@ -21,8 +26,6 @@ public static partial class TrRmExecutableCompiler
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
         if (program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty             || !program.Classes.IsEmpty
-            || program.Structures.Any(static structure =>
-                structure.StandardTypeOrigin is not null)
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
             || !program.NativePointerTypes.IsEmpty
@@ -40,9 +43,10 @@ public static partial class TrRmExecutableCompiler
             || program.RuntimePolicy != BoundRuntimePolicy.FailFast)
         {
             throw Unsupported(
-                "A2 Copy declaration emission requires a fail-fast library of local struct declarations.");
+                "A2 Copy declaration emission requires a fail-fast library of supported struct declarations.");
         }
 
+        ValidateA2SourceTypeDeclarationMap(program);
         var typeDefCount = program.Structures.Length;
         var structureTypeDefRows = new Dictionary<int, int>(typeDefCount);
         for (var index = 0; index < typeDefCount; index++)
@@ -128,12 +132,33 @@ public static partial class TrRmExecutableCompiler
 
         var exportRows = CreateA2SourceTypeExportRows(program,
             sourceTypeExports, structureTypeDefRows, GetStringRow);
+        var typeImportPlan = CreateA2SourceTypeImportPlan(program,
+            GetStringRow);
+        var importedTypeSpecRows = new Dictionary<int, int>();
 
         uint GetFieldTypeSpecRef(PrimitiveType type)
         {
             if (NativeFixedArrayTypes.IsType(type))
             {
                 return GetArrayTypeSpecRow(NativeFixedArrayTypes.Index(type));
+            }
+
+            var structureIndex = (int)type - 100;
+            if (structureIndex >= 0
+                && structureIndex < typeDefCount
+                && typeImportPlan.FirstImportRowByStructure.TryGetValue(
+                    structureIndex, out var importRow))
+            {
+                if (!importedTypeSpecRows.TryGetValue(structureIndex,
+                        out var importedRow))
+                {
+                    importedRow = typeRows.Count + 1;
+                    typeRows.Add(TrRmTypeSpecTableWriter.Reference(0x03,
+                        checked((uint)importRow)));
+                    importedTypeSpecRows.Add(structureIndex, importedRow);
+                }
+
+                return checked((uint)importedRow);
             }
 
             return checked((uint)NativeBlittableFieldTypeRow(typeRows,
@@ -274,13 +299,21 @@ public static partial class TrRmExecutableCompiler
                 0, 0, 1, 1, 1, 1,
                 FeatureFirst: featureRows.Count == 0 ? 0 : 1,
                 FeatureCount: featureRows.Count),
-        ], strings, 0, typeDefCount, 0, 0, featureRows.Count);
+        ], strings, typeImportPlan.ModuleRefs.Count, typeDefCount, 0, 0,
+            featureRows.Count);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
-            0, typeDefCount, 0, 0, featureRows.Count);
+            typeImportPlan.ModuleRefs.Count, typeDefCount, 0, 0,
+            featureRows.Count);
+        var moduleRefBytes = typeImportPlan.ModuleRefs.Count == 0 ? []
+            : TrRmModuleRefTableWriter.Encode(typeImportPlan.ModuleRefs,
+                strings, modules);
+        var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes,
+            typeImportPlan.ModuleRefs.Count, strings, modules);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeRows,
-            typeDefCount, 0, 0, 0, schema);
+            typeDefCount, typeImportPlan.Imports.Count, 0, 0, schema);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeRows.Count, typeDefCount, 0, 0, 0, schema);
+            typeRows.Count, typeDefCount, typeImportPlan.Imports.Count, 0, 0,
+            schema);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
             strings, modules, fieldRows.Count, 0, layoutRows.Count, 0,
             schema);
@@ -291,6 +324,14 @@ public static partial class TrRmExecutableCompiler
             typeDefs, typeSpecs);
         var fields = new TrRmFieldDefTableReader(fieldBytes, fieldRows.Count,
             strings, typeDefs, typeSpecs);
+        var importBytes = typeImportPlan.Imports.Count == 0 ? []
+            : TrRmImportTableWriter.Encode(typeImportPlan.Imports,
+                strings, moduleRefs, typeDefs, default, default, default,
+                default, fields, features, modules, schema);
+        var imports = new TrRmImportTableReader(importBytes,
+            typeImportPlan.Imports.Count, strings, moduleRefs, typeDefs,
+            default, default, default, default, fields, features, modules,
+            schema);
         var targetProfileBytes = TrRmTargetProfileTableWriter.Encode([
             new TrRmTargetProfileRow(
                 TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
@@ -307,7 +348,7 @@ public static partial class TrRmExecutableCompiler
             layoutFieldRows, layouts, typeDefs, fields);
         var exportBytes = exportRows.Count == 0 ? []
             : TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
-                default, default, default, default, default, default,
+                default, default, imports, default, default, default,
                 features, modules, schema);
         var sections = new List<TrRmSection>
         {
@@ -325,6 +366,16 @@ public static partial class TrRmExecutableCompiler
         {
             sections.Add(new TrRmSection(0x001D, 0,
                 (uint)exportRows.Count, exportBytes));
+        }
+        if (typeImportPlan.ModuleRefs.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x0010, 0,
+                (uint)typeImportPlan.ModuleRefs.Count, moduleRefBytes));
+        }
+        if (typeImportPlan.Imports.Count != 0)
+        {
+            sections.Add(new TrRmSection(0x001C, 0,
+                (uint)typeImportPlan.Imports.Count, importBytes));
         }
         if (fixedArrayLayoutRows.Count != 0)
         {
@@ -365,8 +416,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var sourceDeclarations = program.SourceTypeDeclarations;
-        if (sourceDeclarations.IsDefault
-            || sourceDeclarations.Length != program.Structures.Length)
+        if (sourceDeclarations.IsDefault)
         {
             throw Unsupported(
                 "Explicit A2 TypeDef exports require a source-bound local declaration set.");
@@ -393,6 +443,7 @@ public static partial class TrRmExecutableCompiler
                 : $"{declaration.Namespace}.{declaration.Name}";
             if (!StringComparer.Ordinal.Equals(structure.Name, qualifiedName)
                 || declaration.DeclarationSnapshot != structure
+                || structure.StandardTypeOrigin is not null
                 || !declarationByName.TryAdd(
                     (declaration.Namespace, declaration.Name), declaration))
             {
@@ -509,6 +560,12 @@ public static partial class TrRmExecutableCompiler
                 return;
             }
 
+            if (program.Structures[structureIndex].StandardTypeOrigin
+                is not null)
+            {
+                return;
+            }
+
             if (!selectedStructures.Contains(structureIndex))
             {
                 throw Unsupported(
@@ -529,4 +586,402 @@ public static partial class TrRmExecutableCompiler
             }
         }
     }
+
+    private static void ValidateA2SourceTypeDeclarationMap(
+        BoundProgram program)
+    {
+        var sourceDeclarations = program.SourceTypeDeclarations;
+        if (sourceDeclarations.IsDefault)
+        {
+            return;
+        }
+
+        var sourceIndexes = new bool[program.Structures.Length];
+        foreach (var declaration in sourceDeclarations)
+        {
+            if ((uint)declaration.StructureIndex
+                    >= (uint)program.Structures.Length
+                || sourceIndexes[declaration.StructureIndex])
+            {
+                throw new ArgumentException(
+                    "The source TypeDef declaration map is inconsistent.",
+                    nameof(program));
+            }
+
+            var structure = program.Structures[declaration.StructureIndex];
+            var qualifiedName = declaration.Namespace.Length == 0
+                ? declaration.Name
+                : $"{declaration.Namespace}.{declaration.Name}";
+            if (!StringComparer.Ordinal.Equals(structure.Name,
+                    qualifiedName)
+                || declaration.DeclarationSnapshot != structure
+                || structure.StandardTypeOrigin is not null)
+            {
+                throw new ArgumentException(
+                    "The source TypeDef declaration map no longer matches the checked program.",
+                    nameof(program));
+            }
+
+            sourceIndexes[declaration.StructureIndex] = true;
+        }
+
+        for (var index = 0; index < program.Structures.Length; index++)
+        {
+            if (!sourceIndexes[index]
+                && program.Structures[index].StandardTypeOrigin is null)
+            {
+                throw Unsupported(
+                    "A2 source emission cannot preserve a referenced type without its Standard TypeDef origin.");
+            }
+        }
+    }
+
+    private static A2SourceTypeImportPlan CreateA2SourceTypeImportPlan(
+        BoundProgram program, Func<string, int> getStringRow)
+    {
+        var moduleRefs = new List<TrRmModuleRefRow>();
+        var imports = new List<TrRmImportRow>();
+        var firstImportRowByStructure = new Dictionary<int, int>();
+        var moduleRefsByIdentity = new Dictionary<string,
+            (uint TargetRequirement, uint RuntimePolicy, int Row)>(
+            StringComparer.Ordinal);
+        var providerSnapshotsByIdentity = new Dictionary<string,
+            BoundSourceTypeProviderSnapshot>(StringComparer.Ordinal);
+        var structuresByActualDefinition = new Dictionary<
+            (string ModuleIdentity, uint DefinitionId), List<int>>();
+        var rootAliasKeysByDefinition = new Dictionary<(
+            BoundSourceTypeProviderSnapshot ReferenceRoot,
+            string ModuleIdentity, uint DefinitionId),
+            List<(string ExportKey, uint TargetRequirement,
+                uint RuntimePolicy)>>();
+        var rootAliasViewsByDefinition = new Dictionary<(
+            BoundSourceTypeProviderSnapshot ReferenceRoot,
+            string ModuleIdentity, uint DefinitionId), List<int>>();
+        var writtenExpectations = new HashSet<(
+            BoundSourceTypeProviderSnapshot UsingModule, int ImportRow,
+            uint ExpectedDefinitionId)>();
+        var importTriples = new HashSet<(
+            int ModuleRefRow, string ExportKey, uint ExpectedDefinition)>();
+
+        for (var structureIndex = 0;
+            structureIndex < program.Structures.Length; structureIndex++)
+        {
+            var origin = program.Structures[structureIndex].StandardTypeOrigin;
+            if (origin is null)
+            {
+                continue;
+            }
+
+            var provider = origin.Provider;
+            var expectedDeclaration = origin.ExpectedDeclaration
+                ?? throw Unsupported(
+                    "An A2 source type origin does not retain its checked declaration snapshot.");
+            if (!SameA2SourceTypeDeclaration(
+                    program.Structures[structureIndex],
+                    expectedDeclaration))
+            {
+                throw Unsupported(
+                    "An A2 source type declaration changed after its provider expectation was checked.");
+            }
+
+            var referenceRoot = origin.ReferenceRoot
+                ?? throw Unsupported(
+                    "An A2 source type origin does not retain its reference root.");
+            if (!StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                || !StringComparer.Ordinal.Equals(referenceRoot.SchemaIdentity,
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                || string.IsNullOrEmpty(provider.ModuleIdentity)
+                || origin.DefinitionId >> 24 != 0x13
+                || origin.ExportKeys.IsDefaultOrEmpty)
+            {
+                throw Unsupported(
+                    "An A2 source type origin lacks a complete selected provider identity.");
+            }
+
+            if (providerSnapshotsByIdentity.TryGetValue(
+                    provider.ModuleIdentity, out var existingSnapshot))
+            {
+                if (!SameA2SourceTypeProviderSnapshot(existingSnapshot,
+                        provider))
+                {
+                    throw Unsupported(
+                        "A2 source type origins select conflicting snapshots for one provider identity.");
+                }
+            }
+            else
+            {
+                providerSnapshotsByIdentity.Add(provider.ModuleIdentity,
+                    provider);
+            }
+            var actualDefinitionKey = (provider.ModuleIdentity,
+                origin.DefinitionId);
+            if (!structuresByActualDefinition.TryGetValue(
+                    actualDefinitionKey, out var actualStructures))
+            {
+                actualStructures = [];
+                structuresByActualDefinition.Add(actualDefinitionKey,
+                    actualStructures);
+            }
+            actualStructures.Add(structureIndex);
+
+            var expectedDefinition = 0x1300_0000u
+                | checked((uint)(structureIndex + 1));
+            var rootAliasKey = (referenceRoot, provider.ModuleIdentity,
+                origin.DefinitionId);
+            if (!rootAliasKeysByDefinition.TryGetValue(rootAliasKey,
+                    out var rootAliasKeys))
+            {
+                rootAliasKeys = [];
+                rootAliasKeysByDefinition.Add(rootAliasKey, rootAliasKeys);
+            }
+            if (!rootAliasViewsByDefinition.TryGetValue(rootAliasKey,
+                    out var rootAliasViews))
+            {
+                rootAliasViews = [];
+                rootAliasViewsByDefinition.Add(rootAliasKey, rootAliasViews);
+            }
+            rootAliasViews.Add(structureIndex);
+
+            if (origin.IsLookupRoot)
+            {
+                if (!ReferenceEquals(provider, referenceRoot))
+                {
+                    throw Unsupported(
+                        "An A2 lookup root does not belong to its retained reference Module.");
+                }
+
+                foreach (var exportKey in origin.ExportKeys)
+                {
+                    AddRootAliasKey(rootAliasKey, exportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy);
+                    AddImport(provider.ModuleIdentity, exportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy,
+                        expectedDefinition, structureIndex);
+                }
+            }
+            else
+            {
+                if (origin.Expectations.IsDefaultOrEmpty)
+                {
+                    throw Unsupported(
+                        "An imported A2 source type has no retained Import expectations.");
+                }
+
+                var rootExpectations = origin.Expectations.Where(expectation
+                    => ReferenceEquals(expectation.UsingModule,
+                        referenceRoot)).ToArray();
+                if (rootExpectations.Length == 0
+                    || rootExpectations.Any(expectation =>
+                        (expectation.ExpectedDefinitionId >> 24) != 0x13
+                        || expectation.ExpectedDefinitionId
+                            != rootExpectations[0].ExpectedDefinitionId
+                        || !StringComparer.Ordinal.Equals(
+                            expectation.ProducerIdentity,
+                            provider.ModuleIdentity)
+                        || expectation.TargetRequirement
+                            != provider.TargetRequirement
+                        || expectation.RuntimePolicy != provider.RuntimePolicy))
+                {
+                    throw Unsupported(
+                        "An imported A2 source type lacks a complete expectation from its retained reference Module.");
+                }
+
+                var rootKeys = rootExpectations.Select(
+                        static expectation => expectation.ExportKey)
+                    .Distinct(StringComparer.Ordinal);
+                if (!origin.ExportKeys.SequenceEqual(rootKeys,
+                        StringComparer.Ordinal))
+                {
+                    throw Unsupported(
+                        "An imported A2 source type's retained alias keys do not match its reference Module expectations.");
+                }
+
+                foreach (var expectation in rootExpectations)
+                {
+                    AddRootAliasKey(rootAliasKey, expectation.ExportKey,
+                        expectation.TargetRequirement,
+                        expectation.RuntimePolicy);
+                    AddImport(expectation.ProducerIdentity,
+                        expectation.ExportKey,
+                        expectation.TargetRequirement,
+                        expectation.RuntimePolicy, expectedDefinition,
+                        structureIndex);
+                }
+            }
+        }
+
+        foreach (var (aliasClass, structures) in rootAliasViewsByDefinition)
+        {
+            foreach (var structureIndex in structures)
+            {
+                var expectedDefinition = 0x1300_0000u
+                    | checked((uint)(structureIndex + 1));
+                foreach (var (exportKey, targetRequirement, runtimePolicy)
+                    in rootAliasKeysByDefinition[aliasClass])
+                {
+                    AddImport(aliasClass.ModuleIdentity, exportKey,
+                        targetRequirement, runtimePolicy,
+                        expectedDefinition, structureIndex);
+                }
+            }
+        }
+
+        foreach (var ownerStructure in program.Structures)
+        {
+            var origin = ownerStructure.StandardTypeOrigin;
+            if (origin is null || origin.Expectations.IsDefaultOrEmpty)
+            {
+                continue;
+            }
+
+            var referenceRoot = origin.ReferenceRoot
+                ?? throw Unsupported(
+                    "An A2 source type origin does not retain its reference root.");
+            foreach (var expectation in origin.Expectations)
+            {
+                if (ReferenceEquals(expectation.UsingModule, referenceRoot)
+                    || !writtenExpectations.Add((
+                        expectation.UsingModule, expectation.ImportRow,
+                        expectation.ExpectedDefinitionId)))
+                {
+                    continue;
+                }
+
+                if ((expectation.ProviderDefinitionId >> 24) != 0x13
+                    || !StringComparer.Ordinal.Equals(
+                        expectation.ProducerIdentity,
+                        expectation.Provider.ModuleIdentity)
+                    || expectation.TargetRequirement
+                        != expectation.Provider.TargetRequirement
+                    || expectation.RuntimePolicy
+                        != expectation.Provider.RuntimePolicy)
+                {
+                    throw Unsupported(
+                        "A provider-owned A2 expectation does not retain its actual TypeDef origin.");
+                }
+
+                var targetDefinitionKey
+                    = (expectation.Provider.ModuleIdentity,
+                        expectation.ProviderDefinitionId);
+                if (!structuresByActualDefinition.TryGetValue(
+                        targetDefinitionKey, out var targetStructures))
+                {
+                    continue;
+                }
+
+                foreach (var structureIndex in targetStructures)
+                {
+                    var targetOrigin
+                        = program.Structures[structureIndex]
+                            .StandardTypeOrigin;
+                    if (targetOrigin is not null
+                        && SameA2SourceTypeProviderSnapshot(
+                            targetOrigin.Provider, expectation.Provider))
+                    {
+                        AddImport(expectation.ProducerIdentity,
+                            expectation.ExportKey,
+                            expectation.TargetRequirement,
+                            expectation.RuntimePolicy,
+                            0x1300_0000u
+                                | checked((uint)(structureIndex + 1)),
+                            structureIndex);
+                    }
+                }
+            }
+        }
+
+        return new A2SourceTypeImportPlan(moduleRefs, imports,
+            firstImportRowByStructure);
+
+        void AddRootAliasKey(
+            (BoundSourceTypeProviderSnapshot ReferenceRoot,
+                string ModuleIdentity, uint DefinitionId) aliasClass,
+            string exportKey, uint targetRequirement, uint runtimePolicy)
+        {
+            var alias = (ExportKey: exportKey,
+                TargetRequirement: targetRequirement, RuntimePolicy: runtimePolicy);
+            if (!rootAliasKeysByDefinition[aliasClass]
+                .Any(existing => StringComparer.Ordinal.Equals(
+                    existing.ExportKey, alias.ExportKey)
+                    && existing.TargetRequirement == alias.TargetRequirement
+                    && existing.RuntimePolicy == alias.RuntimePolicy))
+            {
+                rootAliasKeysByDefinition[aliasClass].Add(alias);
+            }
+        }
+
+        void AddImport(string producerIdentity, string exportKey,
+            uint targetRequirement, uint runtimePolicy,
+            uint expectedDefinition, int structureIndex)
+        {
+            if (string.IsNullOrEmpty(producerIdentity)
+                || string.IsNullOrEmpty(exportKey))
+            {
+                throw Unsupported(
+                    "An A2 source type Import has an empty provider identity or ExportKey.");
+            }
+
+            if (!moduleRefsByIdentity.TryGetValue(producerIdentity,
+                    out var moduleRef))
+            {
+                var moduleRefRow = moduleRefs.Count + 1;
+                moduleRefs.Add(new TrRmModuleRefRow(
+                    getStringRow(producerIdentity), targetRequirement,
+                    runtimePolicy));
+                moduleRef = (targetRequirement, runtimePolicy,
+                    moduleRefRow);
+                moduleRefsByIdentity.Add(producerIdentity, moduleRef);
+            }
+            else if (moduleRef.TargetRequirement != targetRequirement
+                || moduleRef.RuntimePolicy != runtimePolicy)
+            {
+                throw Unsupported(
+                    "A2 source type origins retain conflicting Module requirements for one provider identity.");
+            }
+
+            if (importTriples.Add((moduleRef.Row, exportKey,
+                    expectedDefinition)))
+            {
+                imports.Add(new TrRmImportRow(moduleRef.Row,
+                    getStringRow(exportKey), expectedDefinition));
+                _ = firstImportRowByStructure.TryAdd(structureIndex,
+                    imports.Count);
+            }
+        }
+    }
+
+    private static bool SameA2SourceTypeProviderSnapshot(
+        BoundSourceTypeProviderSnapshot left,
+        BoundSourceTypeProviderSnapshot right)
+        => StringComparer.Ordinal.Equals(left.SchemaIdentity,
+                right.SchemaIdentity)
+            && left.ArtifactSnapshot.AsSpan().SequenceEqual(
+                right.ArtifactSnapshot.AsSpan())
+            && left.ModuleRow == right.ModuleRow
+            && StringComparer.Ordinal.Equals(left.ModuleIdentity,
+                right.ModuleIdentity)
+            && left.GoverningRuleEdition == right.GoverningRuleEdition
+            && left.TargetRequirement == right.TargetRequirement
+            && left.RuntimePolicy == right.RuntimePolicy
+            && left.Features.AsSpan().SequenceEqual(right.Features.AsSpan())
+            && left.TargetProfiles.AsSpan().SequenceEqual(
+                right.TargetProfiles.AsSpan());
+
+    private static bool SameA2SourceTypeDeclaration(
+        BoundStruct actual, BoundStruct expected)
+        => StringComparer.Ordinal.Equals(actual.Name, expected.Name)
+            && actual.Fields.AsSpan().SequenceEqual(expected.Fields.AsSpan())
+            && actual.Size == expected.Size
+            && actual.TokenSpanRole == expected.TokenSpanRole
+            && actual.BlittableTargetRequirement
+                == expected.BlittableTargetRequirement
+            && actual.IsSequential == expected.IsSequential
+            && actual.IsTransparent == expected.IsTransparent
+            && actual.IsUnique == expected.IsUnique
+            && StringComparer.Ordinal.Equals(actual.CleanupMethod,
+                expected.CleanupMethod)
+            && actual.IsPrivate == expected.IsPrivate
+            && actual.IsInternal == expected.IsInternal
+            && expected.StandardTypeOrigin is null;
 }
