@@ -70,6 +70,16 @@ public sealed class TrRmConstructedTypeSpecBindingTests
                 formalKind: 1, [4], typeSpecRows: rows)));
     }
 
+    [Test]
+    public void A3ConstructedTypeSpecGraphUsesExactWorkBoundary()
+    {
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(resourceLedger =>
+        {
+            _ = CreateArtifact(formalKind: 1, [4],
+                resourceLedger: resourceLedger);
+        });
+    }
+
     private static ReadOnlyMemory<byte>[] ConstructedRows(byte formalKind, uint[] arguments)
     {
         var root = TrRmTypeSpecTableWriter.Reference(0x02, 1);
@@ -88,7 +98,8 @@ public sealed class TrRmConstructedTypeSpecBindingTests
         bool importedGenericType = false, uint importExpectedDefId = 0x1300_0001,
         bool includeMethodImport = false, int constantSourceCount = 0,
         uint constantTypeSpecRef = 0, uint defaultArgumentRef = 0,
-        ReadOnlyMemory<byte>[]? typeSpecRows = null)
+        ReadOnlyMemory<byte>[]? typeSpecRows = null,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (typeSpecRows is null)
         {
@@ -120,13 +131,15 @@ public sealed class TrRmConstructedTypeSpecBindingTests
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             1, moduleRefCount, 1);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
-            typeSpecRows.Length, 1, moduleRefCount, 1);
+            typeSpecRows.Length, 1, moduleRefCount, 1, 0,
+            TrRmArtifactSchema.Standard, 0, 0, resourceLedger);
         var typeDefBytes = TrRmTypeDefTableWriter.Encode([
             new TrRmTypeDefRow(3, 4, 6,
                 0, 0, 1, 1, 1, 1, 0, 0),
         ], stringReader, modules, 0, 1, 1, 0);
         var types = new TrRmTypeDefTableReader(typeDefBytes, 1,
-            stringReader, modules, 0, 1, 1, 0);
+            stringReader, modules, 0, 1, 1, 0,
+            TrRmArtifactSchema.Standard, resourceLedger);
         var targetProfiles = new TrRmTargetProfileTableReader([], 0);
         var layoutBytes = TrRmLayoutTableWriter.Encode([
             new TrRmLayoutRow(1, 0, 0, 0, 0, 0, 0, 0),
@@ -156,6 +169,15 @@ public sealed class TrRmConstructedTypeSpecBindingTests
                         constantTypeSpecRef, defaultArgumentRef),
                 ], stringReader, types, methods, signatures, typeSpecs, 0,
                     constantSourceCount);
+        if (resourceLedger is not null)
+        {
+            var genericParamReader = new TrRmGenericParamTableReader(
+                genericParamBytes, 1, stringReader, types, methods, signatures,
+                typeSpecs, 0, constantSourceCount, resourceLedger);
+            TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
+                genericParamReader, default, constantSourceCount,
+                resourceLedger);
+        }
         var importBytes = importedGenericType
             ? TrRmImportTableWriter.Encode([
                 new TrRmImportRow(1, 6, importExpectedDefId),

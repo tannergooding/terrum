@@ -10,24 +10,29 @@ internal static class TrRmConstructedTypeSpecValidator
 {
     public static void Validate(TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs, TrRmGenericParamTableReader formals,
-        TrRmImportTableReader imports, int constantSourceCount)
+        TrRmImportTableReader imports, int constantSourceCount,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork();
         if (constantSourceCount is < 0 or > 0xFF_FFFF)
         {
             throw InvalidTypeSpec();
         }
 
         var hasForwardReference = false;
-        for (var row = 1; row <= typeSpecs.Count; row++)
+        var typeSpecCount = typeSpecs.Count;
+        for (var row = 1; row <= typeSpecCount; row++)
         {
+            resourceLedger?.ConsumeWork();
             var bytes = typeSpecs.GetRow(row);
             if (bytes[0] == 0x03)
             {
-                ValidateImportedTypeDef(Read(bytes, 2), imports);
+                ValidateImportedTypeDef(Read(bytes, 2, resourceLedger),
+                    imports);
             }
             else if (bytes[0] == 0x04)
             {
-                var formalRow = checked((int)Read(bytes, 2));
+                var formalRow = checked((int)Read(bytes, 2, resourceLedger));
                 if (formals.GetFormalKind(formalRow) != 1)
                 {
                     throw InvalidTypeSpec();
@@ -36,7 +41,8 @@ internal static class TrRmConstructedTypeSpecValidator
             else if (bytes[0] == 0x05)
             {
                 var definition = GetConstructedDefinition(
-                    bytes, typeSpecs, typeDefs, formals, imports);
+                    bytes, typeSpecs, typeDefs, formals, imports,
+                    resourceLedger);
                 var argumentCount = (bytes.Length - 6) / sizeof(uint);
                 if (argumentCount != definition.FormalCount)
                 {
@@ -45,6 +51,7 @@ internal static class TrRmConstructedTypeSpecValidator
 
                 for (var ordinal = 0; ordinal < argumentCount; ordinal++)
                 {
+                    resourceLedger?.ConsumeWork();
                     var formalRow = definition.FormalFirst + ordinal;
                     if (formals.GetOwnerDefId(formalRow) != definition.DefId
                         || formals.GetOrdinal(formalRow) != (uint)ordinal)
@@ -52,7 +59,8 @@ internal static class TrRmConstructedTypeSpecValidator
                         throw InvalidTypeSpec();
                     }
 
-                    var argument = Read(bytes, 6 + (ordinal * sizeof(uint)));
+                    var argument = Read(bytes,
+                        6 + (ordinal * sizeof(uint)), resourceLedger);
                     switch (formals.GetFormalKind(formalRow))
                     {
                         case 1:
@@ -79,7 +87,8 @@ internal static class TrRmConstructedTypeSpecValidator
         // All other TypeSpec row edges already point backward; only constructed type arguments can point forward.
         if (hasForwardReference)
         {
-            ValidateAcyclicReferences(typeSpecs, typeDefs, formals, imports);
+            ValidateAcyclicReferences(typeSpecs, typeDefs, formals, imports,
+                resourceLedger);
         }
     }
 
@@ -96,15 +105,16 @@ internal static class TrRmConstructedTypeSpecValidator
     private static ConstructedDefinition GetConstructedDefinition(
         ReadOnlySpan<byte> bytes, TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs, TrRmGenericParamTableReader formals,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
-        var genericTypeSpec = checked((int)Read(bytes, 2));
+        var genericTypeSpec = checked((int)Read(bytes, 2, resourceLedger));
         var genericType = typeSpecs.GetRow(genericTypeSpec);
         var defId = genericType[0] switch
         {
-            0x02 => 0x1300_0000u | Read(genericType, 2),
+            0x02 => 0x1300_0000u | Read(genericType, 2, resourceLedger),
             0x03 => imports.GetExpectedDefinitionForImportRow(
-                checked((int)Read(genericType, 2))),
+                checked((int)Read(genericType, 2, resourceLedger))),
             _ => throw InvalidTypeSpec(),
         };
         if ((defId >> 24) != 0x13)
@@ -121,6 +131,7 @@ internal static class TrRmConstructedTypeSpecValidator
         var (formalFirst, formalCount) = typeDefs.GetGenericRange(typeDef);
         for (var ordinal = 0; ordinal < formalCount; ordinal++)
         {
+            resourceLedger?.ConsumeWork();
             var formalRow = formalFirst + ordinal;
             if (formals.GetOwnerDefId(formalRow) != defId
                 || formals.GetOrdinal(formalRow) != (uint)ordinal)
@@ -134,27 +145,34 @@ internal static class TrRmConstructedTypeSpecValidator
 
     private static void ValidateAcyclicReferences(TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs, TrRmGenericParamTableReader formals,
-        TrRmImportTableReader imports)
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
-        var indegree = new int[typeSpecs.Count + 1];
-        for (var row = 1; row <= typeSpecs.Count; row++)
+        var typeSpecCount = typeSpecs.Count;
+        resourceLedger?.ConsumeWork(checked((2UL * (ulong)typeSpecCount) + 3UL));
+        var indegree = new int[typeSpecCount + 1];
+        var ready = new int[typeSpecCount];
+        for (var row = 1; row <= typeSpecCount; row++)
         {
+            resourceLedger?.ConsumeWork();
             var referenceCount = GetTypeSpecReferenceCount(
-                row, typeSpecs, typeDefs, formals, imports);
+                row, typeSpecs, typeDefs, formals, imports, resourceLedger);
             for (var reference = 0; reference < referenceCount; reference++)
             {
+                resourceLedger?.ConsumeWork();
                 indegree[GetTypeSpecReference(row, reference,
-                    typeSpecs, typeDefs, formals, imports)]++;
+                    typeSpecs, typeDefs, formals, imports, resourceLedger)]++;
             }
         }
 
-        var ready = new int[typeSpecs.Count];
         var head = 0;
         var tail = 0;
-        for (var row = 1; row <= typeSpecs.Count; row++)
+        for (var row = 1; row <= typeSpecCount; row++)
         {
+            resourceLedger?.ConsumeWork();
             if (indegree[row] == 0)
             {
+                resourceLedger?.ConsumeWork();
                 ready[tail++] = row;
             }
         }
@@ -162,22 +180,27 @@ internal static class TrRmConstructedTypeSpecValidator
         var processed = 0;
         while (head < tail)
         {
+            resourceLedger?.ConsumeWork();
             var row = ready[head++];
             processed++;
             var referenceCount = GetTypeSpecReferenceCount(
-                row, typeSpecs, typeDefs, formals, imports);
+                row, typeSpecs, typeDefs, formals, imports, resourceLedger);
             for (var reference = 0; reference < referenceCount; reference++)
             {
+                resourceLedger?.ConsumeWork();
                 var target = GetTypeSpecReference(row, reference,
-                    typeSpecs, typeDefs, formals, imports);
+                    typeSpecs, typeDefs, formals, imports, resourceLedger);
+                resourceLedger?.ConsumeWork();
                 if (--indegree[target] == 0)
                 {
+                    resourceLedger?.ConsumeWork();
                     ready[tail++] = target;
                 }
             }
         }
 
-        if (processed != typeSpecs.Count)
+        resourceLedger?.ConsumeWork();
+        if (processed != typeSpecCount)
         {
             throw InvalidTypeSpec();
         }
@@ -185,20 +208,23 @@ internal static class TrRmConstructedTypeSpecValidator
 
     private static int GetTypeSpecReferenceCount(int row,
         TrRmTypeSpecTableReader typeSpecs, TrRmTypeDefTableReader typeDefs,
-        TrRmGenericParamTableReader formals, TrRmImportTableReader imports)
+        TrRmGenericParamTableReader formals, TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var bytes = typeSpecs.GetRow(row);
         if (bytes[0] == 0x05)
         {
             var definition = GetConstructedDefinition(
-                bytes, typeSpecs, typeDefs, formals, imports);
+                bytes, typeSpecs, typeDefs, formals, imports, resourceLedger);
             var count = 1;
             for (var ordinal = 0; ordinal < definition.FormalCount; ordinal++)
             {
+                resourceLedger?.ConsumeWork();
                 var formalRow = definition.FormalFirst + ordinal;
                 if (formals.GetFormalKind(formalRow) == 1
                     && typeSpecs.GetTypeSpecRef(
-                        Read(bytes, 6 + (ordinal * sizeof(uint)))).IsRow)
+                        Read(bytes, 6 + (ordinal * sizeof(uint)),
+                            resourceLedger)).IsRow)
                 {
                     count++;
                 }
@@ -209,18 +235,20 @@ internal static class TrRmConstructedTypeSpecValidator
 
         if (bytes[0] is (>= 0x06 and <= 0x0B) or 0x0E)
         {
-            return typeSpecs.GetTypeSpecRef(Read(bytes, 2)).IsRow ? 1 : 0;
+            return typeSpecs.GetTypeSpecRef(
+                Read(bytes, 2, resourceLedger)).IsRow ? 1 : 0;
         }
 
         if (bytes[0] == 0x0C)
         {
-            return typeSpecs.GetTypeSpecRef(Read(bytes, 3),
+            return typeSpecs.GetTypeSpecRef(Read(bytes, 3, resourceLedger),
                 allowInitQualifier: bytes[2] == 0x8A).IsRow ? 1 : 0;
         }
 
         if (bytes[0] == 0x11)
         {
-            return typeSpecs.GetTypeSpecRef(Read(bytes, 2)).IsRow ? 1 : 0;
+            return typeSpecs.GetTypeSpecRef(
+                Read(bytes, 2, resourceLedger)).IsRow ? 1 : 0;
         }
 
         return 0;
@@ -228,20 +256,22 @@ internal static class TrRmConstructedTypeSpecValidator
 
     private static int GetTypeSpecReference(int row, int reference,
         TrRmTypeSpecTableReader typeSpecs, TrRmTypeDefTableReader typeDefs,
-        TrRmGenericParamTableReader formals, TrRmImportTableReader imports)
+        TrRmGenericParamTableReader formals, TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var bytes = typeSpecs.GetRow(row);
         if (bytes[0] == 0x05)
         {
             if (reference == 0)
             {
-                return checked((int)Read(bytes, 2));
+                return checked((int)Read(bytes, 2, resourceLedger));
             }
 
             var definition = GetConstructedDefinition(
-                bytes, typeSpecs, typeDefs, formals, imports);
+                bytes, typeSpecs, typeDefs, formals, imports, resourceLedger);
             for (var ordinal = 0; ordinal < definition.FormalCount; ordinal++)
             {
+                resourceLedger?.ConsumeWork();
                 var formalRow = definition.FormalFirst + ordinal;
                 if (formals.GetFormalKind(formalRow) != 1)
                 {
@@ -249,7 +279,8 @@ internal static class TrRmConstructedTypeSpecValidator
                 }
 
                 var typeArgument = typeSpecs.GetTypeSpecRef(
-                    Read(bytes, 6 + (ordinal * sizeof(uint))));
+                    Read(bytes, 6 + (ordinal * sizeof(uint)),
+                        resourceLedger));
                 if (typeArgument.IsRow && --reference == 0)
                 {
                     return typeArgument.Row;
@@ -260,7 +291,8 @@ internal static class TrRmConstructedTypeSpecValidator
         }
 
         var offset = bytes[0] == 0x0C ? 3 : 2;
-        var inner = typeSpecs.GetTypeSpecRef(Read(bytes, offset),
+        var inner = typeSpecs.GetTypeSpecRef(Read(bytes, offset,
+                resourceLedger),
             allowInitQualifier: bytes[0] == 0x0C && bytes[2] == 0x8A);
         if (reference == 0 && inner.IsRow)
         {
@@ -270,8 +302,13 @@ internal static class TrRmConstructedTypeSpecValidator
         throw InvalidTypeSpec();
     }
 
-    private static uint Read(ReadOnlySpan<byte> bytes, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(bytes.Slice(offset, sizeof(uint)));
+    private static uint Read(ReadOnlySpan<byte> bytes, int offset,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            bytes.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidTypeSpec()
         => new("Invalid TRRM TypeSpec binding.");

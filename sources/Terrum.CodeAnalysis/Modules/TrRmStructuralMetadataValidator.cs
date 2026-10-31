@@ -1790,7 +1790,8 @@ public static class TrRmStructuralMetadataValidator
                 interfaceWitnesses, witnessMembers, imports);
         }
         TrRmConstructedTypeSpecValidator.Validate(typeSpecs, types,
-            generics, imports, selectedConstantSourceCount);
+            generics, imports, selectedConstantSourceCount,
+            selectedA3LayoutResourceLedger);
         if (index.Schema
             == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft)
         {
