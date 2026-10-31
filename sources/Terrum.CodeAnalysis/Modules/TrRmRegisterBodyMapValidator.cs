@@ -143,26 +143,79 @@ internal static class TrRmRegisterBodyMapValidator
             = targetProfiles;
     }
 
+    private readonly record struct PlaceHandleOrigin(
+        int PlaceSelectionRecordIndex, int RootHomeIndex,
+        int DefinitionCodeOffset);
+
     private readonly record struct RegisterTypeState(int TypeMapIndex,
         uint TypeSpecRef, int PlaceSelectionRecordIndex, int RootHomeIndex,
-        byte AccessKind)
+        byte AccessKind, PlaceHandleOrigin[] PlaceOrigins)
     {
-        internal static RegisterTypeState Unknown => new(-1, 0, -1, -1, 0);
+        internal static RegisterTypeState Unknown
+            => new(-1, 0, -1, -1, 0, []);
 
         internal static RegisterTypeState FromTypeMap(int typeMapIndex)
-            => new(typeMapIndex, 0, -1, -1, 0);
+            => new(typeMapIndex, 0, -1, -1, 0,
+                []);
 
         internal static RegisterTypeState FromTypeSpecRef(uint typeSpecRef)
-            => new(-1, typeSpecRef, -1, -1, 0);
+            => new(-1, typeSpecRef, -1, -1, 0,
+                []);
 
         internal static RegisterTypeState FromPlaceTypeMap(int typeMapIndex,
             byte accessKind)
-            => new(typeMapIndex, 0, -2, -1, accessKind);
+            => new(typeMapIndex, 0, -2, -1, accessKind,
+                []);
 
         internal static RegisterTypeState FromPlace(uint typeSpecRef,
-            int placeSelectionRecordIndex, int rootHomeIndex, byte accessKind)
-            => new(-1, typeSpecRef, placeSelectionRecordIndex,
-                rootHomeIndex, accessKind);
+            int placeSelectionRecordIndex, byte accessKind,
+            PlaceHandleOrigin[] origins)
+        {
+            var rootHomeIndex = origins.Length == 0
+                ? -1 : origins[0].RootHomeIndex;
+            var selectionIndex = origins.Length == 0
+                ? -2 : origins[0].PlaceSelectionRecordIndex;
+            foreach (var origin in origins)
+            {
+                if (origin.RootHomeIndex != rootHomeIndex)
+                {
+                    rootHomeIndex = -2;
+                }
+                if (origin.PlaceSelectionRecordIndex != selectionIndex)
+                {
+                    selectionIndex = -2;
+                }
+            }
+
+            return new RegisterTypeState(-1, typeSpecRef, selectionIndex,
+                rootHomeIndex, accessKind, origins);
+        }
+
+        internal RegisterTypeState WithPlaceOrigins(
+            PlaceHandleOrigin[] origins)
+        {
+            var rootHomeIndex = origins.Length == 0
+                ? -1 : origins[0].RootHomeIndex;
+            var selectionIndex = origins.Length == 0
+                ? -2 : origins[0].PlaceSelectionRecordIndex;
+            foreach (var origin in origins)
+            {
+                if (origin.RootHomeIndex != rootHomeIndex)
+                {
+                    rootHomeIndex = -2;
+                }
+                if (origin.PlaceSelectionRecordIndex != selectionIndex)
+                {
+                    selectionIndex = -2;
+                }
+            }
+
+            return this with {
+                PlaceSelectionRecordIndex = selectionIndex,
+                RootHomeIndex = rootHomeIndex,
+                PlaceOrigins = origins,
+            };
+        }
 
         internal bool IsKnown => TypeMapIndex >= 0 || TypeSpecRef != 0;
         internal bool IsPlaceHandle => PlaceSelectionRecordIndex != -1;
@@ -223,13 +276,15 @@ internal static class TrRmRegisterBodyMapValidator
         ValidateConstantMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
         ConsumeWork(body);
-        ValidateCallSiteEffects(body, methodDefRow, typeSpecs, methods, signatures,
+        var registerTypeEntries = ValidateCallSiteEffects(body, methodDefRow,
+            typeSpecs, methods, signatures,
             parameters, contracts, imports, nativeFunctionPointerAnchors,
             constantValues);
         ConsumeWork(body);
         ValidateCallSiteHomeTypes(body, methodDefRow, ownerModule, types, typeSpecs,
             genericParams, methods, signatures, parameters, imports,
-            constantValues, contracts, nativeFunctionPointerAnchors);
+            constantValues, contracts, nativeFunctionPointerAnchors,
+            registerTypeEntries);
         ConsumeWork(body);
         ValidateNativeAddressRecords(body, ownerModule, features, modules,
             types, typeSpecs, genericParams, methods, signatures, parameters,
@@ -1006,7 +1061,8 @@ internal static class TrRmRegisterBodyMapValidator
         }
     }
 
-    private static void ValidateCallSiteEffects(TrRmRegisterBodyReader body,
+    private static RegisterTypeState[][] ValidateCallSiteEffects(
+        TrRmRegisterBodyReader body,
         int methodDefRow,
         TrRmTypeSpecTableReader typeSpecs, TrRmMethodDefTableReader methods,
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
@@ -1014,11 +1070,17 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
         ConstantSourceValueContext constantValues)
     {
+        var registerTypeEntries = ComputeBlockRegisterTypeStates(body,
+            methodDefRow, typeSpecs, methods, signatures, parameters, imports,
+            nativeFunctionPointerAnchors, constantValues);
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             ConsumeWork(body);
+            var block = body.GetBlock(blockIndex);
+            var codeOffset = checked((int)ReadUInt32(body, block, 0));
             var code = body.GetBlockCode(blockIndex);
-            var registerTypes = CreateBlockEntryRegisterTypes(body, blockIndex);
+            var registerTypes = CopyRegisterTypeStates(body,
+                registerTypeEntries[blockIndex]);
             var position = 0;
             while (position < code.Length)
             {
@@ -1081,11 +1143,14 @@ internal static class TrRmRegisterBodyMapValidator
                 {
                     UpdateRegisterTypeStates(body, instruction, registerTypes,
                         methodDefRow, methods, signatures, parameters, typeSpecs,
-                        constantValues);
+                        constantValues, checked(codeOffset + position),
+                        allowIncompletePlaceFlow: false);
                 }
                 position += instructionLength;
             }
         }
+
+        return registerTypeEntries;
     }
 
     private static void UpdateCallSiteRegisterTypes(
@@ -1277,12 +1342,467 @@ internal static class TrRmRegisterBodyMapValidator
         return registerTypes;
     }
 
+    private static RegisterTypeState[][] ComputeBlockRegisterTypeStates(
+        TrRmRegisterBodyReader body, int methodDefRow,
+        TrRmTypeSpecTableReader typeSpecs,
+        TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
+        TrRmParamTableReader parameters, TrRmImportTableReader imports,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        ConstantSourceValueContext constantValues)
+    {
+        var blockCount = body.BlockCount;
+        ConsumeWork(body, checked(((ulong)blockCount * 4UL) + 4UL));
+        var entryStates = new RegisterTypeState[blockCount][];
+        var outputStates = new RegisterTypeState[blockCount][];
+        var hasOutput = new bool[blockCount];
+        var queued = new bool[blockCount];
+        var successors = BuildBlockFlowSuccessors(body);
+        ConsumeWork(body, checked((ulong)blockCount + 1UL));
+        var worklist = new Queue<int>(blockCount);
+
+        for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        {
+            ConsumeWork(body);
+            entryStates[blockIndex]
+                = CreateBlockEntryRegisterTypes(body, blockIndex);
+            ConsumeWork(body);
+            worklist.Enqueue(blockIndex);
+            queued[blockIndex] = true;
+        }
+
+        while (worklist.TryDequeue(out var blockIndex))
+        {
+            ConsumeWork(body);
+            queued[blockIndex] = false;
+            var registerTypes = CopyRegisterTypeStates(body,
+                entryStates[blockIndex]);
+            var block = body.GetBlock(blockIndex);
+            var codeOffset = checked((int)ReadUInt32(body, block, 0));
+            var code = body.GetBlockCode(blockIndex);
+            var position = 0;
+            while (position < code.Length)
+            {
+                ConsumeWork(body, 2);
+                var opcode = ReadByte(body, code, position);
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(opcode,
+                        body.Schema);
+                ConsumeWork(body,
+                    checked((ulong)instructionLength));
+                var instruction = code.Slice(position, instructionLength);
+                if (opcode == 0x90)
+                {
+                    UpdateCallSiteRegisterTypes(body,
+                        ReadByte(body, instruction, 1), registerTypes,
+                        typeSpecs, methods, signatures, imports,
+                        nativeFunctionPointerAnchors);
+                }
+                else if (opcode == 0xE0)
+                {
+                    UpdateCallSiteRegisterTypes(body,
+                        ReadUInt16(body, instruction, 2), registerTypes,
+                        typeSpecs, methods, signatures, imports,
+                        nativeFunctionPointerAnchors);
+                }
+                else
+                {
+                    UpdateRegisterTypeStates(body, instruction,
+                        registerTypes, methodDefRow, methods, signatures,
+                        parameters, typeSpecs, constantValues,
+                        checked(codeOffset + position),
+                        allowIncompletePlaceFlow: true);
+                }
+
+                position += instructionLength;
+            }
+
+            if (hasOutput[blockIndex]
+                && RegisterTypeStatesEqual(body,
+                    outputStates[blockIndex], registerTypes))
+            {
+                continue;
+            }
+
+            ConsumeWork(body);
+            outputStates[blockIndex] = registerTypes;
+            hasOutput[blockIndex] = true;
+            if (successors[blockIndex] is not { } blockSuccessors)
+            {
+                continue;
+            }
+
+            foreach (var successor in blockSuccessors)
+            {
+                ConsumeWork(body);
+                var successorEntryStates = entryStates[successor];
+                var changed = false;
+                for (var register = 0;
+                    register < successorEntryStates.Length; register++)
+                {
+                    ConsumeWork(body);
+                    var expected = successorEntryStates[register];
+                    if (!expected.IsPlaceHandle)
+                    {
+                        if (expected.IsKnown
+                            && registerTypes[register].IsPlaceHandle)
+                        {
+                            throw InvalidMap();
+                        }
+
+                        continue;
+                    }
+
+                    var incoming = registerTypes[register];
+                    if (!incoming.IsPlaceHandle
+                        || incoming.PlaceOrigins.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    if (expected.AccessKind != incoming.AccessKind
+                        || !typeSpecs.AreEquivalentTypeSpecRefs(
+                            GetRegisterTypeSpecRef(body, expected),
+                            GetRegisterTypeSpecRef(body, incoming)))
+                    {
+                        throw InvalidMap();
+                    }
+
+                    var mergedOrigins = MergePlaceHandleOrigins(body,
+                        expected.PlaceOrigins, incoming.PlaceOrigins);
+                    if (PlaceHandleOriginsEqual(body,
+                            expected.PlaceOrigins, mergedOrigins))
+                    {
+                        continue;
+                    }
+
+                    ConsumeWork(body,
+                        checked((ulong)mergedOrigins.Length + 1UL));
+                    successorEntryStates[register]
+                        = expected.WithPlaceOrigins(mergedOrigins);
+                    changed = true;
+                }
+
+                if (changed && !queued[successor])
+                {
+                    ConsumeWork(body);
+                    worklist.Enqueue(successor);
+                    queued[successor] = true;
+                }
+            }
+        }
+
+        for (var sourceBlock = 0; sourceBlock < blockCount; sourceBlock++)
+        {
+            ConsumeWork(body);
+            if (successors[sourceBlock] is not { } blockSuccessors)
+            {
+                continue;
+            }
+
+            foreach (var successor in blockSuccessors)
+            {
+                ConsumeWork(body);
+                var successorEntryStates = entryStates[successor];
+                for (var register = 0;
+                    register < successorEntryStates.Length; register++)
+                {
+                    ConsumeWork(body);
+                    var expected = successorEntryStates[register];
+                    if (!expected.IsPlaceHandle)
+                    {
+                        continue;
+                    }
+
+                    if (!hasOutput[sourceBlock])
+                    {
+                        throw InvalidMap();
+                    }
+
+                    var incoming = outputStates[sourceBlock][register];
+                    if (!incoming.IsPlaceHandle
+                        || incoming.PlaceOrigins.Length == 0
+                        || expected.AccessKind != incoming.AccessKind
+                        || !typeSpecs.AreEquivalentTypeSpecRefs(
+                            GetRegisterTypeSpecRef(body, expected),
+                            GetRegisterTypeSpecRef(body, incoming)))
+                    {
+                        throw InvalidMap();
+                    }
+                }
+            }
+        }
+
+        return entryStates;
+    }
+
+    private static List<int>?[] BuildBlockFlowSuccessors(
+        TrRmRegisterBodyReader body)
+    {
+        var blockCount = body.BlockCount;
+        ConsumeWork(body, checked((ulong)blockCount + 1UL));
+        var successors = new List<int>?[blockCount];
+        for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        {
+            ConsumeWork(body);
+            var code = body.GetBlockCode(blockIndex);
+            ReadOnlySpan<byte> terminalInstruction = default;
+            var position = 0;
+            while (position < code.Length)
+            {
+                ConsumeWork(body);
+                var opcode = ReadByte(body, code, position);
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(opcode,
+                        body.Schema);
+                ConsumeWork(body);
+                terminalInstruction = code.Slice(position,
+                    instructionLength);
+                position += instructionLength;
+            }
+
+            if (terminalInstruction.IsEmpty)
+            {
+                throw InvalidMap();
+            }
+
+            var terminalOpcode = ReadByte(body, terminalInstruction, 0);
+            switch (terminalOpcode)
+            {
+                case 0xB0:
+                    AddBlockFlowSuccessor(body, successors, blockIndex,
+                        ReadByte(body, terminalInstruction, 1), blockCount);
+                    break;
+                case 0xE3:
+                    AddBlockFlowSuccessor(body, successors, blockIndex,
+                        ReadUInt16(body, terminalInstruction, 2), blockCount);
+                    break;
+                case >= 0xA0 and <= 0xAF:
+                case 0xB1:
+                    AddConditionalBlockFlowSuccessors(body, successors,
+                        blockIndex,
+                        ReadByte(body, terminalInstruction, 1) >> 4,
+                        blockCount);
+                    break;
+                case 0xE4:
+                case 0xE5:
+                    AddConditionalBlockFlowSuccessors(body, successors,
+                        blockIndex,
+                        ReadUInt16(body, terminalInstruction, 2),
+                        blockCount);
+                    break;
+                case 0xB2:
+                    AddSwitchBlockFlowSuccessors(body, successors,
+                        blockIndex, ReadByte(body, terminalInstruction, 1),
+                        blockCount);
+                    break;
+                case 0xE6:
+                    AddSwitchBlockFlowSuccessors(body, successors,
+                        blockIndex, ReadUInt16(body, terminalInstruction, 2),
+                        blockCount);
+                    break;
+            }
+        }
+
+        return successors;
+    }
+
+    private static void AddBlockFlowSuccessor(TrRmRegisterBodyReader body,
+        List<int>?[] successors, int sourceBlock, int targetBlock,
+        int blockCount)
+    {
+        ConsumeWork(body, 2);
+        if ((uint)targetBlock >= (uint)blockCount)
+        {
+            throw InvalidMap();
+        }
+
+        var targets = successors[sourceBlock];
+        if (targets is null)
+        {
+            ConsumeWork(body);
+            targets = new List<int>();
+            successors[sourceBlock] = targets;
+        }
+
+        targets.Add(targetBlock);
+    }
+
+    private static void AddConditionalBlockFlowSuccessors(
+        TrRmRegisterBodyReader body, List<int>?[] successors,
+        int sourceBlock, int recordIndex, int blockCount)
+    {
+        var payload = GetRecordPayload(body, recordIndex);
+        if (payload.Length != 4)
+        {
+            throw InvalidMap();
+        }
+
+        AddBlockFlowSuccessor(body, successors, sourceBlock,
+            ReadUInt16(body, payload, 0), blockCount);
+        AddBlockFlowSuccessor(body, successors, sourceBlock,
+            ReadUInt16(body, payload, 2), blockCount);
+    }
+
+    private static void AddSwitchBlockFlowSuccessors(
+        TrRmRegisterBodyReader body, List<int>?[] successors,
+        int sourceBlock, int recordIndex, int blockCount)
+    {
+        var payload = GetRecordPayload(body, recordIndex);
+        var caseCount = ReadUInt32(body, payload, 8);
+        if (12L + ((long)caseCount * 4) != payload.Length)
+        {
+            throw InvalidMap();
+        }
+
+        AddBlockFlowSuccessor(body, successors, sourceBlock,
+            ReadUInt16(body, payload, 6), blockCount);
+        for (var caseIndex = 0; caseIndex < caseCount; caseIndex++)
+        {
+            ConsumeWork(body);
+            AddBlockFlowSuccessor(body, successors, sourceBlock,
+                ReadUInt16(body, payload,
+                    checked(14 + (checked((int)caseIndex) * 4))),
+                blockCount);
+        }
+    }
+
+    private static RegisterTypeState[] CopyRegisterTypeStates(
+        TrRmRegisterBodyReader body, RegisterTypeState[] source)
+    {
+        ConsumeWork(body, checked((ulong)source.Length + 1UL));
+        var result = new RegisterTypeState[source.Length];
+        Array.Copy(source, result, source.Length);
+        return result;
+    }
+
+    private static bool RegisterTypeStatesEqual(
+        TrRmRegisterBodyReader body, RegisterTypeState[] left,
+        RegisterTypeState[] right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Length; index++)
+        {
+            ConsumeWork(body);
+            if (left[index].TypeMapIndex != right[index].TypeMapIndex
+                || left[index].TypeSpecRef != right[index].TypeSpecRef
+                || left[index].PlaceSelectionRecordIndex
+                    != right[index].PlaceSelectionRecordIndex
+                || left[index].RootHomeIndex != right[index].RootHomeIndex
+                || left[index].AccessKind != right[index].AccessKind
+                || !PlaceHandleOriginsEqual(body,
+                    left[index].PlaceOrigins, right[index].PlaceOrigins))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static PlaceHandleOrigin[] MergePlaceHandleOrigins(
+        TrRmRegisterBodyReader body, PlaceHandleOrigin[] left,
+        PlaceHandleOrigin[] right)
+    {
+        if (right.Length == 0)
+        {
+            return left;
+        }
+        if (left.Length == 0)
+        {
+            ConsumeWork(body, checked((ulong)right.Length + 1UL));
+            return right;
+        }
+
+        var count = left.Length;
+        for (var rightIndex = 0; rightIndex < right.Length; rightIndex++)
+        {
+            var found = false;
+            for (var leftIndex = 0; leftIndex < left.Length; leftIndex++)
+            {
+                ConsumeWork(body);
+                if (left[leftIndex] == right[rightIndex])
+                {
+                    found = true;
+                    break;
+                }
+            }
+            for (var priorRightIndex = 0;
+                !found && priorRightIndex < rightIndex; priorRightIndex++)
+            {
+                ConsumeWork(body);
+                found = right[priorRightIndex] == right[rightIndex];
+            }
+
+            if (!found)
+            {
+                count++;
+            }
+        }
+
+        if (count == left.Length)
+        {
+            return left;
+        }
+
+        ConsumeWork(body, checked((2UL * (ulong)count) + 1UL));
+        var merged = new PlaceHandleOrigin[count];
+        Array.Copy(left, merged, left.Length);
+        var mergedCount = left.Length;
+        for (var rightIndex = 0; rightIndex < right.Length; rightIndex++)
+        {
+            var found = false;
+            for (var existingIndex = 0; existingIndex < mergedCount;
+                existingIndex++)
+            {
+                ConsumeWork(body);
+                if (merged[existingIndex] == right[rightIndex])
+                {
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found)
+            {
+                merged[mergedCount++] = right[rightIndex];
+            }
+        }
+
+        return merged;
+    }
+
+    private static bool PlaceHandleOriginsEqual(
+        TrRmRegisterBodyReader body, PlaceHandleOrigin[] left,
+        PlaceHandleOrigin[] right)
+    {
+        if (left.Length != right.Length)
+        {
+            return false;
+        }
+
+        for (var index = 0; index < left.Length; index++)
+        {
+            ConsumeWork(body);
+            if (left[index] != right[index])
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static void UpdateRegisterTypeStates(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
         RegisterTypeState[] registerTypes, int methodDefRow,
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
-        ConstantSourceValueContext constantValues)
+        ConstantSourceValueContext constantValues, int codeOffset,
+        bool allowIncompletePlaceFlow)
     {
         var opcode = ReadByte(body, instruction, 0);
         var operand = instruction.Length > 1
@@ -1292,7 +1812,7 @@ internal static class TrRmRegisterBodyMapValidator
         {
             UpdateFixedArrayPlaceRegister(body, instruction, registerTypes,
                 methods.GetOwnerModule(methodDefRow), typeSpecs,
-                constantValues);
+                constantValues, codeOffset, allowIncompletePlaceFlow);
             return;
         }
 
@@ -1300,7 +1820,7 @@ internal static class TrRmRegisterBodyMapValidator
         {
             UpdateStorageAddressResult(body, instruction, registerTypes,
                 methods.GetOwnerModule(methodDefRow), typeSpecs,
-                constantValues);
+                constantValues, allowIncompletePlaceFlow);
             return;
         }
 
@@ -1668,6 +2188,15 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (opcode is 0x00 or 0x17 or 0x18
+            or (>= 0xA0 and <= 0xAF)
+            or 0xB0 or 0xB1 or 0xB2 or 0xB3 or 0xB4 or 0xB5
+            or 0xB7 or 0xB8
+            or (>= 0xE3 and <= 0xE8) or 0xEB)
+        {
+            return;
+        }
+
         ClearRegisterTypeStates(body, registerTypes);
     }
 
@@ -1675,7 +2204,8 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
         RegisterTypeState[] registerTypes, int ownerModule,
         TrRmTypeSpecTableReader typeSpecs,
-        ConstantSourceValueContext constantValues)
+        ConstantSourceValueContext constantValues, int codeOffset,
+        bool allowIncompletePlaceFlow)
     {
         var opcode = ReadByte(body, instruction, 0);
         var instructionOperand = ReadByte(body, instruction, 1);
@@ -1724,7 +2254,7 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
-        int rootHome;
+        var placeOrigins = Array.Empty<PlaceHandleOrigin>();
         bool parentAllowsWrite;
         var baseKind = ReadByte(body, payload, 3);
         if (baseKind == 2)
@@ -1739,7 +2269,10 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
 
-            rootHome = homeIndex;
+            ConsumeWork(body, 2);
+            placeOrigins = [
+                new PlaceHandleOrigin(recordIndex, homeIndex, codeOffset),
+            ];
             parentAllowsWrite = (ReadByte(body, home, 1) & 1) != 0;
         }
         else if (baseKind == 1)
@@ -1755,7 +2288,37 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
 
-            rootHome = baseState.RootHomeIndex;
+            if (baseState.PlaceOrigins.Length == 0)
+            {
+                if (!allowIncompletePlaceFlow)
+                {
+                    throw InvalidMap();
+                }
+            }
+            else
+            {
+                ConsumeWork(body,
+                    checked((ulong)baseState.PlaceOrigins.Length + 1UL));
+                var origins = new PlaceHandleOrigin[
+                    baseState.PlaceOrigins.Length];
+                for (var originIndex = 0;
+                    originIndex < baseState.PlaceOrigins.Length;
+                    originIndex++)
+                {
+                    ConsumeWork(body);
+                    var origin = baseState.PlaceOrigins[originIndex];
+                    if (origin.RootHomeIndex < 0
+                        || origin.RootHomeIndex >= body.HomeCount)
+                    {
+                        throw InvalidMap();
+                    }
+
+                    origins[originIndex] = new PlaceHandleOrigin(recordIndex,
+                        origin.RootHomeIndex, codeOffset);
+                }
+
+                placeOrigins = origins;
+            }
             parentAllowsWrite = AllowsWriteAuthority(
                 baseState.AccessKind,
                 GetRegisterTypeSpecRef(body, baseState), typeSpecs);
@@ -1774,16 +2337,18 @@ internal static class TrRmRegisterBodyMapValidator
             throw InvalidMap();
         }
 
+        ConsumeWork(body, checked((ulong)placeOrigins.Length + 1UL));
         SetRegisterTypeState(body, registerTypes, destination,
-            RegisterTypeState.FromPlace(
-                elementTypeSpecRef, recordIndex, rootHome, accessKind));
+            RegisterTypeState.FromPlace(elementTypeSpecRef, recordIndex,
+                accessKind, placeOrigins));
     }
 
     private static void UpdateStorageAddressResult(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
         RegisterTypeState[] registerTypes, int ownerModule,
         TrRmTypeSpecTableReader typeSpecs,
-        ConstantSourceValueContext constantValues)
+        ConstantSourceValueContext constantValues,
+        bool allowIncompletePlaceFlow)
     {
         var storageRecordIndex = ReadUInt16(body, instruction, 2);
         var storage = GetRecordPayload(body, storageRecordIndex);
@@ -1800,64 +2365,82 @@ internal static class TrRmRegisterBodyMapValidator
             }
 
             var source = GetRegisterTypeState(body, registerTypes, sourceIndex);
-            if (!source.IsPlaceHandle || source.RootHomeIndex < 0
-                || source.PlaceSelectionRecordIndex < 0
-                || (uint)source.RootHomeIndex >= (uint)body.HomeCount)
+            if (!source.IsPlaceHandle)
             {
                 throw InvalidMap();
             }
+            var sourceTypeSpecRef = GetRegisterTypeSpecRef(body, source);
 
-            var rootHome = GetHomeMapEntry(body, source.RootHomeIndex);
-            if (ReadByte(body, rootHome, 0) != 3)
+            if (source.PlaceOrigins.Length == 0)
             {
-                throw InvalidMap();
+                if (!allowIncompletePlaceFlow)
+                {
+                    throw InvalidMap();
+                }
             }
-
-            var selection = GetRecordPayload(body,
-                source.PlaceSelectionRecordIndex);
-            if (ReadByte(body, selection, 0) != 3
-                || ReadByte(body, selection, 9) != 3)
+            else
             {
-                throw InvalidMap();
-            }
+                var requiredElementCount = ReadUInt32(body, storage, 8);
+                var pointerTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                    pointerTypeMapIndex);
+                var pointerType = typeSpecs.GetTypeSpecBytes(
+                    pointerTypeSpecRef);
+                var pointeeType = pointerType.Length == 4
+                    ? 0xF200_0000u | pointerType[3]
+                    : pointerType.Length == 7
+                        ? ReadUInt32(pointerType, 3)
+                        : throw InvalidMap();
+                var isOpaqueVoid = typeSpecs.AreEquivalentTypeSpecRefs(
+                    pointeeType, 0xF200_0000);
+                if (requiredElementCount == 0
+                    || (!isOpaqueVoid
+                        && !typeSpecs.AreEquivalentTypeSpecRefs(
+                            sourceTypeSpecRef, pointeeType))
+                    || (isOpaqueVoid && pointerType[1] != 0))
+                {
+                    throw InvalidMap();
+                }
 
-            var layoutRow = ReadUInt32(body, selection, 12);
-            var arrayLayout = constantValues.FixedArrayLayouts.GetRow(
-                checked((int)layoutRow));
-            var requiredElementCount = ReadUInt32(body, storage, 8);
-            if (arrayLayout.OwnerModuleRow != ownerModule
-                || !typeSpecs.TryGetFixedInlineArray(
-                    (uint)arrayLayout.ArrayTypeSpecRow,
-                    out var elementTypeSpecRef, out var elementCount)
-                || !typeSpecs.AreEquivalentTypeSpecRefs(
-                    source.TypeSpecRef, elementTypeSpecRef)
-                || requiredElementCount == 0
-                || requiredElementCount > elementCount)
-            {
-                throw InvalidMap();
-            }
+                foreach (var origin in source.PlaceOrigins)
+                {
+                    ConsumeWork(body);
+                    if (origin.RootHomeIndex < 0
+                        || origin.RootHomeIndex >= body.HomeCount
+                        || origin.PlaceSelectionRecordIndex < 0)
+                    {
+                        throw InvalidMap();
+                    }
 
-            var pointerTypeSpecRef = GetTypeMapTypeSpecRef(body,
-                pointerTypeMapIndex);
-            var pointerType = typeSpecs.GetTypeSpecBytes(
-                pointerTypeSpecRef);
-            var pointeeType = pointerType.Length == 4
-                ? 0xF200_0000u | pointerType[3]
-                : pointerType.Length == 7
-                    ? ReadUInt32(pointerType, 3)
-                    : throw InvalidMap();
-            var isOpaqueVoid = typeSpecs.AreEquivalentTypeSpecRefs(
-                pointeeType, 0xF200_0000);
-            if ((!isOpaqueVoid
-                    && !typeSpecs.AreEquivalentTypeSpecRefs(
-                        source.TypeSpecRef, pointeeType))
-                || (isOpaqueVoid && pointerType[1] != 0)
-                || (pointerType[1] == 1
-                    && (!AllowsWriteAuthority(source.AccessKind,
-                            source.TypeSpecRef, typeSpecs)
-                        || (ReadByte(body, rootHome, 1) & 1) == 0)))
-            {
-                throw InvalidMap();
+                    var rootHome = GetHomeMapEntry(body,
+                        origin.RootHomeIndex);
+                    var selection = GetRecordPayload(body,
+                        origin.PlaceSelectionRecordIndex);
+                    if (ReadByte(body, rootHome, 0) != 3
+                        || ReadByte(body, selection, 0) != 3
+                        || ReadByte(body, selection, 9) != 3)
+                    {
+                        throw InvalidMap();
+                    }
+
+                    var layoutRow = ReadUInt32(body, selection, 12);
+                    var arrayLayout = constantValues.FixedArrayLayouts
+                        .GetRow(checked((int)layoutRow));
+                    if (arrayLayout.OwnerModuleRow != ownerModule
+                        || !typeSpecs.TryGetFixedInlineArray(
+                            (uint)arrayLayout.ArrayTypeSpecRow,
+                            out var elementTypeSpecRef,
+                            out var elementCount)
+                        || !typeSpecs.AreEquivalentTypeSpecRefs(
+                            sourceTypeSpecRef, elementTypeSpecRef)
+                        || requiredElementCount > elementCount
+                        || (pointerType[1] == 1
+                            && (!AllowsWriteAuthority(source.AccessKind,
+                                    sourceTypeSpecRef, typeSpecs)
+                                || (ReadByte(body, rootHome, 1) & 1) == 0)))
+                    {
+                        throw InvalidMap();
+                    }
+                }
             }
         }
 
@@ -2008,13 +2591,17 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters, TrRmImportTableReader imports,
         ConstantSourceValueContext constantValues, TrRmContractTableReader contracts,
-        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        RegisterTypeState[][] registerTypeEntries)
     {
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             ConsumeWork(body);
+            var block = body.GetBlock(blockIndex);
+            var codeOffset = checked((int)ReadUInt32(body, block, 0));
             var code = body.GetBlockCode(blockIndex);
-            var registerTypes = CreateBlockEntryRegisterTypes(body, blockIndex);
+            var registerTypes = CopyRegisterTypeStates(body,
+                registerTypeEntries[blockIndex]);
             var position = 0;
             while (position < code.Length)
             {
@@ -2119,7 +2706,8 @@ internal static class TrRmRegisterBodyMapValidator
                 {
                     UpdateRegisterTypeStates(body, instruction, registerTypes,
                         methodDefRow, methods, signatures, parameters, typeSpecs,
-                        constantValues);
+                        constantValues, checked(codeOffset + position),
+                        allowIncompletePlaceFlow: false);
                 }
                 position += instruction.Length;
             }

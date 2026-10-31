@@ -318,6 +318,44 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void PropagatesNestedArrayPlaceHandleAcrossBlocks()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            crossBlockPlaceSelection: true);
+
+        ValidateBodyMaps(artifact);
+    }
+
+    [Test]
+    public void MergesNestedArrayPlaceHandleOriginsAcrossBranches()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            branchJoinPlaceSelection: true);
+
+        ValidateBodyMaps(artifact);
+    }
+
+    [Test]
+    public void RejectsBranchJoinWhenAnIncomingPathHasNoPlaceHandle()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            branchJoinPlaceSelection: true,
+            missingBranchPlaceHandle: true);
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
+    [Test]
+    public void PropagatesNestedArrayPlaceHandleOriginsAroundLoopBackEdge()
+    {
+        var artifact = CreateNestedArrayPlaceArtifact(
+            loopPlaceSelection: true);
+
+        ValidateBodyMaps(artifact);
+    }
+
+    [Test]
     public void RejectsCountedAddressLargerThanTheSelectedArray()
     {
         var artifact = CreateNestedArrayPlaceArtifact(
@@ -4256,7 +4294,11 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
     private static byte[] CreateNestedArrayPlaceArtifact(
         ulong requiredElementCount = 1,
-        bool zeroRequiredElementCount = false)
+        bool zeroRequiredElementCount = false,
+        bool crossBlockPlaceSelection = false,
+        bool branchJoinPlaceSelection = false,
+        bool loopPlaceSelection = false,
+        bool missingBranchPlaceHandle = false)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -4290,23 +4332,40 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             new TrRmFixedArrayLayoutRow(1, 1, 1, 4, 8, 4),
             new TrRmFixedArrayLayoutRow(1, 2, 1, 8, 24, 4),
         ], typeSpecs, targetProfiles, features, modules);
+        var hasControlFlowParameter
+            = branchJoinPlaceSelection || loopPlaceSelection;
         var methodSignatureBytes = TrRmMethodSigTableWriter.Encode([
-            new TrRmMethodSigRow(0xF200_0000, 0, 0, 0, 0, 0),
-        ], typeSpecs, 0, 0);
+            new TrRmMethodSigRow(0xF200_0000, 0,
+                hasControlFlowParameter ? 1 : 0,
+                hasControlFlowParameter ? 1 : 0, 0, 0),
+        ], typeSpecs, hasControlFlowParameter ? 1 : 0, 0);
         var signatures = new TrRmMethodSigTableReader(methodSignatureBytes,
-            1, typeSpecs, 0, 0);
+            1, typeSpecs, hasControlFlowParameter ? 1 : 0, 0);
+        var parameterBytes = hasControlFlowParameter
+            ? TrRmParamTableWriter.Encode([
+                new TrRmParamRow(1, 0, 0xF200_0001, 0),
+            ], signatures, typeSpecs, schema)
+            : [];
         var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
             0, 0, 0, 0, schema);
         var methodDefinitionBytes = TrRmMethodDefTableWriter.Encode([
             new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
         ], strings, modules, typeDefs, signatures, 0, 1);
 
-        var homeMap = new byte[]
-        {
-            3, 1, 0, 0, 0, 0, 0, 0,
-            3, 0, 2, 0, 0, 0, 0, 0,
-            3, 0, 2, 0, 0, 0, 0, 0,
-        };
+        var homeMap = branchJoinPlaceSelection || loopPlaceSelection
+            ? new byte[]
+            {
+                3, 1, 0, 0, 0, 0, 0, 0,
+                3, 0, 2, 0, 0, 0, 0, 0,
+                3, 0, 2, 0, 0, 0, 0, 0,
+                3, 1, 0, 0, 0, 0, 0, 0,
+                3, 0, 2, 0, 0, 0, 0, 0,
+            }
+            : [
+                3, 1, 0, 0, 0, 0, 0, 0,
+                3, 0, 2, 0, 0, 0, 0, 0,
+                3, 0, 2, 0, 0, 0, 0, 0,
+            ];
         var typeMap = new byte[4 * sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(typeMap, 0x1100_0002);
         BinaryPrimitives.WriteUInt32LittleEndian(
@@ -4321,6 +4380,12 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 destinationIndex: 0, baseIndex: 0, indexKind: 2,
                 targetRefKind: 3, indexIndex: 1, targetRef: 2,
                 referentTypeMapIndex: 1, schema);
+        var alternateFirstSelection
+            = TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                targetKind: 3, accessKind: 1, destinationKind: 1, baseKind: 2,
+                destinationIndex: 0, baseIndex: 3, indexKind: 2,
+                targetRefKind: 3, indexIndex: 4, targetRef: 2,
+                referentTypeMapIndex: 1, schema);
         var secondSelection
             = TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
                 targetKind: 3, accessKind: 1, destinationKind: 1, baseKind: 1,
@@ -4332,21 +4397,141 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             pointerTypeMapIndex: 3,
             requiredElementCount: checked((uint)(zeroRequiredElementCount
                 ? 1UL : requiredElementCount)));
-        var bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
-            default, default, default,
-            [new TrRmRegisterBodyBlock(0, 14, 0)],
-            [
+        TrRmRegisterBodyBlock[] blocks;
+        ReadOnlyMemory<byte>[] records;
+        byte[] code;
+        if (loopPlaceSelection)
+        {
+            blocks = [
+                new TrRmRegisterBodyBlock(0, 6, 0),
+                new TrRmRegisterBodyBlock(6, 4, 1),
+                new TrRmRegisterBodyBlock(10, 8, 2),
+                new TrRmRegisterBodyBlock(18, 6, 3),
+                new TrRmRegisterBodyBlock(24, 10, 4),
+            ];
+            records = [
+                new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 0, 1 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 0, 1 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 0, 1 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 0, 1 },
+                new byte[] { 6, 0, 0, 0, 2, 0, 4, 0 },
+                new byte[] { 6, 0, 0, 0, 3, 0, 1, 0 },
+                firstSelection,
+                alternateFirstSelection,
+                secondSelection,
+                address,
+            ];
+            code = [
+                0xD8, 0, 7, 0,
+                0xB0, 1,
+                0x11, 2,
+                0xB1, 0x52,
+                0xD8, 0, 7, 0,
+                0x11, 2,
+                0xB1, 0x62,
+                0xD8, 0, 8, 0,
+                0xB0, 1,
+                0xD8, 1, 9, 0,
+                0xEC, 0, 10, 0,
+                0xB7, 0,
+            ];
+        }
+        else if (branchJoinPlaceSelection)
+        {
+            blocks = missingBranchPlaceHandle
+                ? [
+                    new TrRmRegisterBodyBlock(0, 4, 0),
+                    new TrRmRegisterBodyBlock(4, 2, 1),
+                    new TrRmRegisterBodyBlock(6, 6, 2),
+                    new TrRmRegisterBodyBlock(12, 10, 3),
+                ]
+                : [
+                    new TrRmRegisterBodyBlock(0, 4, 0),
+                    new TrRmRegisterBodyBlock(4, 6, 1),
+                    new TrRmRegisterBodyBlock(10, 6, 2),
+                    new TrRmRegisterBodyBlock(16, 10, 3),
+                ];
+            records = [
+                new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 0, 1 },
+                new byte[] { 6, 0, 0, 0, 1, 0, 2, 0 },
+                firstSelection,
+                alternateFirstSelection,
+                secondSelection,
+                address,
+            ];
+            code = missingBranchPlaceHandle
+                ? [
+                    0x11, 0,
+                    0xB1, 0x40,
+                    0xB0, 3,
+                    0xD8, 0, 6, 0,
+                    0xB0, 3,
+                    0xD8, 1, 7, 0,
+                    0xEC, 0, 8, 0,
+                    0xB7, 0,
+                ]
+                : [
+                    0x11, 0,
+                    0xB1, 0x40,
+                    0xD8, 0, 5, 0,
+                    0xB0, 3,
+                    0xD8, 0, 6, 0,
+                    0xB0, 3,
+                    0xD8, 1, 7, 0,
+                    0xEC, 0, 8, 0,
+                    0xB7, 0,
+                ];
+        }
+        else if (crossBlockPlaceSelection)
+        {
+            blocks = [
+                new TrRmRegisterBodyBlock(0, 6, 0),
+                new TrRmRegisterBodyBlock(6, 10, 1),
+            ];
+            records = [
+                new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                new byte[] { 1, 0, 0, 0, 1, 0, 0, 0,
+                    0, 1, 1, 0, 1 },
+                firstSelection,
+                secondSelection,
+                address,
+            ];
+            code = [
+                0xD8, 0, 2, 0,
+                0xB0, 1,
+                0xD8, 1, 3, 0,
+                0xEC, 0, 4, 0,
+                0xB7, 0,
+            ];
+        }
+        else
+        {
+            blocks = [new TrRmRegisterBodyBlock(0, 14, 0)];
+            records = [
                 new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
                 firstSelection,
                 secondSelection,
                 address,
-            ],
-            new byte[] {
+            ];
+            code = [
                 0xD8, 0, 1, 0,
                 0xD8, 1, 2, 0,
                 0xEC, 0, 3, 0,
                 0xB7, 0,
-            },
+            ];
+        }
+        var bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
+            default, default, default,
+            blocks, records, code,
             schema: schema);
         if (zeroRequiredElementCount)
         {
@@ -4373,6 +4558,10 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 TrRmVariableTableWriter.EncodeBodies([bodyBytes])),
             new(0x0048, 0, 1, targetProfilesBytes),
         };
+        if (parameterBytes.Length != 0)
+        {
+            sections.Add(new TrRmSection(0x0018, 0, 1, parameterBytes));
+        }
         sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
         return TrRmArtifactWriter.Encode(sections, schema);
     }
