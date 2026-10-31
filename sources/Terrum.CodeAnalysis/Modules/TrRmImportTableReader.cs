@@ -12,11 +12,17 @@ internal readonly record struct TrRmImportBinding(string ProducerIdentity, strin
 
 /// <summary>Validates retained dependency references and their local expected definitions.</summary>
 /// <remarks>Does not bind the selected producer or compare full declared contracts.</remarks>
+/// <remarks>A2 TypeDef aliases retain distinct Import rows; callers must use row-scoped binding when one expected
+/// DefId has multiple views.</remarks>
 public readonly ref struct TrRmImportTableReader
 {
     private const int RowSize = 12;
     private readonly ReadOnlySpan<byte> _rows;
     private readonly Dictionary<uint, TrRmImportBinding> _expected;
+    private readonly HashSet<uint>? _ambiguousExpected;
+    private readonly HashSet<(int ModuleRefRow, string ExportKey, uint ExpectedDefinition)>?
+        _importTriples;
+    private readonly TrRmImportBinding[]? _bindingsByImportRow;
     private readonly int _recordCount;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
@@ -25,7 +31,7 @@ public readonly ref struct TrRmImportTableReader
         get
         {
             _resourceLedger?.ConsumeWork();
-            return _expected is null ? 0 : _expected.Count;
+            return _expected is null ? 0 : _recordCount;
         }
     }
 
@@ -106,6 +112,25 @@ public readonly ref struct TrRmImportTableReader
         _recordCount = recordCount;
         _resourceLedger = resourceLedger;
         _resourceLedger?.ConsumeWork((ulong)recordCount);
+        var allowsTypeDefAliases = profileAware
+            && (schema
+                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+        if (allowsTypeDefAliases)
+        {
+            resourceLedger?.ConsumeWork(
+                checked(((ulong)recordCount * 3UL) + 3UL));
+            _ambiguousExpected = new HashSet<uint>(recordCount);
+            _importTriples = new HashSet<(
+                int ModuleRefRow, string ExportKey, uint ExpectedDefinition)>(
+                    recordCount);
+            _bindingsByImportRow = new TrRmImportBinding[recordCount];
+        }
+        else
+        {
+            _ambiguousExpected = null;
+            _importTriples = null;
+            _bindingsByImportRow = null;
+        }
         _expected = new Dictionary<uint, TrRmImportBinding>(recordCount);
         var lastModuleRefRow = 0;
         var lastRequirements = default((int OwnerModule,
@@ -169,11 +194,28 @@ public readonly ref struct TrRmImportTableReader
             }
 
             _resourceLedger?.ConsumeWork(2);
-            if (!_expected.TryAdd(expected, new TrRmImportBinding(
-                references.GetProducerIdentity(moduleRefRow), strings.DecodeName((int)key),
-                lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy)))
+            var exportKey = strings.DecodeName((int)key);
+            var binding = new TrRmImportBinding(
+                references.GetProducerIdentity(moduleRefRow), exportKey,
+                lastRequirements.TargetRequirement, lastRequirements.RuntimePolicy);
+            if (allowsTypeDefAliases)
             {
-                throw InvalidImport();
+                if (!_importTriples!.Add((moduleRefRow, exportKey, expected)))
+                {
+                    throw InvalidImport();
+                }
+
+                _bindingsByImportRow![row] = binding;
+            }
+
+            if (!_expected.TryAdd(expected, binding))
+            {
+                if (!allowsTypeDefAliases || expected >> 24 != 0x13)
+                {
+                    throw InvalidImport();
+                }
+
+                _ = _ambiguousExpected!.Add(expected);
             }
         }
 
@@ -231,7 +273,8 @@ public readonly ref struct TrRmImportTableReader
         out (uint TargetRequirement, uint RuntimePolicy) requirements)
     {
         _resourceLedger?.ConsumeWork();
-        if (_expected is null)
+        if (_expected is null
+            || (_ambiguousExpected?.Contains(reference) ?? false))
         {
             requirements = default;
             return false;
@@ -251,7 +294,9 @@ public readonly ref struct TrRmImportTableReader
     internal bool TryGetExpectedBinding(uint reference, out TrRmImportBinding binding)
     {
         _resourceLedger?.ConsumeWork();
-        if (_expected is not null && _expected.TryGetValue(reference, out binding))
+        if (_expected is not null
+            && !(_ambiguousExpected?.Contains(reference) ?? false)
+            && _expected.TryGetValue(reference, out binding))
         {
             return true;
         }
@@ -280,6 +325,26 @@ public readonly ref struct TrRmImportTableReader
         }
 
         return checked((int)Read(_rows.Slice((row - 1) * RowSize, RowSize), 0));
+    }
+
+    internal TrRmImportBinding GetBindingForImportRow(int row)
+    {
+        _resourceLedger?.ConsumeWork();
+        if (row <= 0 || row > _recordCount)
+        {
+            throw InvalidImport();
+        }
+
+        if (_bindingsByImportRow is not null)
+        {
+            return _bindingsByImportRow[row - 1];
+        }
+
+        var expected = GetExpectedDefinitionForImportRow(row);
+        return _expected is not null && _expected.TryGetValue(expected,
+                out var binding)
+            ? binding
+            : throw InvalidImport();
     }
 
     private uint Read(ReadOnlySpan<byte> data, int offset)

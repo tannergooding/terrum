@@ -1243,13 +1243,12 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 = consumer.TypeDefs.GetOwnerModule(expectedTypeDefRow);
             var moduleRefRow
                 = consumer.Imports.GetModuleRefForImportRow(importRow);
+            var binding = consumer.Imports.GetBindingForImportRow(importRow);
             if (expectedModule != moduleRow
                 || (expectedRequiresGenericSchema
                     && !IsGenericFixedArraySchemaIdentity(
                         _schemaIdentities[artifactIndex]))
-                || consumer.ModuleRefs.GetOwnerModule(moduleRefRow) != moduleRow
-                || !consumer.Imports.TryGetExpectedBinding(expectedDefinition,
-                    out var binding))
+                || consumer.ModuleRefs.GetOwnerModule(moduleRefRow) != moduleRow)
             {
                 throw InvalidBinding();
             }

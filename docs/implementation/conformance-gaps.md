@@ -493,11 +493,13 @@ Module Import/ModuleRef expectation. Direct field and fixed-array imports,
 compatible TypeDef relocation, incompatible packing, source-name lookup and
 snapshot immutability are covered. Provider-owned TypeDef Import chains now
 project through separately supplied or co-located A2 type-only Modules,
-retaining both provider and consumer expectations. Alias/multiple-view
-handling, origin replacement/remapping, canonical re-encoding, source-free
-Bodies, CLI and runtime remain open. The combined A2 provider/reference/layout
-selection passed 162/162 with zero skips; the provider-chain selection passed
-163/163 with zero skips.
+retaining both provider and consumer expectations. Distinct A2 TypeDef Import
+triples for the same expected TypeDef retain each ExportKey and Import
+expectation; they bind only when all keys resolve to the same actual provider
+TypeDef, while duplicate triples and split aliases reject. Distinct expected
+views, origin replacement/remapping, canonical re-encoding, source-free Bodies,
+CLI and runtime remain open. The combined A2 provider/reference/layout
+selection passed 163/163 with zero skips, including alias and split-alias cases.
 Compatible provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering
 remain open. Closed constructed array elements remain incomplete. The exact
