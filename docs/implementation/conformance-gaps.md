@@ -507,7 +507,10 @@ local ExportKey map is supplied. Explicit local exports preserve the same
 imports; provider-owned alias keys survive two consumer re-projection
 generations; compatible provider TypeDef relocation succeeds; changed imported
 declarations, split alias replacements and incompatible layouts reject. The
-combined A2 provider/reference/layout selection passed 164/164 with zero
+writer checks retained declaration, fixed-array and pointer-table snapshots;
+local TypeDef and Import TypeSpec forms compare after resolving to the same
+actual TypeDef origin. The combined A2 provider/reference/layout selection
+passed 164/164 with zero
 skips, including distinct-view and re-encoding cases.
 General provider replacement,
 complete remapping, initialization, and A2 indexed native/runtime lowering

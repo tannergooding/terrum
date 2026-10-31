@@ -649,6 +649,8 @@ public static partial class TrRmExecutableCompiler
             BoundSourceTypeProviderSnapshot>(StringComparer.Ordinal);
         var structuresByActualDefinition = new Dictionary<
             (string ModuleIdentity, uint DefinitionId), List<int>>();
+        var validatedReferenceRoots
+            = new HashSet<BoundSourceTypeProviderSnapshot>();
         var rootAliasKeysByDefinition = new Dictionary<(
             BoundSourceTypeProviderSnapshot ReferenceRoot,
             string ModuleIdentity, uint DefinitionId),
@@ -683,7 +685,6 @@ public static partial class TrRmExecutableCompiler
                 throw Unsupported(
                     "An A2 source type declaration changed after its provider expectation was checked.");
             }
-
             var referenceRoot = origin.ReferenceRoot
                 ?? throw Unsupported(
                     "An A2 source type origin does not retain its reference root.");
@@ -697,6 +698,26 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported(
                     "An A2 source type origin lacks a complete selected provider identity.");
+            }
+            if (validatedReferenceRoots.Add(referenceRoot)
+                && (origin.ExpectedFixedArrayTypes.IsDefault
+                    || origin.ExpectedNativePointerTypes.IsDefault
+                    || program.NativeFixedArrayTypes.Length
+                        < origin.ExpectedFixedArrayTypes.Length
+                    || !program.NativeFixedArrayTypes.AsSpan()
+                        .Slice(0, origin.ExpectedFixedArrayTypes.Length)
+                        .SequenceEqual(
+                            origin.ExpectedFixedArrayTypes.AsSpan())
+                    || program.NativePointerTypes.Length
+                        < origin.ExpectedNativePointerTypes.Length
+                    || !program.NativePointerTypes.AsSpan()
+                        .Slice(0,
+                            origin.ExpectedNativePointerTypes.Length)
+                        .SequenceEqual(
+                            origin.ExpectedNativePointerTypes.AsSpan())))
+            {
+                throw Unsupported(
+                    "An A2 source type array or pointer table changed after its provider expectation was checked.");
             }
 
             if (providerSnapshotsByIdentity.TryGetValue(
@@ -751,6 +772,18 @@ public static partial class TrRmExecutableCompiler
                         "An A2 lookup root does not belong to its retained reference Module.");
                 }
 
+                foreach (var exportKey in origin.ExportKeys)
+                {
+                    AddRootAliasKey(rootAliasKey, exportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy);
+                    AddImport(provider.ModuleIdentity, exportKey,
+                        provider.TargetRequirement, provider.RuntimePolicy,
+                        expectedDefinition, structureIndex);
+                }
+            }
+            else if (ReferenceEquals(provider, referenceRoot)
+                && origin.Expectations.IsDefaultOrEmpty)
+            {
                 foreach (var exportKey in origin.ExportKeys)
                 {
                     AddRootAliasKey(rootAliasKey, exportKey,

@@ -508,6 +508,8 @@ public static partial class TrRmExecutableCompiler
             });
         }
 
+        var expectedFixedArrayTypes = projectedArrays.ToImmutable();
+        var expectedNativePointerTypes = projectedPointers.ToImmutable();
         var projectedStructures = ImmutableArray.CreateBuilder<BoundStruct>(
             structureOrder.Length);
         foreach (var structureIndex in structureOrder)
@@ -538,6 +540,9 @@ public static partial class TrRmExecutableCompiler
                 Fields = projectedFields,
                 StandardTypeOrigin = origin with {
                     ExpectedDeclaration = expectedDeclaration,
+                    ExpectedFixedArrayTypes = expectedFixedArrayTypes,
+                    ExpectedNativePointerTypes
+                        = expectedNativePointerTypes,
                 },
             });
         }

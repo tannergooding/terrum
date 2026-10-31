@@ -430,6 +430,28 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             ?.IsLookupRoot, Is.True);
         Assert.That(consumer.Program.NativeFixedArrayTypes, Has.Length.EqualTo(2));
 
+        var unexportedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumer.Program!, "a2-type-reference-consumer", schemaIdentity, 1);
+        var loadedUnexportedConsumer = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                unexportedConsumerArtifact),
+            "a2-type-reference-consumer", [providerInput]);
+        Assert.That(loadedUnexportedConsumer.Structures,
+            Has.Length.EqualTo(3));
+        Assert.That(loadedUnexportedConsumer.NativeFixedArrayTypes,
+            Has.Length.EqualTo(2));
+
+        var staleArrayProgram = consumer.Program! with {
+            NativeFixedArrayTypes = consumer.Program.NativeFixedArrayTypes
+                .SetItem(0, consumer.Program.NativeFixedArrayTypes[0] with {
+                    ElementType = PrimitiveType.Int32,
+                }),
+        };
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(staleArrayProgram,
+                "a2-type-reference-consumer", schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]));
+
         var closureLookup = Compilation.CreateLibrary(
             SyntaxTree.Parse("""
                 [Blittable] [Layout(LayoutKind.Sequential)]
@@ -438,9 +460,6 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 }
                 """), reference);
         Assert.That(closureLookup.HasErrors, Is.True);
-        _ = Assert.Throws<NotSupportedException>(() =>
-            TrRmExecutableCompiler.EmitStandard(consumer.Program!,
-                "a2-type-reference-consumer", schemaIdentity, 1));
 
         var functionConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
             public int32 Read() {

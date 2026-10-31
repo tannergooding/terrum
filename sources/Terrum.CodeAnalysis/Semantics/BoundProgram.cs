@@ -555,7 +555,9 @@ internal sealed record BoundStandardTypeOrigin(
     ImmutableArray<string> ExportKeys, bool IsLookupRoot,
     ImmutableArray<BoundSourceTypeExpectation> Expectations = default,
     BoundSourceTypeProviderSnapshot? ReferenceRoot = null,
-    BoundStruct? ExpectedDeclaration = null);
+    BoundStruct? ExpectedDeclaration = null,
+    ImmutableArray<BoundNativeFixedArrayType> ExpectedFixedArrayTypes = default,
+    ImmutableArray<NativePointerTypeDefinition> ExpectedNativePointerTypes = default);
 
 /// <summary>A sealed, image-private managed payload with non-null initialized fields.</summary>
 public sealed record BoundClass(string Name, ImmutableArray<BoundStructField> Fields, int Size)

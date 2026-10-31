@@ -816,8 +816,11 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 var right = rightTables.TypeSpecs.GetTypeSpecRef(
                     comparison.RightTypeSpecRef,
                     allowInitQualifier: comparison.AllowInitQualifier);
-                if (left.Form != right.Form
-                    || left.Qualifiers != right.Qualifiers)
+                var leftIsNominalType = left.Form is 0x02 or 0x03;
+                var rightIsNominalType = right.Form is 0x02 or 0x03;
+                if (left.Qualifiers != right.Qualifiers
+                    || (left.Form != right.Form
+                        && !(leftIsNominalType && rightIsNominalType)))
                 {
                     return false;
                 }

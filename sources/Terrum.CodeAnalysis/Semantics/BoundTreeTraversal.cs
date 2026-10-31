@@ -314,11 +314,27 @@ internal static class BoundTreeTraversal
         var origin = structure.StandardTypeOrigin;
         if (origin?.ExpectedDeclaration is BoundStruct expectedDeclaration)
         {
+            var expectedFixedArrayTypes = origin.ExpectedFixedArrayTypes.IsDefault
+                ? default
+                : ImmutableArray.CreateRange(origin.ExpectedFixedArrayTypes
+                    .Select(fixedArray => RewriteTypes(fixedArray,
+                        rewriteType)));
+            var expectedNativePointerTypes
+                = origin.ExpectedNativePointerTypes.IsDefault
+                    ? default
+                    : ImmutableArray.CreateRange(
+                        origin.ExpectedNativePointerTypes.Select(pointerType
+                            => pointerType with {
+                                PointeeType = rewriteType(
+                                    pointerType.PointeeType),
+                            }));
             origin = origin with {
                 ExpectedDeclaration = expectedDeclaration with {
                     Fields = RewriteFields(expectedDeclaration.Fields,
                         rewriteType),
                 },
+                ExpectedFixedArrayTypes = expectedFixedArrayTypes,
+                ExpectedNativePointerTypes = expectedNativePointerTypes,
             };
         }
 
