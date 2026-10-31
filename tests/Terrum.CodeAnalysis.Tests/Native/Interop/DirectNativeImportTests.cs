@@ -1117,6 +1117,64 @@ public sealed class DirectNativeImportTests
             Is.EqualTo(0));
     }
 
+    [TestCase(2, 0)]
+    [TestCase(3, 7)]
+    [TestCase(-1, 7)]
+    public void NativeJitChecksIndexedNativeParameterArraySuffix(
+        int index, int expectedResult)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport("ntdll.dll", "RtlCompareMemory")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
+            extern uint64 RtlCompareMemory(ptr<uint8> first, ptr<uint8> second,
+                uint64 length);
+
+            int32 Main() {
+                [uint8; 4] values = [1, 2, 3, 4];
+                [uint8; 2] expected = [3, 4];
+                mut int32 selectedIndex = {{index}};
+                unsafe {
+                    try {
+                        return int32(RtlCompareMemory(
+                            &values[selectedIndex], &expected[0], 2)) - 2;
+                    } catch {
+                        return 7;
+                    }
+                }
+            }
+            """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(expectedResult));
+    }
+
+    [Test]
+    public void NativeParameterRejectsConstantArrayAddressPastItsRequestedSuffix()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("ntdll.dll", "RtlCompareMemory")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
+            extern uint64 RtlCompareMemory(ptr<uint8> first, ptr<uint8> second,
+                uint64 length);
+
+            int32 Main() {
+                [uint8; 4] values = [1, 2, 3, 4];
+                unsafe { return int32(RtlCompareMemory(&values[3], &values[0], 2)); }
+            }
+            """));
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
     [Test]
     public void NativeJitExecutesABlittableAggregatePointerInput()
     {

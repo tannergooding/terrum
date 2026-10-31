@@ -11,9 +11,11 @@ namespace Terrum.CodeAnalysis.Native;
 internal sealed partial class PeCompiler
 {
     private void EmitNativeArrayElementAddress(int variable, BoundExpression index, int spill,
-        ulong elementCount, ulong elementStride)
+        ulong elementCount, ulong elementStride,
+        ulong requiredElementCount = 1)
     {
-        EmitNativeArrayElementOffset(index, spill, elementCount, elementStride);
+        EmitNativeArrayElementOffset(index, spill, elementCount, elementStride,
+            requiredElementCount);
         _code.Bytes(0x48, 0x89, 0xC2);
         _code.Address(Slot(variable));
         _code.Bytes(0x48, 0x01, 0xD0);
@@ -52,8 +54,13 @@ internal sealed partial class PeCompiler
     }
 
     private void EmitNativeArrayElementOffset(BoundExpression index,
-        int indexSpill, ulong elementCount, ulong elementStride)
+        int indexSpill, ulong elementCount, ulong elementStride,
+        ulong requiredElementCount = 1)
     {
+        var validIndexCount = requiredElementCount is > 0
+            && requiredElementCount <= elementCount
+                ? elementCount - requiredElementCount + 1
+                : 0;
         Expression(index, indexSpill);
         if (index.Type is PrimitiveType.Int128 or PrimitiveType.UInt128)
         {
@@ -73,10 +80,10 @@ internal sealed partial class PeCompiler
             case PrimitiveType.UInt8:
             case PrimitiveType.UInt16:
             case PrimitiveType.UInt32:
-                if (elementCount <= uint.MaxValue)
+                if (validIndexCount <= uint.MaxValue)
                 {
                     _code.Byte(0x3D);
-                    _code.Int32((int)elementCount);
+                    _code.Int32((int)validIndexCount);
                     RuntimeBranch(0x83, 3);
                 }
                 break;
@@ -91,7 +98,7 @@ internal sealed partial class PeCompiler
                 goto case PrimitiveType.UInt64;
             case PrimitiveType.UInt64:
                 _code.Bytes(0x48, 0xBA);
-                _code.Int64(unchecked((long)elementCount));
+                _code.Int64(unchecked((long)validIndexCount));
                 _code.Bytes(0x48, 0x39, 0xD0);
                 RuntimeBranch(0x83, 3);
                 break;
@@ -120,29 +127,30 @@ internal sealed partial class PeCompiler
     private void EmitNativeStorageAddress(BoundNativeStorageAddress address, int spill)
     {
         if (address.Type != address.AddressType
-            || address.ElementCount == 0)
+            || address.ElementCount == 0 || address.ElementStride == 0
+            || address.ByteExtent == 0
+            || address.ByteExtent % address.ElementStride != 0)
         {
             throw new InvalidOperationException("The native storage address has an invalid extent.");
         }
 
         var completeExtent = checked(address.ElementCount * address.ElementStride);
-        if (address.ByteExtent > completeExtent)
+        var requiredElementCount = address.ByteExtent / address.ElementStride;
+        if (address.ByteExtent > completeExtent
+            || requiredElementCount == 0
+            || requiredElementCount > address.ElementCount)
         {
             throw new InvalidOperationException("The native storage address exceeds its carrier.");
         }
-        if (address.ByteExtent == completeExtent)
+        if (NativeFixedArrayContract.IsConstantIndex(address.Index, 0))
         {
-            if (!NativeFixedArrayContract.IsConstantIndex(address.Index, 0))
-            {
-                throw new InvalidOperationException(
-                    "A whole-storage address must select the first element.");
-            }
             _code.Address(Slot(address.Variable));
         }
         else
         {
             EmitNativeArrayElementAddress(address.Variable, address.Index, spill,
-                address.ElementCount, address.ElementStride);
+                address.ElementCount, address.ElementStride,
+                requiredElementCount);
         }
     }
 
@@ -301,8 +309,9 @@ internal sealed partial class PeCompiler
                     >= (uint)_program.Functions[_currentFunction].Variables.Length
                     || _program.Functions[_currentFunction].Variables[element.Variable].Type
                         != element.Layout.CarrierType
-                    || _program.Functions[_currentFunction].Variables[element.Variable]
-                        .NativeFixedArrayLayout != element.Layout
+                    || !NativeFixedArrayContract.MatchesType(
+                        _program.Functions[_currentFunction].Variables[element.Variable].Type,
+                        element.Layout, _program)
                     || !NativeFixedArrayContract.MatchesLayout(element.Layout, _program)
                     || element.Type != element.Layout.ElementType)
                 {

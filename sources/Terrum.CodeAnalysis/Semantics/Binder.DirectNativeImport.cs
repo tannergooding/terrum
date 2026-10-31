@@ -194,13 +194,24 @@ internal sealed partial class Binder
 
         if (target.Kind == SyntaxKind.IndexExpression
             && TryFindNativeFixedArrayLocal((SyntaxNode)target.Children[0], out var arrayVariable)
-            && _variables[arrayVariable].NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
-            && NativeFixedArrayContract.MatchesLayout(layout, _structs))
+            && TryGetNativeFixedArrayLayout(_variables[arrayVariable].Type,
+                out var layout)
+            && NativeFixedArrayContract.MatchesLayout(layout, _structs,
+                _nativeFixedArrayTypes))
         {
             var index = BindNativeFixedArrayIndex((SyntaxNode)target.Children[2], layout);
+            var requiredElementCount = extent == 0 ? 1UL : extent;
+            var hasAvailableSuffix
+                = requiredElementCount <= layout.ElementCount;
+            var hasInvalidConstantIndex = hasAvailableSuffix
+                && index is BoundConstant
+                && !NativeFixedArrayContract.IsConstantIndexInRange(index,
+                    layout.ElementCount - requiredElementCount + 1);
             if ((pointeeType != PrimitiveType.Void && pointeeType != layout.ElementType)
-                || (extent > 0 && (ulong)layout.ElementCount < extent)
-                || index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
+                || !hasAvailableSuffix
+                || layout.ElementStride == 0 || layout.ByteExtent == 0
+                || !NativeFixedArrayContract.IsIndexType(index.Type)
+                || hasInvalidConstantIndex
                 || _variables[arrayVariable].IsInitializationLocal
                 || _unresolvedVacantLocals.Contains(arrayVariable)
                 || (access is NativeParameterAccess.Write or NativeParameterAccess.ReadWrite
@@ -215,7 +226,8 @@ internal sealed partial class Binder
 
             return new BoundNativeStorageAddress(arrayVariable, index, layout.CarrierType,
                 layout.ElementType, PrimitiveType.NativeStorageAddress, layout.ElementCount,
-                layout.ElementStride, layout.ByteExtent,
+                layout.ElementStride,
+                checked(requiredElementCount * layout.ElementStride),
                 IsReadonly: access == NativeParameterAccess.Read, Span: span);
         }
 
@@ -240,7 +252,8 @@ internal sealed partial class Binder
         var extentBytes = ValueLayout.Size(carrierType, _structs);
         return new BoundNativeStorageAddress(variable,
             new BoundConstant(0, PrimitiveType.Int32, span), carrierType, carrierType,
-            PrimitiveType.NativeStorageAddress, 1, extentBytes, extentBytes,
+            PrimitiveType.NativeStorageAddress, 1, (ulong)extentBytes,
+            (ulong)extentBytes,
             IsReadonly: access == NativeParameterAccess.Read, Span: span);
     }
 

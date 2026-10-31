@@ -228,7 +228,7 @@ public static partial class SemanticVerifier
             if (argument.Type is PrimitiveType.NativeRawPointer
                     or PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                 || NativePointerTypeContract.IsValidType(argument.Type, program.NativePointerTypes)
-                || argument.Type == PrimitiveType.NativeFixedArray
+                || NativeFixedArrayContract.IsCarrier(argument.Type)
                 || HasFields(program, argument.Type))
             {
                 if (initialized.MayHaveNativeOutputState)
@@ -1006,10 +1006,11 @@ public static partial class SemanticVerifier
             throw InvalidEffect(address.Span, "NativeImport");
         }
 
-        if (address.CarrierType == PrimitiveType.NativeFixedArray)
+        if (NativeFixedArrayContract.IsCarrier(address.CarrierType))
         {
-            VerifyNativeFixedArrayPlace(address.Variable, address.Index, PrimitiveType.NativeFixedArray,
-                0, parameter.Access == NativeParameterAccess.Read,
+            VerifyNativeFixedArrayPlace(address.Variable, address.Index,
+                address.CarrierType,
+                parameter.Access == NativeParameterAccess.Read,
                 initialized, fieldMasks, declarations, function, program,
                 ref remaining, depth + 1, failures);
             return;

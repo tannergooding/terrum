@@ -16,14 +16,15 @@ public static partial class SemanticVerifier
             || (uint)variable >= (uint)function.Variables.Length
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
             || function.Variables[variable].Type != layout.CarrierType
-            || function.Variables[variable].NativeFixedArrayLayout != layout
+            || !NativeFixedArrayContract.MatchesType(
+                function.Variables[variable].Type, layout, program)
             || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || (function.Variables[variable].IsMutable
                 && !NativeFixedArrayContract.AllowsMutableLocal(layout))
             || initialization.Elements.IsDefault
             || (initialization.Elements.IsEmpty
                 ? !NativeFixedArrayContract.AllowsEmptyInitialization(layout)
-                : initialization.Elements.Length != layout.ElementCount))
+                : (ulong)initialization.Elements.Length != layout.ElementCount))
         {
             throw InvalidEffect(initialization.Span, "NativeImport");
         }
@@ -67,11 +68,10 @@ public static partial class SemanticVerifier
         var newValues = NativePointerFieldValueSnapshotOfExpression(
             write.Value, write.Layout.ElementType, facts, function,
             program, ref remaining, depth + 1);
-        for (var index = 0; index < write.Layout.ElementCount; index++)
+        for (ulong index = 0; index < write.Layout.ElementCount; index++)
         {
             Count(ref remaining, depth + 1);
-            var elementProjection = StorageProjection.ForArrayElement(
-                new BoundConstant(index, PrimitiveType.Int32, write.Index.Span));
+            var elementProjection = StorageProjection.ForArrayIndex(index);
             foreach (var (relativeProjection, newValue) in newValues)
             {
                 Count(ref remaining, depth + 1);
@@ -101,7 +101,7 @@ public static partial class SemanticVerifier
     }
 
     private static void VerifyNativeFixedArrayPlace(int variable, BoundExpression index,
-        PrimitiveType carrierType, int? requiredStartIndex, bool isReadonly,
+        PrimitiveType carrierType, bool isReadonly,
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
     {
@@ -117,21 +117,18 @@ public static partial class SemanticVerifier
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
             || variable >= function.Variables.Length || !declarations.Contains(variable) || !initialized[variable]
             || function.Variables[variable].Type != carrierType
-            || function.Variables[variable].NativeFixedArrayLayout is not BoundNativeFixedArrayLayout layout
+            || !NativeFixedArrayContract.TryGetLayout(
+                function.Variables[variable].Type, program.Structures,
+                program.NativeFixedArrayTypes, out var layout)
             || layout.CarrierType != carrierType
             || !NativeFixedArrayContract.MatchesLayout(layout, program)
             || (!isReadonly && (!function.Variables[variable].IsMutable
                 || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
             || index is null
-            || (index.Type != PrimitiveType.Int32
-                && !(index.Type == PrimitiveType.UInt32
-                    && NativeFixedArrayContract.AllowsUInt32Indices(layout)))
-            || (requiredStartIndex is int required
-                && index is BoundConstant { Type: PrimitiveType.Int32, Value: var actual }
-                && actual != required)
-            || (requiredStartIndex is null && index is BoundConstant constant
-                && (!constant.TryGetLegacyValue(out var constantValue)
-                    || constantValue < 0 || constantValue >= layout.ElementCount)))
+            || !NativeFixedArrayContract.IsIndexType(index.Type)
+            || (index is BoundConstant
+                && !NativeFixedArrayContract.IsConstantIndexInRange(index,
+                    layout.ElementCount)))
         {
             throw InvalidEffect(index?.Span ?? default, "NativeImport");
         }

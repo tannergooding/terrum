@@ -406,10 +406,11 @@ internal static class DirectNativeImportContract
             && address.CarrierType == output.PointeeType
             && address.ElementType == output.PointeeType
             && address.ElementCount == 1
-            && address.ElementStride == extent
-            && address.ByteExtent == extent
+            && extent >= 0
+            && address.ElementStride == (ulong)extent
+            && address.ByteExtent == (ulong)extent
             && !address.IsReadonly
-            && address.Index is BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
+            && NativeFixedArrayContract.IsConstantIndex(address.Index, 0)
             && (uint)address.Variable < (uint)caller.Variables.Length
             && caller.Variables[address.Variable].Type == output.PointeeType
             && caller.Variables[address.Variable].IsMutable
@@ -433,7 +434,6 @@ internal static class DirectNativeImportContract
         if (address.Type != PrimitiveType.NativeStorageAddress
             || address.AddressType != PrimitiveType.NativeStorageAddress
             || address.IsReadonly != (parameter.Access == NativeParameterAccess.Read)
-            || address.Index is not BoundConstant { Type: PrimitiveType.Int32, Value: 0 }
             || (uint)address.Variable >= (uint)caller.Variables.Length
             || caller.Variables[address.Variable].Type != address.CarrierType
             || caller.Variables[address.Variable].IsInitializationLocal
@@ -443,33 +443,56 @@ internal static class DirectNativeImportContract
             return false;
         }
 
-        if (address.CarrierType == PrimitiveType.NativeFixedArray)
+        if (NativeFixedArrayContract.IsCarrier(address.CarrierType))
         {
-            return caller.Variables[address.Variable].NativeFixedArrayLayout
-                    is BoundNativeFixedArrayLayout layout
-                && NativeFixedArrayContract.MatchesLayout(layout, program)
-                && address.ElementType == layout.ElementType
-                && (parameter.PointeeType == PrimitiveType.Void
-                    || parameter.PointeeType == layout.ElementType)
-                && address.ElementCount == layout.ElementCount
-                && address.ElementStride == layout.ElementStride
-                && address.ByteExtent == layout.ByteExtent
-                && (parameter.Extent == 0 || (address.ElementCount >= 0
-                    && (ulong)address.ElementCount >= parameter.Extent))
-                && (parameter.PointeeType != PrimitiveType.Void
-                    || DirectNativeImportContract.IsInputPointee(layout.ElementType, program.Structures))
-                && (parameter.Access == NativeParameterAccess.Read
-                    || NativeFixedArrayContract.AllowsMutableLocal(layout));
+            if (!NativeFixedArrayContract.TryGetLayout(
+                    caller.Variables[address.Variable].Type, program.Structures,
+                    program.NativeFixedArrayTypes, out var layout)
+                || !NativeFixedArrayContract.MatchesType(
+                    address.CarrierType, layout, program)
+                || address.ElementType != layout.ElementType
+                || (parameter.PointeeType != PrimitiveType.Void
+                    && parameter.PointeeType != layout.ElementType)
+                || address.ElementCount != layout.ElementCount
+                || address.ElementStride != layout.ElementStride
+                || layout.ElementCount == 0
+                || layout.ElementStride == 0
+                || layout.ByteExtent == 0
+                || !NativeFixedArrayContract.IsIndexType(address.Index.Type)
+                || (parameter.PointeeType == PrimitiveType.Void
+                    && !DirectNativeImportContract.IsInputPointee(
+                        layout.ElementType, program.Structures))
+                || (parameter.Access != NativeParameterAccess.Read
+                    && !NativeFixedArrayContract.AllowsMutableLocal(layout)))
+            {
+                return false;
+            }
+
+            var requiredElementCount = parameter.Extent == 0
+                ? 1UL : parameter.Extent;
+            if (requiredElementCount > layout.ElementCount
+                || address.ByteExtent != checked(requiredElementCount
+                    * layout.ElementStride))
+            {
+                return false;
+            }
+
+            var indexCount = layout.ElementCount - requiredElementCount + 1;
+            return address.Index is not BoundConstant
+                || NativeFixedArrayContract.IsConstantIndexInRange(
+                    address.Index, indexCount);
         }
 
         var elementExtent = ValueLayout.Size(address.ElementType, program.Structures);
         return address.CarrierType == address.ElementType
+            && NativeFixedArrayContract.IsConstantIndex(address.Index, 0)
             && (parameter.PointeeType == PrimitiveType.Void
                 ? DirectNativeImportContract.IsInputPointee(address.ElementType, program.Structures)
                 : address.ElementType == parameter.PointeeType)
             && address.ElementCount == 1
             && parameter.Extent <= 1
-            && address.ElementStride == elementExtent
-            && address.ByteExtent == elementExtent;
+            && elementExtent > 0
+            && address.ElementStride == (ulong)elementExtent
+            && address.ByteExtent == (ulong)elementExtent;
     }
 }
