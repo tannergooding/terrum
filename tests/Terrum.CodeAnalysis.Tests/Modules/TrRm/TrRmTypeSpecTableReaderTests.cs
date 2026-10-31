@@ -150,6 +150,21 @@ public sealed class TrRmTypeSpecTableReaderTests
     }
 
     [Test]
+    public void A3StructuralHashMatchesEquivalentTypeSpecRows()
+    {
+        var section = Rows(
+            [0x01, 0, 0x08],
+            [0x06, 0, 0x08, 0, 0, 0xF2],
+            [0x06, 0, 1, 0, 0, 0]);
+        var typeSpecs = new TrRmTypeSpecTableReader(section, 3,
+            0, 0, 0, 0, s_a3Schema);
+
+        Assert.That(typeSpecs.AreEquivalentTypeSpecRefs(2, 3), Is.True);
+        Assert.That(typeSpecs.GetTypeSpecStructuralHash(2),
+            Is.EqualTo(typeSpecs.GetTypeSpecStructuralHash(3)));
+    }
+
+    [Test]
     public void A3TypeSpecIdentityWalksEnforceLogicalDepth()
     {
         var depth = checked((int)TrRmA3LayoutResourceLedger.DepthLimit + 1);

@@ -19,6 +19,9 @@ public readonly ref struct TrRmTypeSpecTableReader
 {
     internal const ushort NativeFunctionPointerTypeKeyStart = 0x200;
     private const long TypeIdentityBase = 0x1000_0000_0000;
+    // Keep normalized-key bucket collisions independent of process-randomized hash seeds.
+    private const uint StructuralHashOffset = 2_166_136_261;
+    private const uint StructuralHashPrime = 16_777_619;
     private static readonly byte[] s_existentialTypeSpec = [0x0F, 0];
 
     private readonly TrRmVariableTableIndex _rows;
@@ -397,7 +400,7 @@ public readonly ref struct TrRmTypeSpecTableReader
 
     internal int GetTypeSpecStructuralHash(uint typeSpecRef)
     {
-        var hash = new HashCode();
+        var hash = StructuralHashOffset;
         var allowInitQualifier = false;
         ulong depth = 1;
         _resourceLedger?.ReserveWorkAtDepth(1, depth);
@@ -408,15 +411,15 @@ public readonly ref struct TrRmTypeSpecTableReader
             var reference = GetTypeSpecRef(typeSpecRef,
                 allowInitQualifier: allowInitQualifier);
             _resourceLedger?.ConsumeWork(2);
-            hash.Add(reference.Form);
-            hash.Add(reference.Qualifiers);
+            hash = MixStructuralHash(hash, reference.Form);
+            hash = MixStructuralHash(hash, reference.Qualifiers);
             if (!reference.IsRow)
             {
                 _resourceLedger?.ConsumeWork(2);
-                hash.Add(reference.TypeCode);
-                hash.Add(reference.ArgumentCode);
+                hash = MixStructuralHash(hash, reference.TypeCode);
+                hash = MixStructuralHash(hash, reference.ArgumentCode);
                 _resourceLedger?.ConsumeWork();
-                return hash.ToHashCode();
+                return unchecked((int)hash);
             }
 
             var row = GetRow(reference.Row);
@@ -424,19 +427,19 @@ public readonly ref struct TrRmTypeSpecTableReader
             {
                 case 0x01:
                     _resourceLedger?.ConsumeWork(2);
-                    hash.Add(reference.TypeCode);
-                    hash.Add(reference.ArgumentCode);
+                    hash = MixStructuralHash(hash, reference.TypeCode);
+                    hash = MixStructuralHash(hash, reference.ArgumentCode);
                     _resourceLedger?.ConsumeWork();
-                    return hash.ToHashCode();
+                    return unchecked((int)hash);
 
                 case 0x02:
                 case 0x03:
                 case 0x04:
                     var identity = Read(row, 2);
                     _resourceLedger?.ConsumeWork();
-                    hash.Add(identity);
+                    hash = MixStructuralHash(hash, identity);
                     _resourceLedger?.ConsumeWork();
-                    return hash.ToHashCode();
+                    return unchecked((int)hash);
 
                 case >= 0x06 and <= 0x0B:
                 case 0x0E:
@@ -450,7 +453,7 @@ public readonly ref struct TrRmTypeSpecTableReader
 
                 case 0x0C:
                     _resourceLedger?.ConsumeWork(2);
-                    hash.Add(row[2]);
+                    hash = MixStructuralHash(hash, row[2]);
                     var indexedChild = Read(row, 3);
                     var indexedDepth = checked(depth + 1);
                     _resourceLedger?.ReserveWorkAtDepth(1, indexedDepth);
@@ -461,21 +464,21 @@ public readonly ref struct TrRmTypeSpecTableReader
 
                 case 0x0F:
                     _resourceLedger?.ConsumeWork();
-                    return hash.ToHashCode();
+                    return unchecked((int)hash);
 
                 case 0x10:
                     var predicateCapture = Read(row, 2);
                     _resourceLedger?.ConsumeWork();
-                    hash.Add(predicateCapture);
+                    hash = MixStructuralHash(hash, predicateCapture);
                     _resourceLedger?.ConsumeWork();
-                    return hash.ToHashCode();
+                    return unchecked((int)hash);
 
                 case 0x11:
                     _resourceLedger?.ConsumeWork(sizeof(ulong) + 1);
                     var elementCount
                         = BinaryPrimitives.ReadUInt64LittleEndian(row[6..]);
-                    _resourceLedger?.ConsumeWork();
-                    hash.Add(elementCount);
+                    _resourceLedger?.ConsumeWork(2);
+                    hash = MixStructuralHash(hash, elementCount);
                     var arrayElement = Read(row, 2);
                     var arrayDepth = checked(depth + 1);
                     _resourceLedger?.ReserveWorkAtDepth(1, arrayDepth);
@@ -488,12 +491,24 @@ public readonly ref struct TrRmTypeSpecTableReader
                     for (var index = 2; index < row.Length; index++)
                     {
                         _resourceLedger?.ConsumeWork(2);
-                        hash.Add(row[index]);
+                        hash = MixStructuralHash(hash, row[index]);
                     }
                     _resourceLedger?.ConsumeWork();
-                    return hash.ToHashCode();
+                    return unchecked((int)hash);
             }
         }
+    }
+
+    private static uint MixStructuralHash(uint hash, byte value)
+        => unchecked((hash ^ value) * StructuralHashPrime);
+
+    private static uint MixStructuralHash(uint hash, uint value)
+        => unchecked((hash ^ value) * StructuralHashPrime);
+
+    private static uint MixStructuralHash(uint hash, ulong value)
+    {
+        hash = MixStructuralHash(hash, unchecked((uint)value));
+        return MixStructuralHash(hash, unchecked((uint)(value >> 32)));
     }
 
     private bool RowsEqual(ReadOnlySpan<byte> left, ReadOnlySpan<byte> right)
