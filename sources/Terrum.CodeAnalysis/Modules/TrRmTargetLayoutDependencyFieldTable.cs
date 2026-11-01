@@ -45,6 +45,7 @@ public readonly ref struct TrRmTargetLayoutDependencyFieldTableReader
 
     private readonly ReadOnlySpan<byte> _rows;
     private readonly int _recordCount;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated field-reference rows.</summary>
     public int Count => _recordCount;
@@ -56,6 +57,14 @@ public readonly ref struct TrRmTargetLayoutDependencyFieldTableReader
     /// <param name="imports">The validated Import table.</param>
     public TrRmTargetLayoutDependencyFieldTableReader(ReadOnlySpan<byte> section,
         int recordCount, TrRmFieldDefTableReader fields, TrRmImportTableReader imports)
+        : this(section, recordCount, fields, imports, null)
+    {
+    }
+
+    internal TrRmTargetLayoutDependencyFieldTableReader(
+        ReadOnlySpan<byte> section, int recordCount,
+        TrRmFieldDefTableReader fields, TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (recordCount is < 0 or > 0xFF_FFFF
             || (long)recordCount * RowSize != section.Length)
@@ -65,6 +74,7 @@ public readonly ref struct TrRmTargetLayoutDependencyFieldTableReader
 
         _rows = section;
         _recordCount = recordCount;
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
             TrRmFieldReferenceValidator.Validate(ReadRow(row), fields, imports);
@@ -77,6 +87,7 @@ public readonly ref struct TrRmTargetLayoutDependencyFieldTableReader
 
     private uint ReadRow(int row)
     {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
         if (row <= 0 || row > _recordCount)
         {
             throw InvalidFieldReferenceTable();
