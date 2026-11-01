@@ -1585,7 +1585,9 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundBinary comparison
                     when IsSupportedNativeUnitConditionalComparison(
-                        comparison):
+                            comparison)
+                        || IsSupportedNativeUnitConditionalBooleanXor(
+                            comparison):
                     if (comparison.Left is not BoundRead leftRead
                         || comparison.Right is not BoundRead rightRead
                         || (uint)leftRead.Variable
@@ -2087,7 +2089,8 @@ public static partial class TrRmExecutableCompiler
             } => IsSupportedNativeUnitConditionalCondition(left)
                 && IsSupportedNativeUnitConditionalCondition(right),
             BoundBinary comparison =>
-                IsSupportedNativeUnitConditionalComparison(comparison),
+                IsSupportedNativeUnitConditionalComparison(comparison)
+                || IsSupportedNativeUnitConditionalBooleanXor(comparison),
             BoundConditional {
                 Type: PrimitiveType.Bool,
                 Condition: var nestedCondition,
@@ -2102,16 +2105,36 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsSupportedNativeUnitConditionalComparison(
         BoundBinary comparison)
-        => comparison.Type == PrimitiveType.Bool
-            && comparison.Left.Type == comparison.Right.Type
-            && comparison.Left.Type != PrimitiveType.Bool
-            && DirectNativeImportContract.IsScalar(comparison.Left.Type)
-            && comparison.Left is BoundRead
-            && comparison.Right is BoundRead
+    {
+        if (comparison.Type != PrimitiveType.Bool
+            || comparison.Left.Type != comparison.Right.Type
+            || comparison.Left is not BoundRead
+            || comparison.Right is not BoundRead)
+        {
+            return false;
+        }
+
+        if (comparison.Left.Type == PrimitiveType.Bool)
+        {
+            return comparison.Operator is TokenKind.EqualsEquals
+                or TokenKind.BangEquals;
+        }
+
+        return DirectNativeImportContract.IsScalar(comparison.Left.Type)
             && comparison.Operator is TokenKind.EqualsEquals
                 or TokenKind.BangEquals or TokenKind.Less
                 or TokenKind.LessEquals or TokenKind.Greater
                 or TokenKind.GreaterEquals;
+    }
+
+    private static bool IsSupportedNativeUnitConditionalBooleanXor(
+        BoundBinary binary)
+        => binary.Operator == TokenKind.Caret
+            && binary.Type == PrimitiveType.Bool
+            && binary.Left.Type == PrimitiveType.Bool
+            && binary.Right.Type == PrimitiveType.Bool
+            && binary.Left is BoundRead
+            && binary.Right is BoundRead;
 
     private static bool TryGetNativeAddressKnownBoolean(
         BoundExpression expression, out bool value)
@@ -2849,28 +2872,44 @@ public static partial class TrRmExecutableCompiler
                     break;
 
                 case BoundBinary comparison
-                    when IsSupportedNativeUnitConditionalComparison(
-                        comparison)
+                    when (IsSupportedNativeUnitConditionalComparison(
+                            comparison)
+                        || IsSupportedNativeUnitConditionalBooleanXor(
+                            comparison))
                         && comparison.Left is BoundRead leftRead
                         && comparison.Right is BoundRead rightRead:
-                    var predicateMask = comparison.Operator switch {
-                        TokenKind.EqualsEquals => 2,
-                        TokenKind.BangEquals => 13,
-                        TokenKind.Less => 1,
-                        TokenKind.LessEquals => 3,
-                        TokenKind.Greater => 4,
-                        TokenKind.GreaterEquals => 6,
-                        _ => throw Unsupported(
-                            "The A2EU comparison predicate has no assigned mask."),
-                    };
                     AppendHomeLoad(code, 0,
                         GetCallerHome(leftRead.Variable));
                     AppendHomeLoad(code, 1,
                         GetCallerHome(rightRead.Variable));
-                    code.Add(0x40);
-                    code.Add(0x10);
-                    code.Add(0x41);
-                    code.Add(checked((byte)(predicateMask << 4)));
+                    if (comparison.Left.Type == PrimitiveType.Bool)
+                    {
+                        code.Add(0x32);
+                        code.Add(0x10);
+                        if (comparison.Operator
+                            == TokenKind.EqualsEquals)
+                        {
+                            code.Add(0x33);
+                            code.Add(0x00);
+                        }
+                    }
+                    else
+                    {
+                        var predicateMask = comparison.Operator switch {
+                            TokenKind.EqualsEquals => 2,
+                            TokenKind.BangEquals => 13,
+                            TokenKind.Less => 1,
+                            TokenKind.LessEquals => 3,
+                            TokenKind.Greater => 4,
+                            TokenKind.GreaterEquals => 6,
+                            _ => throw Unsupported(
+                                "The A2EU comparison predicate has no assigned mask."),
+                        };
+                        code.Add(0x40);
+                        code.Add(0x10);
+                        code.Add(0x41);
+                        code.Add(checked((byte)(predicateMask << 4)));
+                    }
                     break;
 
                 default:

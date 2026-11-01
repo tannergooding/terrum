@@ -32,6 +32,9 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct NativeAddressPendingComparison(
         int Destination, BoundRead Left, BoundRead Right);
 
+    private readonly record struct NativeAddressPendingBooleanXor(
+        int Destination, BoundRead Left, BoundRead Right);
+
     private sealed record NativeAddressConditionalReadState(
         bool[] LocalInitializedByHome,
         Dictionary<int, NativeStorageAddressFacts> StorageAddressesByHome,
@@ -1152,6 +1155,7 @@ public static partial class TrRmExecutableCompiler
                 case 0x21:
                 case 0x24:
                 case 0x25:
+                case 0x32:
                 case 0x33:
                     if (instruction[0] is 0x24 or 0x25
                         && !body.Schema
@@ -1413,6 +1417,7 @@ public static partial class TrRmExecutableCompiler
         var sawReturn = false;
         var instructionOrdinal = 0;
         NativeAddressPendingComparison? pendingComparison = null;
+        NativeAddressPendingBooleanXor? pendingBooleanXor = null;
 
         NativeAddressConditionalReadState CaptureConditionalState()
         {
@@ -1604,6 +1609,21 @@ public static partial class TrRmExecutableCompiler
                     "The F+S comparison result is not immediately tested.");
             }
 
+            if (pendingBooleanXor is { } booleanXor
+                && instruction.Opcode is not (0x33 or 0xFC))
+            {
+                throw Invalid(
+                    "The F+S Boolean XOR is not immediately used as a condition.");
+            }
+
+            if (pendingBooleanXor is { } branchXor
+                && instruction.Opcode == 0xFC
+                && instruction.Register != branchXor.Destination)
+            {
+                throw Invalid(
+                    "The F+S Boolean XOR condition uses a different register.");
+            }
+
             switch (instruction.Opcode)
             {
                 case 0xFC:
@@ -1617,6 +1637,7 @@ public static partial class TrRmExecutableCompiler
                             "The A2EU conditional register is not a checked Boolean.");
                     }
 
+                    pendingBooleanXor = null;
                     condition = conditionExpression;
                     var conditionalFrame = new NativeAddressConditionalFrame(
                         condition, CaptureConditionalState(),
@@ -1808,6 +1829,35 @@ public static partial class TrRmExecutableCompiler
                         comparisonRightRead);
                     break;
 
+                case 0x32:
+                    var booleanXorOperand
+                        = checked((byte)instruction.Index);
+                    var booleanXorDestination = booleanXorOperand & 0x0F;
+                    var booleanXorRight = booleanXorOperand >> 4;
+                    if (booleanXorDestination >= 14
+                        || booleanXorRight >= 14
+                        || !registerExpressions.TryGetValue(
+                            booleanXorDestination, out var booleanXorLeftValue)
+                        || booleanXorLeftValue is not BoundRead booleanXorLeft
+                        || booleanXorLeft.Type != PrimitiveType.Bool
+                        || !registerExpressions.TryGetValue(booleanXorRight,
+                            out var booleanXorRightValue)
+                        || booleanXorRightValue is not BoundRead booleanXorRightRead
+                        || booleanXorRightRead.Type != PrimitiveType.Bool)
+                    {
+                        throw Invalid(
+                            "The F+S Boolean XOR has unsupported operands.");
+                    }
+
+                    _ = registerConstants.Remove(booleanXorDestination);
+                    registerExpressions[booleanXorDestination] = new BoundBinary(
+                        TokenKind.Caret, booleanXorLeft, booleanXorRightRead,
+                        PrimitiveType.Bool, default);
+                    pendingBooleanXor = new NativeAddressPendingBooleanXor(
+                        booleanXorDestination, booleanXorLeft,
+                        booleanXorRightRead);
+                    break;
+
                 case 0x41:
                     var predicateOperand
                         = checked((byte)instruction.Index);
@@ -1877,6 +1927,24 @@ public static partial class TrRmExecutableCompiler
                     var registerOperand = checked((byte)instruction.Index);
                     var destinationRegister = registerOperand & 0x0F;
                     var rightRegister = registerOperand >> 4;
+                    if (pendingBooleanXor is { } equalityXor)
+                    {
+                        if (destinationRegister != equalityXor.Destination
+                            || rightRegister != equalityXor.Destination)
+                        {
+                            throw Invalid(
+                                "The F+S Boolean equality has a mismatched NOT register.");
+                        }
+
+                        _ = registerConstants.Remove(destinationRegister);
+                        registerExpressions[destinationRegister]
+                            = new BoundBinary(TokenKind.EqualsEquals,
+                                equalityXor.Left, equalityXor.Right,
+                                PrimitiveType.Bool, default);
+                        pendingBooleanXor = null;
+                        break;
+                    }
+
                     if (instruction.Opcode == 0x10)
                     {
                         if (!registerConstants.TryGetValue(rightRegister,
@@ -2652,9 +2720,10 @@ public static partial class TrRmExecutableCompiler
             instructionOrdinal++;
         }
 
-        if (pendingComparison is not null)
+        if (pendingComparison is not null || pendingBooleanXor is not null)
         {
-            throw Invalid("The F+S comparison has no predicate test.");
+            throw Invalid(
+                "The F+S comparison or Boolean XOR has no condition consumer.");
         }
 
         if (!sawCallSite || !sawReturn || conditionalFrames.Count != 0

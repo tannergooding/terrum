@@ -1707,6 +1707,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(true, false, "markedError <= clearError", false)]
     [TestCase(true, false, "markedError > clearError", false)]
     [TestCase(true, false, "markedError >= clearError", false)]
+    [TestCase(true, false, "choose == other", false)]
+    [TestCase(false, false, "choose == other", false)]
+    [TestCase(true, false, "choose != other", false)]
+    [TestCase(false, false, "choose != other", false)]
     [TestCase(true, false,
         "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
     public void StandardA2EUConditionalJitExecutesOnlyTheSelectedNativeArm(
@@ -1753,6 +1757,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 or "markedError >= clearError" => true,
             "markedError == clearError" or "markedError < clearError"
                 or "markedError <= clearError" => false,
+            "choose == other" => choose,
+            "choose != other" => !choose,
             _ => throw new InvalidOperationException(
                 "The A2EU test condition has no expected normal result."),
         };
@@ -1782,6 +1788,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
     [TestCase(true, false, "markedError > clearError", false)]
     [TestCase(true, false, "markedError <= clearError", false)]
+    [TestCase(true, false, "choose == other", false)]
+    [TestCase(false, false, "choose == other", false)]
+    [TestCase(true, false, "choose != other", false)]
+    [TestCase(false, false, "choose != other", false)]
     public async Task StandardA2EUConditionalAotExecutesOnlyTheSelectedNativeArm(
         bool choose, bool failFalseArm, string conditionExpression,
         bool useIfStatement)
@@ -1848,6 +1858,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "choose && IsProcessorFeaturePresent(markedError / clearError)" => false,
                 "markedError > clearError" => true,
                 "markedError <= clearError" => false,
+                "choose == other" => choose,
+                "choose != other" => !choose,
                 _ => throw new InvalidOperationException(
                     "The A2EU test condition has no expected normal result."),
             };
@@ -1934,6 +1946,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             int32 Main() {
                 unsafe {
                     bool choose = {{choose.ToString().ToLowerInvariant()}};
+                    bool other = true;
                     uint32 clearError = 0;
                     uint32 markedError = GetCurrentProcessId();
                     {{conditional}}

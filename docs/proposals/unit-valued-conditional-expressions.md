@@ -141,11 +141,13 @@ complete. Condition support now includes Boolean Home reads, direct Boolean
 NativeImport results, constant selection, logical-not, short-circuit `&&`/`||`,
 nested Boolean conditional expressions, and non-Boolean scalar Home-read
 comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41`
-instructions. Right-side calls and checks stay on reached paths. The focused
-A2EU producer/reader/JIT/AOT selection passed 43/43 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-scalar-comparison-conditions\\a2eu-scalar-comparison-conditions.trx`.
-Boolean equality, non-source predicate masks, and comparisons with effectful
-call operands remain outside this Body profile. The corresponding
+instructions. Boolean Home-read equality/inequality also lower through
+assigned `0x32` XOR and `0x33` NOT. Right-side calls and checks stay on reached
+paths. The focused A2EU producer/reader/JIT/AOT selection passed 51/51 with
+zero skips at
+`artifacts\\tst\\Debug\\a2eu-boolean-equality-conditions\\a2eu-boolean-equality-conditions.trx`.
+Boolean literal/call operands, non-source predicate masks, and comparisons
+with effectful scalar call operands remain outside this Body profile. The corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 artifact. The active Body regression covers nested arms, checked

@@ -94,13 +94,14 @@ condition subset now includes Boolean Home reads, direct Boolean NativeImport
 results, constant selection, logical-not, short-circuit `&&`/`||`, nested
 Boolean conditional expressions, and non-Boolean scalar Home-read comparisons
 (`==`, `!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41` instructions.
-Right-side calls and checks stay on reached paths. The focused A2EU
-producer/reader/JIT/AOT selection passed 43/43 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-scalar-comparison-conditions\\a2eu-scalar-comparison-conditions.trx`.
-Boolean equality, non-source predicate masks, and comparisons with effectful
-call operands remain unsupported. A co-located selected-provider
-regression shifts the
-conditional caller to Body row 2, remaps its maps, preserves body-local
+Boolean Home-read equality/inequality also lower through assigned `0x32` XOR
+and `0x33` NOT. Right-side calls and checks stay on reached paths. The focused
+A2EU producer/reader/JIT/AOT selection passed 51/51 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-boolean-equality-conditions\\a2eu-boolean-equality-conditions.trx`.
+Boolean literal/call operands, non-source predicate masks, and comparisons
+with effectful scalar call operands remain unsupported. A co-located
+selected-provider regression shifts the conditional caller to Body row 2,
+remaps its maps, preserves body-local
 branches/records, and checks compatible and incompatible provider replacement.
 Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast;
 CheckedExceptions, effectful comparison operands, and cleanup/loan transport
