@@ -90,7 +90,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var program = LoadStandardProgram(artifacts, schemaIdentities,
-            moduleIdentity, verifySemantics: true, out _,
+            moduleIdentity, true, null, out _,
             out _,
             out var typeProviderBindings, out var moduleValidation, out _);
         return CreateA2SourceTypeReference(artifacts, schemaIdentities,

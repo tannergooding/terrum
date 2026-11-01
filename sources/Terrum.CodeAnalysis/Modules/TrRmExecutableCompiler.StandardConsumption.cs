@@ -54,11 +54,14 @@ public static partial class TrRmExecutableCompiler
             coreExceptionIdentitySelections)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
-        var artifacts = SnapshotStandardInputs(input, providers);
-        var schemaIdentities = GetStandardSchemaIdentities(input, providers);
-        return LoadStandardProgram(artifacts, schemaIdentities, moduleIdentity,
-            verifySemantics: true, out _, out _, out _, out _, out _,
-            coreExceptionIdentitySelections);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(providers);
+        var (artifacts, schemaIdentities, a3LayoutResourceLedger)
+            = SnapshotStandardInputsForOperation(input, moduleIdentity,
+                providers);
+        return LoadStandardProgram(artifacts, schemaIdentities,
+            moduleIdentity, true, a3LayoutResourceLedger,
+            out _, out _, out _, out _, out _, coreExceptionIdentitySelections);
     }
 
     internal static TrRmStandardNativeBindingPlan
@@ -75,12 +78,15 @@ public static partial class TrRmExecutableCompiler
                 "The bounded F native binding plan supports fail-fast only.");
         }
 
-        var artifacts = SnapshotStandardInputs(input, providers);
-        var schemaIdentities = GetStandardSchemaIdentities(input, providers);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(providers);
+        var (artifacts, schemaIdentities, selectedA3LayoutResourceLedger)
+            = SnapshotStandardInputsForOperation(input, moduleIdentity,
+                providers);
 
         var program = LoadStandardProgram(artifacts, schemaIdentities,
-            moduleIdentity,
-            verifySemantics: true, out var providerBindings,
+            moduleIdentity, true, selectedA3LayoutResourceLedger,
+            out var providerBindings,
             out var providerDependencyBindings, out var typeProviderBindings,
             out var moduleValidation,
             out var a3LayoutResourceLedger);
@@ -129,11 +135,14 @@ public static partial class TrRmExecutableCompiler
             coreExceptionIdentitySelections)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
-        var artifacts = SnapshotStandardInputs(input, providers);
-        var schemaIdentities = GetStandardSchemaIdentities(input, providers);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(providers);
+        var (artifacts, schemaIdentities, selectedA3LayoutResourceLedger)
+            = SnapshotStandardInputsForOperation(input, moduleIdentity,
+                providers);
         var program = LoadStandardProgram(artifacts, schemaIdentities,
-            moduleIdentity,
-            verifySemantics: false, out _, out _, out _, out _,
+            moduleIdentity, false, selectedA3LayoutResourceLedger,
+            out _, out _, out _, out _,
             out var a3LayoutResourceLedger,
             coreExceptionIdentitySelections);
         var index = CreateForeignInvocationIndex(artifacts[0],
@@ -197,6 +206,7 @@ public static partial class TrRmExecutableCompiler
     private static BoundProgram LoadStandardProgram(byte[][] artifacts,
         string[] schemaIdentities, string moduleIdentity,
         bool verifySemantics,
+        TrRmA3LayoutResourceLedger? selectedA3LayoutResourceLedger,
         out ImmutableArray<TrRmStandardNativeProviderBinding>
             providerBindings,
         out ImmutableArray<TrRmStandardNativeDependencyBinding>
@@ -207,10 +217,16 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<CoreExceptionIdentitySelection>
             coreExceptionIdentitySelections = default)
     {
-        a3LayoutResourceLedger
-            = StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
-                ? new TrRmA3LayoutResourceLedger(moduleIdentity) : null;
+        var usesA3Schema = schemaIdentities.Length != 0
+            && StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardForeignInvocationStorageGenericFixedArraySchemaIdentity);
+        if (usesA3Schema != (selectedA3LayoutResourceLedger is not null))
+        {
+            throw new InvalidOperationException(
+                "The selected A3 Standard operation must retain its preflight ledger.");
+        }
+
+        a3LayoutResourceLedger = selectedA3LayoutResourceLedger;
         try
         {
             return LoadStandardProgramCore(artifacts, schemaIdentities,
@@ -1225,6 +1241,141 @@ public static partial class TrRmExecutableCompiler
         }
 
         return (producer.ArtifactIndex, producer.ModuleRow, typeDefRow);
+    }
+
+    private static (byte[][] Artifacts, string[] SchemaIdentities,
+        TrRmA3LayoutResourceLedger? ResourceLedger)
+        SnapshotStandardInputsForOperation(
+            TrRmStandardArtifactInput input, string moduleIdentity,
+            IReadOnlyList<TrRmStandardArtifactInput> providers)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(providers);
+        if (!StringComparer.Ordinal.Equals(input.SchemaIdentity,
+                StandardForeignInvocationStorageGenericFixedArraySchemaIdentity))
+        {
+            return (SnapshotStandardInputs(input, providers),
+                GetStandardSchemaIdentities(input, providers), null);
+        }
+
+        var resourceLedger
+            = new TrRmA3LayoutResourceLedger(moduleIdentity);
+        try
+        {
+            resourceLedger.ConsumeWork();
+            resourceLedger.ConsumeWork(
+                TrRmStandardNativeBindingPlan.GetStringComparisonWork(
+                    input.SchemaIdentity,
+                    StandardForeignInvocationStorageGenericFixedArraySchemaIdentity));
+            resourceLedger.ConsumeWork(
+                TrRmStandardNativeBindingPlan.GetStringComparisonWork(
+                    moduleIdentity, moduleIdentity));
+            var (artifacts, schemaIdentities) = SnapshotA3StandardInputs(
+                input, providers, resourceLedger);
+            return (artifacts, schemaIdentities, resourceLedger);
+        }
+        catch (Exception exception)
+        {
+            resourceLedger.AdmissionScope.Mark(exception,
+                GetA3AdmissionFailureKind(exception));
+            throw;
+        }
+    }
+
+    private static (byte[][] Artifacts, string[] SchemaIdentities)
+        SnapshotA3StandardInputs(TrRmStandardArtifactInput input,
+            IReadOnlyList<TrRmStandardArtifactInput> providers,
+            TrRmA3LayoutResourceLedger resourceLedger)
+    {
+        resourceLedger.ConsumeWork();
+        var providerCount = providers.Count;
+        if (providerCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(providers));
+        }
+
+        resourceLedger.ConsumeWork();
+        var inputCountValue = checked((ulong)providerCount + 1UL);
+        resourceLedger.ConsumeWork(checked(inputCountValue + 1UL));
+        var inputCount = checked((int)inputCountValue);
+        var selectedInputs = new TrRmStandardArtifactInput[inputCount];
+        selectedInputs[0] = input;
+        for (var index = 0; index < providerCount; index++)
+        {
+            resourceLedger.ConsumeWork();
+            selectedInputs[index + 1] = providers[index]
+                ?? throw new ArgumentNullException(
+                    $"{nameof(providers)}[{index}]");
+        }
+
+        resourceLedger.ConsumeWork(checked((ulong)inputCount + 1UL));
+        var schemaIdentities = new string[inputCount];
+        for (var index = 0; index < inputCount; index++)
+        {
+            resourceLedger.ConsumeWork();
+            var schemaIdentity = selectedInputs[index].SchemaIdentity;
+            var parameterName = index == 0
+                ? nameof(input) : $"{nameof(providers)}[{index - 1}]";
+            ArgumentException.ThrowIfNullOrEmpty(schemaIdentity,
+                parameterName);
+            if (!IsSelectedStandardSchemaIdentity(schemaIdentity,
+                    resourceLedger))
+            {
+                throw new ArgumentException(
+                    "The exact Standard schema identity is not selected by this consumer.",
+                    parameterName);
+            }
+
+            schemaIdentities[index] = schemaIdentity;
+        }
+
+        resourceLedger.ConsumeWork(checked((ulong)inputCount + 1UL));
+        var artifacts = new byte[inputCount][];
+        for (var index = 0; index < inputCount; index++)
+        {
+            resourceLedger.ConsumeWork();
+            var source = selectedInputs[index].Artifact;
+            resourceLedger.ConsumeWork();
+            var length = source.Length;
+            resourceLedger.ConsumeWork();
+            resourceLedger.ConsumeWork(checked((ulong)length));
+            artifacts[index] = source.ToArray();
+        }
+
+        return (artifacts, schemaIdentities);
+    }
+
+    private static bool IsSelectedStandardSchemaIdentity(string identity,
+        TrRmA3LayoutResourceLedger resourceLedger)
+        => IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationSchemaIdentity, resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationStorageAddressSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationStorageFixedArraySchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardForeignInvocationStorageGenericFixedArraySchemaIdentity,
+                resourceLedger)
+            || IsSelectedStandardSchemaIdentity(identity,
+                StandardRegisterExceptionRegionsSchemaIdentity,
+                resourceLedger);
+
+    private static bool IsSelectedStandardSchemaIdentity(string identity,
+        string selectedIdentity,
+        TrRmA3LayoutResourceLedger resourceLedger)
+    {
+        resourceLedger.ConsumeWork(
+            TrRmStandardNativeBindingPlan.GetStringComparisonWork(identity,
+                selectedIdentity));
+        return StringComparer.Ordinal.Equals(identity, selectedIdentity);
     }
 
     private static byte[][] SnapshotStandardInputs(

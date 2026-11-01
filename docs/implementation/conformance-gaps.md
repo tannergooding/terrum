@@ -624,10 +624,14 @@ context and constructed-identity payload charges are covered. A3 aggregate
 depth sums now use nonwrapping `BigInteger` arithmetic before comparing against
 the 128-frame limit; nested frames plus `ulong.MaxValue` through
 `EnterDepthContext`, `CheckDepthFromCurrent` and `ReserveWorkAtDepth` reject with
-the exact required depth without consuming work. The focused A3 layout,
-TypeSpec, witness/text and CLI resource selection passed 181/181 with zero
-skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_10_00_20_net11.0.trx`.
+the exact required depth without consuming work. The focused A3 layout, TypeSpec, witness/text and CLI resource selection passed
+185/185 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_10_22_59_net11.0.trx`. A3
+`LoadStandard`, `CreateStandardReference` and native-plan paths now select one
+root ledger before input snapshots, reserve selected input/schema/artifact
+state and copied bytes before allocation, and carry the same ledger through
+later validation. Oversized artifact bytes and an `int.MaxValue` provider-list
+count reject before touching the artifact span or indexing/allocating the list.
 The bounded-expansion subtask is complete; the full deterministic
 field/action/payload recipe and remaining table/body/provider state charges
 are still unfinished. A broader `Modules.TrRm` selection later reported 2,378
@@ -644,7 +648,7 @@ with zero skips at
 `artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
 baseline; the normalized comparison in
-`artifacts\\log\\compiler-adoption-a3-depth-overflow-analyzers-final14.log`
+`artifacts\\log\\compiler-adoption-a3-snapshot-ledger-analyzers-final19.log`
 has 353 unique diagnostic identities on each side, with no additions or
 removals.
 

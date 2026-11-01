@@ -582,7 +582,7 @@ internal sealed class TrRmStandardNativeBindingPlan
         return StringComparer.Ordinal.Equals(left, right);
     }
 
-    private static ulong GetStringComparisonWork(string? left, string? right)
+    internal static ulong GetStringComparisonWork(string? left, string? right)
     {
         var characterCount = checked((ulong)(left?.Length ?? 0)
             + (ulong)(right?.Length ?? 0));

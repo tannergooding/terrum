@@ -1,6 +1,8 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Collections;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -19,6 +21,57 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class TrRmFixedArrayLayoutTableTests
 {
+    private sealed class TrackingMemoryManager(int length)
+        : MemoryManager<byte>
+    {
+        private readonly byte[] _buffer = new byte[length];
+
+        internal int SpanAccessCount { get; private set; }
+
+        public override Span<byte> GetSpan()
+        {
+            SpanAccessCount++;
+            return _buffer;
+        }
+
+        public override MemoryHandle Pin(int elementIndex = 0)
+            => throw new NotSupportedException();
+
+        public override void Unpin()
+        {
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+        }
+
+        internal void ResetSpanAccessCount() => SpanAccessCount = 0;
+    }
+
+    private sealed class OversizedProviderList(int count)
+        : IReadOnlyList<TrRmStandardArtifactInput>
+    {
+        internal int IndexerAccessCount { get; private set; }
+
+        public int Count => count;
+
+        public TrRmStandardArtifactInput this[int index]
+        {
+            get
+            {
+                IndexerAccessCount++;
+                throw new InvalidOperationException(
+                    "The provider list must be bounded before indexing.");
+            }
+        }
+
+        public IEnumerator<TrRmStandardArtifactInput> GetEnumerator()
+            => throw new InvalidOperationException(
+                "The provider list must be bounded before enumeration.");
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
     [Test]
     public void ReadsFixedArrayLayoutWithItsModuleFeatureAndExactProfile()
     {
@@ -1516,6 +1569,71 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         Assert.That(reservationException!.Required,
             Is.EqualTo(maximum + 2));
         Assert.That(ledger.WorkRemaining, Is.EqualTo(workRemaining));
+    }
+
+    [TestCase("LoadStandard")]
+    [TestCase("CreateStandardReference")]
+    [TestCase("LoadStandardNativeBindingPlan")]
+    public void A3StandardOperationsReserveArtifactSnapshotBytesBeforeCopy(
+        string operation)
+    {
+        using var artifactMemory = new TrackingMemoryManager(
+            checked((int)TrRmA3LayoutResourceLedger.WorkLimit + 1));
+        var artifact = artifactMemory.Memory;
+        artifactMemory.ResetSpanAccessCount();
+        var input = new TrRmStandardArtifactInput(
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
+            artifact);
+
+        Action invoke = operation switch
+        {
+            "LoadStandard" => () =>
+                _ = TrRmExecutableCompiler.LoadStandard(
+                    input, "SnapshotRoot", []),
+            "CreateStandardReference" => () =>
+                _ = TrRmExecutableCompiler.CreateStandardReference(
+                    input, "SnapshotRoot", []),
+            "LoadStandardNativeBindingPlan" => () =>
+                _ = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+                    input, "SnapshotRoot", [],
+                    TrRmStandardNativeOperation.EmitExecutable,
+                    NativeRuntimePolicy.FailFast),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+        };
+        var exception
+            = Assert.Throws<TrRmResourceLimitException>(invoke);
+
+        Assert.That(exception!.Dimension, Is.EqualTo("work"));
+        Assert.That(exception.Required,
+            Is.GreaterThan(TrRmA3LayoutResourceLedger.WorkLimit));
+        Assert.That(artifactMemory.SpanAccessCount, Is.Zero);
+        Assert.That(TrRmExecutableCompiler.TryGetA3AdmissionFailure(
+            exception, out var failureKind), Is.True);
+        Assert.That(failureKind,
+            Is.EqualTo(TrRmA3AdmissionFailureKind.ResourceLimit));
+    }
+
+    [Test]
+    public void A3LoadBoundsProviderSnapshotBeforeAllocating()
+    {
+        var emptyArtifact = Array.Empty<byte>();
+        var input = new TrRmStandardArtifactInput(
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
+            emptyArtifact);
+        var providers = new OversizedProviderList(int.MaxValue);
+
+        var exception = Assert.Throws<TrRmResourceLimitException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, "SnapshotRoot",
+                providers));
+
+        Assert.That(exception!.Dimension, Is.EqualTo("work"));
+        Assert.That(exception.Required,
+            Is.GreaterThan(TrRmA3LayoutResourceLedger.WorkLimit));
+        Assert.That(providers.IndexerAccessCount, Is.Zero);
+        Assert.That(TrRmExecutableCompiler.TryGetA3AdmissionFailure(
+            exception, out var failureKind), Is.True);
+        Assert.That(failureKind,
+            Is.EqualTo(TrRmA3AdmissionFailureKind.ResourceLimit));
     }
 
     [Test]
