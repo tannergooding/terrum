@@ -199,11 +199,14 @@ public sealed partial class CliTests
     }
 
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1",
-        false)]
+        false, false)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1",
-        true)]
+        true, false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1",
+        true, true)]
     public async Task BuildTrRmSelectsEmptyArrayArtifactSchemaAsync(
-        string schemaIdentity, bool includesUnitValues)
+        string schemaIdentity, bool includesUnitValues,
+        bool includesDistinctUnitCalls)
     {
         const string moduleIdentity = "a2e-cli-selection";
         var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
@@ -217,7 +220,21 @@ public sealed partial class CliTests
                 NativeCoreRegistration
                     = NativeCoreRegistrationTests.CreateRegistration(),
             };
-            var source = includesUnitValues ? """
+            var markImports = includesDistinctUnitCalls ? """
+                [Terrum.Interop.NativeImport(
+                    "example.dll",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                internal extern void MarkFirst();
+
+                [Terrum.Interop.NativeImport(
+                    "example.dll",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                internal extern void MarkSecond();
+                """ : "";
+            var unitInitializers = includesDistinctUnitCalls
+                ? "MarkFirst(), MarkSecond()" : "(), ()";
+            var source = includesUnitValues ? $$"""
+                {{markImports}}
                 [Terrum.Interop.NativeImport(
                     "example.dll",
                     CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
@@ -230,10 +247,10 @@ public sealed partial class CliTests
                 int32 Main() {
                     int32 zeroIndex = 0;
                     [uint32; 0] empty = [];
-                    mut [void; 2] units = [(), ()];
                     mut uint32 input = 0;
                     mut int32 output = 0;
                     unsafe {
+                        mut [void; 2] units = [{{unitInitializers}}];
                         var callback = &Observe;
                         callback(&input, &output);
                     }

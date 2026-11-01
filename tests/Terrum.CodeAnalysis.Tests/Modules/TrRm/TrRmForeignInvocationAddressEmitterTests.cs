@@ -755,6 +755,143 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var loadedMain = loaded.Functions.Single(static function =>
             function.Name == "Main");
         var unitArrays = new List<BoundNativeFixedArrayInitialization>();
+        var initializerCalls = new List<BoundCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayInitialization
+                    { Layout.ElementType: PrimitiveType.Void } initialization
+                    && initialization.Layout.ElementCount == 2)
+                {
+                    unitArrays.Add(initialization);
+                }
+                if (expression is BoundCall call)
+                {
+                    initializerCalls.Add(call);
+                }
+            }), Is.True);
+        Assert.That(unitArrays, Has.Count.EqualTo(1));
+        Assert.That(unitArrays[0].Elements.OfType<BoundConstant>().ToArray(),
+            Has.Length.EqualTo(2));
+        Assert.That(initializerCalls, Has.Count.EqualTo(2));
+        Assert.That(initializerCalls.All(static call => call.Arguments
+            .OfType<BoundNativeStorageAddress>().Count() == 2), Is.True);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [Test]
+    public void StandardA2EUCallsDistinctUnitImportsInSourceOrder()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-unit-array-distinct-calls";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void MarkFirst();
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void MarkSecond();
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    mut [void; 2] values = [
+                        MarkFirst(),
+                        MarkSecond()
+                    ];
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        var directCallTargets = new List<string>();
+        var lastDirectCallOffset = -1;
+        var firstStoreOffset = int.MaxValue;
+        var code = body.GetBlockCode(0);
+        for (var position = 0; position < code.Length;)
+        {
+            var instructionLength = TrRmRegisterBodyReader.InstructionLength(
+                code[position], body.Schema);
+            if (code[position] == 0xE0)
+            {
+                var callRecord = body.GetRecord(
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        code[(position + 2)..]));
+                if (callRecord[4] == 1)
+                {
+                    var methodMapIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            callRecord[8..]);
+                    var methodToken
+                        = BinaryPrimitives.ReadUInt32LittleEndian(
+                            body.MethodMap[(methodMapIndex * sizeof(uint))..]);
+                    var methodRow = checked((int)(methodToken
+                        & 0x00FF_FFFF));
+                    directCallTargets.Add(tables.Methods.GetName(methodRow));
+                    lastDirectCallOffset = position;
+                }
+            }
+            else if (code[position] == 0xD9)
+            {
+                firstStoreOffset = Math.Min(firstStoreOffset, position);
+            }
+            position += instructionLength;
+        }
+        Assert.That(directCallTargets,
+            Is.EqualTo(new[] { "MarkFirst", "MarkSecond" }));
+        Assert.That(lastDirectCallOffset, Is.LessThan(firstStoreOffset));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var unitArrays = new List<BoundNativeFixedArrayInitialization>();
         Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
             expression =>
             {
@@ -766,12 +903,18 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 }
             }), Is.True);
         Assert.That(unitArrays, Has.Count.EqualTo(1));
-            var initializerCalls
-                = unitArrays[0].Elements.OfType<BoundCall>().ToArray();
-            Assert.That(initializerCalls, Has.Length.EqualTo(2));
-            Assert.That(initializerCalls
-            .All(static call => call.Arguments
-                .OfType<BoundNativeStorageAddress>().Count() == 2), Is.True);
+        Assert.That(unitArrays[0].Elements.OfType<BoundConstant>().ToArray(),
+            Has.Length.EqualTo(2));
+        var unsafeBody = loadedMain.Body.Statements
+            .OfType<BoundUnsafe>().Single().Body;
+        var callStatementTargets = unsafeBody.Statements
+            .OfType<BoundExpressionStatement>()
+            .Select(static statement => statement.Expression)
+            .OfType<BoundCall>()
+            .Select(call => loaded.Functions[call.Function].Name)
+            .ToArray();
+        Assert.That(callStatementTargets,
+            Is.EqualTo(new[] { "MarkFirst", "MarkSecond" }));
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }

@@ -28,6 +28,11 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct NativeAddressRegisterConstant(
         PrimitiveType Type, uint Bits);
 
+    private readonly record struct NativeAddressDirectCallTarget(
+        int FunctionIndex, ImmutableArray<PrimitiveType> ParameterTypes,
+        PrimitiveType ReturnType,
+        ImmutableArray<DirectNativeParameter> NativeParameters);
+
     internal static BoundProgram LoadForeignInvocationDraftNativeAddressLibrary(
         ReadOnlySpan<byte> artifact)
         => LoadForeignInvocationDraftNativeAddressLibrary(artifact, 1, null,
@@ -165,7 +170,7 @@ public static partial class TrRmExecutableCompiler
             || tables.EnumMembers.Count != 0
             || tables.Interfaces.Count != 0
             || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
-            || methodEnd - methodStart != 3
+            || methodEnd - methodStart < 3
             || tables.NativeFunctionPointerSignatures.Count != 0
             || tables.NativeCallables.Count != 0
             || tables.NativeVTables.Count != 0
@@ -176,12 +181,13 @@ public static partial class TrRmExecutableCompiler
                     || selectedImportCount != 1))
         {
             throw Unsupported(
-                "The source-free foreign-invocation loader supports one Windows x64 direct NativeImport, one address anchor and one caller Body.");
+                "The source-free loader supports one caller Body, one address anchor and direct NativeImport methods under the selected profile.");
         }
 
-        var targetMethodRow = 0;
         var callerMethodRow = 0;
         var anchorMethodRow = 0;
+        var nativeImportMethodRows = new List<int>(
+            tables.StandardNativeImports.Count);
         for (var row = methodStart; row < methodEnd; row++)
         {
             if (tables.NativeFunctionPointerAnchors.IsAnchorMethodDef(row))
@@ -195,12 +201,7 @@ public static partial class TrRmExecutableCompiler
             }
             else if (tables.StandardNativeImports.HasImportForMethod(row))
             {
-                if (targetMethodRow != 0)
-                {
-                    throw Unsupported("Multiple direct NativeImports are unsupported.");
-                }
-
-                targetMethodRow = row;
+                nativeImportMethodRows.Add(row);
             }
             else if (tables.Methods.GetBodyRow(row) != 0)
             {
@@ -211,23 +212,51 @@ public static partial class TrRmExecutableCompiler
 
                 callerMethodRow = row;
             }
+            else
+            {
+                throw Unsupported(
+                    "The source-free NativeAddress loader supports only direct NativeImports, one caller and one anchor.");
+            }
         }
 
-        if (targetMethodRow == 0 || callerMethodRow == 0 || anchorMethodRow == 0
-            || targetMethodRow == callerMethodRow
-            || targetMethodRow == anchorMethodRow
+        if (nativeImportMethodRows.Count
+                != methodEnd - methodStart - 2
+            || (nativeImportMethodRows.Count > 1
+                && !schema.UsesForeignInvocationStorageAddresses())
+            || callerMethodRow == 0 || anchorMethodRow == 0
             || callerMethodRow == anchorMethodRow
-            || tables.Methods.GetOwnerType(targetMethodRow) != 0
             || tables.Methods.GetOwnerType(callerMethodRow) != 0
             || tables.Methods.GetOwnerType(anchorMethodRow) != 0
-            || tables.Methods.GetOwnerModule(targetMethodRow) != selectedModuleRow
             || tables.Methods.GetOwnerModule(callerMethodRow) != selectedModuleRow
             || tables.Methods.GetOwnerModule(anchorMethodRow) != selectedModuleRow
             || tables.Methods.GetFlags(anchorMethodRow) != 0
-            || tables.Methods.GetBodyRow(targetMethodRow) != 0
             || tables.Methods.GetBodyRow(anchorMethodRow) != 0)
         {
             throw Invalid("Invalid bounded foreign-invocation method roles.");
+        }
+
+        foreach (var importMethodRow in nativeImportMethodRows)
+        {
+            if (tables.Methods.GetOwnerType(importMethodRow) != 0
+                || tables.Methods.GetOwnerModule(importMethodRow)
+                    != selectedModuleRow
+                || tables.Methods.GetBodyRow(importMethodRow) != 0)
+            {
+                throw Invalid(
+                    "A direct NativeImport method has an invalid owner or Body.");
+            }
+        }
+
+        tables.ValidateRegisterBodyMapsForMethod(callerMethodRow);
+        var candidateBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerMethodRow),
+            tables.Contracts.Count);
+        var targetMethodRow = ReadForeignInvocationNativeAddressTargetMethod(
+            candidateBody, tables.Imports);
+        if (!nativeImportMethodRows.Contains(targetMethodRow))
+        {
+            throw Invalid(
+                "The NativeAddress target is not a selected direct NativeImport.");
         }
 
         var entryMethodRow = tables.Modules.GetEntryMethod(selectedModuleRow);
@@ -262,18 +291,27 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        EnsureNativeAddressContracts(tables.Methods, tables.Contracts,
-            targetMethodRow, tables.Contracts.GetNativeParameters(targetMethodRow).Length + 1,
-            allowEffects: true);
+        foreach (var importMethodRow in nativeImportMethodRows)
+        {
+            EnsureNativeAddressContracts(tables.Methods, tables.Contracts,
+                importMethodRow,
+                tables.Contracts.GetNativeParameters(importMethodRow).Length + 1,
+                allowEffects: true);
+            if (tables.Contracts.GetEffectsMask(importMethodRow) != 4
+                || !tables.Contracts.GetNativeOutputs(importMethodRow).IsEmpty)
+            {
+                throw Unsupported(
+                    "The source-free NativeAddress loader supports caller-unsafe imports without output contracts or additional effects.");
+            }
+        }
+
         EnsureNativeAddressContracts(tables.Methods, tables.Contracts,
             callerMethodRow, 0, allowEffects: false);
         EnsureNativeAddressContracts(tables.Methods, tables.Contracts,
             anchorMethodRow, tables.Contracts.GetNativeParameters(anchorMethodRow).Length,
             allowEffects: false);
-        if (tables.Contracts.GetEffectsMask(targetMethodRow) != 4
-            || tables.Contracts.GetEffectsMask(callerMethodRow) != 0
+        if (tables.Contracts.GetEffectsMask(callerMethodRow) != 0
             || tables.Contracts.GetEffectsMask(anchorMethodRow) != 0
-            || !tables.Contracts.GetNativeOutputs(targetMethodRow).IsEmpty
             || !tables.Contracts.GetNativeOutputs(anchorMethodRow).IsEmpty)
         {
             throw Unsupported(
@@ -404,9 +442,7 @@ public static partial class TrRmExecutableCompiler
                 "The NativeAddress anchor does not preserve the direct NativeImport contract.");
         }
 
-        var bodyRow = tables.Methods.GetBodyRow(callerMethodRow);
-        tables.ValidateRegisterBodyMapsForMethod(callerMethodRow);
-        var body = tables.Bodies.GetRegisterBody(bodyRow, tables.Contracts.Count);
+        var body = candidateBody;
         var callerSignatureRow = tables.Methods.GetSignature(callerMethodRow);
         var callerParameterTypes = ReadForeignInvocationParameterTypes(
             callerMethodRow, tables.Methods, tables.Signatures, tables.Parameters,
@@ -438,7 +474,6 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Invalid native pointer type table.");
         }
 
-        var functions = ImmutableArray.CreateBuilder<BoundFunction>(2);
         var functionIndexByMethodRow = new int[tables.Methods.Count + 1];
         Array.Fill(functionIndexByMethodRow, -1);
         var functionIndex = 0;
@@ -452,6 +487,67 @@ public static partial class TrRmExecutableCompiler
         }
 
         var targetIndex = functionIndexByMethodRow[targetMethodRow];
+        var directCallTargets
+            = new Dictionary<int, NativeAddressDirectCallTarget>(
+                nativeImportMethodRows.Count);
+        var directNativeImportsByMethodRow
+            = new Dictionary<int, DirectNativeImport>(
+                nativeImportMethodRows.Count);
+        foreach (var importMethodRow in nativeImportMethodRows)
+        {
+            var importSignatureRow
+                = tables.Methods.GetSignature(importMethodRow);
+            if (!TrRmNativeImportTypeContract.TryGetDirectNativeImportResultType(
+                    tables.TypeSpecs,
+                    tables.Signatures.GetResultTypeSpec(importSignatureRow),
+                    out _))
+            {
+                throw Unsupported(
+                    "A direct NativeImport result type is unsupported.");
+            }
+
+            var parameterTypes = ReadForeignInvocationParameterTypes(
+                importMethodRow, tables.Methods, tables.Signatures,
+                tables.Parameters, tables.TypeSpecs,
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef);
+            var resultType = ReadForeignInvocationType(tables.TypeSpecs,
+                tables.Signatures.GetResultTypeSpec(importSignatureRow),
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef);
+            if (!IsForeignInvocationValueType(resultType, allowVoid: true))
+            {
+                throw Unsupported(
+                    "A direct NativeImport result type is unsupported.");
+            }
+
+            var nativeParameters = ReadForeignInvocationNativeParameters(
+                importMethodRow, tables.Methods, tables.Signatures,
+                tables.Parameters, tables.TypeSpecs, tables.Contracts,
+                tables.Layouts, nativePointerTypeDefinitions,
+                structureTypeByTypeDef);
+            var importRow
+                = tables.StandardNativeImports.GetImportForMethod(
+                    importMethodRow);
+            directCallTargets.Add(importMethodRow,
+                new NativeAddressDirectCallTarget(
+                    functionIndexByMethodRow[importMethodRow],
+                    parameterTypes, resultType, nativeParameters));
+            directNativeImportsByMethodRow.Add(importMethodRow,
+                new DirectNativeImport(
+                    tables.StandardNativeImports.GetLibraryName(importRow),
+                    tables.StandardNativeImports.GetEntryName(importRow), [])
+                {
+                    CallingConvention
+                        = (NativeCallingConvention)importRow.CallConv,
+                    ResolutionMode
+                        = (NativeImportResolutionMode)importRow.ResolutionMode,
+                    ResolutionPolicy
+                        = (NativeImportResolutionPolicy)importRow.ResolutionPolicy,
+                    Parameters = nativeParameters,
+                });
+        }
+
         var (callerBody, callerVariables) = ReadForeignInvocationCallerBody(
             body, tables.TypeSpecs, tables.Imports,
             tables.TargetProfiles, tables.FixedArrayLayouts,
@@ -461,7 +557,9 @@ public static partial class TrRmExecutableCompiler
             callerParameterTypes, callerResultType,
             targetParameterTypes, functionPointerSignatures[0],
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef);
+            structureTypeByTypeDef, directCallTargets);
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(
+            methodEnd - methodStart - 1);
         for (var row = methodStart; row < methodEnd; row++)
         {
             if (row == anchorMethodRow)
@@ -470,24 +568,45 @@ public static partial class TrRmExecutableCompiler
             }
 
             var flags = tables.Methods.GetFlags(row);
-            var isTarget = row == targetMethodRow;
-            var parameterTypes = isTarget ? targetParameterTypes : callerParameterTypes;
-            var variables = isTarget
-                ? CreateVariables(parameterTypes, "arg")
-                : callerVariables;
-            var function = new BoundFunction(tables.Methods.GetName(row),
-                isTarget ? targetResultType : callerResultType,
-                variables, parameterTypes.Length,
-                isTarget ? new BoundBlock([], default) : callerBody, default)
+            BoundFunction function;
+            if (row == callerMethodRow)
             {
-                DirectNativeImport = isTarget ? directNativeImport : null,
-                ModuleImport = isTarget ? selectedModuleImport : null,
-                IsModuleReference = isTarget && selectedModuleImport is not null,
-                IsExternal = isTarget,
-                RequiresUnsafeCaller = isTarget,
-                IsPrivate = flags == 0,
-                IsInternal = flags == 1,
-            };
+                function = new BoundFunction(tables.Methods.GetName(row),
+                    callerResultType, callerVariables,
+                    callerParameterTypes.Length, callerBody, default)
+                {
+                    IsPrivate = flags == 0,
+                    IsInternal = flags == 1,
+                };
+            }
+            else
+            {
+                if (!directCallTargets.TryGetValue(row,
+                        out var importedTarget))
+                {
+                    throw Invalid(
+                        "A non-caller MethodDef has no NativeImport binding.");
+                }
+
+                var isSelectedTarget = row == targetMethodRow;
+                function = new BoundFunction(tables.Methods.GetName(row),
+                    importedTarget.ReturnType,
+                    CreateVariables(importedTarget.ParameterTypes, "arg"),
+                    importedTarget.ParameterTypes.Length,
+                    new BoundBlock([], default), default)
+                {
+                    DirectNativeImport
+                        = directNativeImportsByMethodRow[row],
+                    ModuleImport = isSelectedTarget
+                        ? selectedModuleImport : null,
+                    IsModuleReference = isSelectedTarget
+                        && selectedModuleImport is not null,
+                    IsExternal = true,
+                    RequiresUnsafeCaller = true,
+                    IsPrivate = flags == 0,
+                    IsInternal = flags == 1,
+                };
+            }
             functions.Add(function);
         }
 
@@ -535,7 +654,9 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<PrimitiveType> targetParameterTypes,
         NativeFunctionPointerSignatureDefinition signature,
         List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+        int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+        IReadOnlyDictionary<int, NativeAddressDirectCallTarget>
+            directCallTargets)
     {
         if (body.BlockCount != 1 || body.RecordCount < 2)
         {
@@ -564,7 +685,8 @@ public static partial class TrRmExecutableCompiler
                 selectedModuleRow, targetMethodRow, targetIndex,
                 callerParameterTypes, callerResultType, targetParameterTypes,
                 signature, nativePointerTypeDefinitions,
-                signatureIndexByAnchorMethod, structureTypeByTypeDef);
+                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                directCallTargets);
         }
 
         var nativeAddress = body.GetRecord(1);
@@ -902,7 +1024,9 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<PrimitiveType> targetParameterTypes,
             NativeFunctionPointerSignatureDefinition signature,
             List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
-            int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef)
+            int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
+            IReadOnlyDictionary<int, NativeAddressDirectCallTarget>
+                directCallTargets)
     {
         if (body.MapMask != 0x07 || body.RecordCount < 4)
         {
@@ -1174,7 +1298,6 @@ public static partial class TrRmExecutableCompiler
         }
         var arrayInitializationElementsByHome
             = new Dictionary<int, List<BoundExpression>>();
-        var pendingUnitInitializerCalls = new Queue<BoundCall>();
         var statements = ImmutableArray.CreateBuilder<BoundStatement>();
         var sawCallSite = false;
         var sawReturn = false;
@@ -1553,24 +1676,9 @@ public static partial class TrRmExecutableCompiler
                             arrayInitializationElementsByHome.Add(
                                 initializedArrayHome, initializedElements);
                         }
-                        BoundExpression initializedElement;
-                        if (initializationSelection.ElementType
-                                == PrimitiveType.Void
-                            && body.Schema
-                                .UsesForeignInvocationStorageFixedArrayUnitInitialization()
-                            && pendingUnitInitializerCalls.Count > 0)
-                        {
-                            initializedElement
-                                = pendingUnitInitializerCalls.Dequeue();
-                        }
-                        else
-                        {
-                            initializedElement = new BoundConstant(
-                                initializationValue,
-                                initializationSelection.ElementType, default);
-                        }
-
-                        initializedElements.Add(initializedElement);
+                        initializedElements.Add(new BoundConstant(
+                            initializationValue,
+                            initializationSelection.ElementType, default));
                         if ((ulong)initializedElements.Count
                             == initializationSelection.ElementCount)
                         {
@@ -1790,16 +1898,17 @@ public static partial class TrRmExecutableCompiler
                                 "An A2EU unit initializer CallSite follows the indirect call.");
                         }
 
-                        pendingUnitInitializerCalls.Enqueue(
-                            ReadForeignInvocationUnitInitializerCall(
+                        var directUnitCall
+                            = ReadForeignInvocationUnitInitializerCall(
                                 body, body.GetRecord(instruction.Index),
-                                imports, targetMethodRow, targetIndex,
-                                callerParameterTypes, targetParameterTypes,
-                                signature, formalOrdinalByHome,
+                                imports, directCallTargets,
+                                callerParameterTypes, formalOrdinalByHome,
                                 localVariableByHome, variables,
                                 storageAddressesByHome,
                                 consumedStorageHomes,
-                                storageAddressHomeOrder));
+                                storageAddressHomeOrder);
+                        statements.Add(new BoundExpressionStatement(
+                            directUnitCall, default));
                         for (var register = 0; register < 14; register++)
                         {
                             _ = registerConstants.Remove(register);
@@ -1981,7 +2090,6 @@ public static partial class TrRmExecutableCompiler
         if (!sawCallSite || !sawReturn
             || placeSelectionsByRegister.Count != 0
             || arrayInitializationElementsByHome.Count != 0
-            || pendingUnitInitializerCalls.Count != 0
             || storageAddressesByHome.Keys.Any(home =>
                 !consumedStorageHomes.Contains(home)))
         {
@@ -2349,10 +2457,9 @@ public static partial class TrRmExecutableCompiler
 
     private static BoundCall ReadForeignInvocationUnitInitializerCall(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> record,
-        TrRmImportTableReader imports, int targetMethodRow, int targetIndex,
+        TrRmImportTableReader imports,
+        IReadOnlyDictionary<int, NativeAddressDirectCallTarget> callTargets,
         ImmutableArray<PrimitiveType> callerParameterTypes,
-        ImmutableArray<PrimitiveType> targetParameterTypes,
-        NativeFunctionPointerSignatureDefinition signature,
         int[] formalOrdinalByHome, int[] localVariableByHome,
         ImmutableArray<BoundVariable>.Builder variables,
         Dictionary<int, NativeStorageAddressFacts> storageAddressesByHome,
@@ -2363,22 +2470,24 @@ public static partial class TrRmExecutableCompiler
             record[12..]);
         var preparationCount = BinaryPrimitives.ReadUInt32LittleEndian(
             record[16..]);
+        var targetMethodRow = ReadForeignInvocationBodyMethodDef(body,
+            imports, BinaryPrimitives.ReadUInt16LittleEndian(record[8..]));
         if (!body.Schema
                 .UsesForeignInvocationStorageFixedArrayUnitInitialization()
-            || signature.ReturnType != PrimitiveType.Void
+            || !callTargets.TryGetValue(targetMethodRow,
+                out var callTarget)
+            || callTarget.ReturnType != PrimitiveType.Void
             || record[0] != 0x02 || record[4] != 1 || record[5] != 0
             || BinaryPrimitives.ReadUInt16LittleEndian(record[10..]) != 0
-            || inputCount != (uint)targetParameterTypes.Length
+            || inputCount != (uint)callTarget.ParameterTypes.Length
             || preparationCount != 0
-            || (long)record.Length != 20L + (inputCount * 4L)
-            || ReadForeignInvocationBodyMethodDef(body, imports,
-                BinaryPrimitives.ReadUInt16LittleEndian(record[8..]))
-                != targetMethodRow)
+            || (long)record.Length != 20L + (inputCount * 4L))
         {
             throw Invalid(
                 "The A2EU unit initializer CallSite does not match the direct Unit import.");
         }
 
+        var targetParameterTypes = callTarget.ParameterTypes;
         var argumentByParameter = new BoundExpression?[
             targetParameterTypes.Length];
         var storageParameterByHome = new Dictionary<int, int>();
@@ -2390,7 +2499,7 @@ public static partial class TrRmExecutableCompiler
             var selectorIndex = BinaryPrimitives.ReadUInt16LittleEndian(
                 record[(inputOffset + 2)..]);
             var parameterType = targetParameterTypes[ordinal];
-            var nativeParameter = signature.NativeParameters
+            var nativeParameter = callTarget.NativeParameters
                 .FirstOrDefault(parameter => parameter.ParameterIndex == ordinal);
             if (selectorKind == 0)
             {
@@ -2537,7 +2646,7 @@ public static partial class TrRmExecutableCompiler
                 == argumentIndex;
         }
 
-        return new BoundCall(targetIndex, arguments.MoveToImmutable(),
+        return new BoundCall(callTarget.FunctionIndex, arguments.MoveToImmutable(),
             PrimitiveType.Void, default)
         {
             ArgumentParameterIndices = isIdentityMapping
@@ -3281,6 +3390,47 @@ public static partial class TrRmExecutableCompiler
         }
 
         return token & 0x00FF_FFFF;
+    }
+
+    private static int ReadForeignInvocationNativeAddressTargetMethod(
+        TrRmRegisterBodyReader body, TrRmImportTableReader imports)
+    {
+        var targetMethodRow = 0;
+        var code = body.GetBlockCode(0);
+        for (var position = 0; position < code.Length;)
+        {
+            var instructionLength
+                = TrRmRegisterBodyReader.InstructionLength(
+                    code[position], body.Schema);
+            var instruction = code.Slice(position, instructionLength);
+            if (instruction[0] == 0xE9)
+            {
+                if (instruction[1] != 0 || targetMethodRow != 0)
+                {
+                    throw Invalid(
+                        "The NativeAddress Body has an invalid target formation.");
+                }
+
+                var recordIndex
+                    = BinaryPrimitives.ReadUInt16LittleEndian(
+                        instruction[2..]);
+                var record = body.GetRecord(recordIndex);
+                if (record[0] != 0x0D)
+                {
+                    throw Invalid(
+                        "The NativeAddress formation has an invalid record.");
+                }
+
+                targetMethodRow = ReadForeignInvocationBodyMethodDef(body,
+                    imports,
+                    BinaryPrimitives.ReadUInt16LittleEndian(record[8..]));
+            }
+
+            position += instructionLength;
+        }
+
+        return targetMethodRow != 0 ? targetMethodRow
+            : throw Invalid("The caller Body has no NativeAddress target.");
     }
 
     private static int ReadForeignInvocationBodyMethodDef(

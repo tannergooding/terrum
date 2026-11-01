@@ -56,7 +56,7 @@ public static partial class TrRmExecutableCompiler
                 program, moduleIdentity, schema, sourceTypeExports);
         }
 
-        if (program.Functions.Length != 2
+        if (program.Functions.Length < 2
             || !program.Structures.IsEmpty || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty || !program.NativeUtf16ZLiterals.IsEmpty
             || !program.NativeUtf8ZLiterals.IsEmpty || program.RequiresSourceGrant
@@ -111,6 +111,29 @@ public static partial class TrRmExecutableCompiler
             || callerIndex < 0 || callerIndex == targetIndex)
         {
             throw Unsupported("A NativeAddress Body must select one distinct target declaration.");
+        }
+
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (index == callerIndex)
+            {
+                continue;
+            }
+
+            var importedFunction = program.Functions[index];
+            if (importedFunction.DirectNativeImport is null
+                || !importedFunction.IsExternal
+                || (index != targetIndex
+                    && importedFunction.ModuleImport is not null)
+                || !importedFunction.DirectNativeImport.Outputs.IsEmpty
+                || !DirectNativeImportContract.IsValid(importedFunction,
+                    program.Structures,
+                    program.NativeFunctionPointerSignatures,
+                    program.NativePointerTypes))
+            {
+                throw Unsupported(
+                    "The NativeAddress Body supports one caller and direct NativeImport declarations without output contracts.");
+            }
         }
 
         if (program.EntryPoint >= 0 && program.EntryPoint != callerIndex)
@@ -330,42 +353,44 @@ public static partial class TrRmExecutableCompiler
             .ToArray();
         var targetParameterTypeSpecRefs
             = signature.ParameterTypes.Select(GetSignatureTypeSpecRef).ToArray();
-        const int callerSignatureRow = 1;
-        const int nativeSignatureRow = 2;
-        var parameterRows = new List<TrRmParamRow>(
-            callerParameterTypeSpecRefs.Length
-                + targetParameterTypeSpecRefs.Length);
-        for (var ordinal = 0;
-            ordinal < callerParameterTypeSpecRefs.Length; ordinal++)
+        var functionSignatureRows = new int[program.Functions.Length];
+        var signatureRows = new List<TrRmMethodSigRow>(
+            program.Functions.Length + 1);
+        var parameterRows = new List<TrRmParamRow>();
+        for (var functionIndex = 0;
+            functionIndex < program.Functions.Length;
+            functionIndex++)
         {
-            parameterRows.Add(new TrRmParamRow(callerSignatureRow, ordinal,
-                callerParameterTypeSpecRefs[ordinal], 0));
+            var function = program.Functions[functionIndex];
+            var signatureRow = signatureRows.Count + 1;
+            functionSignatureRows[functionIndex] = signatureRow;
+            var parameterTypes = function.Variables
+                .Take(function.ParameterCount)
+                .Select(static variable => variable.Type)
+                .Select(GetSignatureTypeSpecRef).ToArray();
+            var parameterFirst = parameterTypes.Length == 0
+                ? 0 : parameterRows.Count + 1;
+            for (var ordinal = 0; ordinal < parameterTypes.Length; ordinal++)
+            {
+                parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
+                    parameterTypes[ordinal], 0));
+            }
+
+            signatureRows.Add(new TrRmMethodSigRow(
+                GetSignatureTypeSpecRef(function.ReturnType), 0,
+                parameterFirst, parameterTypes.Length, 0, 0));
         }
 
-        var targetParameterFirst = targetParameterTypeSpecRefs.Length == 0
-            ? 0 : parameterRows.Count + 1;
-        for (var ordinal = 0;
-            ordinal < targetParameterTypeSpecRefs.Length; ordinal++)
-        {
-            parameterRows.Add(new TrRmParamRow(nativeSignatureRow, ordinal,
-                targetParameterTypeSpecRefs[ordinal], 0));
-        }
-
-        var signatureRows = new[]
-        {
-            new TrRmMethodSigRow(GetSignatureTypeSpecRef(caller.ReturnType), 0,
-                callerParameterTypeSpecRefs.Length == 0 ? 0 : 1,
-                callerParameterTypeSpecRefs.Length, 0, 0),
-            new TrRmMethodSigRow(GetSignatureTypeSpecRef(signature.ReturnType), 0,
-                targetParameterFirst, targetParameterTypeSpecRefs.Length, 0, 0),
-        };
+        var anchorSignatureRow = functionSignatureRows[targetIndex];
         var featureRows = new List<TrRmFeatureRow>();
         if (fixedArrayLayoutRows.Count != 0)
         {
             featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
         }
         featureRows.Add(new TrRmFeatureRow(4, 1));
-        if (!import.Parameters.IsEmpty)
+        if (program.Functions.Any(static function =>
+                function.DirectNativeImport is DirectNativeImport nativeImport
+                && !nativeImport.Parameters.IsEmpty))
         {
             featureRows.Add(TrRmFeatureRow.ForeignInvocationContractsCandidate);
         }
@@ -391,8 +416,24 @@ public static partial class TrRmExecutableCompiler
             methodNameRows[index] = AddString(program.Functions[index].Name, 1);
         }
         var anchorNameRow = AddString(CreateAnchorName(program.Functions), 1);
-        var libraryNameRow = AddString(import.LibraryName, 0);
-        var exportNameRow = AddString(import.ExportName, 0);
+        var nativeImportLibraryNameRows = new int[program.Functions.Length];
+        var nativeImportEntryNameRows = new int[program.Functions.Length];
+        var nativeImportFunctionIndices = new List<int>();
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (program.Functions[index].DirectNativeImport
+                is not DirectNativeImport nativeImport)
+            {
+                continue;
+            }
+
+            nativeImportLibraryNameRows[index]
+                = AddString(nativeImport.LibraryName, 0);
+            nativeImportEntryNameRows[index]
+                = AddString(nativeImport.ExportName, 0);
+            nativeImportFunctionIndices.Add(index);
+        }
+
         var providerIdentityRow = moduleImport is null
             ? 0 : AddString(moduleImport.ProducerIdentity, 1);
         var providerExportKeyRow = moduleImport is null
@@ -434,7 +475,7 @@ public static partial class TrRmExecutableCompiler
         var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
             typeSpecs, parameterRows.Count, 0);
         var signatures = new TrRmMethodSigTableReader(signatureBytes,
-            signatureRows.Length, typeSpecs, parameterRows.Count, 0);
+            signatureRows.Count, typeSpecs, parameterRows.Count, 0);
         var paramBytes = parameterRows.Count == 0
             ? []
             : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs, schema);
@@ -442,40 +483,61 @@ public static partial class TrRmExecutableCompiler
             ? default
             : new TrRmParamTableReader(paramBytes, parameterRows.Count,
                 signatures, typeSpecs, schema);
-        var nativeParameters = import.Parameters
-            .OrderBy(static parameter => parameter.ParameterIndex).ToArray();
-        var targetContractCount = nativeParameters.Length + 1;
-        var targetOwner = 0x1600_0000u | (uint)targetMethodRow;
         var anchorOwner = 0x1600_0000u | (uint)anchorMethodRow;
-        var contractRows = new List<TrRmContractRow>(
-            1 + (nativeParameters.Length * 2));
+        var contractRows = new List<TrRmContractRow>();
         var contractPayload = new byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(contractPayload, 4);
-        contractRows.Add(new TrRmContractRow(targetOwner, 1, contractPayload));
-        var nativeParameterPayloads = new List<byte[]>(nativeParameters.Length);
-        foreach (var parameter in nativeParameters)
+        var importContractFirstByFunction
+            = new int[program.Functions.Length];
+        var importContractCountByFunction
+            = new int[program.Functions.Length];
+        var selectedNativeParameters = import.Parameters
+            .OrderBy(static parameter => parameter.ParameterIndex).ToArray();
+        var selectedNativeParameterPayloads
+            = new List<byte[]>(selectedNativeParameters.Length);
+        foreach (var functionIndex in nativeImportFunctionIndices)
         {
-            if (parameter.Retention != NativeParameterRetention.NoEscape)
+            var nativeImport = program.Functions[functionIndex]
+                .DirectNativeImport!;
+            var nativeParameters = nativeImport.Parameters
+                .OrderBy(static parameter => parameter.ParameterIndex)
+                .ToArray();
+            var owner = 0x1600_0000u
+                | checked((uint)(functionIndex + 1));
+            importContractFirstByFunction[functionIndex]
+                = contractRows.Count + 1;
+            contractRows.Add(new TrRmContractRow(owner, 1,
+                contractPayload));
+            foreach (var parameter in nativeParameters)
             {
-                throw Unsupported(
-                    "The NativeAddress producer requires NoEscape NativeParameter contracts.");
+                if (parameter.Retention != NativeParameterRetention.NoEscape)
+                {
+                    throw Unsupported(
+                        "The NativeAddress producer requires NoEscape NativeParameter contracts.");
+                }
+
+                var payload = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(payload,
+                    checked((uint)parameter.ParameterIndex));
+                payload[4] = checked((byte)((byte)parameter.Access + 1));
+                payload[5] = 1;
+                payload[6] = parameter.Extent == 0 ? (byte)0 : (byte)1;
+                BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
+                    parameter.Extent);
+                contractRows.Add(new TrRmContractRow(owner, 0x0E, payload));
+                if (functionIndex == targetIndex)
+                {
+                    selectedNativeParameterPayloads.Add(payload);
+                }
             }
 
-            var payload = new byte[12];
-            BinaryPrimitives.WriteUInt32LittleEndian(payload,
-                checked((uint)parameter.ParameterIndex));
-            payload[4] = checked((byte)((byte)parameter.Access + 1));
-            payload[5] = 1;
-            payload[6] = parameter.Extent == 0 ? (byte)0 : (byte)1;
-            BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
-                parameter.Extent);
-            nativeParameterPayloads.Add(payload);
-            contractRows.Add(new TrRmContractRow(targetOwner, 0x0E, payload));
+            importContractCountByFunction[functionIndex]
+                = nativeParameters.Length + 1;
         }
 
-        var anchorContractFirst = nativeParameters.Length == 0
-            ? 0 : targetContractCount + 1;
-        foreach (var payload in nativeParameterPayloads)
+        var anchorContractFirst = selectedNativeParameters.Length == 0
+            ? 0 : contractRows.Count + 1;
+        foreach (var payload in selectedNativeParameterPayloads)
         {
             contractRows.Add(new TrRmContractRow(anchorOwner, 0x0E, payload));
         }
@@ -489,13 +551,11 @@ public static partial class TrRmExecutableCompiler
             var function = program.Functions[index];
             var methodRow = index + 1;
             var visibility = function.IsPrivate ? 0u : function.IsInternal ? 1u : 2u;
-            var isTarget = index == targetIndex;
             var isCaller = index == callerIndex;
-            var contractFirst = isTarget ? 1 : 0;
-            var methodContractCount = isTarget ? targetContractCount : 0;
             methodRows.Add(new TrRmMethodDefRow(0, methodNameRows[index],
-                isCaller ? 1 : nativeSignatureRow,
-                visibility, contractFirst, methodContractCount,
+                functionSignatureRows[index], visibility,
+                importContractFirstByFunction[index],
+                importContractCountByFunction[index],
                 isCaller ? 1 : 0));
             if (visibility == 2 && function.ModuleImport is null)
             {
@@ -504,8 +564,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
         methodRows.Add(new TrRmMethodDefRow(0, anchorNameRow,
-            nativeSignatureRow, 0, anchorContractFirst,
-            nativeParameters.Length, 0));
+            anchorSignatureRow, 0, anchorContractFirst,
+            selectedNativeParameters.Length, 0));
         var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
             modules, typeDefs, signatures, contractRows.Count, 1);
         var methods = new TrRmMethodDefTableReader(methodBytes,
@@ -549,11 +609,22 @@ public static partial class TrRmExecutableCompiler
             ? new TrRmTargetProfileTableReader([], 0)
             : new TrRmTargetProfileTableReader(targetProfileBytes, 1, schema);
         var layouts = new TrRmLayoutTableReader([], 0, typeDefs, targetProfiles, 0);
-        var nativeImportBytes = TrRmNativeImportTableWriter.Encode([
-            new TrRmNativeImportRow(1, (byte)import.ResolutionMode,
-                (byte)import.ResolutionPolicy, (byte)import.CallingConvention,
-                targetMethodRow, libraryNameRow, exportNameRow),
-        ], strings, methods, default, typeDefs, imports, modules,
+        var nativeImportRows = new List<TrRmNativeImportRow>(
+            nativeImportFunctionIndices.Count);
+        foreach (var functionIndex in nativeImportFunctionIndices)
+        {
+            var nativeImport = program.Functions[functionIndex]
+                .DirectNativeImport!;
+            nativeImportRows.Add(new TrRmNativeImportRow(1,
+                (byte)nativeImport.ResolutionMode,
+                (byte)nativeImport.ResolutionPolicy,
+                (byte)nativeImport.CallingConvention, functionIndex + 1,
+                nativeImportLibraryNameRows[functionIndex],
+                nativeImportEntryNameRows[functionIndex]));
+        }
+
+        var nativeImportBytes = TrRmNativeImportTableWriter.Encode(
+            nativeImportRows, strings, methods, default, typeDefs, imports, modules,
             signatures, parameters, typeSpecs, contracts, layouts);
         var stagedCalls = new List<BoundCall>(
             indirectCall?.Arguments.Length ?? 0);
@@ -577,7 +648,7 @@ public static partial class TrRmExecutableCompiler
         var unitCallStorageArgumentCount = storageCall is null
             ? 0
             : storageCall.UnitInitializerCalls.Sum(static call =>
-                call.Arguments.Count(static argument =>
+                call.Call.Arguments.Count(static argument =>
                     argument is BoundNativeStorageAddress));
         var typeMapTokenCapacity = storageCall is null
             ? 1 + (callResultHomeIndex >= 0 ? 1 : 0)
@@ -622,23 +693,21 @@ public static partial class TrRmExecutableCompiler
             foreach (var unitCall in storageCall.UnitInitializerCalls)
             {
                 for (var argumentIndex = 0;
-                    argumentIndex < unitCall.Arguments.Length;
+                    argumentIndex < unitCall.Call.Arguments.Length;
                     argumentIndex++)
                 {
-                    if (unitCall.Arguments[argumentIndex]
+                    if (unitCall.Call.Arguments[argumentIndex]
                         is not BoundNativeStorageAddress)
                     {
                         continue;
                     }
 
-                    var parameterIndex
-                        = unitCall.ArgumentParameterIndices.IsDefault
-                            ? argumentIndex
-                            : unitCall.ArgumentParameterIndices[
-                                argumentIndex];
+                    var parameterIndex = GetBoundCallParameterIndex(
+                        unitCall.Call, argumentIndex);
                     typeMapTokens.Add(CreateStandardBodyTypeMapToken(
-                        GetSignatureTypeSpecRef(signature.ParameterTypes[
-                            parameterIndex])));
+                        GetSignatureTypeSpecRef(
+                            unitCall.Signature.ParameterTypes[
+                                parameterIndex])));
                 }
             }
 
@@ -680,8 +749,66 @@ public static partial class TrRmExecutableCompiler
         var targetMethodMapToken = moduleImport is null
             ? 0x1600_0000u | (uint)targetMethodRow
             : 0x1C00_0001u;
+        var methodMapTokens = new List<uint>();
+        var methodMapTokenSet = new HashSet<uint>();
+        if (storageCall is null)
+        {
+            methodMapTokens.Add(targetMethodMapToken);
+        }
+        else
+        {
+            var callerStatements = new List<BoundStatement>();
+            if (!AppendStatements(caller.Body, callerStatements))
+            {
+                throw Unsupported(
+                    "The F+S caller Body cannot be flattened for its MethodMap.");
+            }
+
+            foreach (var statement in callerStatements)
+            {
+                if (statement is BoundExpressionStatement
+                    { Expression: BoundCall call })
+                {
+                    var methodToken = 0x1600_0000u
+                        | checked((uint)(call.Function + 1));
+                    if (methodMapTokenSet.Add(methodToken))
+                    {
+                        methodMapTokens.Add(methodToken);
+                    }
+                    continue;
+                }
+
+                if (statement is not BoundLocal local)
+                {
+                    continue;
+                }
+
+                if (local.Initializer is BoundNativeFunctionAddress)
+                {
+                    if (methodMapTokenSet.Add(targetMethodMapToken))
+                    {
+                        methodMapTokens.Add(targetMethodMapToken);
+                    }
+                }
+                else if (local.Initializer
+                    is BoundNativeFixedArrayInitialization initialization)
+                {
+                    foreach (var initializerCall in initialization.Elements
+                        .OfType<BoundCall>())
+                    {
+                        var methodToken = 0x1600_0000u
+                            | checked((uint)(initializerCall.Function + 1));
+                        if (methodMapTokenSet.Add(methodToken))
+                        {
+                            methodMapTokens.Add(methodToken);
+                        }
+                    }
+                }
+            }
+        }
+
         var maps = TrRmRegisterBodyMapBuilder.Create(typeMapTokens,
-            [targetMethodMapToken]);
+            methodMapTokens);
         byte[] body;
         if (storageCall is not null)
         {
@@ -848,7 +975,7 @@ public static partial class TrRmExecutableCompiler
             new(0x0004, 0, (uint)featureRows.Count, featureBytes),
             new(0x0011, 0, (uint)typeSpecRows.Count, typeSpecBytes),
             new(0x0016, 0, (uint)methodRows.Count, methodBytes),
-            new(0x0017, 0, (uint)signatureRows.Length, signatureBytes),
+            new(0x0017, 0, (uint)signatureRows.Count, signatureBytes),
             new(0x001B, 0, (uint)contractRows.Count, contractBytes),
         };
         if (moduleRefRows.Count != 0)
@@ -887,7 +1014,8 @@ public static partial class TrRmExecutableCompiler
         }
         sections.Add(new TrRmSection(0x0020, 0, 1,
             TrRmVariableTableWriter.EncodeBodies([body])));
-        sections.Add(new TrRmSection(0x0021, 0, 1, nativeImportBytes));
+        sections.Add(new TrRmSection(0x0021, 0,
+            (uint)nativeImportRows.Count, nativeImportBytes));
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
 
@@ -953,10 +1081,13 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct NativeAddressStorageArgument(
         int ParameterOrdinal, BoundNativeStorageAddress Address);
 
+    private readonly record struct NativeAddressUnitInitializerCall(
+        BoundCall Call, NativeFunctionPointerSignatureDefinition Signature);
+
     private sealed record NativeAddressStorageCallPlan(
         BoundIndirectCall Call, int TargetVariable, int ReturnVariable,
         ImmutableArray<NativeAddressStorageArgument> StorageArguments,
-        ImmutableArray<BoundCall> UnitInitializerCalls,
+        ImmutableArray<NativeAddressUnitInitializerCall> UnitInitializerCalls,
         int ArrayInitializationIndexVariable);
 
     private static bool TryGetNativeAddressStorageCall(BoundProgram program,
@@ -1023,7 +1154,9 @@ public static partial class TrRmExecutableCompiler
         if (localDeclarations.Length
                 != function.Variables.Length - function.ParameterCount
             || statements.Take(callStatements[0].index)
-                .Any(static statement => statement is not BoundLocal))
+                .Any(static statement => statement is not BoundLocal
+                    and not BoundExpressionStatement
+                        { Expression: BoundCall }))
         {
             return false;
         }
@@ -1173,27 +1306,57 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        var unitInitializerCalls = ImmutableArray.CreateBuilder<BoundCall>();
-        foreach (var declaration in localDeclarations)
+        var unitInitializerCalls
+            = ImmutableArray.CreateBuilder<NativeAddressUnitInitializerCall>();
+        bool AddUnitInitializerCall(BoundCall unitCall,
+            int initializerArrayVariable)
         {
-            if (declaration.Initializer
-                is not BoundNativeFixedArrayInitialization initialization)
+            if ((uint)unitCall.Function >= (uint)program.Functions.Length)
             {
-                continue;
+                return false;
             }
 
-            foreach (var element in initialization.Elements)
+            var unitCallTarget = program.Functions[unitCall.Function];
+            if (!NativeFunctionPointerContract.TryCreateNativeImportSignature(
+                    unitCallTarget,
+                    program.NativeFunctionPointerSignatures,
+                    out var unitCallSignature)
+                || unitCallSignature is null
+                || !IsSupportedNativeUnitInitializerCall(unitCall,
+                    unitCallTarget, unitCallSignature, function, program,
+                    localVariables, initializerArrayVariable, schema))
             {
-                if (element is BoundCall unitCall)
+                return false;
+            }
+
+            unitInitializerCalls.Add(new NativeAddressUnitInitializerCall(
+                unitCall, unitCallSignature));
+            return true;
+        }
+
+        foreach (var statement in statements.Take(callStatements[0].index))
+        {
+            if (statement is BoundExpressionStatement
+                { Expression: BoundCall unitCall })
+            {
+                if (!AddUnitInitializerCall(unitCall, -1))
                 {
-                    if (!IsSupportedNativeUnitInitializerCall(unitCall,
-                            address.Function, function, program, signature,
-                            localVariables, declaration.Variable, schema))
+                    return false;
+                }
+            }
+            else if (statement is BoundLocal
+                {
+                    Initializer: BoundNativeFixedArrayInitialization initialization,
+                } arrayLocal)
+            {
+                foreach (var element in initialization.Elements)
+                {
+                    if (element is BoundCall arrayElementCall
+                        && !AddUnitInitializerCall(arrayElementCall,
+                            arrayLocal.Variable))
                     {
                         return false;
                     }
-
-                    unitInitializerCalls.Add(unitCall);
                 }
             }
         }
@@ -1261,17 +1424,26 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsSupportedNativeUnitInitializerCall(
-        BoundCall call, int targetFunction, BoundFunction caller,
-        BoundProgram program,
+        BoundCall call, BoundFunction target,
         NativeFunctionPointerSignatureDefinition signature,
+        BoundFunction caller, BoundProgram program,
         HashSet<int> localVariables, int initializerArrayVariable,
         TrRmArtifactSchema schema)
     {
-        if (call.Function != targetFunction
+        if (target.DirectNativeImport is null
+            || target.ModuleImport is not null
+            || !target.IsExternal
+            || target.DoesNotReturn
+            || !target.DirectNativeImport.Outputs.IsEmpty
+            || !DirectNativeImportContract.IsValid(target,
+                program.Structures, program.NativeFunctionPointerSignatures,
+                program.NativePointerTypes)
+            || target.ReturnType != PrimitiveType.Void
             || call.Type != PrimitiveType.Void
             || signature.ReturnType != PrimitiveType.Void
             || !call.IsUnsafeAuthorized
             || call.Arguments.Length != signature.ParameterTypes.Length
+            || call.Arguments.Length != target.ParameterCount
             || (!call.ArgumentParameterIndices.IsDefault
                 && call.ArgumentParameterIndices.Length
                     != call.Arguments.Length))
@@ -1534,7 +1706,7 @@ public static partial class TrRmExecutableCompiler
             callIndex < storageCall.UnitInitializerCalls.Length;
             callIndex++)
         {
-            var unitCall = storageCall.UnitInitializerCalls[callIndex];
+            var unitCall = storageCall.UnitInitializerCalls[callIndex].Call;
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
@@ -1599,7 +1771,9 @@ public static partial class TrRmExecutableCompiler
             callIndex < storageCall.UnitInitializerCalls.Length;
             callIndex++)
         {
-            var call = storageCall.UnitInitializerCalls[callIndex];
+            var unitCallPlan
+                = storageCall.UnitInitializerCalls[callIndex];
+            var call = unitCallPlan.Call;
             for (var argumentIndex = 0;
                 argumentIndex < call.Arguments.Length;
                 argumentIndex++)
@@ -1618,7 +1792,8 @@ public static partial class TrRmExecutableCompiler
                     homeMap.AsSpan(offset + 2),
                     maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
                         getSignatureTypeSpecRef(
-                            signature.ParameterTypes[parameterIndex]))));
+                            unitCallPlan.Signature.ParameterTypes[
+                                parameterIndex]))));
             }
         }
 
@@ -1654,7 +1829,7 @@ public static partial class TrRmExecutableCompiler
             + storageCall.UnitInitializerCalls.Length;
         foreach (var unitCall in storageCall.UnitInitializerCalls)
         {
-            foreach (var argument in unitCall.Arguments)
+            foreach (var argument in unitCall.Call.Arguments)
             {
                 if (argument is not BoundNativeStorageAddress address)
                 {
@@ -1712,15 +1887,18 @@ public static partial class TrRmExecutableCompiler
         {
             if (unitCallIndex >= storageCall.UnitInitializerCalls.Length
                 || !ReferenceEquals(storageCall.UnitInitializerCalls[
-                    unitCallIndex], unitCall))
+                    unitCallIndex].Call, unitCall))
             {
                 throw Unsupported(
                     "The A2EU unit calls are not in initializer source order.");
             }
 
+            var unitCallPlan
+                = storageCall.UnitInitializerCalls[unitCallIndex];
             var currentCallIndex = unitCallIndex++;
+            var unitSignature = unitCallPlan.Signature;
             var argumentIndexByParameter = new int[
-                signature.ParameterTypes.Length];
+                unitSignature.ParameterTypes.Length];
             Array.Fill(argumentIndexByParameter, -1);
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
@@ -1732,7 +1910,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             var callInputs = new TrRmRegisterBodyCallInput[
-                signature.ParameterTypes.Length];
+                unitSignature.ParameterTypes.Length];
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
@@ -1821,7 +1999,8 @@ public static partial class TrRmExecutableCompiler
                         checked((ushort)storageHome),
                         maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
                             getSignatureTypeSpecRef(
-                                signature.ParameterTypes[parameterIndex]))),
+                                unitSignature.ParameterTypes[
+                                    parameterIndex]))),
                         requiredElementCount));
                 code.Add(0xEC);
                 code.Add(0);
@@ -1838,7 +2017,8 @@ public static partial class TrRmExecutableCompiler
             {
                 var argumentIndex
                     = argumentIndexByParameter[parameterIndex];
-                var parameterType = signature.ParameterTypes[parameterIndex];
+                var parameterType
+                    = unitSignature.ParameterTypes[parameterIndex];
                 switch (unitCall.Arguments[argumentIndex])
                 {
                     case BoundNativeStorageAddress:
@@ -1892,8 +2072,9 @@ public static partial class TrRmExecutableCompiler
 
             var callSiteIndex = checked((ushort)records.Count);
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                1, 0, maps.GetMethodMapIndex(targetMethodMapToken), 0,
-                callInputs, []));
+                1, 0, maps.GetMethodMapIndex(0x1600_0000u
+                    | checked((uint)(unitCall.Function + 1))), 0, callInputs,
+                []));
             AppendCallSiteInstruction(code, callSiteIndex);
         }
 
@@ -2105,6 +2286,11 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     AppendHomeStore(code, sourceRegister, homeIndex);
+                    break;
+
+                case BoundExpressionStatement
+                    { Expression: BoundCall unitCall }:
+                    AppendUnitInitializerCall(unitCall);
                     break;
 
                 case BoundExpressionStatement
