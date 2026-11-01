@@ -637,6 +637,8 @@ public static partial class TrRmExecutableCompiler
     {
         var pendingStructures = new Stack<int>(selectedStructures);
         var checkedStructures = new HashSet<int>();
+        var checkedArrayTypes = new HashSet<int>();
+        var checkedPointerTypes = new HashSet<int>();
         while (pendingStructures.TryPop(out var structureIndex))
         {
             if (!checkedStructures.Add(structureIndex))
@@ -662,8 +664,29 @@ public static partial class TrRmExecutableCompiler
                         "A source TypeDef export has an invalid fixed-array closure.");
                 }
 
-                AddNominalDependencies(
-                    program.NativeFixedArrayTypes[arrayIndex].ElementType);
+                if (checkedArrayTypes.Add(arrayIndex))
+                {
+                    AddNominalDependencies(
+                        program.NativeFixedArrayTypes[arrayIndex].ElementType);
+                }
+                return;
+            }
+
+            if (NativePointerTypes.IsType(type))
+            {
+                var pointerIndex = NativePointerTypes.Index(type);
+                if ((uint)pointerIndex
+                    >= (uint)program.NativePointerTypes.Length)
+                {
+                    throw Unsupported(
+                        "A source TypeDef export has an invalid native-pointer closure.");
+                }
+
+                if (checkedPointerTypes.Add(pointerIndex))
+                {
+                    AddNominalDependencies(
+                        program.NativePointerTypes[pointerIndex].PointeeType);
+                }
                 return;
             }
 

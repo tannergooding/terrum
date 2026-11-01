@@ -361,6 +361,39 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(stalePointerProgram,
                 moduleIdentity, schemaIdentity, 1));
+
+        var pointerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct Element {
+                    public int32 Value;
+                }
+                [Blittable] [Layout(LayoutKind.Sequential)]
+                public struct PointerContainer {
+                    public ptr<Element> Value;
+                }
+                """));
+        Assert.That(pointerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, pointerCompilation.Diagnostics));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(pointerCompilation.Program!,
+                "a2-pointer-export-closure", schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "PointerContainer",
+                    "pointer-container")]));
+        var pointerArtifact = TrRmExecutableCompiler.EmitStandard(
+            pointerCompilation.Program!, "a2-pointer-export-closure",
+            schemaIdentity, 1,
+            [
+                new TrRmSourceTypeExport("", "PointerContainer",
+                    "pointer-container"),
+                new TrRmSourceTypeExport("", "Element", "element"),
+            ]);
+        var pointerReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, pointerArtifact),
+                "a2-pointer-export-closure", [], ["pointer-container"]);
+        Assert.That(pointerReference.Structures.Any(static structure
+            => structure.Name == "Element"), Is.True);
     }
 
     [Test]

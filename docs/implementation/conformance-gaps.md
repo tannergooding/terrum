@@ -479,10 +479,12 @@ remains unapproved. Its local A2 `EmitStandard` export-map slice is
 implemented provisionally: source-bound public ordinary Copy declarations
 require explicit namespace/name selection and an exact caller-supplied key;
 exported roots also require explicit keys for every local nominal child in
-their field/array closure. There is no name-derived default or alias. The full
+their field, fixed-array, or typed-pointer storage closure. There is no
+name-derived default or alias. The full
 `CreateStandardReference` type-key projection now selects nonempty explicit
 TypeDef ExportKeys from one local type-only A2 Module, then materializes only
-the selected roots and their required public nominal/array closure. Closure-
+the selected roots and their required public nominal/fixed-array/typed-pointer
+closure. Closure-
 only declarations are not exposed through source name lookup. Projected types
 retain the schema, artifact snapshot, Module requirements, TypeDef identity,
 and selected/closure ExportKeys; Standard and private module producers reject
