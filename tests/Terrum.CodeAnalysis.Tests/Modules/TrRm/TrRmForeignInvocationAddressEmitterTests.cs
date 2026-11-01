@@ -3,15 +3,19 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Infrastructure;
 using Terrum.CodeAnalysis.Tests.Semantics;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -1664,6 +1668,175 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     malformedTarget),
                 moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [TestCase(true, false)]
+    [TestCase(false, false)]
+    [TestCase(true, true)]
+    public void StandardA2EUConditionalJitExecutesOnlyTheSelectedNativeArm(
+        bool choose, bool failFalseArm)
+    {
+        const string moduleIdentity = "a2eu-unit-conditional-jit";
+        AssertA2EUWindowsX64();
+        var input = CreateStandardA2EUConditionalRuntimeInput(choose,
+            moduleIdentity, failFalseArm);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var result = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2EU source-free JIT: choose={choose}; failFalseArm={failFalseArm}; policy=FailFast; expected={(choose ? 0 : Environment.ProcessId)}; actual={result}.");
+        Assert.That(result,
+            Is.EqualTo(choose ? 0 : Environment.ProcessId));
+    }
+
+    [TestCase(true, false)]
+    [TestCase(false, false)]
+    [TestCase(true, true)]
+    [TestCase(false, true)]
+    public async Task StandardA2EUConditionalAotExecutesOnlyTheSelectedNativeArm(
+        bool choose, bool failFalseArm)
+    {
+        const string moduleIdentity = "a2eu-unit-conditional-aot";
+        AssertA2EUWindowsX64();
+        var input = CreateStandardA2EUConditionalRuntimeInput(choose,
+            moduleIdentity, failFalseArm);
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        var imagePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-{moduleIdentity}-{Guid.NewGuid():N}.exe");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            process = Process.Start(new ProcessStartInfo(imagePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException(
+                "The A2EU native executable was not started.");
+            var processId = process.Id;
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"A2EU native executable exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            var output = await stdout.ConfigureAwait(true);
+            var error = await stderr.ConfigureAwait(true);
+            var expected = failFalseArm && !choose
+                ? unchecked((int)0xE0540002)
+                : choose ? 0 : processId;
+            TestContext.WriteLine(
+                $"A2EU source-free AOT: choose={choose}; failFalseArm={failFalseArm}; policy=FailFast; pid={processId}; expected={expected}; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
+            Assert.That(process.ExitCode, Is.EqualTo(expected));
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static TrRmStandardArtifactInput
+        CreateStandardA2EUConditionalRuntimeInput(bool choose,
+            string moduleIdentity, bool failFalseArm)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var source = $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void SetLastError(uint32 errorCode);
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetLastError",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            // Both selected values fit the test's signed result surface.
+            internal extern int32 GetLastError();
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetCurrentProcessId",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern uint32 GetCurrentProcessId();
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            internal extern int32 IsBadReadPtr(
+                ptr<int32> memory,
+                uint64 byteCount);
+
+            int32 Main() {
+                unsafe {
+                    bool choose = {{choose.ToString().ToLowerInvariant()}};
+                    uint32 clearError = 0;
+                    uint32 markedError = GetCurrentProcessId();
+                    choose
+                        ? SetLastError(clearError)
+                        : {{(failFalseArm
+                            ? "SetLastError(markedError / clearError)"
+                            : "SetLastError(markedError)")}};
+                    int32 observedError = GetLastError();
+                    uint64 byteCount = 0;
+                    var callback = &IsBadReadPtr;
+                    callback(&observedError, byteCount);
+                    return observedError;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        TestContext.WriteLine(
+            $"A2EU source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={typeof(TrRmExecutableCompiler).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(TrRmExecutableCompiler).Assembly.Location)))}.");
+        return new TrRmStandardArtifactInput(schemaIdentity, artifact);
+    }
+
+    private static void AssertA2EUWindowsX64()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
     }
 
     [Test]
