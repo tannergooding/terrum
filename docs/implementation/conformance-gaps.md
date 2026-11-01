@@ -445,19 +445,19 @@ one actual definition, 17-provider fan-in, self-edges and mutual cycles are
 covered by public API tests;
 provider Bodies are not merged or invoked. The checked plan revalidates the
 complete retained closure before lowering. The Debug fast build and combined
-NativeAddress/provider-CLI selection passed 142/142 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_45_39_net11.0.trx`,
+NativeAddress/provider-CLI selection passed 144/144 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_52_36_net11.0.trx`,
 including deep-provider rejection, duplicate/empty/non-first Modules, caller
-buffer mutation after plan creation, duplicate mixed names, a non-first address
-target, 17-provider fan-in, UTF-16 identity and ordinal case/normalization
+buffer mutation after plan creation, duplicate mixed names, non-first address
+targets, 17-provider fan-in, UTF-16 identity and ordinal case/normalization
 checks, exact alternate ExportKey selection, compatible deep-body replacement,
-CLI JIT/AOT, PE import/export inspection, a self-edge DLL export invocation and
-sentinel output preservation. Native input/compiler hashes and results are
-recorded in
+chain/diamond/mutual-cycle CLI JIT/AOT, no-entry DLL export invocation, PE
+import/export inspection and sentinel output preservation. Native input/
+compiler hashes and execution results are recorded in
 `artifacts\\log\\compiler-adoption-f-provider-closure-native-qualification.log`.
 This remains provisional, not formal approval or full Standard conformance.
-Further evidence is still required for a multi-edge chain with every Module
-co-located, broader Module/Import/Body permutation and re-encoding, Unicode
+Further evidence is still required for a transitive acyclic chain with every
+Module co-located, broader Module/Import/Body permutation and re-encoding, Unicode
 normalization edge cases outside the exercised NFC/NFD identity pair and
 row/map/work limits beyond the tested fan-in of 17. Same-name expanded lowering,
 general source production/

@@ -4673,6 +4673,17 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(hybridLoaded.Functions.Single(static function =>
             function.Name == "Owned").ModuleImport!.ProducerIdentity,
             Is.EqualTo(providerIdentity));
+        var coLocatedRootProviderArtifact
+            = CombinePopulatedNativeAddressModules(rootArtifact,
+                providerArtifact);
+        var coLocatedRootProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, coLocatedRootProviderArtifact);
+        var rootProviderLoaded = TrRmExecutableCompiler.LoadStandard(
+            coLocatedRootProviderInput, rootIdentity,
+            [secondInput, thirdInput]);
+        Assert.That(rootProviderLoaded.Functions.Single(
+            static function => function.Name == "Owned").ModuleImport!
+            .ProducerIdentity, Is.EqualTo(providerIdentity));
     }
 
     [Test]

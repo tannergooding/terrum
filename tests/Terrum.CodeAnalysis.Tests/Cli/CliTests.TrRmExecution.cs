@@ -28,6 +28,9 @@ public sealed partial class CliTests
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate long TrRmIdentity(long value);
 
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int StandardFNativeFunction();
+
     [Test]
     public async Task CompileTrRmSelectsTheExactNominalEnumsSchemaAsync()
     {
@@ -1125,6 +1128,247 @@ public sealed partial class CliTests
     {
         TestContext.WriteLine(
             $"Standard F input {role}: module={moduleIdentity}; bytes={artifact.Length}; sha256={Convert.ToHexString(SHA256.HashData(artifact))}");
+    }
+
+    [Test]
+    public async Task SelectedFProviderDiamondRunsBuildsAndExportsAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        const string leafIdentity = "Leaf";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var (rootArtifact, _, _, _) =
+            TrRmForeignInvocationAddressEmitterTests
+                .CreateMultipleRootMethodImportArtifacts(
+                    targetMethodName: "Second");
+        var firstProviderArtifact
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateMixedImportProviderArtifact("First", "First",
+                    "GetCurrentProcessId", "Leaf", "GetTickCount",
+                    leafIdentity, "Leaf", core);
+        var secondProviderArtifact
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateMixedImportProviderArtifact("Second", "Second",
+                    "GetCurrentThreadId", "Leaf", "GetTickCount",
+                    leafIdentity, "Leaf", core);
+        var leafCompilation
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateMultipleImportProviderCompilation(
+                    "Leaf", "GetTickCount", core);
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        WriteStandardFArtifactEvidence("diamond-root", rootIdentity,
+            rootArtifact);
+        WriteStandardFArtifactEvidence("diamond-first", "First",
+            firstProviderArtifact);
+        WriteStandardFArtifactEvidence("diamond-second", "Second",
+            secondProviderArtifact);
+        WriteStandardFArtifactEvidence("diamond-leaf", leafIdentity,
+            leafArtifact);
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-provider-diamond-{Guid.NewGuid():N}");
+        var rootPath = prefix + "-root.trrm";
+        var firstPath = prefix + "-first.trrm";
+        var secondPath = prefix + "-second.trrm";
+        var leafPath = prefix + "-leaf.trrm";
+        var imagePath = prefix + ".exe";
+        var libraryPath = prefix + ".dll";
+        try
+        {
+            await File.WriteAllBytesAsync(rootPath, rootArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(firstPath, firstProviderArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(secondPath, secondProviderArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(leafPath, leafArtifact)
+                .ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                rootPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", rootIdentity,
+                "--trrm-provider", schemaIdentity, firstPath,
+                "--trrm-provider", schemaIdentity, secondPath,
+                "--trrm-provider", schemaIdentity, leafPath, "--json")
+                .ConfigureAwait(true);
+            TestContext.WriteLine($"Diamond CLI JIT exit: {ran}");
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", rootPath, "-o", imagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, firstPath, "--trrm-provider", schemaIdentity,
+                secondPath, "--trrm-provider", schemaIdentity, leafPath,
+                "--json").ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            var imageResult = await ExecuteTrRmImageAsync(imagePath)
+                .ConfigureAwait(true);
+            TestContext.WriteLine($"Diamond emitted EXE result: {imageResult}");
+            Assert.That(imageResult, Is.GreaterThan(0));
+
+            var secondInput = new TrRmStandardArtifactInput(schemaIdentity,
+                secondProviderArtifact);
+            var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+                leafArtifact);
+            var library = NativeModuleCompiler.EmitStandardLibrary(
+                secondInput, "Second", [leafInput], ["Second"],
+                NativeRuntimePolicy.FailFast);
+            await File.WriteAllBytesAsync(libraryPath, library)
+                .ConfigureAwait(true);
+            var handle = NativeLibrary.Load(libraryPath);
+            try
+            {
+                var invoke = Marshal.GetDelegateForFunctionPointer<
+                    StandardFNativeFunction>(NativeLibrary.GetExport(handle,
+                    "Second"));
+                var result = invoke();
+                TestContext.WriteLine(
+                    $"Diamond no-entry DLL export result: {result}");
+                Assert.That(result, Is.GreaterThan(0));
+            }
+            finally
+            {
+                NativeLibrary.Free(handle);
+            }
+
+            _ = Assert.Throws<ArgumentException>(() =>
+                NativeModuleCompiler.EmitStandardLibrary(secondInput,
+                    "Second", [leafInput], ["Leaf"],
+                    NativeRuntimePolicy.FailFast));
+        }
+        finally
+        {
+            File.Delete(rootPath);
+            File.Delete(firstPath);
+            File.Delete(secondPath);
+            File.Delete(leafPath);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task SelectedFProviderCycleRunsBuildsAndExportsAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "CycleRoot";
+        const string firstIdentity = "CycleP";
+        const string secondIdentity = "CycleQ";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootArtifact = TrRmForeignInvocationAddressEmitterTests
+            .CreateRootMethodImportArtifact(rootIdentity, firstIdentity,
+                firstIdentity, firstIdentity, core);
+        var firstProviderArtifact = TrRmForeignInvocationAddressEmitterTests
+            .CreateMixedImportProviderArtifact(firstIdentity, firstIdentity,
+                "GetCurrentProcessId", secondIdentity,
+                "GetCurrentProcessId", secondIdentity, secondIdentity, core);
+        var secondProviderArtifact = TrRmForeignInvocationAddressEmitterTests
+            .CreateMixedImportProviderArtifact(secondIdentity, secondIdentity,
+                "GetCurrentProcessId", firstIdentity,
+                "GetCurrentProcessId", firstIdentity, firstIdentity, core);
+        WriteStandardFArtifactEvidence("cycle-root", rootIdentity,
+            rootArtifact);
+        WriteStandardFArtifactEvidence("cycle-first", firstIdentity,
+            firstProviderArtifact);
+        WriteStandardFArtifactEvidence("cycle-second", secondIdentity,
+            secondProviderArtifact);
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-provider-cycle-{Guid.NewGuid():N}");
+        var rootPath = prefix + "-root.trrm";
+        var firstPath = prefix + "-first.trrm";
+        var secondPath = prefix + "-second.trrm";
+        var imagePath = prefix + ".exe";
+        var libraryPath = prefix + ".dll";
+        try
+        {
+            await File.WriteAllBytesAsync(rootPath, rootArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(firstPath, firstProviderArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(secondPath, secondProviderArtifact)
+                .ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                rootPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", rootIdentity,
+                "--trrm-provider", schemaIdentity, firstPath,
+                "--trrm-provider", schemaIdentity, secondPath, "--json")
+                .ConfigureAwait(true);
+            TestContext.WriteLine($"Cycle CLI JIT exit: {ran}");
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", rootPath, "-o", imagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, firstPath, "--trrm-provider", schemaIdentity,
+                secondPath, "--json").ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            var imageResult = await ExecuteTrRmImageAsync(imagePath)
+                .ConfigureAwait(true);
+            TestContext.WriteLine($"Cycle emitted EXE result: {imageResult}");
+            Assert.That(imageResult, Is.GreaterThan(0));
+
+            var firstInput = new TrRmStandardArtifactInput(schemaIdentity,
+                firstProviderArtifact);
+            var secondInput = new TrRmStandardArtifactInput(schemaIdentity,
+                secondProviderArtifact);
+            var library = NativeModuleCompiler.EmitStandardLibrary(
+                firstInput, firstIdentity, [secondInput], [firstIdentity],
+                NativeRuntimePolicy.FailFast);
+            await File.WriteAllBytesAsync(libraryPath, library)
+                .ConfigureAwait(true);
+            var handle = NativeLibrary.Load(libraryPath);
+            try
+            {
+                var invoke = Marshal.GetDelegateForFunctionPointer<
+                    StandardFNativeFunction>(NativeLibrary.GetExport(handle,
+                    firstIdentity));
+                var result = invoke();
+                TestContext.WriteLine(
+                    $"Mutual-cycle no-entry DLL export result: {result}");
+                Assert.That(result, Is.GreaterThan(0));
+            }
+            finally
+            {
+                NativeLibrary.Free(handle);
+            }
+        }
+        finally
+        {
+            File.Delete(rootPath);
+            File.Delete(firstPath);
+            File.Delete(secondPath);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(libraryPath)
+                .ConfigureAwait(true);
+        }
     }
 
     [Test]
