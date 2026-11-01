@@ -575,6 +575,13 @@ internal sealed partial class Binder
                 var argument = typeArguments[ordinal];
                 if (formal.Kind == BoundInterfaceFormalKind.Type)
                 {
+                    if (argument.Kind
+                        == SyntaxKind.ExistentialTypeArgument)
+                    {
+                        arguments.Add(
+                            BoundInterfaceTypeArgument.ForExistentialType());
+                        continue;
+                    }
                     if (argument.Kind == SyntaxKind.ConstantGenericArgument)
                     {
                         Report("TRM3005",
@@ -595,6 +602,14 @@ internal sealed partial class Binder
                 }
                 else
                 {
+                    if (argument.Kind
+                        == SyntaxKind.ExistentialTypeArgument)
+                    {
+                        Report("TRM3005",
+                            "An existential type argument cannot satisfy a constant formal.",
+                            argument.Span);
+                        return null;
+                    }
                     if (formal.ConstantType is not BoundInterfaceType constantType)
                     {
                         return null;
@@ -1688,12 +1703,15 @@ internal sealed partial class Binder
 
     private static string InterfaceTypeArgumentKey(
         BoundInterfaceTypeArgument argument) =>
-        argument.Kind == BoundInterfaceTypeArgumentKind.Type
-            ? $"T:{InterfaceTypeKey(argument.Type!)}"
-            : $"C:{InterfaceTypeKey(argument.ConstantType!)}:"
+        argument.Kind switch {
+            BoundInterfaceTypeArgumentKind.Type
+                => $"T:{InterfaceTypeKey(argument.Type!)}",
+            BoundInterfaceTypeArgumentKind.ExistentialType => "X",
+            _ => $"C:{InterfaceTypeKey(argument.ConstantType!)}:"
                 + (argument.ConstantValue is BoundConstant constant
                     ? $"{(int)constant.Type}:{constant.Bits.Low}:{constant.Bits.High}"
-                    : $"{argument.ConstantParameterScope}:{argument.ConstantParameterOrdinal}");
+                    : $"{argument.ConstantParameterScope}:{argument.ConstantParameterOrdinal}"),
+        };
     private void BindInterfaceConstraints(
         SyntaxNode declaration,
         IReadOnlyDictionary<string, int> typeParameters,

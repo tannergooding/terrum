@@ -290,6 +290,7 @@ internal enum BoundInterfaceTypeArgumentKind : byte
 {
     Type = 1,
     Constant = 2,
+    ExistentialType = 3,
 }
 
 internal sealed record BoundInterfaceTypeArgument(
@@ -302,6 +303,10 @@ internal sealed record BoundInterfaceTypeArgument(
 {
     internal static BoundInterfaceTypeArgument ForType(BoundInterfaceType type) =>
         new(BoundInterfaceTypeArgumentKind.Type, type, null, null,
+            BoundInterfaceTypeParameterScope.None, -1);
+
+    internal static BoundInterfaceTypeArgument ForExistentialType() =>
+        new(BoundInterfaceTypeArgumentKind.ExistentialType, null, null, null,
             BoundInterfaceTypeParameterScope.None, -1);
 
     internal static BoundInterfaceTypeArgument ForConstant(

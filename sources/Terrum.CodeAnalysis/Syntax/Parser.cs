@@ -1072,6 +1072,11 @@ internal sealed class Parser
 
     private SyntaxNode ParseTypeArgument()
     {
+        if (Current.Kind == TokenKind.Underscore)
+        {
+            return Node(SyntaxKind.ExistentialTypeArgument, [Take()]);
+        }
+
         if (Current.Kind is TokenKind.NumericLiteral or TokenKind.StringLiteral
             or TokenKind.CharacterLiteral or TokenKind.TrueKeyword or TokenKind.FalseKeyword
             or TokenKind.NullKeyword)

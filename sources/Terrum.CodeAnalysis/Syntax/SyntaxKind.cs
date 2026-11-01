@@ -237,4 +237,6 @@ public enum SyntaxKind
     FriendTarget,
     /// <summary>A constant literal used as a type argument.</summary>
     ConstantGenericArgument,
+    /// <summary>A hidden type slot in an existential generic type argument.</summary>
+    ExistentialTypeArgument,
 }

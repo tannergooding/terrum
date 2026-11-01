@@ -28,6 +28,79 @@ public sealed class InterfaceDeclarationBindingTests
     }
 
     [Test]
+    public void BindsExistentialInterfaceTypeArgumentSlots()
+    {
+        const string source = """
+            public interface IBox<T, U> { }
+            public interface IView {
+                IBox<int32, _> HideSecond();
+                IBox<_, int32> HideFirst();
+                IBox<_, _> HideBoth();
+                IBox<IBox<_, int32>, _> HideNestedSlots();
+            }
+            int32 Main() => 0;
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var interfaces = compilation.Program!.Interfaces;
+        var view = interfaces.Single(static item =>
+            item.QualifiedName == "IView");
+        BoundInterfaceType ResultType(string name) =>
+            view.Members.Single(member => member.Name == name)
+                .ResultType!;
+
+        Assert.That(ResultType("HideSecond").TypeArguments[0].Kind,
+            Is.EqualTo(BoundInterfaceTypeArgumentKind.Type));
+        Assert.That(ResultType("HideSecond").TypeArguments[1].Kind,
+            Is.EqualTo(BoundInterfaceTypeArgumentKind.ExistentialType));
+        Assert.That(ResultType("HideFirst").TypeArguments[0].Kind,
+            Is.EqualTo(BoundInterfaceTypeArgumentKind.ExistentialType));
+        Assert.That(ResultType("HideBoth").TypeArguments.Select(
+            static argument => argument.Kind),
+            Is.All.EqualTo(BoundInterfaceTypeArgumentKind.ExistentialType));
+        Assert.That(BoundInterfaceContract.AreEquivalent(
+            ResultType("HideSecond"), ResultType("HideFirst")), Is.False);
+        Assert.That(ResultType("HideNestedSlots").TypeArguments[0].Type!
+            .TypeArguments[0].Kind,
+            Is.EqualTo(BoundInterfaceTypeArgumentKind.ExistentialType));
+        Assert.That(ResultType("HideNestedSlots").TypeArguments[1].Kind,
+            Is.EqualTo(BoundInterfaceTypeArgumentKind.ExistentialType));
+
+        var rewritten = interfaces.Select(@interface =>
+            BoundTreeTraversal.RewriteTypes(@interface,
+                static type => type == PrimitiveType.Int32
+                    ? PrimitiveType.Int64 : type)).ToArray();
+        var rewrittenView = rewritten.Single(static item =>
+            item.QualifiedName == "IView");
+        Assert.That(rewrittenView.Members.Single(static member =>
+                member.Name == "HideSecond").ResultType!
+                .TypeArguments[1].Kind,
+            Is.EqualTo(BoundInterfaceTypeArgumentKind.ExistentialType));
+        Assert.That(BoundInterfaceContract.IsValidTable([.. rewritten],
+            static _ => true), Is.True);
+    }
+
+    [Test]
+    public void RejectsExistentialInterfaceArgumentForConstantFormal()
+    {
+        const string source = """
+            public interface ICount<const int32 Size> { }
+            public interface IView { ICount<_> Read(); }
+            int32 Main() => 0;
+            """;
+
+        var compilation = Compilation.Create(SyntaxTree.Parse(source));
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3005"), Is.True);
+    }
+
+    [Test]
     public void BindsLiteralAndForwardedConstantArgumentsOnInterfaceBases()
     {
         const string source = """

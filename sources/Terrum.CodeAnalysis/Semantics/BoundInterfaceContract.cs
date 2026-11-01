@@ -601,17 +601,35 @@ internal static class BoundInterfaceContract
                 var formal = nominalDefinition!.Formals[ordinal];
                 if (formal.Kind == BoundInterfaceFormalKind.Type)
                 {
-                    if (argument is null
-                        || argument.Kind != BoundInterfaceTypeArgumentKind.Type
-                        || argument.Type is null || argument.ConstantType is not null
+                    if (argument is null)
+                    {
+                        return false;
+                    }
+                    if (argument.Kind
+                        == BoundInterfaceTypeArgumentKind.ExistentialType)
+                    {
+                        if (argument.Type is not null
+                            || argument.ConstantType is not null
+                            || argument.ConstantValue is not null
+                            || argument.ConstantParameterScope
+                                != BoundInterfaceTypeParameterScope.None
+                            || argument.ConstantParameterOrdinal != -1)
+                        {
+                            return false;
+                        }
+                    }
+                    else if (argument.Kind
+                            != BoundInterfaceTypeArgumentKind.Type
+                        || argument.Type is null
+                        || argument.ConstantType is not null
                         || argument.ConstantValue is not null
                         || argument.ConstantParameterScope
                             != BoundInterfaceTypeParameterScope.None
                         || argument.ConstantParameterOrdinal != -1
                         || !IsValidType(argument.Type, owner, definitions,
-                            isValidType, visibleTypeParameterCount, methodFormals,
-                            visibleMethodTypeParameterCount, false, depth + 1,
-                            ref visits))
+                            isValidType, visibleTypeParameterCount,
+                            methodFormals, visibleMethodTypeParameterCount,
+                            false, depth + 1, ref visits))
                     {
                         return false;
                     }
@@ -857,6 +875,12 @@ internal static class BoundInterfaceContract
         {
             return left.Type is not null && right.Type is not null
                 && AreEquivalent(left.Type, right.Type);
+        }
+        if (left.Kind == BoundInterfaceTypeArgumentKind.ExistentialType)
+        {
+            return left.Type is null && right.Type is null
+                && left.ConstantType is null && right.ConstantType is null
+                && left.ConstantValue is null && right.ConstantValue is null;
         }
 
         if (left.ConstantType is null || right.ConstantType is null

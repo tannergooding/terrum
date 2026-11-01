@@ -470,7 +470,11 @@ The hosted source binder now preserves nominal interface type arguments as
 tagged complete type or constant terms. Literal scalar actuals,
 forwarded interface/member constant formals, trailing type/constant defaults,
 type-domain substitution and cross-tree rewriting are covered by active
-binding regressions. This source declaration slice does not select interface
+binding regressions. Interface signature terms also preserve existential
+hidden type-argument slots independently from constant arguments. This is not
+general source `G<_>` value support: per-value hidden argument/evidence
+retention, generic pattern recovery, storage and runtime lowering remain
+unimplemented. This source declaration slice does not select interface
 witnesses, publish Standard interface members, or implement member-call
 lowering; provider binding and private witness persistence remain separate.
 Standard structural validation now reads `InterfaceDef` and
