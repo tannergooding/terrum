@@ -86,6 +86,8 @@ internal sealed partial class Binder
     private readonly Dictionary<string, string> _primitiveBackingFields = new(StringComparer.Ordinal);
     private readonly CompilationReference? _reference;
     private readonly NativeCoreRegistrationSet? _nativeCoreRegistration;
+    private readonly ImmutableArray<CoreExceptionIdentitySelection>
+        _coreExceptionIdentitySelections;
     private readonly string? _nativeLoweringAgreement;
     private readonly BoundRuntimePolicy _runtimePolicy;
     private readonly SourceArithmeticProfile _sourceArithmeticProfile;
@@ -154,7 +156,9 @@ internal sealed partial class Binder
         BoundRuntimePolicy runtimePolicy = BoundRuntimePolicy.FailFast, bool coreLibrary = false,
         SourceArithmeticProfile sourceArithmeticProfile = SourceArithmeticProfile.Development,
         NativeCoreRegistrationSet? nativeCoreRegistration = null,
-        string? nativeLoweringAgreement = null)
+        string? nativeLoweringAgreement = null,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections = default)
     {
         if (coreLibrary && (!isLibrary || reference is not null))
         {
@@ -181,6 +185,10 @@ internal sealed partial class Binder
             }
         }
         _nativeCoreRegistration = nativeCoreRegistration ?? reference?.NativeCoreRegistration;
+        _coreExceptionIdentitySelections
+            = coreExceptionIdentitySelections.IsDefault
+                ? reference?.CoreExceptionIdentitySelections ?? []
+                : coreExceptionIdentitySelections;
         _nativeLoweringAgreement = nativeLoweringAgreement;
         _runtimePolicy = runtimePolicy;
         _sourceArithmeticProfile = sourceArithmeticProfile;
@@ -886,6 +894,7 @@ internal sealed partial class Binder
             SourceTypeDeclarations = sourceTypeDeclarations.MoveToImmutable(),
             EnumDefinitions = [.. _enumDefinitions],
             NativeCoreRegistration = _nativeCoreRegistration,
+            CoreExceptionIdentitySelections = _coreExceptionIdentitySelections,
             NativeFunctionPointerSignatures = [.. _nativeFunctionPointerSignatures],
             NativePointerTypes = [.. _nativePointerTypes],
             NativeFixedArrayTypes = [.. _nativeFixedArrayTypes],

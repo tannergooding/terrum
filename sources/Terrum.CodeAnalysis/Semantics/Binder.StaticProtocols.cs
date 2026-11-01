@@ -1177,7 +1177,9 @@ internal sealed partial class Binder
             var proofBinder = new Binder([template.Tree], [], _cancellationToken,
                 isLibrary: true, runtimePolicy: _runtimePolicy,
                 sourceArithmeticProfile: _sourceArithmeticProfile,
-                nativeCoreRegistration: _nativeCoreRegistration);
+                nativeCoreRegistration: _nativeCoreRegistration,
+                coreExceptionIdentitySelections:
+                    _coreExceptionIdentitySelections);
             foreach (var (tree, context) in _contexts)
             {
                 proofBinder._contexts.Add(tree, context);
@@ -1323,6 +1325,8 @@ internal sealed partial class Binder
             functions[symbolicIndex] = function;
             var proof = new BoundProgram(functions.ToImmutable(), -1) {
                 Structures = [.. proofBinder._structs],
+                CoreExceptionIdentitySelections =
+                    proofBinder._coreExceptionIdentitySelections,
                 Classes = [.. proofBinder._classes],
                 RuntimePolicy = _runtimePolicy,
             };

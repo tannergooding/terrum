@@ -169,6 +169,11 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(default, "GenericNominalType");
         }
+        if (!CoreExceptionIdentitySelectionContract.IsValidTable(
+            program.CoreExceptionIdentitySelections))
+        {
+            throw InvalidEffect(default, "CoreExceptionIdentity");
+        }
         if (program.NativeCoreRegistration is NativeCoreRegistrationSet coreRegistration
             && !BoundEnumTypes.ContainsRegistration(program.EnumDefinitions, coreRegistration))
         {

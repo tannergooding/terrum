@@ -488,6 +488,9 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
 
+    internal ImmutableArray<CoreExceptionIdentitySelection>
+        CoreExceptionIdentitySelections { get; init; } = [];
+
     internal ImmutableArray<NativeFunctionPointerSignatureDefinition> NativeFunctionPointerSignatures { get; init; } = [];
 
     internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];

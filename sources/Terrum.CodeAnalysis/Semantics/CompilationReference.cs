@@ -19,7 +19,8 @@ public sealed class CompilationReference
         ImmutableArray<BoundGenericNominalTypeDefinition> genericNominalTypeDefinitions = default,
         ImmutableArray<BoundGenericNominalTypeInstance> genericNominalTypeInstances = default,
         CoreTaskTypeIdentity? coreTaskType = null,
-        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default)
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes = default,
+        ImmutableArray<CoreExceptionIdentitySelection> coreExceptionIdentitySelections = default)
     {
         if (nativeCoreRegistration is not null && !nativeCoreRegistration.IsValid())
         {
@@ -73,6 +74,13 @@ public sealed class CompilationReference
             throw new ArgumentException("The selected Core Task identity is invalid.",
                 nameof(coreTaskType));
         }
+        if (!CoreExceptionIdentitySelectionContract.IsValidTable(
+            coreExceptionIdentitySelections))
+        {
+            throw new ArgumentException(
+                "The selected Core exception identities are invalid.",
+                nameof(coreExceptionIdentitySelections));
+        }
 
         Structures = structures;
         Functions = functions;
@@ -93,6 +101,9 @@ public sealed class CompilationReference
         GenericNominalTypeInstances = genericNominalTypeInstances.IsDefault
             ? [] : genericNominalTypeInstances;
         CoreTaskType = coreTaskType;
+        CoreExceptionIdentitySelections
+            = coreExceptionIdentitySelections.IsDefault
+                ? [] : coreExceptionIdentitySelections;
     }
 
     /// <summary>Gets the value layouts exposed by the imported declarations.</summary>
@@ -134,6 +145,10 @@ public sealed class CompilationReference
     /// <summary>The host-selected exact Core Task declaration, if one was selected for this provider set.</summary>
     public CoreTaskTypeIdentity? CoreTaskType { get; }
 
+    /// <summary>Exact host-selected Core exception anchors for using Modules in this reference.</summary>
+    public ImmutableArray<CoreExceptionIdentitySelection>
+        CoreExceptionIdentitySelections { get; }
+
     /// <summary>Returns a reference that explicitly selects one checked provider definition as Core Task.</summary>
     public CompilationReference SelectCoreTaskType(BoundGenericNominalTypeIdentity identity)
     {
@@ -156,6 +171,6 @@ public sealed class CompilationReference
             NativeFunctionPointerSignatures, NativePointerTypes,
             NativeCoreRegistration, EnumDefinitions, CheckedReferenceTypes,
             Interfaces, GenericNominalTypeDefinitions, GenericNominalTypeInstances,
-            selection, NativeFixedArrayTypes);
+            selection, NativeFixedArrayTypes, CoreExceptionIdentitySelections);
     }
 }
