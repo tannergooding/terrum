@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -1106,7 +1107,7 @@ public static partial class TrRmExecutableCompiler
 
     private readonly record struct NativeAddressUnitInitializerCall(
         BoundCall Call, NativeFunctionPointerSignatureDefinition Signature,
-        int ResultHome, ImmutableArray<int> ArgumentSnapshotHomes);
+        int ResultHome, ImmutableArray<int> ArgumentCaptureHomes);
 
     private readonly record struct NativeAddressUnitCallHome(
         int Index, PrimitiveType Type);
@@ -1133,16 +1134,16 @@ public static partial class TrRmExecutableCompiler
             }
 
             for (var argumentIndex = 0;
-                argumentIndex < call.ArgumentSnapshotHomes.Length;
+                argumentIndex < call.ArgumentCaptureHomes.Length;
                 argumentIndex++)
             {
-                var home = call.ArgumentSnapshotHomes[argumentIndex];
+                var home = call.ArgumentCaptureHomes[argumentIndex];
                 if (home >= localCount
                     && !homesByIndex.TryAdd(home,
                         call.Call.Arguments[argumentIndex].Type))
                 {
                     throw Unsupported(
-                        "The A2EU argument snapshot Home is reused.");
+                        "The A2EU argument capture Home is reused.");
                 }
             }
         }
@@ -1298,6 +1299,21 @@ public static partial class TrRmExecutableCompiler
                 && DirectNativeImportContract.IsScalar(variable.Type))
             {
             }
+            else if (declaration.Initializer is BoundBinary scalarCheck
+                && schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                && scalarCheck.Type == variable.Type
+                && IsSupportedNativeUnitInitializerScalarCheck(scalarCheck)
+                && scalarCheck.Left is BoundRead leftRead
+                && scalarCheck.Right is BoundRead rightRead
+                && leftRead.Variable != declaration.Variable
+                && rightRead.Variable != declaration.Variable
+                && (leftRead.Variable < function.ParameterCount
+                    || localVariables.Contains(leftRead.Variable))
+                && (rightRead.Variable < function.ParameterCount
+                    || localVariables.Contains(rightRead.Variable)))
+            {
+            }
             else if (declaration.Initializer is not BoundConstant constant
                 || constant.Type != variable.Type
                 || !TryGetContextualInitializationRegister(constant,
@@ -1403,8 +1419,8 @@ public static partial class TrRmExecutableCompiler
         bool AddUnitInitializerCall(BoundCall unitCall,
             int initializerArrayVariable, int resultVariable)
         {
-            var argumentSnapshotHomes = new int[unitCall.Arguments.Length];
-            Array.Fill(argumentSnapshotHomes, -1);
+            var argumentCaptureHomes = new int[unitCall.Arguments.Length];
+            Array.Fill(argumentCaptureHomes, -1);
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
@@ -1422,7 +1438,15 @@ public static partial class TrRmExecutableCompiler
                         return false;
                     }
 
-                    argumentSnapshotHomes[argumentIndex]
+                    argumentCaptureHomes[argumentIndex]
+                        = nextUnitCallResultHome++;
+                }
+
+                if (schema
+                        .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    && IsSupportedNativeUnitInitializerScalarCheck(argument))
+                {
+                    argumentCaptureHomes[argumentIndex]
                         = nextUnitCallResultHome++;
                 }
 
@@ -1471,7 +1495,7 @@ public static partial class TrRmExecutableCompiler
 
             unitInitializerCalls.Add(new NativeAddressUnitInitializerCall(
                 unitCall, unitCallSignature, resultHome,
-                [.. argumentSnapshotHomes]));
+                [.. argumentCaptureHomes]));
             return true;
         }
 
@@ -1699,6 +1723,15 @@ public static partial class TrRmExecutableCompiler
                     initializerArrayVariable, schema))
             {
             }
+            else if (argument is BoundBinary scalarCheck
+                && scalarCheck.Type == parameterType
+                && schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                && IsSupportedNativeUnitInitializerScalarCheck(scalarCheck)
+                && signature.NativeParameters.All(parameter =>
+                    parameter.ParameterIndex != parameterIndex))
+            {
+            }
             else if (argument is BoundConstant constant
                 && (constant.Type == PrimitiveType.Void
                     ? parameterType == PrimitiveType.Void
@@ -1714,6 +1747,16 @@ public static partial class TrRmExecutableCompiler
 
         return seenParameters.All(static seen => seen);
     }
+
+    private static bool IsSupportedNativeUnitInitializerScalarCheck(
+        BoundExpression expression)
+        => expression is BoundBinary {
+            Operator: TokenKind.Slash or TokenKind.Percent,
+            Type: PrimitiveType.Int32 or PrimitiveType.UInt32,
+            Left: BoundRead { Type: var leftType },
+            Right: BoundRead { Type: var rightType },
+            OverflowBehavior: BoundIntegerOverflowBehavior.Checked,
+        } binary && leftType == binary.Type && rightType == binary.Type;
 
     private static int GetBoundCallParameterIndex(BoundCall call,
         int argumentIndex)
@@ -2064,6 +2107,47 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(0x1100_0001)),
         };
         var code = new List<byte>();
+        int GetCallerHome(int variableIndex)
+        {
+            if ((uint)variableIndex >= (uint)homeIndexByVariable.Length)
+            {
+                throw Unsupported(
+                    "The A2EU scalar check operand has no caller Home.");
+            }
+
+            var sourceHome = variableIndex < caller.ParameterCount
+                ? formalHomeStart + variableIndex
+                : homeIndexByVariable[variableIndex];
+            if (sourceHome < 0)
+            {
+                throw Unsupported(
+                    "The A2EU scalar check operand has no caller Home.");
+            }
+
+            return sourceHome;
+        }
+
+        void AppendA2EUCheckedScalarCapture(BoundBinary scalarCheck,
+            int destinationHome)
+        {
+            if (!IsSupportedNativeUnitInitializerScalarCheck(scalarCheck)
+                || scalarCheck.Left is not BoundRead leftRead
+                || scalarCheck.Right is not BoundRead rightRead)
+            {
+                throw Unsupported(
+                    "The A2EU scalar check is not an admitted checked division or remainder.");
+            }
+
+            AppendHomeLoad(code, 0,
+                GetCallerHome(leftRead.Variable));
+            AppendHomeLoad(code, 1,
+                GetCallerHome(rightRead.Variable));
+            code.Add(scalarCheck.Operator == TokenKind.Slash
+                ? (byte)0x24 : (byte)0x25);
+            code.Add(0x10);
+            AppendHomeStore(code, 0, destinationHome);
+        }
+
         var storageArguments = storageCall.StorageArguments
             .ToDictionary(static argument => argument.ParameterOrdinal);
         var unitCallPlanIndexByCall = new Dictionary<BoundCall, int>(
@@ -2136,7 +2220,7 @@ public static partial class TrRmExecutableCompiler
                 var parameterIndex = GetBoundCallParameterIndex(
                     unitCall, argumentIndex);
                 if (argument is BoundRead read
-                    && unitCallPlan.ArgumentSnapshotHomes[argumentIndex]
+                    && unitCallPlan.ArgumentCaptureHomes[argumentIndex]
                         >= 0)
                 {
                     var sourceHome
@@ -2144,7 +2228,7 @@ public static partial class TrRmExecutableCompiler
                             ? formalHomeStart + read.Variable
                             : homeIndexByVariable[read.Variable];
                     var snapshotHome
-                        = unitCallPlan.ArgumentSnapshotHomes[argumentIndex];
+                        = unitCallPlan.ArgumentCaptureHomes[argumentIndex];
                     if (sourceHome < 0)
                     {
                         throw Unsupported(
@@ -2153,6 +2237,14 @@ public static partial class TrRmExecutableCompiler
 
                     AppendHomeLoad(code, 0, sourceHome);
                     AppendHomeStore(code, 0, snapshotHome);
+                    continue;
+                }
+
+                if (argument is BoundBinary scalarCheck
+                    && unitCallPlan.ArgumentCaptureHomes[argumentIndex]
+                        is var checkHome and >= 0)
+                {
+                    AppendA2EUCheckedScalarCapture(scalarCheck, checkHome);
                     continue;
                 }
 
@@ -2264,7 +2356,7 @@ public static partial class TrRmExecutableCompiler
 
                     case BoundRead read:
                         var snapshotHome
-                            = unitCallPlan.ArgumentSnapshotHomes[argumentIndex];
+                            = unitCallPlan.ArgumentCaptureHomes[argumentIndex];
                         var inputHome = snapshotHome >= 0
                             ? snapshotHome
                             : read.Variable < caller.ParameterCount
@@ -2279,6 +2371,20 @@ public static partial class TrRmExecutableCompiler
                         callInputs[parameterIndex]
                             = new TrRmRegisterBodyCallInput(2, 1,
                                 checked((ushort)inputHome));
+                        break;
+
+                    case BoundBinary:
+                        var checkHome
+                            = unitCallPlan.ArgumentCaptureHomes[argumentIndex];
+                        if (checkHome < 0)
+                        {
+                            throw Unsupported(
+                                "The A2EU scalar check has no captured Home.");
+                        }
+
+                        callInputs[parameterIndex]
+                            = new TrRmRegisterBodyCallInput(2, 1,
+                                checked((ushort)checkHome));
                         break;
 
                     case BoundConstant { Type: PrimitiveType.Void }:
@@ -2576,6 +2682,17 @@ public static partial class TrRmExecutableCompiler
 
                         AppendHomeLoad(code, 0, sourceHome);
                         AppendHomeStore(code, 0, homeIndex);
+                        break;
+                    }
+
+                    if (local.Initializer is BoundBinary scalarCheck
+                        && schema
+                            .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                        && IsSupportedNativeUnitInitializerScalarCheck(
+                            scalarCheck))
+                    {
+                        AppendA2EUCheckedScalarCapture(scalarCheck,
+                            homeIndex);
                         break;
                     }
 

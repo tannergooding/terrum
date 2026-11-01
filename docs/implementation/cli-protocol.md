@@ -71,7 +71,11 @@ A2 positive-count scalar initialization, A2E direct/nested empty-array
 initialization, and provisional A2EU positive-count Unit stores using typed
 R14 `()`. A2E and A2EU artifacts pass their CLI PE-build selectors. These
 checks establish reconstruction and emission, not native execution or
-zero-extent backing. Other initializer effects and complete JIT/AOT runtime
+zero-extent backing. A2EU also captures checked `int32`/`uint32` division and
+remainder over Home reads in direct NativeImport arguments, reconstructing
+checked expressions and preserving operation-before-call/store order through
+canonical re-emission. This remains a bounded operand profile; other
+effectful expressions, cleanup/loan transport, and complete JIT/AOT runtime
 qualification remain open. The
 bounded F route runs/builds direct NativeImport
 executables and emits direct-import libraries. A provisional

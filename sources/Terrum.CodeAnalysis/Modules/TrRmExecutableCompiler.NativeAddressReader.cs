@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -1090,7 +1091,16 @@ public static partial class TrRmExecutableCompiler
                 case 0x10:
                 case 0x20:
                 case 0x21:
+                case 0x24:
+                case 0x25:
                 case 0x33:
+                    if (instruction[0] is 0x24 or 0x25
+                        && !body.Schema
+                            .UsesForeignInvocationStorageFixedArrayUnitInitialization())
+                    {
+                        throw Unsupported(
+                            "Checked scalar-call argument capture requires the exact A2EU schema.");
+                    }
                     instructions.Add((instruction[0], instruction[1], 0));
                     break;
 
@@ -1325,7 +1335,7 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, NativeArrayPlaceSelectionFacts>();
         var registerConstants
             = new Dictionary<int, NativeAddressRegisterConstant>();
-        var registerHomeReads = new Dictionary<int, BoundRead>();
+        var registerExpressions = new Dictionary<int, BoundExpression>();
         if (directUnitCallRecordIndexes.Count > 0)
         {
             registerConstants.Add(14, new NativeAddressRegisterConstant(
@@ -1361,10 +1371,10 @@ public static partial class TrRmExecutableCompiler
                         nativePointerTypeDefinitions,
                         signatureIndexByAnchorMethod, structureTypeByTypeDef);
                     BoundExpression localValue;
-                    if (registerHomeReads.Remove(instruction.Register,
-                            out var copiedHomeRead))
+                    if (registerExpressions.Remove(instruction.Register,
+                            out var copiedHomeExpression))
                     {
-                        if (copiedHomeRead.Type != localType
+                        if (copiedHomeExpression.Type != localType
                             || (!DirectNativeImportContract.IsScalar(localType)
                                 && !NativePointerTypes.IsType(localType)))
                         {
@@ -1372,7 +1382,7 @@ public static partial class TrRmExecutableCompiler
                                 "The F+S Home copy has a mismatched source type.");
                         }
 
-                        localValue = copiedHomeRead;
+                        localValue = copiedHomeExpression;
                     }
                     else
                     {
@@ -1413,7 +1423,7 @@ public static partial class TrRmExecutableCompiler
                             "The F+S array-index register load is unsupported.");
                     }
 
-                    _ = registerHomeReads.Remove(shortLoadDestination);
+                    _ = registerExpressions.Remove(shortLoadDestination);
                     registerConstants[shortLoadDestination]
                         = new NativeAddressRegisterConstant(
                             PrimitiveType.Int32,
@@ -1458,8 +1468,41 @@ public static partial class TrRmExecutableCompiler
                         _ = registerConstants.Remove(longLoadDestination);
                     }
 
-                    registerHomeReads[longLoadDestination] = new BoundRead(
+                    registerExpressions[longLoadDestination] = new BoundRead(
                         longLoadVariable, longLoadType, default);
+                    break;
+
+                case 0x24:
+                case 0x25:
+                    var arithmeticOperand
+                        = checked((byte)instruction.Index);
+                    var arithmeticDestination = arithmeticOperand & 0x0F;
+                    var arithmeticRight = arithmeticOperand >> 4;
+                    if (arithmeticDestination >= 14
+                        || arithmeticRight >= 14
+                        || !registerExpressions.TryGetValue(
+                            arithmeticDestination, out var arithmeticLeftValue)
+                        || !registerExpressions.TryGetValue(arithmeticRight,
+                            out var arithmeticRightValue)
+                        || arithmeticLeftValue is not BoundRead arithmeticLeft
+                        || arithmeticRightValue is not BoundRead
+                        || arithmeticLeft.Type is not (
+                            PrimitiveType.Int32 or PrimitiveType.UInt32)
+                        || arithmeticRightValue.Type != arithmeticLeft.Type)
+                    {
+                        throw Invalid(
+                            "The F+S checked division or remainder has unsupported operands.");
+                    }
+
+                    _ = registerConstants.Remove(arithmeticDestination);
+                    registerExpressions[arithmeticDestination]
+                        = new BoundBinary(instruction.Opcode == 0x24
+                                ? TokenKind.Slash : TokenKind.Percent,
+                            arithmeticLeft, arithmeticRightValue,
+                            arithmeticLeft.Type, default) {
+                            OverflowBehavior
+                                = BoundIntegerOverflowBehavior.Checked,
+                        };
                     break;
 
                 case 0x10:
@@ -1479,20 +1522,21 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         registerConstants[destinationRegister] = moveSource;
-                        if (registerHomeReads.TryGetValue(rightRegister,
-                                out var movedHomeRead))
+                        if (registerExpressions.TryGetValue(rightRegister,
+                                out var movedExpression))
                         {
-                            registerHomeReads[destinationRegister]
-                                = movedHomeRead;
+                            registerExpressions[destinationRegister]
+                                = movedExpression;
                         }
                         else
                         {
-                            _ = registerHomeReads.Remove(destinationRegister);
+                            _ = registerExpressions.Remove(
+                                destinationRegister);
                         }
                         break;
                     }
 
-                    _ = registerHomeReads.Remove(destinationRegister);
+                    _ = registerExpressions.Remove(destinationRegister);
                     if (!registerConstants.TryGetValue(destinationRegister,
                             out var leftValue)
                         || leftValue.Type != PrimitiveType.Int32)
@@ -2051,7 +2095,7 @@ public static partial class TrRmExecutableCompiler
                         for (var register = 0; register < 14; register++)
                         {
                             _ = registerConstants.Remove(register);
-                            _ = registerHomeReads.Remove(register);
+                            _ = registerExpressions.Remove(register);
                         }
                         localConstantByHome.Clear();
                         break;

@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -1087,6 +1088,163 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             Has.Length.EqualTo(2));
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [Test]
+    public void StandardA2EUCapturesCheckedDivisionArgumentsBeforeUnitCalls()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-unit-array-checked-arguments";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void Sleep(uint32 milliseconds);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void ObserveSigned(int32 value);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut uint32 numerator = 0;
+                mut uint32 divisor = 0;
+                mut int32 signedNumerator = -1;
+                mut int32 signedDivisor = -1;
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    mut [void; 3] values = [
+                        Sleep(numerator / divisor),
+                        Sleep(numerator % divisor),
+                        ObserveSigned(signedNumerator / signedDivisor)
+                    ];
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+
+        var arithmeticInstructions = new List<(byte Opcode, int Offset)>();
+        var directCallOffsets = new List<int>();
+        var firstUnitStoreOffset = int.MaxValue;
+        var code = body.GetBlockCode(0);
+        for (var position = 0; position < code.Length;)
+        {
+            var opcode = code[position];
+            var instructionLength = TrRmRegisterBodyReader.InstructionLength(
+                opcode, body.Schema);
+            if (opcode is 0x24 or 0x25)
+            {
+                arithmeticInstructions.Add((opcode, position));
+            }
+            else if (opcode == 0xE0)
+            {
+                var callRecord = body.GetRecord(
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        code[(position + 2)..]));
+                if (callRecord[4] == 1)
+                {
+                    directCallOffsets.Add(position);
+                }
+            }
+            else if (opcode == 0xD9)
+            {
+                firstUnitStoreOffset = Math.Min(firstUnitStoreOffset,
+                    position);
+            }
+
+            position += instructionLength;
+        }
+        Assert.That(arithmeticInstructions.Select(
+                static instruction => instruction.Opcode),
+            Is.EqualTo(new byte[] { 0x24, 0x25, 0x24 }));
+        Assert.That(directCallOffsets, Has.Count.EqualTo(3));
+        for (var index = 0; index < arithmeticInstructions.Count; index++)
+        {
+            Assert.That(arithmeticInstructions[index].Offset,
+                Is.LessThan(directCallOffsets[index]));
+        }
+        Assert.That(directCallOffsets[^1],
+            Is.LessThan(firstUnitStoreOffset));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var capturedChecks = new List<BoundBinary>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundBinary {
+                        Operator: TokenKind.Slash or TokenKind.Percent,
+                    } check)
+                {
+                    capturedChecks.Add(check);
+                }
+            }), Is.True);
+        Assert.That(capturedChecks, Has.Count.EqualTo(3));
+        Assert.That(capturedChecks.All(static check =>
+            (check.Type is PrimitiveType.Int32 or PrimitiveType.UInt32)
+            && check.OverflowBehavior
+                == BoundIntegerOverflowBehavior.Checked), Is.True);
+        Assert.That(capturedChecks.Count(static check =>
+            check.Type == PrimitiveType.UInt32), Is.EqualTo(2));
+        Assert.That(capturedChecks.Count(static check =>
+            check.Type == PrimitiveType.Int32), Is.EqualTo(1));
+        Assert.That(capturedChecks.Count(static check =>
+            check.Operator == TokenKind.Slash), Is.EqualTo(2));
+        Assert.That(capturedChecks.Count(static check =>
+            check.Operator == TokenKind.Percent), Is.EqualTo(1));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+
+        var malformed = RewriteA2EUCheckedArithmeticArtifact(artifact);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, malformed),
+                moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
     }
 
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
@@ -4613,6 +4771,72 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             {
                 throw new InvalidOperationException(
                     "The A2EU Body contains no typed Unit SemanticStore.");
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                TrRmVariableTableWriter.EncodeBodies([bodyBytes])));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] RewriteA2EUCheckedArithmeticArtifact(
+        byte[] artifact)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        var modified = false;
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind != 0x0020)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
+                contractCount, schema);
+            var bodyBytes = bodyTable.GetRow(1).ToArray();
+            var code = body.GetBlockCode(0);
+            var codeOffset = bodyBytes.AsSpan().IndexOf(code);
+            if (codeOffset < 0)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU checked arithmetic has no serialized code bytes.");
+            }
+
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], schema);
+                if (code[position] is 0x24 or 0x25)
+                {
+                    bodyBytes[codeOffset + position + 1] = 0x0E;
+                    modified = true;
+                    break;
+                }
+
+                position += instructionLength;
+            }
+
+            if (!modified)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU Body contains no checked division or remainder.");
             }
 
             sections.Add(new TrRmSection(kind, flags,
