@@ -4699,6 +4699,111 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFProviderClosureSupportsFanInBeyondSixteenModules()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "fan-in-root";
+        const int providerCount = 17;
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var declarations = string.Join(Environment.NewLine,
+            Enumerable.Range(0, providerCount).Select(index => $$"""
+                [Terrum.Interop.NativeImport(
+                    "kernel32.dll",
+                    "GetCurrentProcessId",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                internal extern int32 Provider{{index:D2}}();
+                """));
+        var rootCompilation = Compilation.Create(SyntaxTree.Parse($$"""
+            {{declarations}}
+
+            int32 Main() {
+                unsafe {
+                    var callback = &Provider00;
+                    return callback();
+                }
+            }
+            """), core);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, rootCompilation.Diagnostics));
+        var rootArtifact = TrRmExecutableCompiler.EmitStandard(
+            rootCompilation.Program!, rootIdentity, schemaIdentity, 1);
+        var bindings = new List<(string MethodName, string ProducerIdentity,
+            string ExportKey)>(providerCount);
+        var providers = new TrRmStandardArtifactInput[providerCount];
+        for (var index = 0; index < providerCount; index++)
+        {
+            var identity = $"Provider{index:D2}";
+            bindings.Add((identity, identity, identity));
+            var compilation = CreateMultipleImportProviderCompilation(
+                identity, "GetCurrentProcessId", core);
+            var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, identity, schemaIdentity, 1);
+            providers[index] = new TrRmStandardArtifactInput(schemaIdentity,
+                providerArtifact);
+        }
+
+        rootArtifact = AddRootMethodImports(rootArtifact, bindings,
+            reuseModuleRefs: false, duplicateSecondMethodName: false);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        Assert.That(loaded.Functions.Count(static function =>
+            function.ModuleImport is not null), Is.EqualTo(providerCount));
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity, providers,
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings,
+            Has.Length.EqualTo(providerCount));
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            rootIdentity, providers, NativeRuntimePolicy.FailFast);
+        Assert.That(image.Take(2), Is.EqualTo([(byte)'M', (byte)'Z']));
+    }
+
+    [Test]
+    public void StandardFProviderClosureUsesTheSelectedPublicExportKey()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "Root";
+        const string providerIdentity = "Owned";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootArtifact = CreateRootMethodImportArtifact(rootIdentity,
+            "Owned", providerIdentity, "GetCurrentProcessId", core);
+        var providerCompilation = CreateMultipleImportProviderCompilation(
+            "Owned", "GetCurrentProcessId", core);
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var aliasProviderArtifact = AddMethodExportAlias(providerArtifact,
+            "Owned", "GetCurrentProcessId");
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            aliasProviderArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [providerInput]);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Owned").DirectNativeImport!.ExportName,
+            Is.EqualTo("GetCurrentProcessId"));
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity, [providerInput],
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings,
+            Has.Length.EqualTo(1));
+    }
+
+    [Test]
     public void StandardFProviderClosureSupportsSelfAndMutualDependencies()
     {
         const string schemaIdentity
@@ -5567,6 +5672,61 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             new TrRmSection(0x0001, 0, 1, modules),
             new TrRmSection(0x0002, 0, 1, stringsBytes),
         ], TrRmArtifactSchema.ForeignInvocationDraft);
+    }
+
+    private static byte[] AddMethodExportAlias(byte[] artifact,
+        string methodName, string exportKey)
+    {
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        Assert.That(index.TryGetSection(0x0002, out _, out var stringCount),
+            Is.True);
+        var methodRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetOwnerModule(row) == 1
+                && StringComparer.Ordinal.Equals(
+                    tables.Methods.GetName(row), methodName))
+            {
+                methodRow = row;
+                break;
+            }
+        }
+
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var exportRows = new List<TrRmExportRow>();
+        foreach (var (definition, existingKey)
+            in tables.Exports.GetExportsForModule(1))
+        {
+            exportRows.Add(new TrRmExportRow(definition,
+                FindStringRow(tables.Strings, stringCount, existingKey)));
+        }
+
+        exportRows.Add(new TrRmExportRow(
+            0x1600_0000u | (uint)methodRow,
+            FindStringRow(tables.Strings, stringCount, exportKey)));
+        var exports = TrRmExportTableWriter.Encode(exportRows,
+            tables.Strings, tables.TypeDefs, tables.Methods,
+            default, tables.Imports, tables.Interfaces,
+            tables.AssociatedTypeDefs, tables.Fields, tables.Features,
+            tables.Modules, TrRmArtifactSchema.ForeignInvocationDraft,
+            tables.AssociatedConstDefs, tables.StaticFields,
+            tables.StaticFieldContracts, tables.IntrinsicRegistrations);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind == 0x001D
+                ? new TrRmSection(kind, flags, (uint)exportRows.Count,
+                    exports)
+                : new TrRmSection(kind, flags, (uint)recordCount,
+                    bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ForeignInvocationDraft);
     }
 
     internal static byte[] CreateMixedImportProviderArtifact(

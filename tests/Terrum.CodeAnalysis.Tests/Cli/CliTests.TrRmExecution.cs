@@ -5,6 +5,7 @@ using System.Buffers.Binary;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -999,6 +1000,12 @@ public sealed partial class CliTests
         var incompatibleLeafArtifact = TrRmExecutableCompiler.EmitStandard(
             incompatibleLeafCompilation.Program!, leafIdentity,
             schemaIdentity, 1);
+        WriteStandardFArtifactEvidence("root", rootIdentity, rootArtifact);
+        WriteStandardFArtifactEvidence("provider", providerIdentity,
+            providerArtifact);
+        WriteStandardFArtifactEvidence("leaf", leafIdentity, leafArtifact);
+        WriteStandardFArtifactEvidence("incompatible-leaf", leafIdentity,
+            incompatibleLeafArtifact);
 
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-f-provider-closure-{Guid.NewGuid():N}");
@@ -1091,6 +1098,13 @@ public sealed partial class CliTests
             await TestFileCleanup.DeleteWithRetryAsync(imagePath)
                 .ConfigureAwait(true);
         }
+    }
+
+    private static void WriteStandardFArtifactEvidence(string role,
+        string moduleIdentity, byte[] artifact)
+    {
+        TestContext.WriteLine(
+            $"Standard F input {role}: module={moduleIdentity}; bytes={artifact.Length}; sha256={Convert.ToHexString(SHA256.HashData(artifact))}");
     }
 
     [Test]

@@ -440,18 +440,19 @@ MethodDef Import by its exact ModuleRef identity/requirements and key to a
 public provider-owned NativeImport. It retains each edge's original Import,
 ModuleRef, expectation and actual origin; root imports alone are substituted
 for lowering. Mixed one-owned/imported Modules, three-edge chains, hybrid
-provider co-location, diamonds, repeated ModuleRefs, self-edges and mutual
-cycles are covered by public API tests;
+provider co-location, diamonds, repeated ModuleRefs, multiple public keys for
+one actual definition, 17-provider fan-in, self-edges and mutual cycles are
+covered by public API tests;
 provider Bodies are not merged or invoked. The checked plan revalidates the
 complete retained closure before lowering. The Debug fast build and combined NativeAddress/provider-CLI selection passed
-136/136 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_09_49_net11.0.trx`,
+138/138 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_15_36_net11.0.trx`,
 including deep-provider rejection, empty and non-first Modules, CLI JIT/AOT
 and sentinel-output preservation.
 This remains provisional, not formal approval or full Standard conformance.
 Further evidence is still required for all-co-located closure and broader
-Module/Import/Body remapping, multiple public keys for one actual declaration,
-larger capacity boundaries, compatible deep replacement and PE import/export
+Module/Import/Body remapping, identity/key encoding and case boundaries,
+larger row/map/work capacity, compatible deep replacement and PE import/export
 inspection. Same-name expanded lowering, general source production/re-emission
 of non-target Imports and broader schema compositions remain unsupported.
 
