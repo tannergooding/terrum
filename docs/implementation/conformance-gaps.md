@@ -467,17 +467,22 @@ the selected root and checked lowering plan. Unicode identity coverage now
 also binds a supplementary scalar (`U+1F680`) exactly and rejects normalization
 of `U+212B` to `U+00C5`. Corrupting the co-located chain's ModuleRef identity,
 Import ExportKey, cross-module Body MethodDef token or function-pointer
-TypeSpec anchor rejects during selected loading. The final Debug fast build
-and combined NativeAddress/provider-CLI selection passed 147/147 with zero
-skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_38_22_net11.0.trx`.
+TypeSpec anchor rejects during selected loading. Exact-F loading rejects
+one-over 24-bit record counts for Module, ModuleRef, TypeSpec, MethodDef,
+Import and Body sections. The shared Body reader/writer selection also covers
+the 65,536-entry map boundary and one-over rejection; the provider matrix
+retains its 17-Module fan-in case. The combined NativeAddress/provider CLI and
+Body reader/writer selection passed 243/243 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_43_53_net11.0.trx`.
 The normal analyzer build remains at its existing baseline: 709 errors and
 353 normalized identities, with zero additions/removals against
 `artifacts\\log\\compiler-adoption-final-debug-analyzers.log`; output:
-`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final12.log`.
+`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final13.log`.
 This remains provisional, not formal approval or full Standard conformance.
-Further evidence is still required for row/map/work limits beyond the tested
-fan-in of 17. Same-name expanded lowering,
+The selected proposal introduces no separate closure work/depth cap; finite
+graph validation remains subject to existing row/map and operation/backend
+capacity and must fail explicitly on exhaustion. Broader source
+production/re-emission, same-name expanded lowering,
 general source production/
 re-emission of non-target Imports and broader schema compositions remain
 unsupported.

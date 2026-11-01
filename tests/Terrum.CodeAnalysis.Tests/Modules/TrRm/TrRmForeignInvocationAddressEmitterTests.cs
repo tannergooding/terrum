@@ -5231,6 +5231,33 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 ]));
     }
 
+    [TestCase(0x0001)]
+    [TestCase(0x0010)]
+    [TestCase(0x0011)]
+    [TestCase(0x0016)]
+    [TestCase(0x001C)]
+    [TestCase(0x0020)]
+    public void StandardFProviderClosureRejectsOverLimitSectionCounts(
+        int sectionKind)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "CountLimitRoot";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var artifact = CreateRootMethodImportArtifact(rootIdentity,
+            "Owned", "Owned", "Owned", core);
+        var overLimitArtifact = ReplaceSectionRecordCount(artifact,
+            sectionKind, 0x0100_0000);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    overLimitArtifact), rootIdentity, []));
+    }
+
     [Test]
     public void StandardFProviderClosureSupportsSelfAndMutualDependencies()
     {
@@ -6504,6 +6531,30 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             }
         }
 
+        return result;
+    }
+
+    private static byte[] ReplaceSectionRecordCount(byte[] artifact,
+        int sectionKind, uint recordCount)
+    {
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var result = (byte[])artifact.Clone();
+        var found = false;
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out _, out _, out _);
+            if (kind != sectionKind)
+            {
+                continue;
+            }
+
+            BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(
+                32 + section * 16 + 4), recordCount);
+            found = true;
+            break;
+        }
+
+        Assert.That(found, Is.True);
         return result;
     }
 
