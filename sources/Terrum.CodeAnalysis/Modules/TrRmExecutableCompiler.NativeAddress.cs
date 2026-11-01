@@ -832,6 +832,38 @@ public static partial class TrRmExecutableCompiler
                 storageCall.ConditionCaptures,
                 callerLocalTypeSpecRefs.Length,
                 a3LayoutResourceLedger);
+        var arrayElementTypeMapTokenCount = 0;
+        if (storageCall is not null)
+        {
+            for (var localOrdinal = 0;
+                localOrdinal < callerLocalTypeSpecRefs.Length; localOrdinal++)
+            {
+                a3LayoutResourceLedger?.ConsumeWork();
+                var arrayType = caller.Variables[
+                    caller.ParameterCount + localOrdinal].Type;
+                var remainingArrayTypes
+                    = program.NativeFixedArrayTypes.Length;
+                while (NativeFixedArrayTypes.IsType(arrayType))
+                {
+                    if (remainingArrayTypes-- <= 0)
+                    {
+                        throw Unsupported(
+                            "The A2 array type graph contains a cycle.");
+                    }
+
+                    var arrayDefinition = program.NativeFixedArrayTypes[
+                        NativeFixedArrayTypes.Index(arrayType)];
+                    if (arrayDefinition.ElementCount == 0)
+                    {
+                        break;
+                    }
+
+                    arrayElementTypeMapTokenCount = checked(
+                        arrayElementTypeMapTokenCount + 1);
+                    arrayType = arrayDefinition.ElementType;
+                }
+            }
+        }
         var typeMapTokenCapacity = storageCall is null
             ? 1 + (callResultHomeIndex >= 0 ? 1 : 0)
                 + stagedResultHomeCount + callerParameterTypeSpecRefs.Length
@@ -839,7 +871,8 @@ public static partial class TrRmExecutableCompiler
                 + unitCallTemporaryHomes.Length
                 + unitCallStorageArgumentCount
                 + storageCall.StorageArguments.Length
-                + callerParameterTypeSpecRefs.Length;
+                + callerParameterTypeSpecRefs.Length
+                + arrayElementTypeMapTokenCount;
         ReserveA3Collection(a3LayoutResourceLedger, typeMapTokenCapacity);
         var typeMapTokens = new List<uint>(typeMapTokenCapacity);
         if (storageCall is null)
@@ -941,17 +974,31 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                var arrayType = program.NativeFixedArrayTypes[
-                    NativeFixedArrayTypes.Index(variable.Type)];
-                if (arrayType.ElementCount == 0)
+                var arrayType = variable.Type;
+                var remainingArrayTypes
+                    = program.NativeFixedArrayTypes.Length;
+                while (NativeFixedArrayTypes.IsType(arrayType))
                 {
-                    continue;
-                }
+                    if (remainingArrayTypes-- <= 0)
+                    {
+                        throw Unsupported(
+                            "The A2 array type graph contains a cycle.");
+                    }
 
-                AddA3Staged(typeMapTokens,
-                    CreateStandardBodyTypeMapToken(
-                        GetSignatureTypeSpecRef(arrayType.ElementType)),
-                    a3LayoutResourceLedger);
+                    var arrayDefinition = program.NativeFixedArrayTypes[
+                        NativeFixedArrayTypes.Index(arrayType)];
+                    if (arrayDefinition.ElementCount == 0)
+                    {
+                        break;
+                    }
+
+                    AddA3Staged(typeMapTokens,
+                        CreateStandardBodyTypeMapToken(
+                            GetSignatureTypeSpecRef(
+                                arrayDefinition.ElementType)),
+                        a3LayoutResourceLedger);
+                    arrayType = arrayDefinition.ElementType;
+                }
             }
         }
 
@@ -2455,72 +2502,78 @@ public static partial class TrRmExecutableCompiler
         BoundNativeFixedArrayInitialization initialization,
         BoundProgram program, TrRmArtifactSchema schema)
     {
-        if (!NativeFixedArrayContract.TryGetLayout(arrayType,
-                program.Structures, program.NativeFixedArrayTypes,
-                out var layout)
-            || !NativeFixedArrayContract.MatchesType(arrayType, layout, program)
-            || !NativeFixedArrayContract.MatchesLayout(layout, program)
-            || initialization.Layout != layout
-            || initialization.Elements.IsDefault)
+        var pending = new Stack<(PrimitiveType ArrayType,
+            BoundNativeFixedArrayInitialization Initialization, int Depth)>();
+        pending.Push((arrayType, initialization, 1));
+        while (pending.TryPop(out var current))
         {
-            return false;
-        }
-
-        if (layout.ElementCount == 0)
-        {
-            return schema
-                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
-                && initialization.Elements.IsEmpty
-                && layout.ByteExtent == 0;
-        }
-
-        if ((ulong)initialization.Elements.Length != layout.ElementCount)
-        {
-            return false;
-        }
-
-        foreach (var element in initialization.Elements)
-        {
-            if (element is BoundConstant constant
-                && TryGetContextualInitializationRegister(constant,
-                    layout.ElementType, schema, out _))
-            {
-                continue;
-            }
-
-            if (layout.ElementType == PrimitiveType.Void
-                && schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
-                && element is BoundCall { Type: PrimitiveType.Void })
-            {
-                continue;
-            }
-
-            if (layout.ElementType == PrimitiveType.Void
-                && schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
-                && IsSupportedNativeUnitConditionalExpression(element))
-            {
-                continue;
-            }
-
-            if (!schema
-                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
-                || !NativeFixedArrayTypes.IsType(layout.ElementType)
-                || element is not BoundNativeFixedArrayInitialization
-                    emptyInitialization
+            if (current.Depth > 6
                 || !NativeFixedArrayContract.TryGetLayout(
-                    layout.ElementType, program.Structures,
-                    program.NativeFixedArrayTypes, out var elementLayout)
+                    current.ArrayType, program.Structures,
+                    program.NativeFixedArrayTypes, out var layout)
                 || !NativeFixedArrayContract.MatchesType(
-                    layout.ElementType, elementLayout, program)
-                || !NativeFixedArrayContract.MatchesLayout(
-                    elementLayout, program)
-                || emptyInitialization.Layout != elementLayout
-                || elementLayout.ElementCount != 0
-                || elementLayout.ByteExtent != 0
-                || emptyInitialization.Elements.IsDefault
-                || !emptyInitialization.Elements.IsEmpty)
+                    current.ArrayType, layout, program)
+                || !NativeFixedArrayContract.MatchesLayout(layout, program)
+                || current.Initialization.Type != current.ArrayType
+                || current.Initialization.Layout != layout
+                || current.Initialization.Elements.IsDefault)
             {
                 return false;
+            }
+
+            if (layout.ElementCount == 0)
+            {
+                if (!schema
+                        .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                    || !current.Initialization.Elements.IsEmpty
+                    || layout.ByteExtent != 0)
+                {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if ((ulong)current.Initialization.Elements.Length
+                != layout.ElementCount)
+            {
+                return false;
+            }
+
+            foreach (var element in current.Initialization.Elements)
+            {
+                if (element is BoundConstant constant
+                    && TryGetContextualInitializationRegister(constant,
+                        layout.ElementType, schema, out _))
+                {
+                    continue;
+                }
+
+                if (layout.ElementType == PrimitiveType.Void
+                    && schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    && element is BoundCall { Type: PrimitiveType.Void })
+                {
+                    continue;
+                }
+
+                if (layout.ElementType == PrimitiveType.Void
+                    && schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    && IsSupportedNativeUnitConditionalExpression(element))
+                {
+                    continue;
+                }
+
+                if (!schema.UsesForeignInvocationStorageFixedArrays()
+                    || !NativeFixedArrayTypes.IsType(layout.ElementType)
+                    || element
+                        is not BoundNativeFixedArrayInitialization nested
+                    || element.Type != layout.ElementType)
+                {
+                    return false;
+                }
+
+                pending.Push((layout.ElementType, nested,
+                    checked(current.Depth + 1)));
             }
         }
 
@@ -3019,6 +3072,36 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("The F+S caller Body cannot be flattened.");
         }
 
+        long CountFixedArrayInitializationRecords(
+            BoundNativeFixedArrayInitialization initialization)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            if (initialization.Elements.IsEmpty)
+            {
+                return 2;
+            }
+
+            long count = 0;
+            foreach (var element in initialization.Elements)
+            {
+                resourceLedger?.ConsumeWork();
+                if (element
+                        is BoundNativeFixedArrayInitialization nested
+                    && nested.Layout.ElementCount > 0)
+                {
+                    count = checked(count + 1
+                        + CountFixedArrayInitializationRecords(nested));
+                }
+                else
+                {
+                    count = checked(count + 2);
+                }
+            }
+
+            return count;
+        }
+
         long CountArrayInitializationRecords(BoundStatement statement)
         {
             using var frame = resourceLedger?.EnterFrame();
@@ -3028,8 +3111,7 @@ public static partial class TrRmExecutableCompiler
                 BoundLocal
                 {
                     Initializer: BoundNativeFixedArrayInitialization initialization,
-                } => initialization.Elements.IsEmpty
-                    ? 2 : (long)initialization.Elements.Length * 2,
+                } => CountFixedArrayInitializationRecords(initialization),
                 BoundAssignment assignment
                     when IsSupportedA2EEmptyArrayInitialization(
                         assignment, caller, program, schema, out _) => 2,
@@ -3204,7 +3286,7 @@ public static partial class TrRmExecutableCompiler
                         getSignatureTypeSpecRef(
                             caller.Variables[variable].Type))),
                     schema));
-            AppendRecordPlaceSelectionInstruction(code, selectionIndex);
+            AppendRecordPlaceSelectionInstruction(code, selectionIndex, 2);
 
             var storeIndex = checked((ushort)records.Count);
             records.Add(
@@ -3995,6 +4077,225 @@ public static partial class TrRmExecutableCompiler
                 });
         }
 
+        int GetArrayInitializationDepth(
+            BoundNativeFixedArrayInitialization initialization)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            var depth = 1;
+            foreach (var element in initialization.Elements)
+            {
+                resourceLedger?.ConsumeWork();
+                if (element
+                        is BoundNativeFixedArrayInitialization nested
+                    && nested.Layout.ElementCount > 0)
+                {
+                    depth = Math.Max(depth,
+                        checked(1 + GetArrayInitializationDepth(nested)));
+                }
+            }
+
+            return depth;
+        }
+
+        void AppendZeroArrayIndex(int indexHome, byte destinationRegister)
+        {
+            if (storageCall!.UnitInitializerCalls.IsEmpty)
+            {
+                AppendHomeLoad(code, destinationRegister, indexHome);
+                return;
+            }
+
+            code.Add(0x10);
+            code.Add((byte)((14 << 4) | destinationRegister));
+        }
+
+        void AppendArrayInitializerEffects(
+            BoundNativeFixedArrayInitialization initialization,
+            int rootVariable)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            foreach (var element in initialization.Elements)
+            {
+                resourceLedger?.ConsumeWork();
+                switch (element)
+                {
+                    case BoundCall { Type: PrimitiveType.Void } unitCall:
+                        _ = AppendUnitInitializerCall(unitCall);
+                        break;
+
+                    case BoundConditional
+                        { Type: PrimitiveType.Void } unitConditional:
+                        AppendUnitInitializerExpression(unitConditional);
+                        break;
+
+                    case BoundNativeFixedArrayInitialization nested:
+                        AppendArrayInitializerEffects(nested, rootVariable);
+                        break;
+                }
+            }
+        }
+
+        void AppendArrayInitializationElements(
+            BoundNativeFixedArrayInitialization initialization,
+            int rootVariable, int depth, int maximumDepth, int indexHome,
+            int oneRegister, int parentPlaceRegister)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            var arrayType = initialization.Type;
+            if (depth >= maximumDepth
+                || !NativeFixedArrayContract.TryGetLayout(
+                    arrayType, program.Structures,
+                    program.NativeFixedArrayTypes, out var layout)
+                || !NativeFixedArrayContract.MatchesType(
+                    arrayType, layout, program)
+                || !NativeFixedArrayContract.MatchesLayout(layout, program)
+                || initialization.Layout != layout
+                || layout.ElementCount == 0
+                || (ulong)initialization.Elements.Length
+                    != layout.ElementCount
+                || !fixedArrayLayoutRowByType.TryGetValue(
+                    NativeFixedArrayTypes.Index(arrayType),
+                    out var layoutRow)
+                || (uint)layoutRow > 0xFF_FFFFu)
+            {
+                throw Unsupported(
+                    "The A2 nested array initializer has no exact selected layout.");
+            }
+
+            var indexRegister = checked((byte)depth);
+            var placeRegister
+                = checked((byte)(maximumDepth + depth + 1));
+            if (indexRegister > 13 || placeRegister > 13
+                || oneRegister > 13)
+            {
+                throw Unsupported(
+                    "The A2 nested initializer exceeds the Body register window.");
+            }
+
+            if (depth > 0)
+            {
+                AppendZeroArrayIndex(indexHome, indexRegister);
+            }
+            var elementType = layout.ElementType;
+            var baseKind = depth == 0 ? (byte)2 : (byte)1;
+            var baseIndex = depth == 0
+                ? homeIndexByVariable[rootVariable]
+                : parentPlaceRegister;
+            if (baseIndex < 0 || (uint)baseIndex > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "The A2 nested array initializer has no parent place.");
+            }
+
+            for (var elementIndex = 0;
+                elementIndex < initialization.Elements.Length;
+                elementIndex++)
+            {
+                resourceLedger?.ConsumeWork();
+                var element = initialization.Elements[elementIndex];
+                var isNullaryEmptyChild
+                    = element
+                        is BoundNativeFixedArrayInitialization {
+                            Layout.ElementCount: 0,
+                            Elements.IsEmpty: true,
+                        };
+                var selectionIndex = checked((ushort)records.Count);
+                records.Add(
+                    TrRmRegisterBodyRecordWriter.EncodePlaceSelection(3, 3,
+                        1, baseKind, placeRegister,
+                        checked((ushort)baseIndex), 1, 3, indexRegister,
+                        checked((uint)layoutRow),
+                        maps.GetTypeMapIndex(
+                            CreateStandardBodyTypeMapToken(
+                                getSignatureTypeSpecRef(elementType))),
+                        schema, resourceLedger));
+                if (isNullaryEmptyChild)
+                {
+                    AppendRecordPlaceSelectionInstruction(code, selectionIndex,
+                            placeRegister);
+                }
+                else
+                {
+                    code.Add(0xD8);
+                    code.Add(placeRegister);
+                    code.Add((byte)selectionIndex);
+                    code.Add((byte)(selectionIndex >> 8));
+                }
+
+                if (element
+                            is BoundNativeFixedArrayInitialization nested)
+                {
+                    if (nested.Layout.ElementCount == 0)
+                    {
+                        if (!schema
+                                .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                            || !nested.Elements.IsEmpty)
+                        {
+                            throw Unsupported(
+                                "The A2 nested empty child requires the exact A2E schema.");
+                        }
+
+                        var storeIndex = checked((ushort)records.Count);
+                        records.Add(
+                            TrRmRegisterBodyRecordWriter
+                                .EncodeEmptyArrayInitialization(
+                                    placeRegister, schema));
+                        AppendNullaryArrayStoreInstruction(code, storeIndex);
+                    }
+                    else
+                    {
+                        AppendArrayInitializationElements(nested,
+                            rootVariable, depth + 1, maximumDepth,
+                            indexHome, oneRegister, placeRegister);
+                    }
+                }
+                else
+                {
+                    var storeIndex = checked((ushort)records.Count);
+                    if (element is BoundConstant initializerConstant
+                        && TryGetContextualInitializationRegister(
+                            initializerConstant, elementType, schema,
+                            out var initializerRegister))
+                    {
+                        records.Add(
+                            TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                                1, 1, 1, 1, placeRegister,
+                                initializerRegister));
+                    }
+                    else if (element is BoundCall
+                            { Type: PrimitiveType.Void }
+                        or BoundConditional { Type: PrimitiveType.Void }
+                        && schema
+                            .UsesForeignInvocationStorageFixedArrayUnitInitialization())
+                    {
+                        records.Add(
+                            TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                                1, 1, 1, 1, placeRegister, 14));
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "The A2 nested array element has no admitted store encoding.");
+                    }
+
+                    code.Add(0xD9);
+                    code.Add(0);
+                    code.Add((byte)storeIndex);
+                    code.Add((byte)(storeIndex >> 8));
+                }
+
+                if (elementIndex + 1
+                    < initialization.Elements.Length)
+                {
+                    code.Add(0x21);
+                    code.Add((byte)((oneRegister << 4) | indexRegister));
+                }
+            }
+        }
+
         int AppendBranchPlaceholder()
         {
             code.Add(0xE3);
@@ -4060,36 +4361,11 @@ public static partial class TrRmExecutableCompiler
                                 "The A2 Body array initializer is not a complete supported local.");
                         }
 
-                        var arrayType = caller.Variables[local.Variable].Type;
                         if (arrayInitialization.Layout.ElementCount == 0)
                         {
                             AppendEmptyArrayHomeInitialization(
                                 local.Variable, arrayInitialization);
                             break;
-                        }
-
-                        if (!fixedArrayLayoutRowByType.TryGetValue(
-                                NativeFixedArrayTypes.Index(arrayType),
-                                out var fixedArrayLayoutRow))
-                        {
-                            throw Unsupported(
-                                "The A2 Body array initializer has no mapped layout row.");
-                        }
-
-                        foreach (var initializer in
-                            arrayInitialization.Elements)
-                        {
-                            if (initializer is BoundCall unitInitializerCall)
-                            {
-                                _ = AppendUnitInitializerCall(
-                                    unitInitializerCall);
-                            }
-                            else if (initializer is BoundConditional
-                                unitConditional)
-                            {
-                                AppendUnitInitializerExpression(
-                                    unitConditional);
-                            }
                         }
 
                         var indexHome = homeIndexByVariable[
@@ -4100,137 +4376,29 @@ public static partial class TrRmExecutableCompiler
                                 "The A2 array initializer has no zero-valued index Home.");
                         }
 
-                        if (storageCall.UnitInitializerCalls.IsEmpty)
-                        {
-                            AppendHomeLoad(code, 0, indexHome);
-                        }
-                        else
-                        {
-                            code.Add(0x10);
-                            code.Add(0xE0);
-                        }
-
-                        code.Add(0x10);
-                        code.Add(0x01);
-                        code.Add(0x33);
-                        code.Add(0x11);
-                        code.Add(0x20);
-                        code.Add(0x11);
-                        var elementType
-                            = arrayInitialization.Layout.ElementType;
-                        if ((uint)fixedArrayLayoutRow > 0xFF_FFFFu)
+                        AppendArrayInitializerEffects(arrayInitialization,
+                            local.Variable);
+                        var maximumDepth
+                            = GetArrayInitializationDepth(arrayInitialization);
+                        var oneRegister = maximumDepth;
+                        if (oneRegister > 13)
                         {
                             throw Unsupported(
-                                "The A2 array initializer has no representable layout row.");
+                                "The A2 nested array initializer exceeds the Body register window.");
                         }
 
-                        for (var elementIndex = 0;
-                            elementIndex < arrayInitialization.Elements.Length;
-                            elementIndex++)
-                        {
-                            var isNullaryEmptyChild
-                                = arrayInitialization.Elements[elementIndex]
-                                    is BoundNativeFixedArrayInitialization {
-                                        Layout.ElementCount: 0,
-                                        Elements.IsEmpty: true,
-                                    };
-                            var initializationSelectionIndex
-                                = checked((ushort)records.Count);
-                            records.Add(
-                                TrRmRegisterBodyRecordWriter
-                                    .EncodePlaceSelection(3, 3, 1, 2, 2,
-                                        checked((ushort)homeIndexByVariable[
-                                            local.Variable]),
-                                        1, 3, 0,
-                                        checked((uint)
-                                            fixedArrayLayoutRow),
-                                        maps.GetTypeMapIndex(
-                                            CreateStandardBodyTypeMapToken(
-                                                getSignatureTypeSpecRef(
-                                                    elementType))),
-                                        schema));
-                            if (isNullaryEmptyChild)
-                            {
-                                AppendRecordPlaceSelectionInstruction(code,
-                                    initializationSelectionIndex);
-                            }
-                            else
-                            {
-                                code.Add(0xD8);
-                                code.Add(2);
-                                code.Add((byte)initializationSelectionIndex);
-                                code.Add((byte)(initializationSelectionIndex
-                                    >> 8));
-                            }
-
-                            var initializationStoreIndex
-                                = checked((ushort)records.Count);
-                            if (arrayInitialization.Elements[elementIndex]
-                                is BoundConstant initializerConstant)
-                            {
-                                if (!TryGetContextualInitializationRegister(
-                                        initializerConstant, elementType,
-                                        schema,
-                                        out var initializerRegister))
-                                {
-                                    throw Unsupported(
-                                        "The A2 array initializer requires admitted contextual scalar values.");
-                                }
-
-                                records.Add(
-                                    TrRmRegisterBodyRecordWriter
-                                        .EncodeSemanticStore(1, 1, 1, 1, 2,
-                                            initializerRegister));
-                            }
-                            else
-                            {
-                                if (arrayInitialization.Elements[elementIndex]
-                                    is BoundCall { Type: PrimitiveType.Void }
-                                        or BoundConditional
-                                            { Type: PrimitiveType.Void }
-                                    && schema
-                                        .UsesForeignInvocationStorageFixedArrayUnitInitialization())
-                                {
-                                    records.Add(
-                                        TrRmRegisterBodyRecordWriter
-                                            .EncodeSemanticStore(1, 1, 1, 1,
-                                                2, 14));
-                                }
-                                else if (isNullaryEmptyChild
-                                    && schema
-                                        .UsesForeignInvocationStorageFixedArrayEmptyInitialization())
-                                {
-                                    records.Add(
-                                        TrRmRegisterBodyRecordWriter
-                                            .EncodeEmptyArrayInitialization(2,
-                                                schema));
-                                }
-                                else
-                                {
-                                    throw Unsupported(
-                                        "The A2 Body array element has no admitted store encoding.");
-                                }
-                            }
-
-                            if (isNullaryEmptyChild)
-                            {
-                                AppendNullaryArrayStoreInstruction(code,
-                                    initializationStoreIndex);
-                            }
-                            else
-                            {
-                                code.Add(0xD9);
-                                code.Add(0);
-                                code.Add((byte)initializationStoreIndex);
-                                code.Add((byte)(initializationStoreIndex >> 8));
-                            }
-                            if (elementIndex + 1
-                                < arrayInitialization.Elements.Length)
-                            {
-                                code.Add(0x21);
-                                code.Add(0x10);
-                            }
-                        }
+                        AppendZeroArrayIndex(indexHome, 0);
+                        code.Add(0x10);
+                        code.Add(checked((byte)oneRegister));
+                        code.Add(0x33);
+                        code.Add(checked((byte)((oneRegister << 4)
+                            | oneRegister)));
+                        code.Add(0x20);
+                        code.Add(checked((byte)((oneRegister << 4)
+                            | oneRegister)));
+                        AppendArrayInitializationElements(
+                            arrayInitialization, local.Variable, 0,
+                            maximumDepth, indexHome, oneRegister, -1);
 
                         break;
                     }
@@ -4823,17 +4991,24 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void AppendRecordPlaceSelectionInstruction(
-        TrRmA3StagedList<byte> code, ushort recordIndex)
+        TrRmA3StagedList<byte> code, ushort recordIndex,
+        byte destinationRegister)
     {
+        if (destinationRegister > 13)
+        {
+            throw Unsupported(
+                "The F+S PlaceSelection destination is not a value register.");
+        }
+
         if (recordIndex <= 0x0F)
         {
             code.Add(0x91);
-            code.Add((byte)((recordIndex << 4) | 2));
+            code.Add((byte)((recordIndex << 4) | destinationRegister));
             return;
         }
 
         code.Add(0xD8);
-        code.Add(2);
+        code.Add(destinationRegister);
         code.Add((byte)recordIndex);
         code.Add((byte)(recordIndex >> 8));
     }

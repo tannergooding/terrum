@@ -2883,6 +2883,130 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardA2EmitsAndReconstructsNestedArrayInitialization()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-nested-array-initialization";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            internal extern void Observe(write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [[[int32; 2]; 2]; 2] values = [
+                    [[0, -1], [-1, 0]],
+                    [[-1, 0], [0, -1]]];
+                mut int32 output = 0;
+                unsafe {
+                    var callback = &Observe;
+                    callback(&output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(3));
+
+        var mainRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                mainRow = row;
+                break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(mainRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(mainRow), tables.Contracts.Count);
+        AssertHomeFirstUseTypeMap(body);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var initializations
+            = new List<BoundNativeFixedArrayInitialization>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayInitialization init)
+                {
+                    initializations.Add(init);
+                }
+            }), Is.True);
+        Assert.That(initializations, Has.Count.EqualTo(7));
+        Assert.That(initializations.All(static init =>
+            init.Layout.ElementCount == 2
+                && (ulong)init.Elements.Length == init.Layout.ElementCount),
+            Is.True);
+        Assert.That(initializations.Count(static init =>
+            NativeFixedArrayTypes.IsType(init.Layout.ElementType)),
+            Is.EqualTo(3));
+        Assert.That(initializations.Count(static init =>
+            init.Layout.ElementType == PrimitiveType.Int32),
+            Is.EqualTo(4));
+        int GetArrayTypeDepth(PrimitiveType type)
+        {
+            var depth = 0;
+            while (NativeFixedArrayTypes.IsType(type))
+            {
+                depth++;
+                type = loaded.NativeFixedArrayTypes[
+                    NativeFixedArrayTypes.Index(type)].ElementType;
+            }
+
+            return depth;
+        }
+        var outerInitialization = initializations.Single(init =>
+            GetArrayTypeDepth(init.Type) == 3);
+        var sourceOrderedValues = new List<uint>();
+        void CollectNestedValues(
+            BoundNativeFixedArrayInitialization initialization)
+        {
+            foreach (var element in initialization.Elements)
+            {
+                if (element
+                    is BoundNativeFixedArrayInitialization nested)
+                {
+                    CollectNestedValues(nested);
+                }
+                else
+                {
+                    Assert.That(element, Is.InstanceOf<BoundConstant>());
+                    sourceOrderedValues.Add(unchecked((uint)
+                        ((BoundConstant)element).Bits.Low));
+                }
+            }
+        }
+        CollectNestedValues(outerInitialization);
+        Assert.That(sourceOrderedValues, Is.EqualTo(new uint[] {
+            0, uint.MaxValue, uint.MaxValue, 0,
+            uint.MaxValue, 0, 0, uint.MaxValue,
+        }));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [Test]
     public void StandardA2DeclarationProducerPublishesCheckedCopyEvidence()
     {
         const string schemaIdentity
