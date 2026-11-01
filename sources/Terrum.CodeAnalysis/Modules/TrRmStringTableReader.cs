@@ -19,9 +19,9 @@ public readonly ref struct TrRmStringTableReader
     internal TrRmStringTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
-        resourceLedger?.ConsumeWork(checked((ulong)section.Length
-            + (ulong)recordCount + 2UL));
-        _rows = new TrRmVariableTableIndex(section, recordCount, 8, 4);
+        resourceLedger?.ConsumeWork();
+        _rows = new TrRmVariableTableIndex(section, recordCount, 8, 4,
+            resourceLedger);
         _resourceLedger = resourceLedger;
         Count = recordCount;
     }

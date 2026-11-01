@@ -9,14 +9,27 @@ namespace Terrum.CodeAnalysis.Modules;
 public readonly ref struct TrRmBlobTableReader
 {
     private readonly TrRmVariableTableIndex _rows;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public int Count => _rows.Count;
 
     public TrRmBlobTableReader(ReadOnlySpan<byte> section, int recordCount)
+        : this(section, recordCount, null)
     {
-        _rows = new TrRmVariableTableIndex(section, recordCount, 0, 1);
+    }
+
+    internal TrRmBlobTableReader(ReadOnlySpan<byte> section, int recordCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        _rows = new TrRmVariableTableIndex(section, recordCount, 0, 1,
+            resourceLedger);
+        _resourceLedger = resourceLedger;
     }
 
     public ReadOnlySpan<byte> GetRow(int row)
-        => _rows.GetRow(row);
+    {
+        var result = _rows.GetRow(row);
+        _resourceLedger?.ConsumeWork(checked((ulong)result.Length));
+        return result;
+    }
 }

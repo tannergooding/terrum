@@ -42,9 +42,8 @@ public readonly ref struct TrRmBodyTableReader
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
 
-        resourceLedger?.ConsumeWork(checked((ulong)(recordCount + 1)
-            * (sizeof(uint) + 1)));
-        _rows = new TrRmVariableTableIndex(section, recordCount, 1, 1);
+        _rows = new TrRmVariableTableIndex(section, recordCount, 1, 1,
+            resourceLedger);
         _schema = schema;
         _resourceLedger = resourceLedger;
     }

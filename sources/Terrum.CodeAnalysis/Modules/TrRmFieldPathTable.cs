@@ -17,6 +17,7 @@ public readonly record struct TrRmFieldPathRow(
 public readonly ref struct TrRmFieldPathTableReader
 {
     private readonly TrRmVariableTableIndex _rows;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     /// <summary>Gets the number of validated FieldPath rows.</summary>
     public int Count => _rows.Count;
@@ -30,13 +31,26 @@ public readonly ref struct TrRmFieldPathTableReader
     public TrRmFieldPathTableReader(ReadOnlySpan<byte> section, int recordCount,
         TrRmTypeSpecTableReader types, TrRmFieldDefTableReader fields,
         TrRmImportTableReader imports)
+        : this(section, recordCount, types, fields, imports, null)
     {
-        _rows = new TrRmVariableTableIndex(section, recordCount, 8, 4);
+    }
+
+    internal TrRmFieldPathTableReader(ReadOnlySpan<byte> section,
+        int recordCount, TrRmTypeSpecTableReader types,
+        TrRmFieldDefTableReader fields, TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork();
+        _rows = new TrRmVariableTableIndex(section, recordCount, 8, 4,
+            resourceLedger);
+        _resourceLedger = resourceLedger;
         for (var row = 1; row <= recordCount; row++)
         {
-            var data = _rows.GetRow(row);
+            _resourceLedger?.ConsumeWork();
+            var data = GetRow(row);
             var root = Read(data, 0);
             var fieldCount = Read(data, 4);
+            _resourceLedger?.ConsumeWork(3);
             if (root == 0 || fieldCount == 0
                 || (8L + (4L * fieldCount)) != data.Length)
             {
@@ -46,6 +60,7 @@ public readonly ref struct TrRmFieldPathTableReader
             _ = types.GetTypeSpecRef(root);
             for (var field = 0; field < fieldCount; field++)
             {
+                _resourceLedger?.ConsumeWork();
                 TrRmFieldReferenceValidator.Validate(
                     Read(data, 8 + checked((int)field * sizeof(uint))), fields, imports);
             }
@@ -54,17 +69,25 @@ public readonly ref struct TrRmFieldPathTableReader
 
     /// <summary>Gets the complete root TypeSpecRef.</summary>
     public uint GetRootTypeSpecRef(int row)
-        => Read(GetRow(row), 0);
+    {
+        _resourceLedger?.ConsumeWork();
+        return Read(GetRow(row), 0);
+    }
 
     /// <summary>Gets the number of ordered FieldReferences in a path.</summary>
     public int GetFieldCount(int row)
-        => checked((int)Read(GetRow(row), 4));
+    {
+        _resourceLedger?.ConsumeWork();
+        return checked((int)Read(GetRow(row), 4));
+    }
 
     /// <summary>Gets an ordered FieldDef DefId or FieldDef Import token.</summary>
     public uint GetFieldReference(int row, int ordinal)
     {
+        _resourceLedger?.ConsumeWork();
         var data = GetRow(row);
         var fieldCount = checked((int)Read(data, 4));
+        _resourceLedger?.ConsumeWork(2);
         if (ordinal < 0 || ordinal >= fieldCount)
         {
             throw InvalidFieldPath();
@@ -74,10 +97,19 @@ public readonly ref struct TrRmFieldPathTableReader
     }
 
     private ReadOnlySpan<byte> GetRow(int row)
-        => _rows.GetRow(row);
+    {
+        _resourceLedger?.ConsumeWork();
+        var data = _rows.GetRow(row);
+        _resourceLedger?.ConsumeWork(checked((ulong)data.Length));
+        return data;
+    }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private uint Read(ReadOnlySpan<byte> data, int offset)
+    {
+        _resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidFieldPath()
         => new("Invalid TRRM FieldPath table.");

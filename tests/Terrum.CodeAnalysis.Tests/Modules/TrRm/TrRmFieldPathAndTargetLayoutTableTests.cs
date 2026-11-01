@@ -43,6 +43,91 @@ public sealed class TrRmFieldPathAndTargetLayoutTableTests
     }
 
     [Test]
+    public void TargetLayoutReadersChargeRowsAndStateAtExactWorkBoundaries()
+    {
+        var fixture = CreateFixture();
+        var readers = CreateReaders(fixture);
+
+        var exactFieldLedger = new TrRmA3LayoutResourceLedger();
+        exactFieldLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 15);
+        var exactFields = new TrRmTargetLayoutDependencyFieldTableReader(
+            fixture.DependencyFieldBytes, 2, readers.Fields, readers.Imports,
+            exactFieldLedger);
+        Assert.That(exactFields.GetFieldReference(2),
+            Is.EqualTo(0x1C00_0002u));
+        Assert.That(exactFieldLedger.WorkRemaining, Is.Zero);
+
+        var shortFieldLedger = new TrRmA3LayoutResourceLedger();
+        shortFieldLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 14);
+        var shortFields = new TrRmTargetLayoutDependencyFieldTableReader(
+            fixture.DependencyFieldBytes, 2, readers.Fields, readers.Imports,
+            shortFieldLedger);
+        TrRmResourceLimitException? fieldException = null;
+        try
+        {
+            _ = shortFields.GetFieldReference(2);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            fieldException = caught;
+        }
+
+        Assert.That(fieldException!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+            TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+
+        var exactDependencyLedger = new TrRmA3LayoutResourceLedger();
+        exactDependencyLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 85);
+        var exactDependencies = new TrRmTargetLayoutDependencyTableReader(
+            fixture.DependencyBytes, 2, readers.TypeSpecs,
+            readers.TargetProfiles, 2, exactDependencyLedger);
+        Assert.That(exactDependencies.GetQueryKind(1), Is.EqualTo((byte)1));
+        Assert.That(exactDependencies.GetTargetProfileRow(2), Is.EqualTo(1));
+        Assert.That(exactDependencies.GetFieldRange(2), Is.EqualTo((1, 2)));
+        Assert.That(exactDependencyLedger.WorkRemaining, Is.Zero);
+
+        var shortDependencyLedger = new TrRmA3LayoutResourceLedger();
+        shortDependencyLedger.ConsumeWork(
+            TrRmA3LayoutResourceLedger.WorkLimit - 84);
+        var shortDependencies = new TrRmTargetLayoutDependencyTableReader(
+            fixture.DependencyBytes, 2, readers.TypeSpecs,
+            readers.TargetProfiles, 2, shortDependencyLedger);
+        TrRmResourceLimitException? dependencyException = null;
+        try
+        {
+            _ = shortDependencies.GetQueryKind(1);
+            _ = shortDependencies.GetTargetProfileRow(2);
+            _ = shortDependencies.GetFieldRange(2);
+        }
+        catch (TrRmResourceLimitException caught)
+        {
+            dependencyException = caught;
+        }
+
+        Assert.That(dependencyException!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+            TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+    }
+
+    [Test]
+    public void FieldPathReaderChargesRowsAndFieldsAtTheExactWorkBoundary()
+    {
+        var fixture = CreateFixture();
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var readers = CreateReaders(fixture);
+            var reader = new TrRmFieldPathTableReader(
+                fixture.FieldPathBytes, 1, readers.TypeSpecs, readers.Fields,
+                readers.Imports, ledger);
+            Assert.That(reader.GetFieldReference(1, 1),
+                Is.EqualTo(0x1C00_0002u));
+        });
+    }
+
+    [Test]
     public void RejectsInvalidFieldReferencesAndFieldPathShapes()
     {
         var fixture = CreateFixture();

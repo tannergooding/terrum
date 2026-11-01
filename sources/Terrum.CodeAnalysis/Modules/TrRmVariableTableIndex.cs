@@ -15,26 +15,61 @@ public readonly ref struct TrRmVariableTableIndex
     private readonly int _recordCount;
     private readonly int _minimumRowBytes;
     private readonly int _rowAlignment;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public int Count => _recordCount;
 
     public TrRmVariableTableIndex(ReadOnlySpan<byte> section, int recordCount,
         int minimumRowBytes, int rowAlignment)
+        : this(section, recordCount, minimumRowBytes, rowAlignment, null)
     {
+    }
+
+    internal TrRmVariableTableIndex(ReadOnlySpan<byte> section, int recordCount,
+        int minimumRowBytes, int rowAlignment,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        _resourceLedger = resourceLedger;
+        ConsumeWork(2);
         var indexBytes = ((long)recordCount + 1) * sizeof(uint);
-        if (recordCount <= 0 || recordCount > 0xFF_FFFF
-            || minimumRowBytes < 0 || rowAlignment is not (1 or 4)
-            || indexBytes > section.Length)
+        ConsumeWork();
+        if (recordCount <= 0)
         {
             throw InvalidIndex();
         }
 
+        ConsumeWork();
+        if (recordCount > 0xFF_FFFF)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork();
+        if (minimumRowBytes < 0)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork();
+        if (rowAlignment is not (1 or 4))
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork();
+        if (indexBytes > section.Length)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork(2);
         _offsets = section.Slice(0, (int)indexBytes);
         _data = section.Slice((int)indexBytes);
         _recordCount = recordCount;
         _minimumRowBytes = minimumRowBytes;
         _rowAlignment = rowAlignment;
         var previous = ReadOffset(0);
+        ConsumeWork();
         if (previous != 0)
         {
             throw InvalidIndex();
@@ -42,9 +77,24 @@ public readonly ref struct TrRmVariableTableIndex
 
         for (var row = 1; row <= recordCount; row++)
         {
+            ConsumeWork();
             var next = ReadOffset(row);
-            if (next > _data.Length || next < previous + minimumRowBytes
-                || next % rowAlignment != 0)
+            ConsumeWork();
+            if (next > _data.Length)
+            {
+                throw InvalidIndex();
+            }
+
+            ConsumeWork();
+            var minimumEnd = previous + minimumRowBytes;
+            ConsumeWork();
+            if (next < minimumEnd)
+            {
+                throw InvalidIndex();
+            }
+
+            ConsumeWork(2);
+            if (next % rowAlignment != 0)
             {
                 throw InvalidIndex();
             }
@@ -52,6 +102,7 @@ public readonly ref struct TrRmVariableTableIndex
             previous = next;
         }
 
+        ConsumeWork();
         if (previous != _data.Length)
         {
             throw InvalidIndex();
@@ -60,26 +111,64 @@ public readonly ref struct TrRmVariableTableIndex
 
     public ReadOnlySpan<byte> GetRow(int row)
     {
-        if (row <= 0 || row > _recordCount)
+        ConsumeWork();
+        if (row <= 0)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork();
+        if (row > _recordCount)
         {
             throw InvalidIndex();
         }
 
         var start = (int)ReadOffset(row - 1);
         var end = (int)ReadOffset(row);
-        // Row alignment is restricted to 1 or 4, so one low-bit mask checks both offsets.
-        if (start < 0 || start > _data.Length - _minimumRowBytes
-            || end > _data.Length || end < start + _minimumRowBytes
-            || ((start | end) & (_rowAlignment - 1)) != 0)
+        ConsumeWork();
+        if (start < 0)
         {
             throw InvalidIndex();
         }
 
+        ConsumeWork(2);
+        if (start > _data.Length - _minimumRowBytes)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork();
+        if (end > _data.Length)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork(2);
+        if (end < start + _minimumRowBytes)
+        {
+            throw InvalidIndex();
+        }
+
+        // Row alignment is restricted to 1 or 4, so one low-bit mask checks both offsets.
+        ConsumeWork(2);
+        if (((start | end) & (_rowAlignment - 1)) != 0)
+        {
+            throw InvalidIndex();
+        }
+
+        ConsumeWork();
         return _data.Slice(start, end - start);
     }
 
     private uint ReadOffset(int row)
-        => BinaryPrimitives.ReadUInt32LittleEndian(_offsets.Slice(row * sizeof(uint), sizeof(uint)));
+    {
+        ConsumeWork(sizeof(uint) + 2);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            _offsets.Slice(row * sizeof(uint), sizeof(uint)));
+    }
+
+    private void ConsumeWork(ulong units = 1)
+        => _resourceLedger?.ConsumeWork(units);
 
     private static InvalidDataException InvalidIndex()
         => new("Invalid TRRM variable table index.");

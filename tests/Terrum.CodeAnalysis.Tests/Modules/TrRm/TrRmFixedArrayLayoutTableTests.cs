@@ -1201,9 +1201,15 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var replacement = CreateA3GenericCopyProviderArtifact(
             declaredCopy: false);
         Array.Copy(replacement, providerArtifact, providerArtifact.Length);
-        _ = Assert.Throws<InvalidDataException>(() =>
+        var workBeforeRevalidation = ledger.WorkRemaining;
+        var revalidationLimit = Assert.Throws<TrRmResourceLimitException>(() =>
             plan.CreateLoweringInputs(
                 TrRmStandardNativeOperation.EmitExecutable));
+        Assert.That(revalidationLimit!.Required,
+            Is.EqualTo(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+        Assert.That(ledger.WorkRemaining,
+            Is.LessThan(workBeforeRevalidation));
 
         ledger.ConsumeWork(ledger.WorkRemaining);
         var limitException = Assert.Throws<TrRmResourceLimitException>(() =>

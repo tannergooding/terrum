@@ -82,7 +82,8 @@ public readonly ref struct TrRmTypeSpecTableReader
         }
 
         resourceLedger?.ConsumeWork(checked((ulong)recordCount));
-        _rows = new TrRmVariableTableIndex(section, recordCount, 2, 1);
+        _rows = new TrRmVariableTableIndex(section, recordCount, 2, 1,
+            resourceLedger);
         _recordCount = recordCount;
         _typeDefCount = typeDefCount;
         _importCount = importCount;

@@ -639,10 +639,19 @@ and the state/work for deterministic out-of-order extent sorting. Standard
 loading, reference creation, provider binding, native-address reconstruction
 and retained-plan revalidation keep using the same ledger for reconstructed
 indexes. Exact/one-short constructor and lookup boundaries, padding-byte cost,
-out-of-order payloads and an oversized directory count are covered. The
-combined focused A3 index/layout/provider/TypeSpec/witness/text/CLI selection
-passed 243/243 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_10_42_26_net11.0.trx`.
+out-of-order payloads and an oversized directory count are covered.
+The shared `TrRmVariableTableIndex` now accepts the same ledger and charges
+offset-field access, checked row boundaries and each selected row lookup.
+Blob, Body, Contract, FieldPath, String and TypeSpec readers pass the root
+ledger into it; duplicate caller-side offset charges were removed so each
+index read is accounted once. The combined focused A3 index/layout/provider/
+TypeSpec/witness/text/CLI plus variable-table and Body-reader selection passed
+505/505 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_10_56_38_net11.0.trx`.
+Repeated retained-plan work shares the same budget: after an earlier
+no-`NativeImport` attempt, changed-provider revalidation can correctly exhaust
+the remaining work before establishing incompatibility. Separate within-budget
+provider mismatch and exact-limit tests remain active.
 The bounded-expansion subtask is complete; the full deterministic
 field/action/payload recipe and remaining table/body/provider state charges
 are still unfinished. A broader `Modules.TrRm` selection later reported 2,378
@@ -659,7 +668,7 @@ with zero skips at
 `artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
 baseline; the normalized comparison in
-`artifacts\\log\\compiler-adoption-a3-artifact-index-analyzers.log` has 352
+`artifacts\\log\\compiler-adoption-a3-variable-table-index-analyzers.log` has 352
 unique diagnostic identities versus the 353-identity baseline, with no
 additions and one removed diagnostic.
 

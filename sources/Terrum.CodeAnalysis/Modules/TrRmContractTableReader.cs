@@ -160,9 +160,9 @@ public readonly ref struct TrRmContractTableReader
         }
         var developmentProfile = schema.IsDevelopmentProfile();
 
-        resourceLedger?.ConsumeWork(checked(((ulong)recordCount + 1UL)
-            * (sizeof(uint) + 1UL)));
-        _rows = recordCount == 0 ? default : new TrRmVariableTableIndex(section, recordCount, 8, 1);
+        _rows = recordCount == 0 ? default
+            : new TrRmVariableTableIndex(section, recordCount, 8, 1,
+                resourceLedger);
         _methods = methods;
         _signatures = signatures;
         _parameters = parameters;
