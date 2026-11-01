@@ -617,6 +617,12 @@ cleanup providers until their last use. Servicing later bindings cannot relabel
 an existing event to a replacement image or release its old instruction-address
 mapping.
 
+The exact Core anchor selection/binding mechanism is addressed by the separate,
+unapproved [Core exception identity proposal](standard-trrm-core-exception-identity.md).
+That provisional direction does not change this proposal's status or normative
+owners; E1 use must not infer Core identity from a name, body shape or witness
+implementer while the decision remains unadopted.
+
 ### Traversal, remapping and re-encoding
 
 Shared bound-tree traversal/rewriting must visit protected code, filters,
