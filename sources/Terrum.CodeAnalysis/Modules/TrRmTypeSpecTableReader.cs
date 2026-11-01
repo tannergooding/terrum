@@ -73,7 +73,8 @@ public readonly ref struct TrRmTypeSpecTableReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
             || (!schema.IsDevelopmentProfile()
                 && nativeFunctionPointerSignatureCount != 0))
         {

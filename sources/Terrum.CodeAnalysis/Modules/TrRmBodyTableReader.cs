@@ -36,7 +36,8 @@ public readonly ref struct TrRmBodyTableReader
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
-            or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }

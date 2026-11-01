@@ -424,6 +424,33 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void RegisterExceptionRegionsDraftFeatureRequiresItsExactSchema()
+    {
+        var schema = TrRmArtifactSchema.RegisterExceptionRegionsDraft;
+        var featureBytes = TrRmFeatureTableWriter.Encode(
+            [TrRmFeatureRow.RegisterExceptionRegionsCandidate], schema);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode(
+                [TrRmFeatureRow.RegisterExceptionRegionsCandidate]));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode(
+                [TrRmFeatureRow.ForeignInvocationContractsCandidate], schema));
+
+        var artifact = FeatureArtifact(1, 1, featureBytes);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(artifact));
+        var index = TrRmArtifactIndex.ForRegisterExceptionRegionsDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateRegisterExceptionRegionsDraftAndGetExecutionTables(index);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.RegisterExceptionRegionsFeatureId), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.NativeBoundaryContractsFeatureId), Is.False);
+    }
+
+    [Test]
     public void InspectsUnsupportedFeaturesAndRejectsMalformedPayloadsAndModuleRanges()
     {
         var feature = TrRmFeatureTableWriter.Encode([TrRmFeatureRow.LayoutQueries]);

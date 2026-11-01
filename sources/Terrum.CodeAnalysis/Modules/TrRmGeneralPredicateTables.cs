@@ -164,7 +164,8 @@ internal readonly ref struct TrRmPredicateNodeTableReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw TrRmPredicateTableValidation.Invalid("PredicateNode");
         }
@@ -298,7 +299,8 @@ internal readonly ref struct TrRmPredicateNodeOperandTableReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw TrRmPredicateTableValidation.Invalid("PredicateNodeOperand");
         }
@@ -428,7 +430,8 @@ internal readonly ref struct TrRmPredicateReadRootTableReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw TrRmPredicateTableValidation.Invalid("PredicateReadRoot");
         }

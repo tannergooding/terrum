@@ -48,7 +48,8 @@ public readonly ref struct TrRmParamTableReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw InvalidParam();
         }

@@ -152,7 +152,8 @@ public readonly ref struct TrRmContractTableReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
             || (schema == TrRmArtifactSchema.CopyOriginDraft && !profileAware))
         {
             throw InvalidContract();

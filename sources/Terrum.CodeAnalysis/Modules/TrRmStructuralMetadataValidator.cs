@@ -817,6 +817,12 @@ public static class TrRmStructuralMetadataValidator
         => ValidateCore(index, BodyInspection.None, developmentProfile: false,
             generalPredicateGraphsDraft: true);
 
+    internal static ValidatedExecutionTables
+        ValidateRegisterExceptionRegionsDraftAndGetExecutionTables(
+            TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            registerExceptionRegionsDraft: true);
+
     internal static void ValidateGeneralPredicateGraphsDraftProviderBindings(
         ReadOnlySpan<byte> consumerArtifact,
         IReadOnlyList<byte[]> providerArtifacts)
@@ -1069,6 +1075,7 @@ public static class TrRmStructuralMetadataValidator
         bool foreignInvocationStorageFixedArrayEmptyInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayGenericDraft = false,
+        bool registerExceptionRegionsDraft = false,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
     {
         var selectedSchema = developmentFunctionPointerEffectsDraft
@@ -1099,6 +1106,8 @@ public static class TrRmStructuralMetadataValidator
                         ? TrRmArtifactSchema.RootPinRuntimeDraft
                     : generalPredicateGraphsDraft
                         ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    : registerExceptionRegionsDraft
+                        ? TrRmArtifactSchema.RegisterExceptionRegionsDraft
                         : TrRmArtifactSchema.Standard;
         if (index.Schema != selectedSchema)
         {

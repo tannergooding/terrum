@@ -22,6 +22,7 @@ internal enum TrRmArtifactSchema
     NominalEnumsDraft,
     RootPinRuntimeDraft,
     GeneralPredicateGraphsDraft,
+    RegisterExceptionRegionsDraft,
 }
 
 internal static class TrRmArtifactSchemaFacts
@@ -58,6 +59,10 @@ internal static class TrRmArtifactSchemaFacts
 
     internal static bool UsesGeneralPredicateGraphs(this TrRmArtifactSchema schema) =>
         schema == TrRmArtifactSchema.GeneralPredicateGraphsDraft;
+
+    internal static bool UsesRegisterExceptionRegions(
+        this TrRmArtifactSchema schema) =>
+        schema == TrRmArtifactSchema.RegisterExceptionRegionsDraft;
 
     internal static bool UsesForeignInvocationContracts(
         this TrRmArtifactSchema schema) =>
@@ -125,7 +130,8 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
-            or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+            or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+            or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
             || artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
             || ReadU16(artifact, 4) != 1 || ReadU16(artifact, 6) != 0
             || ReadU32(artifact, 8) != 32 || ReadU32(artifact, 16) != artifact.Length
@@ -353,6 +359,10 @@ public readonly ref struct TrRmArtifactIndex
     internal static TrRmArtifactIndex ForGeneralPredicateGraphsDraft(
         ReadOnlySpan<byte> artifact)
         => new(artifact, TrRmArtifactSchema.GeneralPredicateGraphsDraft);
+
+    internal static TrRmArtifactIndex ForRegisterExceptionRegionsDraft(
+        ReadOnlySpan<byte> artifact)
+        => new(artifact, TrRmArtifactSchema.RegisterExceptionRegionsDraft);
 
     public bool TryGetSection(ushort kind, out ReadOnlySpan<byte> section, out int recordCount)
     {
