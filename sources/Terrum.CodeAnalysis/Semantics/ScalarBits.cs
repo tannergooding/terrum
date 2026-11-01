@@ -147,6 +147,7 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
                 or PrimitiveType.Decimal32 => unchecked((long)raw),
             PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64
                 => unchecked((long)raw),
+            _ when BoundEnumTypes.IsType(type) => unchecked((int)raw),
             PrimitiveType.Bool => unchecked((long)raw),
             _ => unchecked((long)raw),
         };
@@ -167,7 +168,7 @@ internal readonly record struct ScalarBits(ulong Low, ulong High)
     {
         for (var index = 0; index < bytes.Length; index++)
         {
-            bytes[index] = (byte)(value >> (index * 8));
+            bytes[index] = unchecked((byte)(value >> (index * 8)));
         }
     }
 }

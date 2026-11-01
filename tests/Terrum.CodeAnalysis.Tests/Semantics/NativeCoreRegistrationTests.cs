@@ -2,18 +2,25 @@
 
 using System;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Threading.Tasks;
 using Terrum.CodeAnalysis.Modules;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
+using Terrum.CodeAnalysis.Tests.Infrastructure;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Semantics;
 
 public sealed class NativeCoreRegistrationTests
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int EnumRoundTrip(int value);
+
     [Test]
     public void RegistrationRetainsSelectedEnumAndSchemaIdentities()
     {
@@ -45,17 +52,83 @@ public sealed class NativeCoreRegistrationTests
         var invalidEnum = registration.CallingConventions with { Members = invalidMembers };
 
         Assert.Throws<ArgumentException>(() => NativeCoreRegistrationSet.Create(
-            registration.UsingModuleIdentity, invalidEnum, registration.ResolutionModes,
+            registration.ModuleBindings, invalidEnum, registration.ResolutionModes,
             registration.ResolutionPolicies, registration.NativeImport,
             registration.NativeCallable, registration.NativeCallConv, registration.NativeExport));
+
+        var invalidBlittableRequirement = registration.CallingConventions with {
+            BlittableTargetRequirement = 2,
+        };
+        Assert.Throws<ArgumentException>(() => NativeCoreRegistrationSet.Create(
+            registration.ModuleBindings, invalidBlittableRequirement,
+            registration.ResolutionModes, registration.ResolutionPolicies,
+            registration.NativeImport, registration.NativeCallable,
+            registration.NativeCallConv, registration.NativeExport));
+
+        var invalidMemberKey = registration.CallingConventions with {
+            Members = registration.CallingConventions.Members.SetItem(1,
+                registration.CallingConventions.Members[1] with { DeclarationKey = "" }),
+        };
+        Assert.Throws<ArgumentException>(() => NativeCoreRegistrationSet.Create(
+            registration.ModuleBindings, invalidMemberKey, registration.ResolutionModes,
+            registration.ResolutionPolicies, registration.NativeImport,
+            registration.NativeCallable, registration.NativeCallConv,
+            registration.NativeExport));
+
+        var duplicateDeclarationKey = registration.CallingConventions with {
+            Members = registration.CallingConventions.Members.SetItem(1,
+                registration.CallingConventions.Members[1] with {
+                    DeclarationKey = registration.CallingConventions.Members[0].DeclarationKey,
+                }),
+        };
+        Assert.Throws<ArgumentException>(() => NativeCoreRegistrationSet.Create(
+            registration.ModuleBindings, duplicateDeclarationKey,
+            registration.ResolutionModes, registration.ResolutionPolicies,
+            registration.NativeImport, registration.NativeCallable,
+            registration.NativeCallConv, registration.NativeExport));
 
         var invalidImport = registration.NativeImport with {
             CallingConventionEnum = registration.ResolutionModes.Identity,
         };
         Assert.Throws<ArgumentException>(() => NativeCoreRegistrationSet.Create(
-            registration.UsingModuleIdentity, registration.CallingConventions,
+            registration.ModuleBindings, registration.CallingConventions,
             registration.ResolutionModes, registration.ResolutionPolicies, invalidImport,
             registration.NativeCallable, registration.NativeCallConv, registration.NativeExport));
+    }
+
+    [Test]
+    public void RegistrationRequiresEverySelectedProviderOrigin()
+    {
+        var registration = CreateRegistration();
+        var missingProvider = CoreProviderModuleBindings.Create("consumer.module", [
+            new CoreProviderModuleOrigin("other.provider", "test-revision",
+                new CoreProviderSchemaSelection("core.native-registration", 1),
+                1, 0, 0),
+        ]);
+
+        Assert.Throws<ArgumentException>(() => NativeCoreRegistrationSet.Create(
+            missingProvider, registration.CallingConventions,
+            registration.ResolutionModes, registration.ResolutionPolicies,
+            registration.NativeImport, registration.NativeCallable,
+            registration.NativeCallConv, registration.NativeExport));
+    }
+
+    [Test]
+    public void ProviderModuleBindingsRejectDuplicateAndUnsupportedSelections()
+    {
+        var origin = new CoreProviderModuleOrigin("core.native", "test-revision",
+            new CoreProviderSchemaSelection("core.native-registration", 1), 1, 0, 0);
+
+        Assert.Throws<ArgumentException>(() =>
+            CoreProviderModuleBindings.Create("consumer.module", [origin, origin]));
+        Assert.Throws<ArgumentException>(() =>
+            CoreProviderModuleBindings.Create("consumer.module", [origin with {
+                TargetRequirement = 2,
+            }]));
+        Assert.Throws<ArgumentException>(() =>
+            CoreProviderModuleBindings.Create("consumer.module", [origin with {
+                Schema = new CoreProviderSchemaSelection("core.native-registration", 0),
+            }]));
     }
 
     [Test]
@@ -70,6 +143,34 @@ public sealed class NativeCoreRegistrationTests
             SyntaxTree.Parse("int32 Main() { return 0; }"), reference);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void BoundEnumPreservesItsBlittableTargetRequirement()
+    {
+        var registration = CreateRegistration();
+        var conventions = registration.CallingConventions with {
+            BlittableTargetRequirement = FixedLayoutStorage.WindowsX64TargetRequirement,
+        };
+        var configuredRegistration = NativeCoreRegistrationSet.Create(
+            registration.ModuleBindings, conventions, registration.ResolutionModes,
+            registration.ResolutionPolicies, registration.NativeImport,
+            registration.NativeCallable, registration.NativeCallConv,
+            registration.NativeExport);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(
+            "public int32 Identity(int32 value) { return value; }"),
+            new CompilationOptions { NativeCoreRegistration = configuredRegistration });
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program!.NativeCoreRegistration,
+            Is.SameAs(configuredRegistration));
+        var definition = compilation.Program!.EnumDefinitions.Single(
+            enumDefinition => enumDefinition.Identity == conventions.Identity);
+        Assert.That(definition.BlittableTargetRequirement,
+            Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
+        Assert.That(definition.Members[0].DeclarationKey,
+            Is.EqualTo(conventions.Members[0].DeclarationKey));
     }
 
     [Test]
@@ -217,6 +318,76 @@ public sealed class NativeCoreRegistrationTests
         Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.Emit(program, "nominal-enum"));
     }
+
+    [Test]
+    public async Task NativeEmitterPreservesUnrelatedEnumArgumentAndResultBits()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+
+        var enumDefinition = CreateUnrelatedEnum() with
+        {
+            BlittableTargetRequirement = FixedLayoutStorage.WindowsX64TargetRequirement,
+        };
+        var reference = new CompilationReference([], [], BoundRuntimePolicy.FailFast,
+            enumDefinitions: [enumDefinition]);
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            alias Palette = Sample.Palette;
+
+            public Palette Echo(Palette value) {
+                return value;
+            }
+            """), reference);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        Assert.That(program.EnumDefinitions.Single().BlittableTargetRequirement,
+            Is.EqualTo(FixedLayoutStorage.WindowsX64TargetRequirement));
+        var image = NativeEmitter.EmitLibrary(program, ["Echo"],
+            NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"native-enum-abi-{Guid.NewGuid():N}.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            var repositoryRoot = Path.GetFullPath(Path.Combine(
+                AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+            var testSourcePath = Path.Combine(repositoryRoot, "tests",
+                "Terrum.CodeAnalysis.Tests", "Semantics",
+                "NativeCoreRegistrationTests.cs");
+            var compilerAssemblyPath = typeof(NativeEmitter).Assembly.Location;
+            var testAssemblyPath = typeof(NativeCoreRegistrationTests).Assembly.Location;
+            TestContext.WriteLine("target=Windows-x64; policy=FailFast; abi=Winapi(int32)->int32");
+            TestContext.WriteLine($"enum={program.EnumDefinitions.Single().Name}; blittable-target={program.EnumDefinitions.Single().BlittableTargetRequirement}");
+            TestContext.WriteLine($"compiler-assembly-path={compilerAssemblyPath}");
+            TestContext.WriteLine($"compiler-assembly-sha256={GetSha256(compilerAssemblyPath)}");
+            TestContext.WriteLine($"test-assembly-path={testAssemblyPath}");
+            TestContext.WriteLine($"test-assembly-sha256={GetSha256(testAssemblyPath)}");
+            TestContext.WriteLine($"test-source-path={testSourcePath}");
+            TestContext.WriteLine($"test-source-sha256={GetSha256(testSourcePath)}");
+            TestContext.WriteLine($"output-dll-path={path}");
+            TestContext.WriteLine($"output-dll-sha256={GetSha256(path)}");
+            handle = NativeLibrary.Load(path);
+            var echo = Marshal.GetDelegateForFunctionPointer<EnumRoundTrip>(
+                NativeLibrary.GetExport(handle, "Echo"));
+            Assert.That(echo(0x13572468), Is.EqualTo(0x13572468));
+            Assert.That(echo(int.MinValue), Is.EqualTo(int.MinValue));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static string GetSha256(string path)
+        => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
 
     [Test]
     public void NativeDeclarationConventionsAcceptForwardedEnumConstants()
@@ -1136,7 +1307,12 @@ public sealed class NativeCoreRegistrationTests
             "Terrum.Interop.NativeImportResolutionPolicy",
             ("Default", 1), ("CompatibilitySearch", 2));
 
-        return NativeCoreRegistrationSet.Create("consumer.module", conventions, resolutionModes,
+        var providerBindings = CoreProviderModuleBindings.Create("consumer.module", [
+            new CoreProviderModuleOrigin("core.native", "test-revision",
+                new CoreProviderSchemaSelection("core.native-registration", 1),
+                1, 0, 0),
+        ]);
+        return NativeCoreRegistrationSet.Create(providerBindings, conventions, resolutionModes,
             resolutionPolicies,
             CreateSchema("NativeImport", "Terrum.Interop.NativeImport",
                 CoreNativeAttributeRole.NativeImport, conventions.Identity,
@@ -1158,7 +1334,10 @@ public sealed class NativeCoreRegistrationTests
         {
             memberDefinitions.Add(new CoreEnumMemberDefinition(
                 Identity("core.native", $"{exportKey}.{member.Name}", CoreDeclarationKind.EnumMember),
-                enumIdentity, member.Name, member.Value, IsPublic: true));
+                enumIdentity, member.Name, member.Value, IsPublic: true)
+            {
+                DeclarationKey = $"{exportKey}/member/{member.Name}",
+            });
         }
 
         return new CoreEnumDefinition(enumIdentity, qualifiedName, PrimitiveType.Int32,
@@ -1172,13 +1351,16 @@ public sealed class NativeCoreRegistrationTests
         var members = ImmutableArray.Create(
             new BoundEnumMemberDefinition(
                 Identity("sample.enums", "Sample.Palette.Minimum", CoreDeclarationKind.EnumMember),
-                identity, "Minimum", int.MinValue, IsPublic: true),
+                identity, "Minimum", int.MinValue, IsPublic: true,
+                DeclarationKey: "member.minimum"),
             new BoundEnumMemberDefinition(
                 Identity("sample.enums", "Sample.Palette.Maximum", CoreDeclarationKind.EnumMember),
-                identity, "Maximum", int.MaxValue, IsPublic: true),
+                identity, "Maximum", int.MaxValue, IsPublic: true,
+                DeclarationKey: "member.maximum"),
             new BoundEnumMemberDefinition(
                 Identity("sample.enums", "Sample.Palette.MinusOne", CoreDeclarationKind.EnumMember),
-                identity, "MinusOne", -1, IsPublic: true));
+                identity, "MinusOne", -1, IsPublic: true,
+                DeclarationKey: "member.minus-one"));
         return new BoundEnumDefinition(identity, "Sample.Palette", PrimitiveType.Int32,
             members, IsPublic: true, IsPrimary: true, IsFlags: false);
     }

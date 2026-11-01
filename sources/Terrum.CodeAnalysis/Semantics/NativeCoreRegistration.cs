@@ -36,6 +36,99 @@ public readonly record struct CoreDeclarationIdentity(
             or CoreDeclarationKind.AttributeSchema;
 }
 
+/// <summary>An exact host-selected provider schema identity and revision.</summary>
+/// <param name="Identity">The nonempty, ordinal schema identity token.</param>
+/// <param name="Revision">The nonzero exact schema revision.</param>
+public readonly record struct CoreProviderSchemaSelection(string Identity, uint Revision);
+
+/// <summary>The selected logical Module and requirements for one Core provider snapshot.</summary>
+/// <param name="ModuleIdentity">The exact logical Module identity.</param>
+/// <param name="RevisionIdentity">The host-selected producer revision token.</param>
+/// <param name="Schema">The exact whole schema/catalog selection.</param>
+/// <param name="GoverningSemanticEdition">The selected semantic edition.</param>
+/// <param name="TargetRequirement">The provider Module target requirement.</param>
+/// <param name="RuntimePolicy">The provider Module runtime policy.</param>
+public readonly record struct CoreProviderModuleOrigin(
+    string ModuleIdentity,
+    string RevisionIdentity,
+    CoreProviderSchemaSelection Schema,
+    uint GoverningSemanticEdition,
+    uint TargetRequirement,
+    uint RuntimePolicy);
+
+/// <summary>Immutable host-selected Module origins for one using Module's Core registration.</summary>
+/// <remarks>The object identity is the binding snapshot token; it is not serialized or an authentication claim.</remarks>
+public sealed class CoreProviderModuleBindings
+{
+    private CoreProviderModuleBindings(string usingModuleIdentity,
+        ImmutableArray<CoreProviderModuleOrigin> providers)
+    {
+        UsingModuleIdentity = usingModuleIdentity;
+        Providers = providers;
+    }
+
+    /// <summary>The exact using logical Module identity.</summary>
+    public string UsingModuleIdentity { get; }
+
+    /// <summary>The exact selected producer Module snapshots used by this registration.</summary>
+    public ImmutableArray<CoreProviderModuleOrigin> Providers { get; }
+
+    /// <summary>Creates a binding context after validating all provider origins.</summary>
+    /// <exception cref="ArgumentException">The using Module or a selected provider origin is invalid or ambiguous.</exception>
+    public static CoreProviderModuleBindings Create(string usingModuleIdentity,
+        ImmutableArray<CoreProviderModuleOrigin> providers)
+    {
+        var bindings = new CoreProviderModuleBindings(usingModuleIdentity, providers);
+        if (bindings.GetInvalidReason() is string reason)
+        {
+            throw new ArgumentException($"The selected Core provider Module bindings are invalid: {reason}.",
+                nameof(providers));
+        }
+
+        return bindings;
+    }
+
+    /// <summary>Whether the complete provider binding context is structurally valid.</summary>
+    public bool IsValid() => GetInvalidReason() is null;
+
+    internal bool ContainsProvider(string moduleIdentity)
+        => Providers.Any(origin => origin.ModuleIdentity == moduleIdentity);
+
+    internal string? GetInvalidReason()
+    {
+        if (!IsValidIdentity(UsingModuleIdentity))
+        {
+            return "the using Module identity is missing or malformed";
+        }
+        if (Providers.IsDefaultOrEmpty)
+        {
+            return "no selected provider Module origins are present";
+        }
+
+        var modules = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var provider in Providers)
+        {
+            if (!IsValidIdentity(provider.ModuleIdentity)
+                || !IsValidIdentity(provider.RevisionIdentity)
+                || !IsValidIdentity(provider.Schema.Identity)
+                || provider.Schema.Revision == 0
+                || provider.GoverningSemanticEdition != 1
+                || provider.TargetRequirement > 1
+                || provider.RuntimePolicy > 1
+                || !modules.Add(provider.ModuleIdentity))
+            {
+                return "a provider Module origin is malformed or has an ambiguous selection";
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsValidIdentity(string value)
+        => !string.IsNullOrWhiteSpace(value)
+            && !value.Contains('\0', StringComparison.Ordinal);
+}
+
 /// <summary>A checked public member definition in a registered Core enum.</summary>
 /// <param name="Identity">The exact member declaration identity.</param>
 /// <param name="DeclaringEnum">The exact enum that owns this member.</param>
@@ -47,7 +140,11 @@ public sealed record CoreEnumMemberDefinition(
     CoreDeclarationIdentity DeclaringEnum,
     string Name,
     int Value,
-    bool IsPublic);
+    bool IsPublic)
+{
+    /// <summary>The producer-assigned key that preserves this member declaration in metadata.</summary>
+    public string DeclarationKey { get; init; } = string.Empty;
+}
 
 /// <summary>A complete checked public enum declaration selected by a Core provider.</summary>
 /// <param name="Identity">The exact enum declaration identity.</param>
@@ -66,7 +163,11 @@ public sealed record CoreEnumDefinition(
     int GenericArity,
     bool IsPublic,
     bool IsPrimary,
-    bool IsFlags);
+    bool IsFlags)
+{
+    /// <summary>The selected target requirement for the enum's Blittable representation, or zero when absent.</summary>
+    public int BlittableTargetRequirement { get; init; }
+}
 
 /// <summary>The native semantic role owned by a registered Core attribute schema.</summary>
 public enum CoreNativeAttributeRole
@@ -115,7 +216,7 @@ public sealed record CoreNativeAttributeSchema(
 /// </remarks>
 public sealed class NativeCoreRegistrationSet
 {
-    private NativeCoreRegistrationSet(string usingModuleIdentity,
+    private NativeCoreRegistrationSet(CoreProviderModuleBindings moduleBindings,
         CoreEnumDefinition callingConventions,
         CoreEnumDefinition resolutionModes,
         CoreEnumDefinition resolutionPolicies,
@@ -124,7 +225,7 @@ public sealed class NativeCoreRegistrationSet
         CoreNativeAttributeSchema nativeCallConv,
         CoreNativeAttributeSchema nativeExport)
     {
-        UsingModuleIdentity = usingModuleIdentity;
+        ModuleBindings = moduleBindings;
         CallingConventions = callingConventions;
         ResolutionModes = resolutionModes;
         ResolutionPolicies = resolutionPolicies;
@@ -135,7 +236,10 @@ public sealed class NativeCoreRegistrationSet
     }
 
     /// <summary>The using logical Module identity for this registration.</summary>
-    public string UsingModuleIdentity { get; }
+    public string UsingModuleIdentity => ModuleBindings.UsingModuleIdentity;
+
+    /// <summary>The immutable selected provider Module context for this registration.</summary>
+    public CoreProviderModuleBindings ModuleBindings { get; }
 
     /// <summary>The selected convention enum declaration.</summary>
     public CoreEnumDefinition CallingConventions { get; }
@@ -183,7 +287,7 @@ public sealed class NativeCoreRegistrationSet
 
     /// <summary>Creates a registration after validating its complete enum and schema shapes.</summary>
     /// <exception cref="ArgumentException">A declaration, mapping or owner relationship is invalid.</exception>
-    public static NativeCoreRegistrationSet Create(string usingModuleIdentity,
+    public static NativeCoreRegistrationSet Create(CoreProviderModuleBindings moduleBindings,
         CoreEnumDefinition callingConventions,
         CoreEnumDefinition resolutionModes,
         CoreEnumDefinition resolutionPolicies,
@@ -192,13 +296,14 @@ public sealed class NativeCoreRegistrationSet
         CoreNativeAttributeSchema nativeCallConv,
         CoreNativeAttributeSchema nativeExport)
     {
-        var registration = new NativeCoreRegistrationSet(usingModuleIdentity,
+        ArgumentNullException.ThrowIfNull(moduleBindings);
+        var registration = new NativeCoreRegistrationSet(moduleBindings,
             callingConventions, resolutionModes, resolutionPolicies, nativeImport,
             nativeCallable, nativeCallConv, nativeExport);
         if (registration.GetInvalidReason() is string reason)
         {
             throw new ArgumentException($"The selected Core native registration is invalid: {reason}.",
-                nameof(usingModuleIdentity));
+                nameof(moduleBindings));
         }
 
         return registration;
@@ -209,9 +314,9 @@ public sealed class NativeCoreRegistrationSet
 
     internal string? GetInvalidReason()
     {
-        if (string.IsNullOrWhiteSpace(UsingModuleIdentity))
+        if (!ModuleBindings.IsValid())
         {
-            return "the using Module identity is missing";
+            return "the provider Module binding context is invalid";
         }
         if (!IsEnum(CallingConventions, "Terrum.Interop.NativeCallingConvention",
                 ("Unmanaged", 1), ("Cdecl", 2), ("Stdcall", 3), ("Vectorcall", 4)))
@@ -247,6 +352,17 @@ public sealed class NativeCoreRegistrationSet
                 CoreNativeAttributeRole.NativeExport))
         {
             return "the NativeExport schema identity or owner is invalid";
+        }
+        if (EnumDefinitions.Any(definition =>
+                    !ModuleBindings.ContainsProvider(definition.Identity.ProviderIdentity)
+                    || definition.Members.Any(member =>
+                        !ModuleBindings.ContainsProvider(member.Identity.ProviderIdentity)))
+                || !ModuleBindings.ContainsProvider(NativeImport.Identity.ProviderIdentity)
+                || !ModuleBindings.ContainsProvider(NativeCallable.Identity.ProviderIdentity)
+                || !ModuleBindings.ContainsProvider(NativeCallConv.Identity.ProviderIdentity)
+                || !ModuleBindings.ContainsProvider(NativeExport.Identity.ProviderIdentity))
+        {
+                return "a registered declaration has no matching selected provider Module origin";
         }
 
         var conventionIdentity = CallingConventions.Identity;
@@ -301,14 +417,17 @@ public sealed class NativeCoreRegistrationSet
             || definition.UnderlyingType != PrimitiveType.Int32
             || definition.GenericArity != 0 || !definition.IsPublic
             || !definition.IsPrimary || definition.IsFlags
+            || definition.BlittableTargetRequirement is not (0
+                or FixedLayoutStorage.WindowsX64TargetRequirement)
             || definition.Members.IsDefault
             || definition.Members.Length != members.Length)
         {
             return false;
         }
 
-        var seenIdentities = new System.Collections.Generic.HashSet<CoreDeclarationIdentity>();
-        var seenNames = new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+        var seenIdentities = new HashSet<CoreDeclarationIdentity>();
+        var seenNames = new HashSet<string>(StringComparer.Ordinal);
+        var seenDeclarationKeys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (expectedName, expectedValue) in members)
         {
             var matches = definition.Members.Where(member => member is not null
@@ -324,8 +443,11 @@ public sealed class NativeCoreRegistrationSet
                 || member.Identity.ProviderIdentity != definition.Identity.ProviderIdentity
                 || member.DeclaringEnum != definition.Identity
                 || !member.IsPublic
+                || string.IsNullOrWhiteSpace(member.DeclarationKey)
+                || member.DeclarationKey.Contains('\0', StringComparison.Ordinal)
                 || !seenIdentities.Add(member.Identity)
-                || !seenNames.Add(member.Name))
+                || !seenNames.Add(member.Name)
+                || !seenDeclarationKeys.Add(member.DeclarationKey))
             {
                 return false;
             }

@@ -95,6 +95,25 @@ internal sealed partial class Binder
             }
             return ManagedClassTypes.IsOptional(sourceType) ? ManagedClassTypes.Optional(mapped) : mapped;
         }
+        if (BoundEnumTypes.IsType(sourceType))
+        {
+            var sourceIndex = BoundEnumTypes.Index(sourceType);
+            if ((uint)sourceIndex >= (uint)source._enumDefinitions.Count)
+            {
+                return null;
+            }
+
+            var identity = source._enumDefinitions[sourceIndex].Identity;
+            for (var index = 0; index < _enumDefinitions.Count; index++)
+            {
+                if (_enumDefinitions[index].Identity == identity)
+                {
+                    return BoundEnumTypes.Type(index);
+                }
+            }
+
+            return null;
+        }
         if (!source.IsStruct(sourceType))
         {
             return sourceType is PrimitiveType.Void or PrimitiveType.Bool or PrimitiveType.Char16
@@ -1162,6 +1181,13 @@ internal sealed partial class Binder
             foreach (var (tree, context) in _contexts)
             {
                 proofBinder._contexts.Add(tree, context);
+            proofBinder._enumDefinitions.AddRange(_enumDefinitions);
+            for (var enumIndex = 0; enumIndex < proofBinder._enumDefinitions.Count;
+                enumIndex++)
+            {
+                proofBinder._enumNames.Add(proofBinder._enumDefinitions[enumIndex].Name,
+                    BoundEnumTypes.Type(enumIndex));
+            }
             }
             foreach (var (name, alias) in _aliases)
             {
@@ -1304,6 +1330,12 @@ internal sealed partial class Binder
                 allowGenericProofDependencies: true))
             {
                 var code = effect switch {
+                EnumDefinitions = [.. proofBinder._enumDefinitions],
+                NativeCoreRegistration = proofBinder._nativeCoreRegistration,
+                NativeFunctionPointerSignatures = [.. proofBinder._nativeFunctionPointerSignatures],
+                NativePointerTypes = [.. proofBinder._nativePointerTypes],
+                NativeFixedArrayTypes = [.. proofBinder._nativeFixedArrayTypes],
+                CheckedReferenceTypes = [.. proofBinder._checkedReferenceTypes],
                     "NoThrow" => "TRM3017",
                     "NormalReturn" => "TRM3012",
                     "FinallyReturn" => "TRM3019",

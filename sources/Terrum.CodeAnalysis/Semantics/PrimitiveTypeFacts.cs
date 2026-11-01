@@ -45,6 +45,7 @@ internal static class PrimitiveTypeFacts
             or PrimitiveType.Float32 or PrimitiveType.Decimal32 => 4,
         PrimitiveType.Int64 or PrimitiveType.UInt64 or PrimitiveType.Float64 or PrimitiveType.Decimal64 => 8,
         PrimitiveType.Int128 or PrimitiveType.UInt128 or PrimitiveType.Float128 or PrimitiveType.Decimal128 => 16,
+        _ when BoundEnumTypes.IsType(type) => sizeof(int),
         _ => -1,
     };
 
