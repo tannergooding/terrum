@@ -607,9 +607,23 @@ enum declarations and a production provider adapter remain unsupported.
 LibraryName validation follows a separate
 unapproved source-name proposal. Static-data source binding, target-specific
 EntryName support, actual Link/Dynamic resolution, retained evaluation
-dependencies, and source-free standard/private enum persistence remain
-incomplete; the current writers reject raw enum-bearing programs rather than
-serialize them as integers or aggregates. `NativeParameter` still adds
+dependencies, general enum source production and private enum persistence
+remain incomplete. Standard source production now has an explicit
+`TrRmExecutableCompiler.EmitStandard` selector for the exact
+`trrm/1-draft-layout-queries-1` baseline and
+`trrm/1-draft-nominal-enums-1` candidate; `compile-trrm --trrm-schema`
+forwards that exact selection, while the existing two-argument `Emit` remains
+Development. The Standard baseline executable source emitter remains
+Windows x64 target-requirement-1-only. The candidate writer emits complete
+enum declaration snapshots
+and bounded parameterless constant-return libraries; enum-free candidate
+libraries retain Feature 11/1 without requiring Feature 18/1. The current
+Blittable enum declarations require target requirement 1; declaration and
+constant-return production otherwise preserves an explicit 0/1 requirement.
+The source-free scalar-return execution helper remains Windows x64-only.
+This does not provide source enum declaration syntax or arbitrary
+enum-bearing Bodies.
+`NativeParameter` still adds
 prototype raw pointer annotations; without it, a raw pointer remains
 caller-unsafe and carries no checked access, retention, extent, or alignment
 promise. The former ordinal `NativeOutput` scalar and opaque-pointer forms are

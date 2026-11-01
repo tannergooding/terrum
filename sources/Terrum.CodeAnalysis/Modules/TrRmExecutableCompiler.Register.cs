@@ -258,7 +258,8 @@ public static partial class TrRmExecutableCompiler
                     tables.Modules.GetRequirements(1).TargetRequirement,
                     tables.ConstantSources, tables.FrozenValueNodes, tables.Blobs,
                     tables.TypeSpecs, tables.Features, tables.Modules,
-                    tables.TypeDefs, tables.EnumDefs, tables.Imports);
+                    tables.TypeDefs, tables.EnumDefs, tables.Imports,
+                    tables.A3LayoutResourceLedger);
                 if (result.Type != resultType)
                 {
                     throw Unsupported("ConstantMap result does not match the selected MethodSig type.");

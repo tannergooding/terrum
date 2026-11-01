@@ -13,15 +13,26 @@ internal static class TrRmConstantSourceValueValidator
     internal static void ValidateConstructedTypeSpecValues(uint typeSpecRef,
         int ownerModule, TrRmTypeSpecTableReader typeSpecs,
         TrRmTypeDefTableReader typeDefs,
+        TrRmEnumDefTableReader enumDefs,
         TrRmGenericParamTableReader genericParams,
         TrRmImportTableReader imports,
         TrRmConstantSourceTableReader constantSources,
         TrRmFrozenValueNodeTableReader frozenValueNodes,
         TrRmBlobTableReader blobs, TrRmFeatureTableReader features,
-        TrRmModuleTableReader modules, HashSet<int> visitedTypeSpecRows)
+        TrRmModuleTableReader modules, HashSet<int> visitedTypeSpecRows,
+        ICollection<TrRmConstantExecutionUse>? constantExecutionUses = null,
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        ulong depth = 1)
     {
+        resourceLedger?.ReserveWorkAtDepth(1, depth);
         var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
-        if (!reference.IsRow || !visitedTypeSpecRows.Add(reference.Row))
+        if (!reference.IsRow)
+        {
+            return;
+        }
+
+        resourceLedger?.ConsumeWork(2);
+        if (!visitedTypeSpecRows.Add(reference.Row))
         {
             return;
         }
@@ -30,13 +41,16 @@ internal static class TrRmConstantSourceValueValidator
         switch (data[0])
         {
             case 0x05:
-                var genericTypeSpecRow = checked((int)Read(data, 2));
+                var genericTypeSpecRow = checked((int)Read(data, 2,
+                    resourceLedger));
                 var genericTypeSpec = typeSpecs.GetRow(genericTypeSpecRow);
                 var definition = genericTypeSpec[0] switch
                 {
-                    0x02 => 0x1300_0000u | Read(genericTypeSpec, 2),
+                    0x02 => 0x1300_0000u | Read(genericTypeSpec, 2,
+                        resourceLedger),
                     0x03 => imports.GetExpectedDefinitionForImportRow(
-                        checked((int)Read(genericTypeSpec, 2))),
+                        checked((int)Read(genericTypeSpec, 2,
+                            resourceLedger))),
                     _ => throw InvalidConstructedTypeSpec(),
                 };
                 var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
@@ -55,6 +69,7 @@ internal static class TrRmConstantSourceValueValidator
 
                 for (var ordinal = 0; ordinal < argumentCount; ordinal++)
                 {
+                    resourceLedger?.ConsumeWork();
                     var formalRow = formalFirst + ordinal;
                     if (genericParams.GetOwnerDefId(formalRow) != definition
                         || genericParams.GetOrdinal(formalRow) != (uint)ordinal)
@@ -68,15 +83,32 @@ internal static class TrRmConstantSourceValueValidator
                     {
                         case 1:
                             ValidateConstructedTypeSpecValues(argument, ownerModule,
-                                typeSpecs, typeDefs, genericParams, imports,
+                                typeSpecs, typeDefs, enumDefs, genericParams, imports,
                                 constantSources, frozenValueNodes, blobs, features,
-                                modules, visitedTypeSpecRows);
+                                modules, visitedTypeSpecRows, constantExecutionUses,
+                                resourceLedger, checked(depth + 1));
                             break;
                         case 2:
-                            ValidateFrozenScalar(checked((int)argument),
-                                genericParams.GetConstantTypeSpecRef(formalRow),
-                                ownerModule, constantSources, frozenValueNodes,
-                                blobs, typeSpecs, features, modules);
+                            var sourceRow = checked((int)argument);
+                            if (constantSources.GetKind(sourceRow) == 2
+                                && constantExecutionUses is not null)
+                            {
+                                resourceLedger?.ConsumeWork();
+                                constantExecutionUses.Add(
+                                    new TrRmConstantExecutionUse(
+                                        checked((int)constantSources
+                                            .GetPayloadReference(sourceRow)),
+                                        ownerModule,
+                                        genericParams.GetConstantTypeSpecRef(formalRow)));
+                            }
+                            else
+                            {
+                                ValidateFrozenScalar(sourceRow,
+                                    genericParams.GetConstantTypeSpecRef(formalRow),
+                                    ownerModule, constantSources, frozenValueNodes,
+                                    blobs, typeSpecs, features, modules, typeDefs,
+                                    enumDefs, imports, resourceLedger);
+                            }
                             break;
                         default:
                             throw InvalidConstructedTypeSpec();
@@ -86,21 +118,43 @@ internal static class TrRmConstantSourceValueValidator
 
             case >= 0x06 and <= 0x0B:
             case 0x0E:
-                ValidateConstructedTypeSpecValues(Read(data, 2), ownerModule,
-                    typeSpecs, typeDefs, genericParams, imports, constantSources,
-                    frozenValueNodes, blobs, features, modules, visitedTypeSpecRows);
+                ValidateConstructedTypeSpecValues(Read(data, 2, resourceLedger),
+                    ownerModule,
+                    typeSpecs, typeDefs, enumDefs, genericParams, imports, constantSources,
+                    frozenValueNodes, blobs, features, modules, visitedTypeSpecRows,
+                    constantExecutionUses, resourceLedger,
+                    checked(depth + 1));
                 break;
 
             case 0x0C:
-                var innerTypeSpecRef = Read(data, 3);
+                var innerTypeSpecRef = Read(data, 3, resourceLedger);
                 var innerReference = typeSpecs.GetTypeSpecRef(innerTypeSpecRef,
                     allowInitQualifier: data[2] == 0x8A);
                 if (innerReference.IsRow)
                 {
                     ValidateConstructedTypeSpecValues(innerTypeSpecRef, ownerModule,
-                        typeSpecs, typeDefs, genericParams, imports, constantSources,
-                        frozenValueNodes, blobs, features, modules, visitedTypeSpecRows);
+                        typeSpecs, typeDefs, enumDefs, genericParams, imports, constantSources,
+                        frozenValueNodes, blobs, features, modules, visitedTypeSpecRows,
+                        constantExecutionUses, resourceLedger,
+                        checked(depth + 1));
                 }
+                break;
+
+            case 0x11:
+                if (!TrRmFeatureManifestValidator.Requires(features, modules,
+                        ownerModule,
+                        TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
+                        typeSpecs.Schema))
+                {
+                    throw InvalidConstructedTypeSpec();
+                }
+
+                ValidateConstructedTypeSpecValues(Read(data, 2, resourceLedger),
+                    ownerModule,
+                    typeSpecs, typeDefs, enumDefs, genericParams, imports,
+                    constantSources, frozenValueNodes, blobs, features, modules,
+                    visitedTypeSpecRows, constantExecutionUses, resourceLedger,
+                    checked(depth + 1));
                 break;
         }
     }
@@ -110,10 +164,27 @@ internal static class TrRmConstantSourceValueValidator
         TrRmConstantSourceTableReader constantSources,
         TrRmFrozenValueNodeTableReader frozenValueNodes,
         TrRmBlobTableReader blobs, TrRmTypeSpecTableReader typeSpecs,
-        TrRmFeatureTableReader features, TrRmModuleTableReader modules)
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => MaterializeFrozenScalar(constantSourceRow, expectedTypeSpecRef,
+            ownerModule, selectedTargetRequirement, constantSources,
+            frozenValueNodes, blobs, typeSpecs, features, modules,
+            default, default, default, resourceLedger);
+
+    internal static BoundConstant MaterializeFrozenScalar(int constantSourceRow,
+        uint expectedTypeSpecRef, int ownerModule, uint selectedTargetRequirement,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs, TrRmTypeSpecTableReader typeSpecs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ValidateFrozenScalar(constantSourceRow, expectedTypeSpecRef, ownerModule,
-            constantSources, frozenValueNodes, blobs, typeSpecs, features, modules);
+            constantSources, frozenValueNodes, blobs, typeSpecs, features, modules,
+            typeDefs, enumDefs, imports, resourceLedger);
+        resourceLedger?.ConsumeWork();
 
         var (moduleTargetRequirement, _) = modules.GetRequirements(ownerModule);
         if (selectedTargetRequirement != moduleTargetRequirement
@@ -123,14 +194,52 @@ internal static class TrRmConstantSourceValueValidator
                 "The selected target has no admitted frozen-scalar materializer.");
         }
 
-        var typeCode = typeSpecs.GetTypeSpecRef(expectedTypeSpecRef).TypeCode;
-        if (!TryGetBoundScalarType(typeCode, out var type))
+        var typeReference = typeSpecs.GetTypeSpecRef(expectedTypeSpecRef);
+        PrimitiveType storageType;
+        ReadOnlySpan<byte> payload;
+        var nodeRow = checked((int)constantSources.GetPayloadReference(
+            constantSourceRow));
+        if (typeReference.Form == 0x01
+            && TryGetBoundScalarType(typeReference.TypeCode, out var type))
+        {
+            storageType = type;
+            payload = frozenValueNodes.GetScalarPayload(nodeRow, blobs);
+        }
+        else if (typeReference.IsRow
+            && typeReference.Form is 0x02 or 0x03
+            && typeReference.Qualifiers == 0)
+        {
+            var typeDefRow = typeSpecs.GetNominalTypeDefRow(
+                expectedTypeSpecRef, typeDefs, imports);
+            _ = enumDefs.GetRowForTypeDef(typeDefRow);
+            var enumOrdinal = 0;
+            for (var row = 1; row < typeDefRow; row++)
+            {
+                resourceLedger?.ConsumeWork();
+                if (typeDefs.GetKind(row) == 4)
+                {
+                    enumOrdinal++;
+                }
+            }
+
+            if (enumOrdinal >= BoundEnumTypes.MaximumCount)
+            {
+                throw new NotSupportedException(
+                    "The selected enum table exceeds the bound enum type domain.");
+            }
+
+            type = BoundEnumTypes.Type(enumOrdinal);
+            storageType = PrimitiveType.Int32;
+            payload = frozenValueNodes.GetNominalEnumScalarPayload(nodeRow,
+                blobs, expectedTypeSpecRef, typeDefRow, typeDefs, enumDefs,
+                imports);
+        }
+        else
         {
             throw new NotSupportedException(
                 "The selected execution profile has no direct bound representation for this frozen scalar.");
         }
-        var payload = frozenValueNodes.GetScalarPayload(
-            checked((int)constantSources.GetPayloadReference(constantSourceRow)), blobs);
+
         var structures = Array.Empty<BoundStruct>();
         var size = ValueLayout.Size(type, structures);
         var alignment = ValueLayout.Alignment(type, structures);
@@ -140,7 +249,9 @@ internal static class TrRmConstantSourceValueValidator
                 "The selected target's scalar layout does not match the frozen representation.");
         }
 
-        return new BoundConstant(ScalarBits.FromPayload(type, payload), type, default);
+        resourceLedger?.ConsumeWork(checked((ulong)payload.Length));
+        return new BoundConstant(ScalarBits.FromPayload(storageType, payload),
+            type, default);
     }
 
     internal static bool TryGetBoundScalarType(byte typeCode, out PrimitiveType type)
@@ -183,8 +294,36 @@ internal static class TrRmConstantSourceValueValidator
         TrRmConstantSourceTableReader constantSources,
         TrRmFrozenValueNodeTableReader frozenValueNodes,
         TrRmBlobTableReader blobs, TrRmTypeSpecTableReader typeSpecs,
-        TrRmFeatureTableReader features, TrRmModuleTableReader modules)
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => ValidateFrozenScalar(constantSourceRow, expectedTypeSpecRef,
+            ownerModule, constantSources, frozenValueNodes, blobs, typeSpecs,
+            features, modules, default, default, default, resourceLedger);
+
+    internal static void ValidateFrozenScalar(int constantSourceRow,
+        uint expectedTypeSpecRef, int ownerModule,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs, TrRmTypeSpecTableReader typeSpecs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        => _ = GetFrozenScalarPayload(constantSourceRow, expectedTypeSpecRef,
+            ownerModule, constantSources, frozenValueNodes, blobs, typeSpecs,
+            features, modules, typeDefs, enumDefs, imports, resourceLedger);
+
+    internal static ReadOnlySpan<byte> GetFrozenScalarPayload(
+        int constantSourceRow, uint expectedTypeSpecRef, int ownerModule,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs, TrRmTypeSpecTableReader typeSpecs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
+        TrRmImportTableReader imports,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork(3);
         var sourceKind = constantSources.GetKind(constantSourceRow);
         if (sourceKind != 1)
         {
@@ -206,27 +345,75 @@ internal static class TrRmConstantSourceValueValidator
         }
 
         var mapType = typeSpecs.GetTypeSpecRef(expectedTypeSpecRef);
-        var nodeType = typeSpecs.GetTypeSpecRef(
-            frozenValueNodes.GetTypeSpecRef(checked((int)nodeRow)));
-        if (mapType.Form != 0x01 || mapType.Qualifiers != 0
-            || nodeType.Form != 0x01 || nodeType.Qualifiers != 0
-            || !TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(mapType.TypeCode)
-            || !TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(nodeType.TypeCode))
+        var nodeTypeSpecRef = frozenValueNodes.GetTypeSpecRef(
+            checked((int)nodeRow));
+        var nodeType = typeSpecs.GetTypeSpecRef(nodeTypeSpecRef);
+        resourceLedger?.ConsumeWork(2);
+        var mapIsBuiltinScalar = mapType.Form == 0x01
+            && mapType.Qualifiers == 0
+            && TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(
+                mapType.TypeCode);
+        var nodeIsBuiltinScalar = nodeType.Form == 0x01
+            && nodeType.Qualifiers == 0
+            && TrRmFrozenValueNodeTableReader.IsRegisteredScalarTypeCode(
+                nodeType.TypeCode);
+        if (mapIsBuiltinScalar != nodeIsBuiltinScalar)
         {
-            throw new System.NotSupportedException(
-                "This selected use requires an unqualified registered scalar type.");
-        }
-        if (mapType.TypeCode != nodeType.TypeCode
-            || mapType.ArgumentCode != nodeType.ArgumentCode)
-        {
-            throw new InvalidDataException("ConstantMap type does not match its frozen value.");
+            throw new InvalidDataException(
+                "ConstantMap type does not match its frozen value.");
         }
 
-        frozenValueNodes.ValidateScalarValue(checked((int)nodeRow), blobs);
+        if (mapIsBuiltinScalar)
+        {
+            resourceLedger?.ConsumeWork();
+            if (mapType.TypeCode != nodeType.TypeCode
+                || mapType.ArgumentCode != nodeType.ArgumentCode)
+            {
+                throw new InvalidDataException(
+                    "ConstantMap type does not match its frozen value.");
+            }
+
+            return frozenValueNodes.GetScalarPayload(
+                checked((int)nodeRow), blobs);
+        }
+
+        if (mapType.IsRow && mapType.Form is 0x02 or 0x03
+            && mapType.Qualifiers == 0 && nodeType.IsRow
+            && nodeType.Form is 0x02 or 0x03
+            && nodeType.Qualifiers == 0)
+        {
+            resourceLedger?.ConsumeWork();
+            if (!typeSpecs.AreEquivalentTypeSpecRefs(
+                    expectedTypeSpecRef, nodeTypeSpecRef))
+            {
+                throw new InvalidDataException(
+                    "ConstantMap type does not match its frozen value.");
+            }
+
+            var typeDefRow = typeSpecs.GetNominalTypeDefRow(
+                expectedTypeSpecRef, typeDefs, imports);
+            if (typeDefs.GetKind(typeDefRow) != 4)
+            {
+                throw new System.NotSupportedException(
+                    "This selected use supports only registered scalar and nominal enum values.");
+            }
+
+            return frozenValueNodes.GetNominalEnumScalarPayload(
+                checked((int)nodeRow), blobs, expectedTypeSpecRef,
+                typeDefRow, typeDefs, enumDefs, imports);
+        }
+
+        throw new System.NotSupportedException(
+            "This selected use requires an unqualified registered scalar or nominal enum type.");
     }
 
-    private static uint Read(ReadOnlySpan<byte> data, int offset)
-        => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));
+    private static uint Read(ReadOnlySpan<byte> data, int offset,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(sizeof(uint) + 1);
+        return BinaryPrimitives.ReadUInt32LittleEndian(
+            data.Slice(offset, sizeof(uint)));
+    }
 
     private static InvalidDataException InvalidConstructedTypeSpec()
         => new("Invalid TRRM constructed TypeSpec value binding.");

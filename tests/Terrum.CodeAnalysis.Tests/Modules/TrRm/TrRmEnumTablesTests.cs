@@ -3,14 +3,24 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
+using Terrum.CodeAnalysis.Tests.Infrastructure;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmEnumTablesTests
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int EnumReturn();
+
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int EnumIdentity(int value);
+
     [Test]
     public void RoundTripsNominalEnumAndDuplicateValuedMembers()
     {
@@ -165,6 +175,12 @@ public sealed class TrRmEnumTablesTests
         var artifact = TrRmExecutableCompiler
             .EmitNominalEnumsDraftDeclarationLibrary(
                 program, "enum-module", moduleTargetRequirement: 1);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(program, "enum-module",
+                "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 1),
+            Is.EqualTo(artifact));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, "enum-module",
+                "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 0));
         var tables = TrRmStructuralMetadataValidator
             .ValidateNominalEnumsDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
@@ -180,6 +196,465 @@ public sealed class TrRmEnumTablesTests
         Assert.That(localDefId, Is.EqualTo(0x1300_0001u));
         Assert.That(tables.EnumMembers.GetDeclarationKey(1), Is.EqualTo("color-red"));
         Assert.That(tables.EnumMembers.GetValue(1), Is.EqualTo(7));
+    }
+
+    [Test]
+    public void EmitsConstantReturnWithNominalEnumFrozenValue()
+    {
+        var enumIdentity = new CoreDeclarationIdentity(
+            "enum-module", "Color", CoreDeclarationKind.EnumType);
+        var member = new BoundEnumMemberDefinition(
+            new CoreDeclarationIdentity("enum-module", "color-red",
+                CoreDeclarationKind.EnumMember),
+            enumIdentity, "Red", 7, true, "color-red");
+        var definition = new BoundEnumDefinition(enumIdentity, "Example.Color",
+            PrimitiveType.Int32, [member], true, true, false)
+        {
+            BlittableTargetRequirement
+                = FixedLayoutStorage.WindowsX64TargetRequirement,
+        };
+        var enumType = BoundEnumTypes.Type(0);
+        var constant = new BoundConstant(
+            ScalarBits.FromPayload(PrimitiveType.Int32, [7, 0, 0, 0]),
+            enumType, default);
+        var function = new BoundFunction("GetColor", enumType, [], 0,
+            new BoundBlock([new BoundReturn(constant, default)], default),
+            default);
+        var program = new BoundProgram([function], -1)
+        {
+            EnumDefinitions = [definition],
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+
+        var artifact = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftConstantReturns(
+                program, "enum-module", moduleTargetRequirement: 1);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(program, "enum-module",
+                "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 1),
+            Is.EqualTo(artifact));
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+
+        Assert.That(tables.EnumDefs.Count, Is.EqualTo(1));
+        Assert.That(tables.Methods.Count, Is.EqualTo(1));
+        Assert.That(tables.TypeSpecs.Count, Is.EqualTo(1));
+        Assert.That(tables.FrozenValueNodes.Count, Is.EqualTo(1));
+        Assert.That(tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+            tables.Signatures.GetResultTypeSpec(
+                tables.Methods.GetSignature(1)),
+            BinaryPrimitives.ReadUInt32LittleEndian(body.ConstantMap)),
+            Is.True);
+        Assert.That(tables.FrozenValueNodes.GetTypeSpecRef(1),
+            Is.EqualTo(BinaryPrimitives.ReadUInt32LittleEndian(
+                body.ConstantMap)));
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftScalarReturns(artifact);
+        var loadedConstant = (BoundConstant)((BoundReturn)
+            loaded.Functions[0].Body.Statements[0]).Value!;
+        Assert.That(loaded.EnumDefinitions.Length, Is.EqualTo(1));
+        Assert.That(loadedConstant.Type, Is.EqualTo(enumType));
+        Assert.That(loadedConstant.Bits.Low, Is.EqualTo(7UL));
+        Assert.That(TrRmExecutableCompiler
+                .EmitNominalEnumsDraftConstantReturns(
+                    loaded, "enum-module", moduleTargetRequirement: 1),
+            Is.EqualTo(artifact));
+        var image = NativeEmitter.EmitLibrary(loaded, ["GetColor"],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image.Length, Is.GreaterThan(sizeof(ushort)));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(image),
+            Is.EqualTo(0x5A4D));
+    }
+
+    [Test]
+    public async Task EmitsAndExecutesNominalEnumIdentityMethod()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var colorIdentity = new CoreDeclarationIdentity(
+            "enum-module", "Color", CoreDeclarationKind.EnumType);
+        var colorMember = new BoundEnumMemberDefinition(
+            new CoreDeclarationIdentity("enum-module", "color-red",
+                CoreDeclarationKind.EnumMember),
+            colorIdentity, "Red", 7, true, "color-red");
+        var colorDefinition = new BoundEnumDefinition(colorIdentity,
+            "Example.Color", PrimitiveType.Int32, [colorMember], true, true, false)
+        {
+            BlittableTargetRequirement
+                = FixedLayoutStorage.WindowsX64TargetRequirement,
+        };
+        var sizeIdentity = new CoreDeclarationIdentity(
+            "enum-module", "Size", CoreDeclarationKind.EnumType);
+        var sizeMember = new BoundEnumMemberDefinition(
+            new CoreDeclarationIdentity("enum-module", "size-small",
+                CoreDeclarationKind.EnumMember),
+            sizeIdentity, "Small", 1, true, "size-small");
+        var sizeDefinition = new BoundEnumDefinition(sizeIdentity,
+            "Example.Size", PrimitiveType.Int32, [sizeMember], true, true, false)
+        {
+            BlittableTargetRequirement
+                = FixedLayoutStorage.WindowsX64TargetRequirement,
+        };
+        var enumType = BoundEnumTypes.Type(0);
+        var function = new BoundFunction("IdentityColor", enumType,
+            [new BoundVariable("value", enumType, false, default)], 1,
+            new BoundBlock([
+                new BoundReturn(new BoundRead(0, enumType, default), default),
+            ], default), default);
+        var program = new BoundProgram([function], -1)
+        {
+            EnumDefinitions = [colorDefinition, sizeDefinition],
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "enum-module", "trrm/1-draft-nominal-enums-1",
+            moduleTargetRequirement: 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+        var (parameterStart, parameterCount) = tables.Signatures.GetParamRange(
+            tables.Methods.GetSignature(1));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+
+        Assert.That(parameterCount, Is.EqualTo(1));
+        Assert.That(tables.Parameters.GetTypeSpec(parameterStart),
+            Is.EqualTo(tables.Signatures.GetResultTypeSpec(
+                tables.Methods.GetSignature(1))));
+        Assert.That(body.MapMask, Is.EqualTo(0x03));
+        Assert.That(tables.Features.GetFeature(1),
+            Is.EqualTo(TrRmFeatureRow.NativeBoundaryContracts));
+        Assert.That(tables.Features.GetFeature(2).FeatureId, Is.EqualTo(18));
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1, TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+            TrRmArtifactSchema.NominalEnumsDraft), Is.True);
+
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftIdentityLibrary(artifact);
+        Assert.That(loaded.EnumDefinitions.Length, Is.EqualTo(2));
+        Assert.That(loaded.Functions[0].ParameterCount, Is.EqualTo(1));
+        Assert.That(((BoundReturn)loaded.Functions[0].Body.Statements[0]).Value,
+            Is.TypeOf<BoundRead>());
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded, "enum-module",
+                "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 1),
+            Is.EqualTo(artifact));
+
+        var mismatchedTypeMap = body.TypeMap.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(mismatchedTypeMap,
+            0x1100_0002);
+        var invalidBody = TrRmRegisterBodyWriter.Encode(
+            body.HomeMap.ToArray(), mismatchedTypeMap, body.MethodMap.ToArray(),
+            body.FieldMap.ToArray(), body.ConstantMap.ToArray(),
+            [new TrRmRegisterBodyBlock(0, 4, 0)],
+            [new ReadOnlyMemory<byte>(body.GetRecord(0).ToArray())],
+            body.GetBlockCode(0).ToArray());
+        var invalidBodyTable = TrRmVariableTableWriter.EncodeBodies([
+            new ReadOnlyMemory<byte>(invalidBody),
+        ]);
+        var index = TrRmArtifactIndex.ForNominalEnumsDraft(artifact);
+        var invalidSections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var count);
+            invalidSections.Add(kind == 0x0020
+                ? new TrRmSection(kind, flags, 1, invalidBodyTable)
+                : new TrRmSection(kind, flags, checked((uint)count),
+                    bytes.ToArray()));
+        }
+
+        var invalidArtifact = TrRmArtifactWriter.Encode(invalidSections,
+            TrRmArtifactSchema.NominalEnumsDraft);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadNominalEnumsDraftIdentityLibrary(
+                invalidArtifact));
+
+        var image = NativeEmitter.EmitLibrary(loaded, ["IdentityColor"],
+            NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-identity-{Guid.NewGuid():N}.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var identity = Marshal.GetDelegateForFunctionPointer<EnumIdentity>(
+                NativeLibrary.GetExport(handle, "IdentityColor"));
+            Assert.That(identity(0x1234), Is.EqualTo(0x1234));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void EmitsEnumFreeNominalEnumsDraftLibraryWithoutFeature18()
+    {
+        var constant = new BoundConstant(
+            ScalarBits.FromPayload(PrimitiveType.Int32, [42, 0, 0, 0]),
+            PrimitiveType.Int32, default);
+        var function = new BoundFunction("GetValue", PrimitiveType.Int32,
+            [], 0, new BoundBlock([new BoundReturn(constant, default)], default),
+            default);
+        var program = new BoundProgram([function], -1)
+        {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            "scalar-module", "trrm/1-draft-nominal-enums-1",
+            moduleTargetRequirement: 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+        Assert.That(tables.TypeDefs.Count, Is.Zero);
+        Assert.That(tables.EnumDefs.Count, Is.Zero);
+        Assert.That(tables.Features.Count, Is.EqualTo(1));
+        Assert.That(tables.Features.GetFeature(1),
+            Is.EqualTo(TrRmFeatureRow.TypedFrozenValues));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(1), tables.Contracts.Count);
+        Assert.That(body.MapMask, Is.EqualTo(0x10));
+        Assert.That(body.ConstantCount, Is.EqualTo(1));
+
+        var noTargetArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            "portable-scalar", "trrm/1-draft-nominal-enums-1",
+            moduleTargetRequirement: 0);
+        var noTargetTables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(noTargetArtifact));
+        Assert.That(noTargetTables.Modules.GetRequirements(1).TargetRequirement,
+            Is.Zero);
+
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftScalarReturns(artifact);
+        var loadedConstant = (BoundConstant)((BoundReturn)
+            loaded.Functions[0].Body.Statements[0]).Value!;
+        Assert.That(loaded.EnumDefinitions, Is.Empty);
+        Assert.That(loadedConstant.Type, Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(loadedConstant.Bits.Low, Is.EqualTo(42UL));
+    }
+
+    [Test]
+    public async Task ExecutesNominalEnumReturnFromLoadedCandidateLibrary()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var enumIdentity = new CoreDeclarationIdentity(
+            "enum-module", "Color", CoreDeclarationKind.EnumType);
+        var member = new BoundEnumMemberDefinition(
+            new CoreDeclarationIdentity("enum-module", "color-red",
+                CoreDeclarationKind.EnumMember),
+            enumIdentity, "Red", 7, true, "color-red");
+        var definition = new BoundEnumDefinition(enumIdentity, "Example.Color",
+            PrimitiveType.Int32, [member], true, true, false);
+        var enumType = BoundEnumTypes.Type(0);
+        var constant = new BoundConstant(
+            ScalarBits.FromPayload(PrimitiveType.Int32, [7, 0, 0, 0]),
+            enumType, default);
+        var function = new BoundFunction("GetColor", enumType, [], 0,
+            new BoundBlock([new BoundReturn(constant, default)], default),
+            default);
+        var program = new BoundProgram([function], -1)
+        {
+            EnumDefinitions = [definition],
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+        var artifact = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftConstantReturns(
+                program, "enum-module", moduleTargetRequirement: 1);
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftScalarReturns(artifact);
+        var image = NativeEmitter.EmitLibrary(loaded, ["GetColor"],
+            NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-enum-return-{Guid.NewGuid():N}.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var getColor = Marshal.GetDelegateForFunctionPointer<EnumReturn>(
+                NativeLibrary.GetExport(handle, "GetColor"));
+            Assert.That(getColor(), Is.EqualTo(7));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task EmitsAndExecutesImportedNominalEnumReturn()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var registration
+            = Terrum.CodeAnalysis.Tests.Semantics.NativeCoreRegistrationTests.CreateRegistration();
+        var enumDefinitions = registration.EnumDefinitions
+            .Select(BoundEnumDefinition.FromCore)
+            .ToArray();
+        var enumType = BoundEnumTypes.Type(0);
+        var constant = new BoundConstant(
+            ScalarBits.FromPayload(PrimitiveType.Int32, [2, 0, 0, 0]),
+            enumType, default);
+        var function = new BoundFunction("GetConvention", enumType, [], 0,
+            new BoundBlock([new BoundReturn(constant, default)], default),
+            default);
+        var program = new BoundProgram([function], -1)
+        {
+            EnumDefinitions = [.. enumDefinitions],
+            NativeCoreRegistration = registration,
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+        var providerProgram = new BoundProgram([], -1)
+        {
+            EnumDefinitions = [.. enumDefinitions],
+        };
+
+        var providerArtifact = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftDeclarationLibrary(
+                providerProgram, "core.native", moduleTargetRequirement: 0);
+        var artifact = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftConstantReturns(
+                program, registration.UsingModuleIdentity,
+                moduleTargetRequirement: 1);
+        TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftProviderBindings(
+                artifact, [providerArtifact]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+
+        Assert.That(tables.Imports.Count, Is.EqualTo(3));
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(1));
+        Assert.That(tables.TypeSpecs.Count, Is.EqualTo(3));
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(1).Form, Is.EqualTo(0x03));
+        Assert.That(tables.FrozenValueNodes.GetTypeSpecRef(1), Is.EqualTo(1u));
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftScalarReturns(artifact);
+        var loadedConstant = (BoundConstant)((BoundReturn)
+            loaded.Functions[0].Body.Statements[0]).Value!;
+        Assert.That(loaded.EnumDefinitions.Length, Is.EqualTo(3));
+        Assert.That(loadedConstant.Type, Is.EqualTo(enumType));
+        Assert.That(loadedConstant.Bits.Low, Is.EqualTo(2UL));
+        var reemitted = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftConstantReturns(
+                loaded, registration.UsingModuleIdentity,
+                moduleTargetRequirement: 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+
+        var image = NativeEmitter.EmitLibrary(loaded, ["GetConvention"],
+            NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-imported-enum-return-{Guid.NewGuid():N}.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var getConvention = Marshal.GetDelegateForFunctionPointer<EnumReturn>(
+                NativeLibrary.GetExport(handle, "GetConvention"));
+            Assert.That(getConvention(), Is.EqualTo(2));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task EmitsAndExecutesImportedNominalEnumIdentityMethod()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var registration
+            = Terrum.CodeAnalysis.Tests.Semantics.NativeCoreRegistrationTests.CreateRegistration();
+        var enumDefinitions = registration.EnumDefinitions
+            .Select(BoundEnumDefinition.FromCore)
+            .ToArray();
+        var enumType = BoundEnumTypes.Type(0);
+        var function = new BoundFunction("IdentityConvention", enumType,
+            [new BoundVariable("value", enumType, false, default)], 1,
+            new BoundBlock([
+                new BoundReturn(new BoundRead(0, enumType, default), default),
+            ], default), default);
+        var program = new BoundProgram([function], -1)
+        {
+            EnumDefinitions = [.. enumDefinitions],
+            NativeCoreRegistration = registration,
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+        };
+        var providerProgram = new BoundProgram([], -1)
+        {
+            EnumDefinitions = [.. enumDefinitions],
+        };
+        var providerArtifact = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftDeclarationLibrary(
+                providerProgram, "core.native", moduleTargetRequirement: 0);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            registration.UsingModuleIdentity,
+            "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 1);
+        TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftProviderBindings(
+                artifact, [providerArtifact]);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+
+        Assert.That(tables.Imports.Count, Is.EqualTo(3));
+        Assert.That(tables.TypeSpecs.Count, Is.EqualTo(3));
+        Assert.That(tables.TypeSpecs.GetTypeSpecRef(1).Form, Is.EqualTo(0x03));
+        var loaded = TrRmExecutableCompiler
+            .LoadNominalEnumsDraftIdentityLibrary(artifact);
+        Assert.That(loaded.EnumDefinitions.Length, Is.EqualTo(3));
+        Assert.That(loaded.Functions[0].Variables[0].Type, Is.EqualTo(enumType));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+                registration.UsingModuleIdentity,
+                "trrm/1-draft-nominal-enums-1", moduleTargetRequirement: 1),
+            Is.EqualTo(artifact));
+
+        var image = NativeEmitter.EmitLibrary(loaded, ["IdentityConvention"],
+            NativeRuntimePolicy.FailFast);
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-imported-enum-identity-{Guid.NewGuid():N}.dll");
+        var handle = IntPtr.Zero;
+        try
+        {
+            File.WriteAllBytes(path, image);
+            handle = NativeLibrary.Load(path);
+            var identity = Marshal.GetDelegateForFunctionPointer<EnumIdentity>(
+                NativeLibrary.GetExport(handle, "IdentityConvention"));
+            Assert.That(identity(2), Is.EqualTo(2));
+        }
+        finally
+        {
+            if (handle != IntPtr.Zero)
+            {
+                NativeLibrary.Free(handle);
+            }
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
     }
 
     [Test]
@@ -221,16 +696,27 @@ public sealed class TrRmEnumTablesTests
             .Select(BoundEnumDefinition.FromCore)
             .Append(importedDefinition)
             .ToArray();
+        var providerProgram = new BoundProgram([], -1)
+        {
+            EnumDefinitions = [.. definitions],
+        };
         var program = new BoundProgram([], -1)
         {
             EnumDefinitions = [.. definitions],
             NativeCoreRegistration = registration,
         };
 
+        var providerArtifact = TrRmExecutableCompiler
+            .EmitNominalEnumsDraftDeclarationLibrary(
+                providerProgram, "core.native", moduleTargetRequirement: 0);
         var artifact = TrRmExecutableCompiler
             .EmitNominalEnumsDraftDeclarationLibrary(
                 program, registration.UsingModuleIdentity,
                 moduleTargetRequirement: 0);
+        Assert.DoesNotThrow(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftProviderBindings(
+                    artifact, [providerArtifact]));
         var tables = TrRmStructuralMetadataValidator
             .ValidateNominalEnumsDraftAndGetExecutionTables(
                 TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
@@ -241,6 +727,54 @@ public sealed class TrRmEnumTablesTests
             Is.EqualTo("core.native"));
         Assert.That(tables.ModuleRefs.GetRequirements(1).TargetRequirement,
             Is.EqualTo(0u));
+    }
+
+    [TestCase(false)]
+    [TestCase(true)]
+    public void ValidatesAndMaterializesEnumFrozenScalarWithNominalType(
+        bool imported)
+    {
+        var artifact = CreateNominalEnumValueArtifact(isImported: imported);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+
+        if (imported)
+        {
+            TrRmStructuralMetadataValidator
+                .ValidateNominalEnumsDraftProviderBindings(
+                    artifact, [CreateBoundEnumArtifact(isConsumer: false)]);
+        }
+        TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+            1, 1, 1, tables.ConstantSources, tables.FrozenValueNodes,
+            tables.Blobs, tables.TypeSpecs, tables.Features, tables.Modules,
+            tables.TypeDefs, tables.EnumDefs, tables.Imports);
+        var value = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
+            1, 1, 1, 1, tables.ConstantSources, tables.FrozenValueNodes,
+            tables.Blobs, tables.TypeSpecs, tables.Features, tables.Modules,
+            tables.TypeDefs, tables.EnumDefs, tables.Imports);
+
+        Assert.That(value.Type, Is.EqualTo(BoundEnumTypes.Type(0)));
+        Assert.That(value.Bits.Low, Is.EqualTo(7UL));
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateNominalEnumFrozenScalar(artifact, 0xF200_0008));
+        var invalidPayload = CreateNominalEnumValueArtifact(
+            blobLength: 8, isImported: imported);
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateNominalEnumFrozenScalar(invalidPayload, 1));
+    }
+
+    private static void ValidateNominalEnumFrozenScalar(byte[] artifact,
+        uint expectedTypeSpecRef)
+    {
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(artifact));
+        TrRmConstantSourceValueValidator.ValidateFrozenScalar(
+            1, expectedTypeSpecRef, 1, tables.ConstantSources,
+            tables.FrozenValueNodes, tables.Blobs, tables.TypeSpecs,
+            tables.Features, tables.Modules, tables.TypeDefs,
+            tables.EnumDefs, tables.Imports);
     }
 
     private static EnumFixture CreateFixture(bool includeMembers = true, bool blittable = true)
@@ -326,7 +860,8 @@ public sealed class TrRmEnumTablesTests
         return (enums.GetFlags(1), range.Count, values);
     }
 
-    private static byte[] CreateArtifact(TrRmFeatureRow[] features)
+    private static byte[] CreateArtifact(TrRmFeatureRow[] features,
+        uint moduleTargetRequirement = 0)
     {
         var stringBytes = TrRmStringTableWriter.EncodeTextRows([
             ("", 0), ("enum-module", 0), ("Color", 0), ("Red", 0),
@@ -336,7 +871,8 @@ public sealed class TrRmEnumTablesTests
         var featureBytes = TrRmFeatureTableWriter.Encode(features,
             TrRmArtifactSchema.NominalEnumsDraft);
         var modules = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, features.Length),
+            new TrRmModuleRow(2, moduleTargetRequirement, 0, 0,
+                1, 1, 1, 1, 1, features.Length),
         ], strings, 0, 1, 0, 0, features.Length);
         var moduleReader = new TrRmModuleTableReader(modules, 1, strings,
             0, 1, 0, 0, features.Length);
@@ -379,12 +915,93 @@ public sealed class TrRmEnumTablesTests
         ], TrRmArtifactSchema.NominalEnumsDraft);
     }
 
+    private static byte[] CreateNominalEnumValueArtifact(int blobLength = 4,
+        bool isImported = false)
+    {
+        var baseArtifact = isImported
+            ? CreateBoundEnumArtifact(isConsumer: true,
+                includeTypedFrozenValues: true, consumerTargetRequirement: 1)
+            : CreateArtifact([
+                TrRmFeatureRow.NativeBoundaryContracts,
+                TrRmFeatureRow.TypedFrozenValues,
+                new TrRmFeatureRow(18, 1),
+            ], moduleTargetRequirement: 1);
+        var index = TrRmArtifactIndex.ForNominalEnumsDraft(baseArtifact);
+        var sections = new List<TrRmSection>(index.SectionCount + 1);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var count);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            new ReadOnlyMemory<byte>(
+                TrRmTypeSpecTableWriter.Reference(
+                    isImported ? (byte)0x03 : (byte)0x02, 1)),
+        ], 1, isImported ? 1 : 0, 0, 0,
+            TrRmArtifactSchema.NominalEnumsDraft);
+        sections.Add(new TrRmSection(0x0011, 0, 1, typeSpecBytes));
+        sections.Sort(static (left, right) => left.Kind.CompareTo(right.Kind));
+        var typeSpecArtifact = TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.NominalEnumsDraft);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateNominalEnumsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForNominalEnumsDraft(typeSpecArtifact));
+        var builder = new TrRmFrozenScalarValueBuilder();
+        var payload = new byte[sizeof(int)];
+        BinaryPrimitives.WriteInt32LittleEndian(payload, 7);
+        var value = new BoundConstant(
+            ScalarBits.FromPayload(PrimitiveType.Int32, payload),
+            BoundEnumTypes.Type(0), default);
+        var valueReference = builder.AddNominalEnum(value, 1);
+        if (valueReference != new TrRmFrozenScalarValueReference(1, 1))
+        {
+            throw new InvalidOperationException(
+                "The first nominal enum frozen value must use row 1.");
+        }
+
+        var valueTables = builder.EncodeNominalEnumsDraft(tables.TypeSpecs,
+            tables.TypeDefs, tables.EnumDefs, tables.Imports);
+        var finalIndex = TrRmArtifactIndex.ForNominalEnumsDraft(typeSpecArtifact);
+        var finalSections = new List<TrRmSection>(finalIndex.SectionCount + 3);
+        for (var section = 0; section < finalIndex.SectionCount; section++)
+        {
+            finalIndex.GetSection(section, out var kind, out var flags,
+                out var bytes, out var count);
+            finalSections.Add(new TrRmSection(kind, flags,
+                checked((uint)count), bytes.ToArray()));
+        }
+        var blobSection = valueTables.BlobSection;
+        if (blobLength != sizeof(int))
+        {
+            blobSection = TrRmVariableTableWriter.EncodeBlobs([
+                new ReadOnlyMemory<byte>(new byte[blobLength]),
+            ]);
+        }
+        finalSections.Add(new TrRmSection(0x0003, 0,
+            (uint)valueTables.BlobCount, blobSection));
+        finalSections.Add(new TrRmSection(0x0030, 0,
+            (uint)valueTables.ConstantSourceCount,
+            valueTables.ConstantSourceSection));
+        finalSections.Add(new TrRmSection(0x003F, 0,
+            (uint)valueTables.FrozenValueNodeCount,
+            valueTables.FrozenValueNodeSection));
+        finalSections.Sort(static (left, right)
+            => left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(finalSections,
+            TrRmArtifactSchema.NominalEnumsDraft);
+    }
+
     private static byte[] CreateBoundEnumArtifact(bool isConsumer,
         int memberValue = 7, string declarationKey = "color-red",
         bool blittable = true, uint flags = 1,
         string providerModuleIdentity = "provider",
         uint providerTargetRequirement = 0, uint providerRuntimePolicy = 0,
-        string providerExportKey = "color")
+        string providerExportKey = "color",
+        bool includeTypedFrozenValues = false,
+        uint consumerTargetRequirement = 0)
     {
         const string providerIdentity = "provider";
         const string exportKey = "color";
@@ -396,16 +1013,21 @@ public sealed class TrRmEnumTablesTests
             (isConsumer ? exportKey : providerExportKey, 0),
         ]);
         var strings = new TrRmStringTableReader(stringBytes, 9);
-        var featureRows = new[]
-        {
-            TrRmFeatureRow.NativeBoundaryContracts,
-            new TrRmFeatureRow(18, 1),
-        };
+        var featureRows = includeTypedFrozenValues
+            ? new[] {
+                TrRmFeatureRow.NativeBoundaryContracts,
+                TrRmFeatureRow.TypedFrozenValues,
+                new TrRmFeatureRow(18, 1),
+            }
+            : new[] {
+                TrRmFeatureRow.NativeBoundaryContracts,
+                new TrRmFeatureRow(18, 1),
+            };
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows,
             TrRmArtifactSchema.NominalEnumsDraft);
         var moduleBytes = TrRmModuleTableWriter.Encode([
             new TrRmModuleRow(2,
-                isConsumer ? 0 : providerTargetRequirement,
+                isConsumer ? consumerTargetRequirement : providerTargetRequirement,
                 isConsumer ? 0 : providerRuntimePolicy,
                 0, 1, 1, 1, 1, 1, featureRows.Length),
         ], strings, moduleRefCount: isConsumer ? 1 : 0, typeDefCount: 1,

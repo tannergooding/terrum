@@ -1,10 +1,14 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Lexing;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 using Terrum.CodeAnalysis.Syntax;
@@ -45,9 +49,11 @@ public sealed class TrRmFrozenScalarMaterializationTests
         {
             var typeSpecRef = 0xF200_0000u | value.TypeCode;
             var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
-                value.TypeCode, value.Payload);
-            var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
-                new TrRmArtifactIndex(artifact));
+                value.TypeCode, value.Payload,
+                schema: TrRmArtifactSchema.ScalarFrozenValuesDraft);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateScalarFrozenValuesDraftAndGetExecutionTables(
+                    TrRmArtifactIndex.ForScalarFrozenValuesDraft(artifact));
             tables.ValidateRegisterBodyMapsForMethod(1);
 
             var constant = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
@@ -87,8 +93,9 @@ public sealed class TrRmFrozenScalarMaterializationTests
         foreach (var value in values)
         {
             var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
-                value.TypeCode, value.Payload, isEntryPoint: false, methodName: "Value");
-            var loaded = TrRmExecutableCompiler.LoadStandardScalarReturn(artifact);
+                value.TypeCode, value.Payload, isEntryPoint: false, methodName: "Value",
+                schema: TrRmArtifactSchema.ScalarFrozenValuesDraft);
+            var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
             var constant = (BoundConstant)((BoundReturn)loaded.Functions[0].Body.Statements.Single()).Value!;
 
             Assert.That(constant.Type, Is.EqualTo(value.Type));
@@ -233,26 +240,184 @@ public sealed class TrRmFrozenScalarMaterializationTests
     }
 
     [Test]
-    public async Task WideScalarConstantsExecuteAcrossNativeCallCarriersAsync()
+    public void ScalarFrozenValuesDraftMaterializesWithoutNominalUnionFeature()
+    {
+        var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
+            0x08, [42, 0, 0, 0], schema: TrRmArtifactSchema.ScalarFrozenValuesDraft);
+        var index = TrRmArtifactIndex.ForScalarFrozenValuesDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateScalarFrozenValuesDraftAndGetExecutionTables(index);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1, TrRmFeatureTableReader.TypedFrozenValuesFeatureId,
+            index.Schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1, TrRmFeatureTableReader.NominalUnionMetadataFeatureId,
+            index.Schema), Is.False);
+
+        var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void ScalarFrozenValuesDraftProducerWritesAndExecutesConstantReturn()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse(
+            "int32 Main() { return 42; }"));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitScalarFrozenValuesDraftConstantReturn(
+            compilation.Program!, "scalar-producer");
+        var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
+
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void ScalarFrozenValuesDraftInternsAcrossMethodsAndReemitsSourceFree()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 SharedA() { return 42; }
+            int32 Main() { return 42; }
+            int32 SharedB() { return 42; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitScalarFrozenValuesDraftConstantReturn(
+            compilation.Program!, "scalar-producer");
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateScalarFrozenValuesDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForScalarFrozenValuesDraft(artifact));
+        var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
+        var reemitted = TrRmExecutableCompiler.EmitScalarFrozenValuesDraftConstantReturn(
+            loaded, "scalar-producer");
+
+        Assert.That(tables.Methods.Count, Is.EqualTo(3));
+        Assert.That(tables.ConstantSources.Count, Is.EqualTo(1));
+        Assert.That(tables.FrozenValueNodes.Count, Is.EqualTo(1));
+        Assert.That(tables.Blobs.Count, Is.EqualTo(1));
+        Assert.That(loaded.EntryPoint, Is.EqualTo(1));
+        Assert.That(reemitted, Is.EqualTo(artifact));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+        Assert.That(NativeEmitter.Emit(loaded, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void ScalarFrozenValuesDraftRemapsDuplicateRowsThroughSourceFreeRoundTrip()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 SharedA() { return 42; }
+            int32 Main() { return 42; }
+            """));
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var canonical = TrRmExecutableCompiler.EmitScalarFrozenValuesDraftConstantReturn(
+            compilation.Program!, "scalar-producer");
+        var duplicateRows = DuplicateScalarValueRows(canonical);
+        var duplicateTables = TrRmStructuralMetadataValidator
+            .ValidateScalarFrozenValuesDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForScalarFrozenValuesDraft(duplicateRows));
+        var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(duplicateRows);
+        var reemitted = TrRmExecutableCompiler.EmitScalarFrozenValuesDraftConstantReturn(
+            loaded, "scalar-producer");
+
+        Assert.That(duplicateTables.ConstantSources.Count, Is.EqualTo(2));
+        Assert.That(duplicateTables.FrozenValueNodes.Count, Is.EqualTo(2));
+        Assert.That(duplicateTables.Blobs.Count, Is.EqualTo(2));
+        Assert.That(reemitted, Is.EqualTo(canonical));
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void ScalarFrozenValuesDraftProducerRoundTripsAllNonUnitScalarTypes()
+    {
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>();
+        var expected = new List<(PrimitiveType Type, byte[] Payload)>();
+        for (var candidate = 0; candidate <= 0x19; candidate++)
+        {
+            var typeCode = (byte)candidate;
+            if (!TrRmConstantSourceValueValidator.TryGetBoundScalarType(
+                typeCode, out var type) || type == PrimitiveType.Void)
+            {
+                continue;
+            }
+
+            var payload = new byte[PrimitiveTypeFacts.ScalarWidth(type)];
+            for (var index = 0; index < payload.Length; index++)
+            {
+                payload[index] = unchecked((byte)(typeCode * 17 + index + 1));
+            }
+            if (type == PrimitiveType.Bool)
+            {
+                payload[0] = 1;
+            }
+            else if (type == PrimitiveType.Rune)
+            {
+                payload = [0x00, 0xF6, 0x01, 0x00];
+            }
+
+            var constant = new BoundConstant(
+                ScalarBits.FromPayload(type, payload), type, default);
+            functions.Add(new BoundFunction($"Value{typeCode:X2}", type, [], 0,
+                new BoundBlock([new BoundReturn(constant, default)], default), default));
+            expected.Add((type, payload));
+        }
+
+        var program = new BoundProgram(functions.ToImmutable(), -1);
+        var artifact = TrRmExecutableCompiler.EmitScalarFrozenValuesDraftConstantReturn(
+            program, "scalar-producer");
+        var loaded = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
+
+        Assert.That(loaded.Functions.Length, Is.EqualTo(expected.Count));
+        for (var index = 0; index < expected.Count; index++)
+        {
+            var actual = (BoundConstant)((BoundReturn)loaded.Functions[index]
+                .Body.Statements.Single()).Value!;
+            var expectedBits = ScalarBits.FromPayload(expected[index].Type,
+                expected[index].Payload);
+            Assert.That(actual.Type, Is.EqualTo(expected[index].Type));
+            Assert.That(actual.Bits, Is.EqualTo(expectedBits));
+        }
+    }
+
+    [Test]
+    public async Task FixedScalarConstantsExecuteAcrossNativeCallCarriersAsync()
     {
         var values = new (byte TypeCode, PrimitiveType Type, byte[] Payload)[]
         {
+            (0x01, PrimitiveType.Bool, [1]),
+            (0x02, PrimitiveType.Char8, [0xE9]),
+            (0x03, PrimitiveType.Char16, [0, 0xD8]),
+            (0x04, PrimitiveType.Char32, [0xFF, 0xFF, 0x10, 0]),
+            (0x05, PrimitiveType.Rune, [0, 0xF6, 1, 0]),
+            (0x06, PrimitiveType.Int8, [0x80]),
+            (0x07, PrimitiveType.Int16, [0, 0x80]),
+            (0x08, PrimitiveType.Int32, [0xFF, 0xFF, 0xFF, 0xFF]),
+            (0x09, PrimitiveType.Int64, [0, 0, 0, 0, 0, 0, 0, 0x80]),
             (0x0A, PrimitiveType.Int128,
                 [0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE,
                     0xEF, 0xCD, 0xAB, 0x89, 0x67, 0x45, 0x23, 0x81]),
+            (0x0B, PrimitiveType.UInt8, [0xFF]),
+            (0x0C, PrimitiveType.UInt16, [0xFF, 0xFF]),
+            (0x0D, PrimitiveType.UInt32, [0xFF, 0xFF, 0xFF, 0xFF]),
+            (0x0E, PrimitiveType.UInt64,
+                [0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE]),
             (0x0F, PrimitiveType.UInt128,
                 [0x21, 0x43, 0x65, 0x87, 0xA9, 0xCB, 0xED, 0x0F,
                     0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10]),
-            (0x12, PrimitiveType.Float16, [0x01, 0x7C]),
-            (0x13, PrimitiveType.BFloat16, [0x81, 0x7F]),
+            (0x12, PrimitiveType.Float16, [0x00, 0x3C]),
+            (0x13, PrimitiveType.BFloat16, [0x80, 0x3F]),
             (0x16, PrimitiveType.Float128,
-                [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0x7F]),
-            (0x17, PrimitiveType.Decimal32, [0x26, 0x02, 0x80, 0x31]),
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xFF, 0x3F]),
+            (0x17, PrimitiveType.Decimal32, [0x78, 0x00, 0x80, 0x31]),
             (0x18, PrimitiveType.Decimal64,
-                [0x26, 0x02, 0x80, 0x31, 0x88, 0x77, 0x66, 0x55]),
+                [0x78, 0x00, 0, 0, 0, 0, 0x80, 0x31]),
             (0x19, PrimitiveType.Decimal128,
-                [0x26, 0x02, 0x80, 0x31, 0x88, 0x77, 0x66, 0x55,
-                    0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE]),
+                [0x78, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x3C, 0x30]),
         };
 
         foreach (var value in values)
@@ -260,6 +425,8 @@ public sealed class TrRmFrozenScalarMaterializationTests
             var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
                 value.TypeCode, value.Payload, isEntryPoint: false, methodName: "Value");
             var program = TrRmExecutableCompiler.LoadStandardScalarReturn(artifact);
+            var result = (BoundConstant)((BoundReturn)program.Functions[0]
+                .Body.Statements.Single()).Value!;
             var identity = new BoundFunction("Identity", value.Type,
                 [new BoundVariable("value", value.Type, false, default)], 1,
                 new BoundBlock(
@@ -268,11 +435,15 @@ public sealed class TrRmFrozenScalarMaterializationTests
                 default);
             var valueCall = new BoundCall(0, [], value.Type, default);
             var identityCall = new BoundCall(1, [valueCall], value.Type, default);
+            var matchesValue = new BoundBinary(TokenKind.EqualsEquals, identityCall,
+                result, PrimitiveType.Bool, default);
             var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
                 new BoundBlock(
                     [
-                        new BoundExpressionStatement(identityCall, default),
-                        new BoundReturn(new BoundConstant(42, PrimitiveType.Int32, default), default),
+                        new BoundIf(matchesValue,
+                            new BoundReturn(new BoundConstant(42, PrimitiveType.Int32, default), default),
+                            new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, default), default),
+                            default),
                     ],
                     default),
                 default);
@@ -287,6 +458,60 @@ public sealed class TrRmFrozenScalarMaterializationTests
             await JitTests.AssertProgramExecutionAsync(
                 executable, 42, NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
         }
+    }
+
+    [Test]
+    public async Task Float128NegativeZeroSignSurvivesFrozenLoadAndNativeCallsAsync()
+    {
+        var negativeZeroPayload = new byte[16];
+        negativeZeroPayload[^1] = 0x80;
+        var artifact = TrRmRegisterBodyTestData.StandardScalarConstantEntryArtifact(
+            0x16, negativeZeroPayload, isEntryPoint: false, methodName: "Value",
+            schema: TrRmArtifactSchema.ScalarFrozenValuesDraft);
+        var program = TrRmExecutableCompiler.LoadScalarFrozenValuesDraft(artifact);
+        var identity = new BoundFunction("Identity", PrimitiveType.Float128,
+            [new BoundVariable("value", PrimitiveType.Float128, false, default)], 1,
+            new BoundBlock([
+                new BoundReturn(new BoundRead(0, PrimitiveType.Float128, default), default),
+            ], default), default);
+        var valueCall = new BoundCall(0, [], PrimitiveType.Float128, default);
+        var identityCall = new BoundCall(1, [valueCall], PrimitiveType.Float128, default);
+        var onePayload = new byte[]
+        {
+            0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0xFF, 0x3F,
+        };
+        var one = new BoundConstant(ScalarBits.FromPayload(PrimitiveType.Float128,
+            onePayload), PrimitiveType.Float128, default);
+        var zero = new BoundConstant(ScalarBits.FromPayload(PrimitiveType.Float128,
+            new byte[16]), PrimitiveType.Float128, default);
+        var reciprocal = new BoundBinary(TokenKind.Slash, one, identityCall,
+            PrimitiveType.Float128, default)
+        {
+            OverflowBehavior = BoundIntegerOverflowBehavior.Checked,
+        };
+        var negativeInfinity = new BoundBinary(TokenKind.Less, reciprocal, zero,
+            PrimitiveType.Bool, default)
+        {
+            OverflowBehavior = BoundIntegerOverflowBehavior.Checked,
+        };
+        var main = new BoundFunction("Main", PrimitiveType.Int32, [], 0,
+            new BoundBlock([
+                new BoundIf(negativeInfinity,
+                    new BoundReturn(new BoundConstant(42, PrimitiveType.Int32, default), default),
+                    new BoundReturn(new BoundConstant(0, PrimitiveType.Int32, default), default),
+                    default),
+            ], default), default);
+        var executable = program with
+        {
+            Functions = program.Functions.Add(identity).Add(main),
+            EntryPoint = 2,
+        };
+
+        await JitTests.AssertProgramExecutionAsync(executable, 42,
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+        await JitTests.AssertProgramExecutionAsync(executable, 42,
+            NativeRuntimePolicy.CheckedExceptions).ConfigureAwait(true);
     }
 
     [Test]
@@ -418,5 +643,66 @@ public sealed class TrRmFrozenScalarMaterializationTests
             Is.EqualTo(42));
         Assert.That(NativeEmitter.Emit(compilation.Program!, NativeRuntimePolicy.FailFast),
             Is.Not.Empty);
+    }
+
+    private static byte[] DuplicateScalarValueRows(byte[] artifact)
+    {
+        var index = TrRmArtifactIndex.ForScalarFrozenValuesDraft(artifact);
+        if (!index.TryGetSection(0x0003, out var originalBlobSection, out var originalBlobCount)
+            || originalBlobCount != 1
+            || !index.TryGetSection(0x0020, out var originalBodySection, out var bodyCount)
+            || bodyCount != 2)
+        {
+            throw new InvalidOperationException("The producer artifact does not contain the expected scalar rows.");
+        }
+
+        var originalBlobs = new TrRmBlobTableReader(originalBlobSection, originalBlobCount);
+        var payload = originalBlobs.GetRow(1).ToArray();
+        var blobSection = TrRmVariableTableWriter.EncodeBlobs([
+            new ReadOnlyMemory<byte>(payload),
+            new ReadOnlyMemory<byte>(payload),
+        ]);
+        var blobs = new TrRmBlobTableReader(blobSection, 2);
+        var typeSpecs = default(TrRmTypeSpecTableReader);
+        var frozenValueNodeSection = TrRmFrozenValueNodeTableWriter.Encode([
+            new TrRmFrozenValueNodeRow(0xF200_0008, 1, 1, 0, 0, 0),
+            new TrRmFrozenValueNodeRow(0xF200_0008, 1, 2, 0, 0, 0),
+        ], typeSpecs, blobs, 0, 0);
+        var constantSourceSection = TrRmConstantSourceTableWriter.Encode([
+            new TrRmConstantSourceRow(1, 1),
+            new TrRmConstantSourceRow(1, 2),
+        ], 2, 0, 0);
+
+        var bodyIndex = new TrRmVariableTableIndex(originalBodySection,
+            bodyCount, 1, 1);
+        var firstBody = bodyIndex.GetRow(1).ToArray();
+        var secondBody = bodyIndex.GetRow(2).ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(secondBody.AsSpan(25), 2);
+        var bodySection = TrRmVariableTableWriter.EncodeBodies([
+            new ReadOnlyMemory<byte>(firstBody),
+            new ReadOnlyMemory<byte>(secondBody),
+        ]);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var replacementBytes = kind switch
+            {
+                0x0003 => blobSection,
+                0x0020 => bodySection,
+                0x0030 => constantSourceSection,
+                0x003F => frozenValueNodeSection,
+                _ => bytes.ToArray(),
+            };
+            var replacementCount = kind is 0x0003 or 0x0030 or 0x003F
+                ? 2u : checked((uint)recordCount);
+            sections.Add(new TrRmSection(kind, flags, replacementCount,
+                replacementBytes));
+        }
+
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ScalarFrozenValuesDraft);
     }
 }
