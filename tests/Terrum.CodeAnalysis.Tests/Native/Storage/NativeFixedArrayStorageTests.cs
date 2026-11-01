@@ -341,10 +341,10 @@ public sealed class NativeFixedArrayStorageTests
         Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.EqualTo(9));
     }
 
-    [TestCase(1, 0, 1)]
-    [TestCase(2, 1, 1)]
-    [TestCase(2, 2, 42)]
-    public void NativeParameterAddressChecksTheRequestedArraySuffix(
+    [TestCase(1, 0, 98)]
+    [TestCase(2, 1, 99)]
+    [TestCase(2, 2, 3)]
+    public void NativeParameterAddressEvaluatesIndexOnceAndChecksSuffix(
         int elementExtent, int index, int expectedResult)
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -366,15 +366,13 @@ public sealed class NativeFixedArrayStorageTests
                 unsafe {
                     try {
                         bool isBad = IsBadReadPtr(
-                            &values[selectedIndex], byteCount);
-                        if (isBad) {
-                            return 99;
-                        }
+                            &values[selectedIndex++], byteCount);
+                        return selectedIndex + 97;
                     } catch {
-                        return 42;
+                        return selectedIndex;
                     }
                 }
-                return 1;
+                return 100;
             }
             """;
         var options = new CompilationOptions {
@@ -390,7 +388,7 @@ public sealed class NativeFixedArrayStorageTests
         var kernel32Path = Path.Combine(Environment.SystemDirectory,
             "kernel32.dll");
         TestContext.WriteLine(
-            $"NativeParameter suffix JIT input: extent={elementExtent}; index={index}; byte-count={(ulong)elementExtent * sizeof(uint)}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={kernel32Path}!IsBadReadPtr; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
+            $"NativeParameter suffix JIT input: extent={elementExtent}; index-expression=selectedIndex++; starting-index={index}; byte-count={(ulong)elementExtent * sizeof(uint)}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={kernel32Path}!IsBadReadPtr; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
         var actualResult = NativeJit.Execute(program,
             NativeRuntimePolicy.CheckedExceptions);
         TestContext.WriteLine(
