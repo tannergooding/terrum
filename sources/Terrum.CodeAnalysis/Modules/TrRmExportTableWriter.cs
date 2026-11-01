@@ -21,6 +21,7 @@ public static class TrRmExportTableWriter
     /// <param name="interfaces">The validated InterfaceDef table, or default when unsupported.</param>
     /// <param name="associatedTypeDefs">The validated AssociatedTypeDef table, or default when unsupported.</param>
     /// <param name="fields">The validated FieldDef table, or default when unsupported.</param>
+    /// <param name="associatedConstDefs">The validated AssociatedConstDef table, or default when unsupported.</param>
     /// <returns>The encoded Export section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmExportRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
@@ -28,10 +29,12 @@ public static class TrRmExportTableWriter
         TrRmImportTableReader imports,
         TrRmInterfaceDefTableReader interfaces = default,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs = default,
-        TrRmFieldDefTableReader fields = default)
+        TrRmFieldDefTableReader fields = default,
+        TrRmAssociatedConstDefTableReader associatedConstDefs = default)
         => EncodeCore(rows, strings, types, methods, properties, imports,
-            interfaces, associatedTypeDefs, fields, default, default,
-            TrRmArtifactSchema.Standard, profileAware: false);
+            interfaces, associatedTypeDefs, fields, associatedConstDefs, default, default,
+            TrRmArtifactSchema.Standard, default, default, default,
+            profileAware: false, resourceLedger: null);
 
     internal static byte[] Encode(IReadOnlyList<TrRmExportRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
@@ -41,10 +44,17 @@ public static class TrRmExportTableWriter
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmFieldDefTableReader fields,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmAssociatedConstDefTableReader associatedConstDefs = default,
+        TrRmStaticFieldTableReader staticFields = default,
+        TrRmStaticFieldContractTableReader staticFieldContracts = default,
+        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations = default,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
         => EncodeCore(rows, strings, types, methods, properties, imports,
-            interfaces, associatedTypeDefs, fields, features, modules, schema,
-            profileAware: true);
+            interfaces, associatedTypeDefs, fields, associatedConstDefs,
+            features, modules, schema, staticFields, staticFieldContracts,
+            intrinsicRegistrations,
+            profileAware: true, resourceLedger: resourceLedger);
 
     private static byte[] EncodeCore(IReadOnlyList<TrRmExportRow> rows,
         TrRmStringTableReader strings, TrRmTypeDefTableReader types,
@@ -53,8 +63,14 @@ public static class TrRmExportTableWriter
         TrRmInterfaceDefTableReader interfaces,
         TrRmAssociatedTypeDefTableReader associatedTypeDefs,
         TrRmFieldDefTableReader fields,
+        TrRmAssociatedConstDefTableReader associatedConstDefs,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
-        TrRmArtifactSchema schema, bool profileAware)
+        TrRmArtifactSchema schema,
+        TrRmStaticFieldTableReader staticFields,
+        TrRmStaticFieldContractTableReader staticFieldContracts,
+        TrRmIntrinsicRegistrationTableReader intrinsicRegistrations,
+        bool profileAware,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -62,6 +78,9 @@ public static class TrRmExportTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL
+            + ((ulong)rows.Count
+                * (1UL + 2UL + (2UL * sizeof(uint))))));
         var result = new byte[rows.Count * 8];
         for (var index = 0; index < rows.Count; index++)
         {
@@ -76,12 +95,15 @@ public static class TrRmExportTableWriter
         {
             _ = new TrRmExportTableReader(result, rows.Count, strings, types,
                 methods, properties, imports, interfaces, associatedTypeDefs,
-                fields, features, modules, schema);
+                fields, features, modules, schema, associatedConstDefs,
+                staticFields, staticFieldContracts, intrinsicRegistrations,
+                resourceLedger);
         }
         else
         {
             _ = new TrRmExportTableReader(result, rows.Count, strings, types,
-                methods, properties, imports, interfaces, associatedTypeDefs, fields);
+                methods, properties, imports, interfaces, associatedTypeDefs, fields,
+                associatedConstDefs);
         }
         return result;
     }

@@ -659,13 +659,18 @@ producer gap is the exact-A3 Standard dispatch from `EmitStandardCore` to
 and performs final index/structural validation. That route now creates one A3
 root ledger, reserves final framed-artifact bytes before allocating the output,
 and passes the same ledger through `TrRmArtifactWriter`, the final
-`TrRmArtifactIndex` and structural validation. The focused writer/emitter
-selection passed 153/153 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_11_15_30_net11.0.trx`. Its
-intermediate table/body section buffers are still produced before any A3
-resource reservation; that is the next producer-metering gap. The
-NativeAddress emitter's fixed-array TypeSpec path currently accepts only
-A2/A2E/A2EU, so A3 source array production remains a separate unsupported gap.
+`TrRmArtifactIndex` and structural validation. The combined focused A3
+consumer/provider/table/Body and producer writer/emitter selection passed
+658/658 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_11_19_07_net11.0.trx`. Its
+section/Body encoders now reserve output bytes and row state before allocating
+their encoded buffers; the final frame separately reserves its output bytes.
+The next producer-metering gap is earlier in `NativeAddress`: row/list/
+dictionary staging, Body entry-state/map buffers and code-list storage are
+created before their A3 charges. NativeAddress record encoders and writer
+validation already share the root ledger. The NativeAddress emitter's
+fixed-array TypeSpec path currently accepts only A2/A2E/A2EU, so A3 source
+array production remains a separate unsupported gap.
 A broader `Modules.TrRm` selection later reported 2,378
 passes but was aborted when the test host crashed; it is incomplete evidence,
 not a passing suite.
@@ -680,9 +685,9 @@ with zero skips at
 `artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
 baseline; the normalized comparison in
-`artifacts\\log\\compiler-adoption-a3-producer-frame-analyzers.log` has 352
+`artifacts\\log\\compiler-adoption-a3-producer-section-analyzers.log` has 351
 unique diagnostic identities versus the 353-identity baseline, with no
-additions and one removed diagnostic.
+additions and two removed diagnostics.
 
 Source production, source-free generic reconstruction and
 remapping/replacement, generic-array CLI JIT/AOT and supervised

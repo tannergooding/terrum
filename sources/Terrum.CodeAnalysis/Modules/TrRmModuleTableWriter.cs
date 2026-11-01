@@ -38,6 +38,13 @@ public static class TrRmModuleTableWriter
     public static byte[] Encode(IReadOnlyList<TrRmModuleRow> rows,
         TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
         int methodDefCount, int sourceFileCount, int featureCount = -1)
+        => Encode(rows, strings, moduleRefCount, typeDefCount, methodDefCount,
+            sourceFileCount, featureCount, null);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmModuleRow> rows,
+        TrRmStringTableReader strings, int moduleRefCount, int typeDefCount,
+        int methodDefCount, int sourceFileCount, int featureCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -45,6 +52,9 @@ public static class TrRmModuleTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        var rowCount = (ulong)rows.Count;
+        var work = checked(1UL + (rowCount * (1UL + 11UL + 48UL)));
+        resourceLedger?.ConsumeWork(work);
         var result = new byte[rows.Count * 48];
         for (var index = 0; index < rows.Count; index++)
         {
@@ -64,7 +74,8 @@ public static class TrRmModuleTableWriter
         }
 
         _ = new TrRmModuleTableReader(result, rows.Count, strings,
-            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount, featureCount);
+            moduleRefCount, typeDefCount, methodDefCount, sourceFileCount,
+            featureCount, resourceLedger);
         return result;
     }
 

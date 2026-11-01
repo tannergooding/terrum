@@ -20,10 +20,12 @@ internal static class TrRmRegisterBodyWriter
         IReadOnlyList<TrRmRegisterBodyBlock> blocks,
         IReadOnlyList<ReadOnlyMemory<byte>> records, ReadOnlyMemory<byte> code,
         int contractCount = 0,
-        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard)
+        TrRmArtifactSchema schema = TrRmArtifactSchema.Standard,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(blocks);
         ArgumentNullException.ThrowIfNull(records);
+        resourceLedger?.ConsumeWork();
         if (contractCount is < 0 or > 0xFF_FFFF)
         {
             throw new ArgumentOutOfRangeException(nameof(contractCount));
@@ -73,11 +75,16 @@ internal static class TrRmRegisterBodyWriter
         var mapBytes = (long)homeMap.Length + typeMap.Length + methodMap.Length
             + fieldMap.Length + constantMap.Length;
 
+        resourceLedger?.ConsumeWork(checked(
+            1UL + (((ulong)records.Count + 1UL)
+                * (1UL + sizeof(uint)))));
         var recordOffsets = new uint[records.Count + 1];
         var recordDataLength = 0L;
         for (var index = 0; index < records.Count; index++)
         {
+            resourceLedger?.ConsumeWork();
             var record = records[index];
+            resourceLedger?.ConsumeWork();
             if (record.Length < sizeof(uint))
             {
                 throw new ArgumentException("A register Body record is shorter than its header.", nameof(records));
@@ -88,14 +95,18 @@ internal static class TrRmRegisterBodyWriter
                 throw new ArgumentOutOfRangeException(nameof(records));
             }
 
+            resourceLedger?.ConsumeWork();
             recordOffsets[index] = checked((uint)recordDataLength);
+            resourceLedger?.ConsumeWork();
             recordDataLength += record.Length;
         }
+        resourceLedger?.ConsumeWork();
         recordOffsets[^1] = checked((uint)recordDataLength);
 
         var codeCursor = 0u;
         foreach (var block in blocks)
         {
+            resourceLedger?.ConsumeWork(3);
             if (codeCursor > (uint)code.Length || block.CodeOffset != codeCursor
                 || block.CodeLength == 0
                 || block.CodeLength > (uint)code.Length - codeCursor
@@ -105,8 +116,10 @@ internal static class TrRmRegisterBodyWriter
                 throw new ArgumentException("A register Body Block has an invalid code or entry-state range.", nameof(blocks));
             }
 
+            resourceLedger?.ConsumeWork();
             codeCursor += block.CodeLength;
         }
+        resourceLedger?.ConsumeWork();
         if (codeCursor != (uint)code.Length)
         {
             throw new ArgumentException("Register Body Blocks must cover the code contiguously.", nameof(blocks));
@@ -121,6 +134,12 @@ internal static class TrRmRegisterBodyWriter
             throw new ArgumentOutOfRangeException(nameof(records));
         }
 
+        resourceLedger?.ConsumeWork(checked((ulong)size + 1UL
+            + 6UL + (ulong)mapCount
+            + (ulong)mapCount
+            + (4UL * (ulong)blocks.Count)
+            + ((ulong)records.Count + 1UL)
+            + (ulong)records.Count + 1UL));
         var result = new byte[(int)size];
         result[0] = 0x01;
         result[1] = 0x01;
@@ -162,7 +181,8 @@ internal static class TrRmRegisterBodyWriter
             throw new InvalidOperationException("Register Body framing size did not match its encoded extents.");
         }
 
-        _ = new TrRmRegisterBodyReader(result, contractCount, schema);
+        _ = new TrRmRegisterBodyReader(result, contractCount, schema,
+            resourceLedger);
         return result;
     }
 

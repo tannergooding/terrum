@@ -10,29 +10,45 @@ namespace Terrum.CodeAnalysis.Modules;
 public static class TrRmVariableTableWriter
 {
     public static byte[] EncodeBlobs(IReadOnlyList<ReadOnlyMemory<byte>> rows)
-        => Encode(rows, 0);
+        => Encode(rows, 0, null);
 
     public static byte[] EncodeBodies(IReadOnlyList<ReadOnlyMemory<byte>> rows)
-        => Encode(rows, 1);
+        => Encode(rows, 1, null);
 
-    private static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows, int minimumRowBytes)
+    internal static byte[] EncodeBlobs(IReadOnlyList<ReadOnlyMemory<byte>> rows,
+        TrRmA3LayoutResourceLedger resourceLedger)
+        => Encode(rows, 0, resourceLedger);
+
+    internal static byte[] EncodeBodies(IReadOnlyList<ReadOnlyMemory<byte>> rows,
+        TrRmA3LayoutResourceLedger resourceLedger)
+        => Encode(rows, 1, resourceLedger);
+
+    private static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows,
+        int minimumRowBytes, TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        resourceLedger?.ConsumeWork();
         if (rows.Count is <= 0 or > 0xFF_FFFF)
         {
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        resourceLedger?.ConsumeWork(2);
         var indexBytes = ((long)rows.Count + 1) * sizeof(uint);
         var dataBytes = 0L;
-        foreach (var row in rows)
+        for (var index = 0; index < rows.Count; index++)
         {
+            resourceLedger?.ConsumeWork();
+            var row = rows[index];
+            resourceLedger?.ConsumeWork();
             if (row.Length < minimumRowBytes)
             {
                 throw new ArgumentException("A TRRM variable row is shorter than its minimum size.", nameof(rows));
             }
 
+            resourceLedger?.ConsumeWork(2);
             dataBytes += row.Length;
+            resourceLedger?.ConsumeWork();
             if (indexBytes + dataBytes > int.MaxValue)
             {
                 throw new ArgumentOutOfRangeException(nameof(rows),
@@ -40,15 +56,22 @@ public static class TrRmVariableTableWriter
             }
         }
 
-        var result = new byte[(int)(indexBytes + dataBytes)];
+        var resultLength = checked((ulong)(indexBytes + dataBytes));
+        resourceLedger?.ConsumeWork(checked(resultLength + 1UL
+            + (ulong)rows.Count + 1UL));
+        var result = new byte[(int)resultLength];
         var offset = 0;
         for (var index = 0; index < rows.Count; index++)
         {
+            resourceLedger?.ConsumeWork();
             BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(index * sizeof(uint)), (uint)offset);
+            resourceLedger?.ConsumeWork();
             rows[index].Span.CopyTo(result.AsSpan((int)indexBytes + offset));
+            resourceLedger?.ConsumeWork();
             offset += rows[index].Length;
         }
 
+        resourceLedger?.ConsumeWork();
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(rows.Count * sizeof(uint)), (uint)offset);
         return result;
     }

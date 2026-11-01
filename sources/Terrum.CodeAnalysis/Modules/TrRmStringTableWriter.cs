@@ -15,13 +15,22 @@ public static class TrRmStringTableWriter
     private static readonly UTF32Encoding s_utf32 = new(false, false, true);
 
     public static byte[] EncodeNames(IReadOnlyList<(string Text, int Encoding)> names)
-        => EncodeRows(names, allowEmpty: false, argumentName: nameof(names));
+        => EncodeRows(names, allowEmpty: false, argumentName: nameof(names),
+            resourceLedger: null);
 
     public static byte[] EncodeTextRows(IReadOnlyList<(string Text, int Encoding)> rows)
-        => EncodeRows(rows, allowEmpty: true, argumentName: nameof(rows));
+        => EncodeRows(rows, allowEmpty: true, argumentName: nameof(rows),
+            resourceLedger: null);
+
+    internal static byte[] EncodeTextRows(
+        IReadOnlyList<(string Text, int Encoding)> rows,
+        TrRmA3LayoutResourceLedger resourceLedger)
+        => EncodeRows(rows, allowEmpty: true, argumentName: nameof(rows),
+            resourceLedger);
 
     private static byte[] EncodeRows(IReadOnlyList<(string Text, int Encoding)> names,
-        bool allowEmpty, string argumentName)
+        bool allowEmpty, string argumentName,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (names is null)
         {
@@ -32,16 +41,30 @@ public static class TrRmStringTableWriter
             throw new ArgumentOutOfRangeException(argumentName);
         }
 
+        resourceLedger?.ConsumeWork(2);
         var indexBytes = ((long)names.Count + 1) * sizeof(uint);
+        resourceLedger?.ConsumeWork(checked((ulong)names.Count + 1UL));
         var rows = new (string Text, int Encoding, int Width, int ContentLength, int Length)[names.Count];
         var dataBytes = 0L;
         for (var index = 0; index < names.Count; index++)
         {
+            resourceLedger?.ConsumeWork();
             var (text, encoding) = names[index];
             ArgumentNullException.ThrowIfNull(text);
-            if ((!allowEmpty && text.Length == 0) || (encoding != 0 && text.Contains('\0')))
+            resourceLedger?.ConsumeWork();
+            if (!allowEmpty && text.Length == 0)
             {
                 throw new ArgumentException("A TRRM text row must be NUL-free and required names nonempty.", argumentName);
+            }
+
+            resourceLedger?.ConsumeWork();
+            if (encoding != 0)
+            {
+                resourceLedger?.ConsumeWork(checked((ulong)text.Length));
+                if (text.Contains('\0', StringComparison.Ordinal))
+                {
+                    throw new ArgumentException("A TRRM text row must be NUL-free and required names nonempty.", argumentName);
+                }
             }
 
             int contentLength;
@@ -50,10 +73,10 @@ public static class TrRmStringTableWriter
             {
                 (contentLength, width) = encoding switch
                 {
-                    0 => (ValidateAscii(text, argumentName), 1),
-                    1 => (s_utf8.GetByteCount(text), 1),
-                    2 => (s_utf16.GetByteCount(text), 2),
-                    3 => (s_utf32.GetByteCount(text), 4),
+                    0 => (ValidateAscii(text, argumentName, resourceLedger), 1),
+                    1 => (GetByteCount(s_utf8, text, resourceLedger), 1),
+                    2 => (GetByteCount(s_utf16, text, resourceLedger), 2),
+                    3 => (GetByteCount(s_utf32, text, resourceLedger), 4),
                     _ => throw new ArgumentOutOfRangeException(argumentName, "Unassigned TRRM String encoding."),
                 };
             }
@@ -67,9 +90,12 @@ public static class TrRmStringTableWriter
                 throw new ArgumentOutOfRangeException(argumentName, "TRRM String unit count exceeds u24.");
             }
 
+            resourceLedger?.ConsumeWork(3);
             var unpaddedLength = (long)4 + contentLength + width;
             var rowLength = (unpaddedLength + 3) & ~3L;
+            resourceLedger?.ConsumeWork(2);
             dataBytes += rowLength;
+            resourceLedger?.ConsumeWork();
             if (indexBytes + dataBytes > int.MaxValue)
             {
                 throw new ArgumentOutOfRangeException(argumentName, "TRRM String section exceeds host byte-array limits.");
@@ -78,11 +104,16 @@ public static class TrRmStringTableWriter
             rows[index] = (text, encoding, width, contentLength, (int)rowLength);
         }
 
-        var result = new byte[(int)(indexBytes + dataBytes)];
+        var resultLength = checked((ulong)(indexBytes + dataBytes));
+        resourceLedger?.ConsumeWork(checked(resultLength + 1UL
+            + (ulong)names.Count + 1UL
+            + ((ulong)names.Count * 4UL)));
+        var result = new byte[(int)resultLength];
         var dataStart = (int)indexBytes;
         var offset = 0;
         for (var index = 0; index < rows.Length; index++)
         {
+            resourceLedger?.ConsumeWork(2);
             var (text, encoding, width, contentLength, length) = rows[index];
             BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(index * sizeof(uint)), (uint)offset);
             var units = contentLength / width;
@@ -91,6 +122,7 @@ public static class TrRmStringTableWriter
             row[1] = (byte)(units & byte.MaxValue);
             row[2] = (byte)((units >> 8) & byte.MaxValue);
             row[3] = (byte)(units >> 16);
+            resourceLedger?.ConsumeWork(checked((ulong)text.Length));
             _ = encoding switch
             {
                 0 => Encoding.ASCII.GetBytes(text.AsSpan(), row.Slice(4, contentLength)),
@@ -99,19 +131,23 @@ public static class TrRmStringTableWriter
                 3 => s_utf32.GetBytes(text.AsSpan(), row.Slice(4, contentLength)),
                 _ => throw new InvalidOperationException("The validated TRRM String encoding changed."),
             };
+            resourceLedger?.ConsumeWork();
             offset += length;
         }
 
+        resourceLedger?.ConsumeWork();
         BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(rows.Length * sizeof(uint)), (uint)offset);
         return result;
     }
 
-    private static int ValidateAscii(string text, string argumentName)
+    private static int ValidateAscii(string text, string argumentName,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var containsZero = false;
         var containsNonAscii = false;
         foreach (var unit in text)
         {
+            resourceLedger?.ConsumeWork();
             containsZero |= unit == '\0';
             containsNonAscii |= unit > 0x7F;
         }
@@ -126,5 +162,12 @@ public static class TrRmStringTableWriter
         }
 
         return text.Length;
+    }
+
+    private static int GetByteCount(Encoding encoding, string text,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork(checked((ulong)text.Length));
+        return encoding.GetByteCount(text);
     }
 }

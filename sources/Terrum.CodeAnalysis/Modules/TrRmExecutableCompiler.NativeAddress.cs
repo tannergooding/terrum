@@ -407,9 +407,10 @@ public static partial class TrRmExecutableCompiler
                 TrRmFeatureRow.FixedInlineArrayStorageCandidate);
         }
 
-        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema);
+        var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema,
+            a3LayoutResourceLedger);
         var featureReader = new TrRmFeatureTableReader(featureBytes,
-            featureRows.Count, schema);
+            featureRows.Count, schema, a3LayoutResourceLedger);
 
         var stringRows = new List<(string Text, int Encoding)> { ("", 0) };
         var stringIndexes = new Dictionary<(string Text, int Encoding), int>
@@ -445,8 +446,12 @@ public static partial class TrRmExecutableCompiler
             ? 0 : AddString(moduleImport.ProducerIdentity, 1);
         var providerExportKeyRow = moduleImport is null
             ? 0 : AddString(moduleImport.ExportKey, 1);
-        var stringsBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
-        var strings = new TrRmStringTableReader(stringsBytes, stringRows.Count);
+        var stringsBytes = a3LayoutResourceLedger is null
+            ? TrRmStringTableWriter.EncodeTextRows(stringRows)
+            : TrRmStringTableWriter.EncodeTextRows(stringRows,
+                a3LayoutResourceLedger);
+        var strings = new TrRmStringTableReader(stringsBytes, stringRows.Count,
+            a3LayoutResourceLedger);
 
         var moduleRefRows = new List<TrRmModuleRefRow>(
             moduleImport is null ? 0 : 1);
@@ -462,34 +467,42 @@ public static partial class TrRmExecutableCompiler
             new TrRmModuleRow(moduleNameRow, 1, 0, entryMethodRow, 1, 1, 1, 1,
                 1, featureRows.Count, 1),
         ], strings, moduleRefRows.Count, 0,
-            program.Functions.Length + 1, 0, featureRows.Count);
+            program.Functions.Length + 1, 0, featureRows.Count,
+            a3LayoutResourceLedger);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             moduleRefRows.Count, 0, program.Functions.Length + 1, 0,
-            featureRows.Count);
+            featureRows.Count, a3LayoutResourceLedger);
         var moduleRefBytes = moduleRefRows.Count == 0
             ? []
-            : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings, modules);
+            : TrRmModuleRefTableWriter.Encode(moduleRefRows, strings, modules,
+                a3LayoutResourceLedger);
         var moduleRefs = moduleRefRows.Count == 0
             ? default
             : new TrRmModuleRefTableReader(moduleRefBytes,
-                moduleRefRows.Count, strings, modules);
+                moduleRefRows.Count, strings, modules,
+                a3LayoutResourceLedger);
         var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
             0, 0, 0, 0, schema,
-            methodDefCount: program.Functions.Length + 1);
+            methodDefCount: program.Functions.Length + 1,
+            resourceLedger: a3LayoutResourceLedger);
         var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
             typeSpecRows.Count, 0, 0, 0, 0, schema,
-            methodDefCount: program.Functions.Length + 1);
+            methodDefCount: program.Functions.Length + 1,
+            resourceLedger: a3LayoutResourceLedger);
         var signatureBytes = TrRmMethodSigTableWriter.Encode(signatureRows,
-            typeSpecs, parameterRows.Count, 0);
+            typeSpecs, parameterRows.Count, 0,
+            a3LayoutResourceLedger);
         var signatures = new TrRmMethodSigTableReader(signatureBytes,
-            signatureRows.Count, typeSpecs, parameterRows.Count, 0);
+            signatureRows.Count, typeSpecs, parameterRows.Count, 0,
+            a3LayoutResourceLedger);
         var paramBytes = parameterRows.Count == 0
             ? []
-            : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs, schema);
+            : TrRmParamTableWriter.Encode(parameterRows, signatures, typeSpecs,
+                schema, a3LayoutResourceLedger);
         var parameters = parameterRows.Count == 0
             ? default
             : new TrRmParamTableReader(paramBytes, parameterRows.Count,
-                signatures, typeSpecs, schema);
+                signatures, typeSpecs, schema, a3LayoutResourceLedger);
         var anchorOwner = 0x1600_0000u | (uint)anchorMethodRow;
         var contractRows = new List<TrRmContractRow>();
         var contractPayload = new byte[sizeof(uint)];
@@ -550,7 +563,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
-            0, 0, 0, contractRows.Count);
+            0, 0, 0, contractRows.Count, schema,
+            a3LayoutResourceLedger);
         var methodRows = new List<TrRmMethodDefRow>(program.Functions.Length + 1);
         var exportRows = new List<TrRmExportRow>();
         for (var index = 0; index < program.Functions.Length; index++)
@@ -574,10 +588,11 @@ public static partial class TrRmExecutableCompiler
             anchorSignatureRow, 0, anchorContractFirst,
             selectedNativeParameters.Length, 0));
         var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
-            modules, typeDefs, signatures, contractRows.Count, 1);
+            modules, typeDefs, signatures, contractRows.Count, 1,
+            a3LayoutResourceLedger);
         var methods = new TrRmMethodDefTableReader(methodBytes,
             methodRows.Count, strings, modules, typeDefs, signatures,
-            contractRows.Count, 1);
+            contractRows.Count, 1, a3LayoutResourceLedger);
         var importRows = new List<TrRmImportRow>(moduleImport is null ? 0 : 1);
         if (moduleImport is not null)
         {
@@ -590,20 +605,21 @@ public static partial class TrRmExecutableCompiler
             : TrRmImportTableWriter.Encode(importRows, strings, moduleRefs,
                 typeDefs, methods, default, default, default, default,
                 featureReader, modules,
-                schema);
+                schema, resourceLedger: a3LayoutResourceLedger);
         var imports = importRows.Count == 0
             ? default
             : new TrRmImportTableReader(importBytes, importRows.Count,
                 strings, moduleRefs, typeDefs, methods, default, default,
                 default, default, featureReader, modules,
-                schema);
+                schema, resourceLedger: a3LayoutResourceLedger);
         var contractBytes = TrRmContractTableWriter.EncodeForeignInvocationDraft(
             contractRows, typeDefs, methods, signatures, parameters, typeSpecs,
-            featureReader, modules, predicateGraphCount: 0, schema: schema);
+            featureReader, modules, predicateGraphCount: 0, schema: schema,
+            resourceLedger: a3LayoutResourceLedger);
         var contracts = new TrRmContractTableReader(contractBytes,
             contractRows.Count, typeDefs, methods, signatures, parameters,
             typeSpecs, 0, featureReader, modules,
-            schema);
+            schema, resourceLedger: a3LayoutResourceLedger);
         var targetProfileBytes = fixedArrayLayoutRows.Count == 0
             ? []
             : TrRmTargetProfileTableWriter.Encode([
@@ -611,11 +627,14 @@ public static partial class TrRmExecutableCompiler
                     TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
                     TrRmTargetProfileTableReader
                         .WindowsX64NativeProfileRuleRevision),
-            ], schema);
+            ], schema, a3LayoutResourceLedger);
         var targetProfiles = fixedArrayLayoutRows.Count == 0
-            ? new TrRmTargetProfileTableReader([], 0)
-            : new TrRmTargetProfileTableReader(targetProfileBytes, 1, schema);
-        var layouts = new TrRmLayoutTableReader([], 0, typeDefs, targetProfiles, 0);
+            ? new TrRmTargetProfileTableReader([], 0, schema,
+                a3LayoutResourceLedger)
+            : new TrRmTargetProfileTableReader(targetProfileBytes, 1, schema,
+                a3LayoutResourceLedger);
+        var layouts = new TrRmLayoutTableReader([], 0, typeDefs,
+            targetProfiles, 0, a3LayoutResourceLedger);
         var nativeImportRows = new List<TrRmNativeImportRow>(
             nativeImportFunctionIndices.Count);
         foreach (var functionIndex in nativeImportFunctionIndices)
@@ -632,7 +651,8 @@ public static partial class TrRmExecutableCompiler
 
         var nativeImportBytes = TrRmNativeImportTableWriter.Encode(
             nativeImportRows, strings, methods, default, typeDefs, imports, modules,
-            signatures, parameters, typeSpecs, contracts, layouts);
+            signatures, parameters, typeSpecs, contracts, layouts,
+            a3LayoutResourceLedger);
         var stagedCalls = new List<BoundCall>(
             indirectCall?.Arguments.Length ?? 0);
         if (indirectCall is not null)
@@ -837,7 +857,8 @@ public static partial class TrRmExecutableCompiler
             emitsIndirectCall ? (byte)2 : (byte)1,
             emitsIndirectCall ? checked((ushort)callHomeIndex) : (ushort)15,
             maps.GetMethodMapIndex(targetMethodMapToken),
-            maps.GetTypeMapIndex(0x1100_0001));
+            maps.GetTypeMapIndex(0x1100_0001),
+            a3LayoutResourceLedger);
         var callLocalHomeCount = stagedResultHomeStart
             + stagedResultHomeCount;
         var homeMap = emitsIndirectCall
@@ -948,7 +969,7 @@ public static partial class TrRmExecutableCompiler
                     isFinalStagedCall ? (ushort)0
                         : checked((ushort)(stagedResultHomeStart
                             + stagedInstructionOrdinal)),
-                    stagedInputs, []));
+                    stagedInputs, [], a3LayoutResourceLedger));
                 AppendCallSiteInstruction(code, stagedCallIndex);
             }
 
@@ -959,7 +980,8 @@ public static partial class TrRmExecutableCompiler
             var callSiteIndex = checked((ushort)records.Count);
             records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
                 3, callResultKind, checked((ushort)callHomeIndex),
-                callResultIndex, callInputs, []));
+                callResultIndex, callInputs, [],
+                a3LayoutResourceLedger));
             AppendCallSiteInstruction(code, callSiteIndex);
         }
 
@@ -973,12 +995,19 @@ public static partial class TrRmExecutableCompiler
             code.Add(returnsCallResult ? (byte)0x17 : (byte)0x18);
             code.Add(0);
         }
+        a3LayoutResourceLedger?.ConsumeWork(checked(
+            (ulong)code.Count + 1UL));
         var codeBytes = code.ToArray();
+        a3LayoutResourceLedger?.ConsumeWork(2);
+        var bodyBlocks = new[]
+        {
+            new TrRmRegisterBodyBlock(0, (uint)codeBytes.Length, 0),
+        };
         body = TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
-            [new TrRmRegisterBodyBlock(0, (uint)codeBytes.Length, 0)],
+            bodyBlocks,
             records, codeBytes, contractRows.Count,
-            schema);
+            schema, a3LayoutResourceLedger);
         }
         var sections = new List<TrRmSection>
         {
@@ -1011,7 +1040,7 @@ public static partial class TrRmExecutableCompiler
                 TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
                     methods, default, imports, default, default, default,
                     featureReader, modules,
-                    schema)));
+                    schema, resourceLedger: a3LayoutResourceLedger)));
         }
         if (fixedArrayLayoutRows.Count != 0)
         {
@@ -1024,8 +1053,13 @@ public static partial class TrRmExecutableCompiler
             sections.Add(new TrRmSection(0x0048, 0, 1,
                 targetProfileBytes));
         }
+        a3LayoutResourceLedger?.ConsumeWork(2);
+        var bodyRows = new ReadOnlyMemory<byte>[] { body };
         sections.Add(new TrRmSection(0x0020, 0, 1,
-            TrRmVariableTableWriter.EncodeBodies([body])));
+            a3LayoutResourceLedger is null
+                ? TrRmVariableTableWriter.EncodeBodies(bodyRows)
+                : TrRmVariableTableWriter.EncodeBodies(bodyRows,
+                    a3LayoutResourceLedger)));
         sections.Add(new TrRmSection(0x0021, 0,
             (uint)nativeImportRows.Count, nativeImportBytes));
         sections.Sort(static (left, right)

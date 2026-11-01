@@ -56,7 +56,8 @@ public static class TrRmContractTableWriter
         TrRmParamTableReader parameters, TrRmTypeSpecTableReader typeSpecs,
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         int predicateGraphCount,
-        TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft)
+        TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -70,7 +71,7 @@ public static class TrRmContractTableWriter
 
         return EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
             fieldPathCount: 0, predicateGraphCount, features, modules,
-            schema, profileAware: true);
+            schema, profileAware: true, resourceLedger: resourceLedger);
     }
 
     internal static byte[] EncodeGeneralPredicateGraphsDraft(
@@ -320,7 +321,8 @@ public static class TrRmContractTableWriter
         TrRmStaticFieldTableReader staticFields = default,
         TrRmStaticFieldContractTableReader staticFieldContracts = default,
         TrRmEagerInitializerTableReader eagerInitializers = default,
-        TrRmLazyUnitTableReader lazyUnits = default)
+        TrRmLazyUnitTableReader lazyUnits = default,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         var rowCount = rows.Count;
@@ -329,12 +331,17 @@ public static class TrRmContractTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        resourceLedger?.ConsumeWork(3);
         var sectionLength = ((long)rowCount + 1) * sizeof(uint);
+        resourceLedger?.ConsumeWork(checked((ulong)rowCount));
         var validatedRows = new TrRmContractRow[rowCount];
         for (var index = 0; index < rowCount; index++)
         {
+            resourceLedger?.ConsumeWork();
             var row = rows[index];
+            resourceLedger?.ConsumeWork(2);
             sectionLength += 8L + row.Payload.Length;
+            resourceLedger?.ConsumeWork();
             if (sectionLength > int.MaxValue)
             {
                 throw new ArgumentOutOfRangeException(nameof(rows));
@@ -343,11 +350,14 @@ public static class TrRmContractTableWriter
             validatedRows[index] = row;
         }
 
+        resourceLedger?.ConsumeWork(checked((ulong)sectionLength + 1UL
+            + ((ulong)rowCount * 3UL) + (ulong)rowCount + 1UL));
         var result = new byte[(int)sectionLength];
         var indexLength = (rowCount + 1) * sizeof(uint);
         var dataOffset = indexLength;
         for (var index = 0; index < validatedRows.Length; index++)
         {
+            resourceLedger?.ConsumeWork();
             var row = validatedRows[index];
             BinaryPrimitives.WriteUInt32LittleEndian(result.AsSpan(index * sizeof(uint)),
                 (uint)(dataOffset - indexLength));
@@ -364,7 +374,8 @@ public static class TrRmContractTableWriter
             _ = new TrRmContractTableReader(result, rowCount, types, methods,
                 signatures, parameters, typeSpecs, fieldPathCount, features,
                 modules, schema, predicateGraphCount, eagerGroups,
-                staticFields, staticFieldContracts, eagerInitializers, lazyUnits);
+                staticFields, staticFieldContracts, eagerInitializers, lazyUnits,
+                resourceLedger);
         }
         else
         {

@@ -37,6 +37,17 @@ public static class TrRmNativeImportTableWriter
         TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
         TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
         TrRmLayoutTableReader layouts)
+        => Encode(rows, strings, methods, fields, typeDefs, imports, modules,
+            signatures, parameters, types, contracts, layouts, null);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmNativeImportRow> rows,
+        TrRmStringTableReader strings, TrRmMethodDefTableReader methods,
+        TrRmFieldDefTableReader fields, TrRmTypeDefTableReader typeDefs,
+        TrRmImportTableReader imports, TrRmModuleTableReader modules,
+        TrRmMethodSigTableReader signatures, TrRmParamTableReader parameters,
+        TrRmTypeSpecTableReader types, TrRmContractTableReader contracts,
+        TrRmLayoutTableReader layouts,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -44,6 +55,9 @@ public static class TrRmNativeImportTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        var rowCount = (ulong)rows.Count;
+        var work = checked(1UL + (rowCount * (1UL + 7UL + 16UL)));
+        resourceLedger?.ConsumeWork(work);
         var result = new byte[rows.Count * 16];
         for (var index = 0; index < rows.Count; index++)
         {
@@ -60,7 +74,7 @@ public static class TrRmNativeImportTableWriter
 
         _ = new TrRmNativeImportTableReader(result, rows.Count, strings, methods,
             fields, typeDefs, imports, modules, signatures, parameters, types,
-            contracts, layouts);
+            contracts, layouts, resourceLedger);
         return result;
     }
 

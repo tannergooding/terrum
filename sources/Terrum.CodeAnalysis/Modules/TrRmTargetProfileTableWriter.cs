@@ -18,8 +18,14 @@ public static class TrRmTargetProfileTableWriter
 
     internal static byte[] Encode(IReadOnlyList<TrRmTargetProfileRow> rows,
         TrRmArtifactSchema schema)
+        => Encode(rows, schema, null);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmTargetProfileRow> rows,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
+        resourceLedger?.ConsumeWork();
         if (rows.Count > 0xFF_FFFF
             || schema is not (TrRmArtifactSchema.Standard
                 or TrRmArtifactSchema.Development
@@ -40,23 +46,30 @@ public static class TrRmTargetProfileTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL
+            + ((ulong)rows.Count
+                * (1UL + 2UL + (2UL * sizeof(uint))))));
         var result = new byte[rows.Count * sizeof(ulong)];
         for (var index = 0; index < rows.Count; index++)
         {
+            resourceLedger?.ConsumeWork();
             var row = rows[index];
+            resourceLedger?.ConsumeWork();
             if (!TrRmTargetProfileTableReader.IsAssigned(
                     row.ProfileId, row.RuleRevision, schema))
             {
                 throw new InvalidDataException("Unassigned TRRM TargetProfile identity.");
             }
 
+            resourceLedger?.ConsumeWork(2);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 result.AsSpan(index * sizeof(ulong)), row.ProfileId);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 result.AsSpan((index * sizeof(ulong)) + sizeof(uint)), row.RuleRevision);
         }
 
-        _ = new TrRmTargetProfileTableReader(result, rows.Count, schema);
+        _ = new TrRmTargetProfileTableReader(result, rows.Count, schema,
+            resourceLedger);
         return result;
     }
 }

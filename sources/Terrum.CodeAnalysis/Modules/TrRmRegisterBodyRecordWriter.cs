@@ -126,7 +126,8 @@ internal static class TrRmRegisterBodyRecordWriter
     }
 
     internal static byte[] EncodeNativeAddress(byte resultKind, ushort resultIndex,
-        ushort methodMapIndex, ushort pointerTypeMapIndex)
+        ushort methodMapIndex, ushort pointerTypeMapIndex,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (resultKind is not (1 or 2))
         {
@@ -137,6 +138,7 @@ internal static class TrRmRegisterBodyRecordWriter
             throw new ArgumentOutOfRangeException(nameof(resultIndex));
         }
 
+        resourceLedger?.ConsumeWork(1 + 12UL + 5UL);
         var result = new byte[12];
         result[0] = 0x0D;
         result[RecordHeaderSize] = resultKind;
@@ -301,7 +303,8 @@ internal static class TrRmRegisterBodyRecordWriter
     internal static byte[] EncodeCallSite(byte targetKind, byte resultKind,
         ushort targetIndex, ushort resultIndex,
         IReadOnlyList<TrRmRegisterBodyCallInput> inputs,
-        IReadOnlyList<ushort> preparations)
+        IReadOnlyList<ushort> preparations,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(preparations);
@@ -333,6 +336,7 @@ internal static class TrRmRegisterBodyRecordWriter
 
         foreach (var input in inputs)
         {
+            resourceLedger?.ConsumeWork(4);
             if (input.SelectorKind > 2
                 || (input.SelectorKind == 0
                     ? input.SourceUse != 0 || input.SelectorIndex != 0
@@ -350,7 +354,10 @@ internal static class TrRmRegisterBodyRecordWriter
             throw new ArgumentOutOfRangeException(nameof(inputs));
         }
 
-        var result = new byte[RecordHeaderSize + (int)payloadLength];
+        var resultLength = checked((ulong)(RecordHeaderSize + payloadLength));
+        resourceLedger?.ConsumeWork(checked(resultLength + 1UL
+            + (ulong)inputs.Count + (ulong)preparations.Count + 8UL));
+        var result = new byte[(int)resultLength];
         result[0] = 0x02;
         var payloadOffset = RecordHeaderSize;
         result[payloadOffset] = targetKind;

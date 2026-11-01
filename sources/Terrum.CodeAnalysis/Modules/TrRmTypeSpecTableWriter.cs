@@ -146,14 +146,17 @@ public static class TrRmTypeSpecTableWriter
     internal static byte[] Encode(IReadOnlyList<ReadOnlyMemory<byte>> rows,
         int typeDefCount, int importCount, int genericParamCount,
         int nativeFunctionPointerSignatureCount, TrRmArtifactSchema schema,
-        int methodDefCount = 0, int predicateCaptureCount = 0)
+        int methodDefCount = 0, int predicateCaptureCount = 0,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        var result = TrRmVariableTableWriter.EncodeBlobs(rows);
+        var result = resourceLedger is null
+            ? TrRmVariableTableWriter.EncodeBlobs(rows)
+            : TrRmVariableTableWriter.EncodeBlobs(rows, resourceLedger);
         _ = new TrRmTypeSpecTableReader(result, rows.Count,
             typeDefCount, importCount, genericParamCount,
             nativeFunctionPointerSignatureCount, schema, methodDefCount,
-            predicateCaptureCount);
+            predicateCaptureCount, resourceLedger);
         return result;
     }
 

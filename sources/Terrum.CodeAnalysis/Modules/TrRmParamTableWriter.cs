@@ -30,7 +30,8 @@ public static class TrRmParamTableWriter
 
     internal static byte[] Encode(IReadOnlyList<TrRmParamRow> rows,
         TrRmMethodSigTableReader signatures, TrRmTypeSpecTableReader types,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -38,6 +39,9 @@ public static class TrRmParamTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        var rowCount = (ulong)rows.Count;
+        var work = checked(1UL + (rowCount * (1UL + 5UL + 16UL)));
+        resourceLedger?.ConsumeWork(work);
         var result = new byte[rows.Count * 16];
         for (var index = 0; index < rows.Count; index++)
         {
@@ -50,7 +54,8 @@ public static class TrRmParamTableWriter
             result[offset + 13] = row.Flags;
         }
 
-        _ = new TrRmParamTableReader(result, rows.Count, signatures, types, schema);
+        _ = new TrRmParamTableReader(result, rows.Count, signatures, types,
+            schema, resourceLedger);
         return result;
     }
 

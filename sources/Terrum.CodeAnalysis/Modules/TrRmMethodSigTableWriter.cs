@@ -15,6 +15,11 @@ public static class TrRmMethodSigTableWriter
 {
     public static byte[] Encode(IReadOnlyList<TrRmMethodSigRow> rows,
         TrRmTypeSpecTableReader types, int paramCount, int genericParamCount)
+        => Encode(rows, types, paramCount, genericParamCount, null);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmMethodSigRow> rows,
+        TrRmTypeSpecTableReader types, int paramCount, int genericParamCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -22,6 +27,9 @@ public static class TrRmMethodSigTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL
+            + ((ulong)rows.Count
+                * (1UL + 6UL + (6UL * sizeof(uint))))));
         var result = new byte[rows.Count * 24];
         for (var index = 0; index < rows.Count; index++)
         {
@@ -35,7 +43,8 @@ public static class TrRmMethodSigTableWriter
             Write(result, offset + 20, row.GenericCount);
         }
 
-        _ = new TrRmMethodSigTableReader(result, rows.Count, types, paramCount, genericParamCount);
+        _ = new TrRmMethodSigTableReader(result, rows.Count, types,
+            paramCount, genericParamCount, resourceLedger);
         return result;
     }
 

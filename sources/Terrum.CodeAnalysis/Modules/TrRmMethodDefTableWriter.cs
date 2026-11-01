@@ -17,6 +17,14 @@ public static class TrRmMethodDefTableWriter
         TrRmStringTableReader strings, TrRmModuleTableReader modules,
         TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
         int contractCount, int bodyCount)
+        => Encode(rows, strings, modules, types, signatures, contractCount,
+            bodyCount, null);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmMethodDefRow> rows,
+        TrRmStringTableReader strings, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader types, TrRmMethodSigTableReader signatures,
+        int contractCount, int bodyCount,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         ArgumentNullException.ThrowIfNull(rows);
         if (rows.Count is <= 0 or > 0xFF_FFFF)
@@ -24,6 +32,9 @@ public static class TrRmMethodDefTableWriter
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL
+            + ((ulong)rows.Count
+                * (1UL + 7UL + (7UL * sizeof(uint))))));
         var result = new byte[rows.Count * 28];
         for (var index = 0; index < rows.Count; index++)
         {
@@ -39,7 +50,7 @@ public static class TrRmMethodDefTableWriter
         }
 
         _ = new TrRmMethodDefTableReader(result, rows.Count, strings, modules, types,
-            signatures, contractCount, bodyCount);
+            signatures, contractCount, bodyCount, resourceLedger);
         return result;
     }
 
