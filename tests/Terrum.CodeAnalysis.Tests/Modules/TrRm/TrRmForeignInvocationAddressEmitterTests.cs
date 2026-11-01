@@ -2734,12 +2734,14 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 consumerIdentity, []));
     }
 
-    [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
-    [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false)]
-    [TestCase(2, "int32", "[0, -1]", PrimitiveType.Int32, true)]
+    [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false, 1)]
+    [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false, 1)]
+    [TestCase(2, "int32", "[0, -1]", PrimitiveType.Int32, true, 1)]
+    [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false, 2)]
     public void StandardA2EmitsAndReconstructsInitializedArrayStorageAddress(
         int elementCount, string elementType, string initializer,
-        PrimitiveType expectedElementType, bool hasAllBitsSetElement)
+        PrimitiveType expectedElementType, bool hasAllBitsSetElement,
+        int nativeParameterExtent)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
@@ -2753,7 +2755,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             [Terrum.Interop.NativeImport(
                 "example.dll",
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
-            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(
+                1, Read, NoEscape, {{nativeParameterExtent}})]
             [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
             internal extern void Observe(
                 ptr<{{elementType}}> value,
@@ -2805,6 +2808,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var placeSelectionCount = 0;
         var semanticStoreCount = 0;
         var storageAddressCount = 0;
+        var arrayRequiredElementCount = 0u;
         var initializerRegisters = new List<ushort>();
         for (var record = 0; record < body.RecordCount; record++)
         {
@@ -2822,12 +2826,20 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     break;
                 case 0x0E:
                     storageAddressCount++;
+                    if (bodyRecord[4] == 1)
+                    {
+                        arrayRequiredElementCount
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                bodyRecord[12..]);
+                    }
                     break;
             }
         }
         Assert.That(placeSelectionCount, Is.EqualTo(elementCount + 1));
         Assert.That(semanticStoreCount, Is.EqualTo(elementCount));
         Assert.That(storageAddressCount, Is.EqualTo(2));
+        Assert.That(arrayRequiredElementCount,
+            Is.EqualTo((uint)nativeParameterExtent));
         var expectedInitializerRegisters = hasAllBitsSetElement
             ? new ushort[] { 14, 15 }
             : Enumerable.Repeat((ushort)14, elementCount).ToArray();
@@ -2863,7 +2875,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(arrayAddress.ElementType, Is.EqualTo(expectedElementType));
         Assert.That(arrayAddress.ElementCount, Is.EqualTo((ulong)elementCount));
         Assert.That(arrayAddress.ElementStride, Is.EqualTo(4));
-        Assert.That(arrayAddress.ByteExtent, Is.EqualTo(4));
+        Assert.That(arrayAddress.ByteExtent,
+            Is.EqualTo((ulong)nativeParameterExtent * 4));
         Assert.That(arrayAddress.Index, Is.TypeOf<BoundRead>());
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));

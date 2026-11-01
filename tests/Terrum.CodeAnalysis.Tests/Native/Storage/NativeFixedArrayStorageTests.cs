@@ -2,8 +2,11 @@
 
 using System;
 using System.Collections.Immutable;
+using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 using Terrum.CodeAnalysis.Syntax;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
@@ -336,6 +339,63 @@ public sealed class NativeFixedArrayStorageTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         Assert.That(NativeJit.Execute(compilation.Program!, NativeRuntimePolicy.FailFast), Is.EqualTo(9));
+    }
+
+    [TestCase(1, 0, 1)]
+    [TestCase(2, 1, 1)]
+    [TestCase(2, 2, 42)]
+    public void NativeParameterAddressChecksTheRequestedArraySuffix(
+        int elementExtent, int index, int expectedResult)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "IsBadReadPtr",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{elementExtent}})]
+            internal extern bool IsBadReadPtr(
+                ptr<uint32> memory,
+                uint64 byteCount);
+
+            int32 Main() {
+                [uint32; 3] values = [10, 20, 30];
+                mut int32 selectedIndex = {{index}};
+                uint64 byteCount = {{(ulong)elementExtent * sizeof(uint)}};
+                unsafe {
+                    try {
+                        bool isBad = IsBadReadPtr(
+                            &values[selectedIndex], byteCount);
+                        if (isBad) {
+                            return 99;
+                        }
+                    } catch {
+                        return 42;
+                    }
+                }
+                return 1;
+            }
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        var compilerPath = typeof(NativeJit).Assembly.Location;
+        var kernel32Path = Path.Combine(Environment.SystemDirectory,
+            "kernel32.dll");
+        TestContext.WriteLine(
+            $"NativeParameter suffix JIT input: extent={elementExtent}; index={index}; byte-count={(ulong)elementExtent * sizeof(uint)}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={kernel32Path}!IsBadReadPtr; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
+        var actualResult = NativeJit.Execute(program,
+            NativeRuntimePolicy.CheckedExceptions);
+        TestContext.WriteLine(
+            $"NativeParameter suffix JIT result: policy=CheckedExceptions; expected={expectedResult}; actual={actualResult}.");
+        Assert.That(actualResult, Is.EqualTo(expectedResult));
     }
 
     [Test]
