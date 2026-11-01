@@ -3,8 +3,10 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using Terrum.CodeAnalysis.Modules;
+using Terrum.CodeAnalysis.Semantics;
 using NUnit.Framework;
 
 namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
@@ -215,6 +217,29 @@ public sealed class TrRmRegisterBodyReaderTests
             CreateRegisterExceptionBoundHomeBody(
                 0xF200_0001, 0xF200_0008),
             1);
+    }
+
+    [Test]
+    public void StandardLoadingRequiresCoreSelectionForExceptionRegions()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-register-exception-regions-1";
+        var artifact = CreateRegisterExceptionFilterArtifact(
+            CreateRegisterExceptionFilterBody(1, 2, 0), 1,
+            TrRmModuleTableReader.WindowsX64NativeTargetRequirement);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var providers = Array.Empty<TrRmStandardArtifactInput>();
+
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, "module", providers,
+            ImmutableArray<CoreExceptionIdentitySelection>.Empty));
+
+        var selection = new CoreExceptionIdentitySelection(
+            "module", "missing-core", "IException",
+            "missing-core", "UnreachableException");
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, "module", providers,
+            ImmutableArray.Create(selection)));
     }
 
     [Test]
@@ -1850,7 +1875,8 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     private static byte[] CreateRegisterExceptionFilterArtifact(
-        byte[] body, byte parameterTypeCode)
+        byte[] body, byte parameterTypeCode,
+        uint targetRequirement = 0)
     {
         var schema = TrRmArtifactSchema.RegisterExceptionRegionsDraft;
         var stringBytes = TrRmStringTableWriter.EncodeTextRows([
@@ -1860,7 +1886,7 @@ public sealed class TrRmRegisterBodyReaderTests
         var featureBytes = TrRmFeatureTableWriter.Encode(
             [TrRmFeatureRow.RegisterExceptionRegionsCandidate], schema);
         var moduleBytes = TrRmModuleTableWriter.Encode([
-            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, 1),
+            new TrRmModuleRow(2, targetRequirement, 0, 0, 1, 1, 1, 1, 1, 1),
         ], strings, 0, 0, 1, 0, 1);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
             0, 0, 1, 0, 1);

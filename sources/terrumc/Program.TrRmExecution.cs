@@ -42,6 +42,9 @@ internal static partial class Program
         var paths = new List<string> { args[1] };
         var exports = new List<string>();
         var providers = new List<(string SchemaIdentity, string Path)>();
+        var coreExceptionAnchors = new Dictionary<
+            (string UsingModuleIdentity, string Role),
+            (string ProducerModuleIdentity, string ExportKey)>();
         var uniqueExports = new HashSet<string>(StringComparer.Ordinal);
         var a3AdmissionCallFailed = false;
         var isArtifactCommand = command is "run-trrm" or "build-trrm"
@@ -68,6 +71,34 @@ internal static partial class Program
 
                     providers.Add((args[i + 1], args[i + 2]));
                     i += 3;
+                    continue;
+                }
+                if (args[i] == "--trrm-core-exception-anchor")
+                {
+                    if (!isArtifactCommand || i + 4 >= count)
+                    {
+                        WriteInputError(json, "TRM2000", Usage);
+                        return 2;
+                    }
+
+                    var usingModuleIdentity = args[i + 1];
+                    var role = args[i + 2];
+                    var producerModuleIdentity = args[i + 3];
+                    var exportKey = args[i + 4];
+                    if (usingModuleIdentity.Length == 0
+                        || role is not ("exception-interface"
+                            or "unreachable-payload")
+                        || producerModuleIdentity.Length == 0
+                        || exportKey.Length == 0
+                        || !coreExceptionAnchors.TryAdd(
+                            (usingModuleIdentity, role),
+                            (producerModuleIdentity, exportKey)))
+                    {
+                        WriteInputError(json, "TRM2000", Usage);
+                        return 2;
+                    }
+
+                    i += 5;
                     continue;
                 }
                 if (i + 1 == count
@@ -120,6 +151,45 @@ internal static partial class Program
                 }
                 i += 2;
             }
+            var coreExceptionIdentitySelections
+                = ImmutableArray.CreateBuilder<CoreExceptionIdentitySelection>();
+            var selectedUsingModules = new HashSet<string>(
+                StringComparer.Ordinal);
+            foreach (var (usingModuleIdentity, _) in coreExceptionAnchors.Keys)
+            {
+                _ = selectedUsingModules.Add(usingModuleIdentity);
+            }
+            foreach (var usingModuleIdentity in selectedUsingModules)
+            {
+                if (!coreExceptionAnchors.TryGetValue(
+                        (usingModuleIdentity, "exception-interface"),
+                        out var exceptionInterface)
+                    || !coreExceptionAnchors.TryGetValue(
+                        (usingModuleIdentity, "unreachable-payload"),
+                        out var unreachablePayload))
+                {
+                    WriteInputError(json, "TRM2000", Usage);
+                    return 2;
+                }
+
+                coreExceptionIdentitySelections.Add(
+                    new CoreExceptionIdentitySelection(
+                        usingModuleIdentity,
+                        exceptionInterface.ProducerModuleIdentity,
+                        exceptionInterface.ExportKey,
+                        unreachablePayload.ProducerModuleIdentity,
+                        unreachablePayload.ExportKey));
+            }
+            var selectedCoreExceptionIdentitySelections
+                = coreExceptionIdentitySelections.ToImmutable();
+            if (!selectedCoreExceptionIdentitySelections.IsEmpty
+                && !StringComparer.Ordinal.Equals(schemaIdentity,
+                    RegisterExceptionRegionsSchemaIdentity))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+
             if (command == "compile-trrm"
                 && (moduleIdentity is not null || providers.Count != 0)
                 || isArtifactCommand
@@ -291,7 +361,8 @@ internal static partial class Program
                         RegisterExceptionRegionsSchemaIdentity))
                 {
                     var program = TrRmExecutableCompiler.LoadStandard(rootInput,
-                        moduleIdentity!, providerInputs);
+                        moduleIdentity!, providerInputs,
+                        selectedCoreExceptionIdentitySelections);
                     if (command == "run-trrm")
                     {
                         if (program.EntryPoint < 0)

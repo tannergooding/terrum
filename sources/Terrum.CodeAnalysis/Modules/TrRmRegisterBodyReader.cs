@@ -183,6 +183,42 @@ internal readonly ref struct TrRmRegisterBodyReader
         => _schema.UsesRegisterExceptionRegions();
     internal TrRmExceptionDirectoryReader ExceptionDirectory
         => _exceptionDirectory;
+    internal bool HasCoreExceptionIdentityUse
+    {
+        get
+        {
+            if (!HasExceptionDirectory)
+            {
+                return false;
+            }
+
+            var directory = ExceptionDirectory;
+            if (directory.RegionCount > 1 || directory.HandlerCount != 0)
+            {
+                return true;
+            }
+
+            for (var blockIndex = 0; blockIndex < BlockCount; blockIndex++)
+            {
+                var code = GetBlockCode(blockIndex);
+                for (var position = 0; position < code.Length;)
+                {
+                    _resourceLedger?.ConsumeWork();
+                    var opcode = code[position];
+                    if (opcode is 0xB4 or 0xB6 or 0xB7
+                        or 0xE8 or 0xEA or 0xEB)
+                    {
+                        return true;
+                    }
+
+                    position += InstructionLength(opcode, _schema);
+                }
+            }
+
+            return false;
+        }
+    }
+
     internal bool HasRootPinOperations
     {
         get

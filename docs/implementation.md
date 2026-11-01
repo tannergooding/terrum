@@ -987,9 +987,12 @@ including register-state liveness, and matches catch-binding Home types to
 CatchType maps by complete type semantics rather than raw TypeMap tokens. Home
 initialization remains a producer/verifier obligation. The nonserialized
 `CoreExceptionIdentitySelection` carrier is validated and preserved through
-`CompilationReference`, `CompilationOptions` and `BoundProgram`; Standard
-provider resolution and catch Core/witness binding do not yet consume it.
-Exception dispatch is not implemented. Standard stream-Body
+`CompilationReference`, `CompilationOptions` and `BoundProgram`. Standard
+`LoadStandard`/`CreateStandardReference` now preflight exact B+E1 using and
+provider Module identities and public TypeDef ExportKeys before verification;
+the current E1 route still rejects multiple artifacts, and the selected
+interface/payload contracts and witness binding remain open. Core identities
+are not serialized. Exception dispatch is not implemented. Standard stream-Body
 production/loading, provider imports/remapping, source catch/filter forms, and
 JIT/AOT continuations remain incomplete. This candidate does not change current
 conformance. Body-local optional scalar values use

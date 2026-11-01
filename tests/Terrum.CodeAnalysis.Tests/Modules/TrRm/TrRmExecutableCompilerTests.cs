@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -144,6 +145,43 @@ public sealed class TrRmExecutableCompilerTests
                 [new TrRmStandardArtifactInput(
                     "trrm/1-draft-foreign-invocation-contracts-1",
                     new byte[] { 0 })]));
+    }
+
+    [Test]
+    public void StandardCoreExceptionSelectionsRequireKnownModulesAndTypeDefExports()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-register-exception-regions-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile(
+            "public int32 Add(int32 left, int32 right) { return left + right; }",
+            library: true);
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "core",
+            schemaIdentity, targetRequirement);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var providers = Array.Empty<TrRmStandardArtifactInput>();
+
+        var unknownUsingModule = new CoreExceptionIdentitySelection(
+            "unknown-using", "core", "Add", "core", "Add");
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, "core", providers,
+                ImmutableArray.Create(unknownUsingModule)));
+
+        var unknownProducerModule = new CoreExceptionIdentitySelection(
+            "core", "missing-provider", "MissingInterface",
+            "core", "Add");
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, "core", providers,
+                ImmutableArray.Create(unknownProducerModule)));
+
+        var methodExportIsNotATypeDef = new CoreExceptionIdentitySelection(
+            "core", "core", "Add", "core", "Add");
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler
+                .CreateStandardReferenceWithCoreExceptionIdentitySelections(
+                    input, "core", providers,
+                    ImmutableArray.Create(methodExportIsNotATypeDef)));
     }
 
     [Test]

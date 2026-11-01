@@ -193,6 +193,24 @@ public sealed partial class CliTests
             "root", "--trrm-provider",
             "trrm/1-draft-foreign-invocation-contracts-1",
             "missing-provider.trrm", "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-core-exception-anchor", "root",
+            "unknown-role", "core", "Interface", "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-schema",
+            "trrm/1-draft-register-exception-regions-1", "--trrm-module",
+            "root", "--trrm-core-exception-anchor", "root",
+            "exception-interface", "core", "Interface", "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-schema",
+            "trrm/1-draft-register-exception-regions-1", "--trrm-module",
+            "root", "--trrm-core-exception-anchor", "root",
+            "exception-interface", "core", "Interface",
+            "--trrm-core-exception-anchor", "root",
+            "exception-interface", "core", "OtherInterface", "--json");
+        await AssertUsageAsync("compile-trrm", "-", "--identity", "root",
+            "--trrm-core-exception-anchor", "root",
+            "exception-interface", "core", "Interface", "--json");
 
         var collidingPath = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-provider-output-{Guid.NewGuid():N}.trrm");
@@ -375,6 +393,26 @@ public sealed partial class CliTests
                 $"{runOutput}{Environment.NewLine}{runError}");
             Assert.That(runOutput, Is.Empty);
             Assert.That(runError, Is.Empty);
+
+            var (invalidSelection, selectionOutput, selectionError)
+                = await RunAsync([], "build-trrm", artifact, "-o", executable,
+                    "--runtime", "fail-fast", "--trrm-schema",
+                    schemaIdentity, "--trrm-module", moduleIdentity,
+                    "--trrm-core-exception-anchor", moduleIdentity,
+                    "exception-interface", moduleIdentity, "missing-interface",
+                    "--trrm-core-exception-anchor", moduleIdentity,
+                    "unreachable-payload", moduleIdentity,
+                    "missing-unreachable", "--json");
+            Assert.That(invalidSelection, Is.EqualTo(1),
+                $"{selectionOutput}{Environment.NewLine}{selectionError}");
+            Assert.That(selectionError, Is.Empty);
+            using (var selectionDocument = JsonDocument.Parse(selectionOutput))
+            {
+                Assert.That(selectionDocument.RootElement
+                    .GetProperty("diagnostics")[0].GetProperty("code")
+                    .GetString(), Is.EqualTo("TRM5001"));
+            }
+            Assert.That(File.Exists(executable), Is.False);
 
             var (built, buildOutput, buildError) = await RunAsync([], "build-trrm",
                 artifact, "-o", executable, "--runtime", "fail-fast",

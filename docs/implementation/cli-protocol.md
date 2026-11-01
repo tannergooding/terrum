@@ -56,6 +56,16 @@ Artifact commands accept exact per-artifact F or F+S schema identities and a
 root Module identity, plus repeatable explicitly selected provider
 schema/path pairs including A2, A2E and A2EU; they preflight selections
 before reading artifacts, and the Development default remains unchanged.
+Artifact commands also accept repeatable
+`--trrm-core-exception-anchor <using-module> <role> <producer-module> <export-key>`
+options. The role is exactly `exception-interface` or `unreachable-payload`;
+each selected using Module requires each role exactly once. Role/duplicate/
+partial/schema errors are usage errors, and B+E1 loading checks selected
+using/provider Module identities and public TypeDef ExportKeys before
+verification. The current B+E1 route still rejects multiple artifacts, so
+anchors in separate provider artifacts remain open. Hosted source compilation
+carries selections through `CompilationOptions` and `CompilationReference`;
+`compile-trrm` does not accept this artifact-command option.
 Exact A3 selection
 uses `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`; the
 flag-free `...-3` identity is not an alias. For an A3 root only, marked

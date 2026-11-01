@@ -32,11 +32,33 @@ public static partial class TrRmExecutableCompiler
     public static BoundProgram LoadStandard(TrRmStandardArtifactInput input,
         string moduleIdentity, IReadOnlyList<TrRmStandardArtifactInput> providers)
     {
+        return LoadStandard(input, moduleIdentity, providers,
+            []);
+    }
+
+    /// <summary>Loads one explicitly selected Standard Module with host-selected Core exception anchors.</summary>
+    /// <param name="input">The complete root artifact and its exact schema selection.</param>
+    /// <param name="moduleIdentity">The exact identity of the root Module to load.</param>
+    /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
+    /// <param name="coreExceptionIdentitySelections">The exact Core exception anchors selected for using Modules.</param>
+    /// <returns>The checked root program.</returns>
+    /// <exception cref="ArgumentNullException">An input, provider list or artifact is null.</exception>
+    /// <exception cref="ArgumentException">A selection or Module identity is empty, duplicate or unrecognized.</exception>
+    /// <exception cref="NotSupportedException">The selected schema is not supported by this operation.</exception>
+    /// <exception cref="InvalidDataException">An artifact or selected Module is invalid.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
+    public static BoundProgram LoadStandard(TrRmStandardArtifactInput input,
+        string moduleIdentity, IReadOnlyList<TrRmStandardArtifactInput> providers,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections)
+    {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         return LoadStandardProgram(artifacts, schemaIdentities, moduleIdentity,
-            verifySemantics: true, out _, out _, out _, out _);
+            verifySemantics: true, out _, out _, out _, out _,
+            coreExceptionIdentitySelections);
     }
 
     internal static TrRmStandardNativeBindingPlan
@@ -82,6 +104,27 @@ public static partial class TrRmExecutableCompiler
     public static CompilationReference CreateStandardReference(
         TrRmStandardArtifactInput input, string moduleIdentity,
         IReadOnlyList<TrRmStandardArtifactInput> providers)
+        => CreateStandardReferenceWithCoreExceptionIdentitySelections(
+            input, moduleIdentity, providers, []);
+
+    /// <summary>Creates a source reference from one explicitly selected Standard Module with Core exception anchors.</summary>
+    /// <param name="input">The complete provider artifact and its exact schema selection.</param>
+    /// <param name="moduleIdentity">The exact identity of the Module to expose.</param>
+    /// <param name="providers">The complete explicitly supplied provider artifact set.</param>
+    /// <param name="coreExceptionIdentitySelections">The exact Core exception anchors selected for using Modules.</param>
+    /// <returns>The selected Module's exported declarations.</returns>
+    /// <exception cref="ArgumentNullException">An input, provider list or artifact is null.</exception>
+    /// <exception cref="ArgumentException">A selection or Module identity is empty, duplicate or unrecognized.</exception>
+    /// <exception cref="NotSupportedException">The selected schema is not supported by this operation.</exception>
+    /// <exception cref="InvalidDataException">An artifact or selected Module is invalid.</exception>
+    /// <exception cref="OverflowException">A selected A3 target-layout calculation exceeds its representable range.</exception>
+    /// <exception cref="TrRmResourceLimitException">The selected A3 request exceeds deterministic layout capacity.</exception>
+    public static CompilationReference
+        CreateStandardReferenceWithCoreExceptionIdentitySelections(
+        TrRmStandardArtifactInput input, string moduleIdentity,
+        IReadOnlyList<TrRmStandardArtifactInput> providers,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections)
     {
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
         var artifacts = SnapshotStandardInputs(input, providers);
@@ -89,7 +132,8 @@ public static partial class TrRmExecutableCompiler
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity,
             verifySemantics: false, out _, out _, out _,
-            out var a3LayoutResourceLedger);
+            out var a3LayoutResourceLedger,
+            coreExceptionIdentitySelections);
         var index = CreateForeignInvocationIndex(artifacts[0],
             input.SchemaIdentity);
         var tables = ValidateForeignInvocationArtifact(index,
@@ -143,7 +187,9 @@ public static partial class TrRmExecutableCompiler
         return new CompilationReference([], functions.ToImmutable(),
             (BoundRuntimePolicy)runtimePolicy,
             nativeFunctionPointerSignatures: program.NativeFunctionPointerSignatures,
-            nativePointerTypes: program.NativePointerTypes);
+            nativePointerTypes: program.NativePointerTypes,
+            coreExceptionIdentitySelections:
+                coreExceptionIdentitySelections);
     }
 
     private static BoundProgram LoadStandardProgram(byte[][] artifacts,
@@ -152,7 +198,9 @@ public static partial class TrRmExecutableCompiler
         out TrRmStandardNativeProviderBinding? providerBinding,
         out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         out StandardModuleValidation moduleValidation,
-        out TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
+        out TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections = default)
     {
         a3LayoutResourceLedger
             = StringComparer.Ordinal.Equals(schemaIdentities[0],
@@ -163,7 +211,7 @@ public static partial class TrRmExecutableCompiler
             return LoadStandardProgramCore(artifacts, schemaIdentities,
                 moduleIdentity, verifySemantics, a3LayoutResourceLedger,
                 out providerBinding, out typeProviderBindings,
-                out moduleValidation);
+                out moduleValidation, coreExceptionIdentitySelections);
         }
         catch (Exception exception)
         {
@@ -179,7 +227,9 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
         out TrRmStandardNativeProviderBinding? providerBinding,
         out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
-        out StandardModuleValidation moduleValidation)
+        out StandardModuleValidation moduleValidation,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections = default)
     {
         providerBinding = null;
         typeProviderBindings = [];
@@ -187,6 +237,20 @@ public static partial class TrRmExecutableCompiler
             = schemaIdentities.Contains(
                 StandardRegisterExceptionRegionsSchemaIdentity,
                 StringComparer.Ordinal);
+        if (!CoreExceptionIdentitySelectionContract.IsValidTable(
+            coreExceptionIdentitySelections))
+        {
+            throw new ArgumentException(
+                "The Core exception identity selections are invalid.",
+                nameof(coreExceptionIdentitySelections));
+        }
+        if (!includesRegisterExceptionRegions
+            && !coreExceptionIdentitySelections.IsDefaultOrEmpty)
+        {
+            throw Unsupported(
+                "Core exception identity selections require the exact B+E1 schema.");
+        }
+
         if (includesRegisterExceptionRegions
             && (schemaIdentities.Any(identity =>
                     !StringComparer.Ordinal.Equals(identity,
@@ -216,7 +280,32 @@ public static partial class TrRmExecutableCompiler
                     "The current B+E1 Standard loader requires one local Module without provider Imports.");
             }
 
-            return LoadRegisterExceptionRegionsDraft(artifacts[0]);
+            var requiresCoreExceptionIdentitySelection = false;
+            for (var bodyRow = 1; bodyRow <= tables.Bodies.Count; bodyRow++)
+            {
+                if (tables.Bodies.GetRow(bodyRow)[0] != 0x01)
+                {
+                    continue;
+                }
+
+                if (tables.Bodies.GetRegisterBody(bodyRow,
+                        tables.Contracts.Count)
+                    .HasCoreExceptionIdentityUse)
+                {
+                    requiresCoreExceptionIdentitySelection = true;
+                    break;
+                }
+            }
+
+            var selectedCoreExceptionIdentitySelections
+                = ValidateStandardCoreExceptionIdentitySelections(
+                    coreExceptionIdentitySelections, artifacts,
+                    schemaIdentities, moduleValidation.Modules,
+                    moduleIdentity,
+                    requiresCoreExceptionIdentitySelection,
+                    nameof(coreExceptionIdentitySelections));
+            return LoadRegisterExceptionRegionsDraft(artifacts[0],
+                selectedCoreExceptionIdentitySelections);
         }
 
         if (schemaIdentities[0] is
@@ -526,6 +615,133 @@ public static partial class TrRmExecutableCompiler
         }
 
         return (providerMethodRow, providerLibraryName, providerExportName);
+    }
+
+    private static ImmutableArray<CoreExceptionIdentitySelection>
+        ValidateStandardCoreExceptionIdentitySelections(
+            ImmutableArray<CoreExceptionIdentitySelection> selections,
+            byte[][] artifacts, string[] schemaIdentities,
+            ImmutableArray<TrRmStandardModuleSelection> modules,
+            string rootModuleIdentity, bool requiresSelection,
+            string parameterName)
+    {
+        if (!CoreExceptionIdentitySelectionContract.IsValidTable(selections))
+        {
+            throw new ArgumentException(
+                "The Core exception identity selections are invalid.",
+                parameterName);
+        }
+
+        if (requiresSelection
+            && !selections.Any(selection =>
+                StringComparer.Ordinal.Equals(
+                    selection.UsingModuleIdentity, rootModuleIdentity)))
+        {
+            throw new ArgumentException(
+                "The selected B+E1 Module uses exception identity records but has no Core exception selection.",
+                parameterName);
+        }
+
+        if (selections.IsDefaultOrEmpty)
+        {
+            return [];
+        }
+
+        foreach (var selection in selections)
+        {
+            var usingModule = FindStandardModuleSelection(modules,
+                selection.UsingModuleIdentity, parameterName);
+            EnsureRegisterExceptionRegionsSchema(schemaIdentities,
+                usingModule.ArtifactIndex, nameof(selections));
+
+            var exceptionInterface = ResolveStandardCoreExceptionAnchor(
+                selection.ExceptionInterfaceProducerIdentity,
+                selection.ExceptionInterfaceExportKey, modules, artifacts,
+                schemaIdentities, "exception-interface",
+                parameterName);
+            var unreachablePayload = ResolveStandardCoreExceptionAnchor(
+                selection.UnreachableProducerIdentity,
+                selection.UnreachableExportKey, modules, artifacts,
+                schemaIdentities, "unreachable-payload",
+                parameterName);
+            if (exceptionInterface == unreachablePayload)
+            {
+                throw new ArgumentException(
+                    "The exception-interface and Unreachable anchors must select distinct TypeDefs.",
+                    parameterName);
+            }
+        }
+
+        return selections.IsDefault ? [] : selections;
+    }
+
+    private static TrRmStandardModuleSelection FindStandardModuleSelection(
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        string moduleIdentity, string parameterName)
+    {
+        foreach (var module in modules)
+        {
+            if (StringComparer.Ordinal.Equals(module.Identity, moduleIdentity))
+            {
+                return module;
+            }
+        }
+
+        throw new ArgumentException(
+            $"The selected Module '{moduleIdentity}' is not present in the supplied Standard artifacts.",
+            parameterName);
+    }
+
+    private static void EnsureRegisterExceptionRegionsSchema(
+        string[] schemaIdentities, int artifactIndex, string parameterName)
+    {
+        if ((uint)artifactIndex >= (uint)schemaIdentities.Length
+            || !StringComparer.Ordinal.Equals(schemaIdentities[artifactIndex],
+                StandardRegisterExceptionRegionsSchemaIdentity))
+        {
+            throw new ArgumentException(
+                "Core exception anchors require exact B+E1 artifacts for the using and provider Modules.",
+                parameterName);
+        }
+    }
+
+    private static (int ArtifactIndex, int ModuleRow, int TypeDefRow)
+        ResolveStandardCoreExceptionAnchor(string producerIdentity,
+            string exportKey,
+            ImmutableArray<TrRmStandardModuleSelection> modules,
+            byte[][] artifacts, string[] schemaIdentities, string role,
+            string parameterName)
+    {
+        var producer = FindStandardModuleSelection(modules,
+            producerIdentity, parameterName);
+        EnsureRegisterExceptionRegionsSchema(schemaIdentities,
+            producer.ArtifactIndex, parameterName);
+        var index = CreateForeignInvocationIndex(
+            artifacts[producer.ArtifactIndex],
+            schemaIdentities[producer.ArtifactIndex]);
+        var tables = ValidateForeignInvocationArtifact(index,
+            schemaIdentities[producer.ArtifactIndex]);
+        if (!tables.Exports.TryGetDefinitionForKey(producer.ModuleRow,
+                exportKey, out var definition)
+            || definition >> 24 != 0x13)
+        {
+            throw new ArgumentException(
+                $"The selected {role} ExportKey is not a TypeDef exported by its selected producer Module.",
+                parameterName);
+        }
+
+        var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+        if (typeDefRow is <= 0
+            || typeDefRow > tables.TypeDefs.Count
+            || tables.TypeDefs.GetOwnerModule(typeDefRow)
+                != producer.ModuleRow)
+        {
+            throw new ArgumentException(
+                $"The selected {role} ExportKey is not owned by its selected producer Module.",
+                parameterName);
+        }
+
+        return (producer.ArtifactIndex, producer.ModuleRow, typeDefRow);
     }
 
     private static byte[][] SnapshotStandardInputs(

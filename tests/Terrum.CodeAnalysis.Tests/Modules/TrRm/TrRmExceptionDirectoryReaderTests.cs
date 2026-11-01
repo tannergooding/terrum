@@ -186,14 +186,17 @@ public sealed class TrRmExceptionDirectoryReaderTests
                 BlockEntryState(),
                 throwRecord,
             };
-            _ = TrRmRegisterBodyWriter.Encode(ReadOnlyMemory<byte>.Empty,
+            var body = TrRmRegisterBodyWriter.Encode(ReadOnlyMemory<byte>.Empty,
                 ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
                 ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
                 [new TrRmRegisterBodyBlock(0, (uint)code.Length, 1)],
                 records, code, schema: schema);
+            Assert.That(new TrRmRegisterBodyReader(body, schema: schema)
+                .HasCoreExceptionIdentityUse, Is.True);
         }
 
-        _ = TrRmRegisterBodyWriter.Encode(ReadOnlyMemory<byte>.Empty,
+        var unreachableBody = TrRmRegisterBodyWriter.Encode(
+            ReadOnlyMemory<byte>.Empty,
             ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
             ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
             [new TrRmRegisterBodyBlock(0, 2, 1)],
@@ -203,6 +206,8 @@ public sealed class TrRmExceptionDirectoryReaderTests
                 BlockEntryState(),
             },
             new byte[] { 0xB7, 0 }, schema: schema);
+        Assert.That(new TrRmRegisterBodyReader(unreachableBody,
+            schema: schema).HasCoreExceptionIdentityUse, Is.True);
     }
 
     [Test]

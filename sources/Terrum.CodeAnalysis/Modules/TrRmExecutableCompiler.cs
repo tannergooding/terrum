@@ -1210,13 +1210,26 @@ public static partial class TrRmExecutableCompiler
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
 
     internal static BoundProgram LoadRegisterExceptionRegionsDraft(
-        ReadOnlySpan<byte> artifact)
+        ReadOnlySpan<byte> artifact,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections = default)
         => LoadDevelopment(artifact,
-            TrRmArtifactSchema.RegisterExceptionRegionsDraft);
+            TrRmArtifactSchema.RegisterExceptionRegionsDraft,
+            coreExceptionIdentitySelections);
 
     private static BoundProgram LoadDevelopment(ReadOnlySpan<byte> artifact,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        ImmutableArray<CoreExceptionIdentitySelection>
+            coreExceptionIdentitySelections = default)
     {
+        if (!CoreExceptionIdentitySelectionContract.IsValidTable(
+            coreExceptionIdentitySelections))
+        {
+            throw new ArgumentException(
+                "The Core exception identity selections are invalid.",
+                nameof(coreExceptionIdentitySelections));
+        }
+
         var index = new TrRmArtifactIndex(artifact, schema);
         var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
             ? TrRmStructuralMetadataValidator
@@ -1764,6 +1777,9 @@ public static partial class TrRmExecutableCompiler
         {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             Structures = structures,
+            CoreExceptionIdentitySelections =
+                coreExceptionIdentitySelections.IsDefault
+                    ? [] : coreExceptionIdentitySelections,
             NativeFunctionPointerSignatures = nativeFunctionPointerSignatureArray,
             NativePointerTypes = [.. nativePointerTypeDefinitions],
         };
