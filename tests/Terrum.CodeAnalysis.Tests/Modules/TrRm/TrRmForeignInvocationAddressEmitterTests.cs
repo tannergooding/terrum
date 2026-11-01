@@ -4505,6 +4505,110 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFProviderClosureChecksDeepNativeParameterExtent()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "Root";
+        const string providerIdentity = "Owned";
+        const string leafIdentity = "Transform";
+        const string leafSource = """
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4294967295)]
+            public extern uint32 Transform(ptr<uint32> value);
+
+            internal uint32 ProviderBody(ptr<uint32> value) {
+                unsafe {
+                    var callback = &Transform;
+                    return callback(value);
+                }
+            }
+            """;
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootArtifact = CreateRootMethodImportArtifact(rootIdentity,
+            "Owned", providerIdentity, "Owned", core);
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport(
+                    "example.dll",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 4294967295)]
+                internal extern uint32 Transform(ptr<uint32> value);
+
+                [Terrum.Interop.NativeImport(
+                    "kernel32.dll",
+                    "GetCurrentProcessId",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                public extern int32 Owned();
+
+                internal int32 ProviderBody() {
+                    unsafe {
+                        var callback = &Owned;
+                        return callback();
+                    }
+                }
+                """), core);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        providerArtifact = AddRootMethodImports(providerArtifact, [
+            ("Transform", leafIdentity, "Transform"),
+        ], reuseModuleRefs: false, duplicateSecondMethodName: false);
+        var leafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(leafSource), core);
+        Assert.That(leafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, leafCompilation.Diagnostics));
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+
+        var loadedProvider = TrRmExecutableCompiler.LoadStandard(providerInput,
+            providerIdentity, [leafInput]);
+        var imported = loadedProvider.Functions.Single(static function =>
+            function.Name == "Transform");
+        Assert.That(imported.ModuleImport!.ProducerIdentity,
+            Is.EqualTo(leafIdentity));
+        Assert.That(imported.DirectNativeImport!.Parameters.Single().Extent,
+            Is.EqualTo(uint.MaxValue));
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, [leafInput]);
+        Assert.That(providerReference.Functions.Select(
+                static function => function.Name),
+            Does.Contain("Owned").And.Not.Contain("Transform"));
+        _ = TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+            providerInput,
+            leafInput,
+        ]);
+
+        var incompatibleLeafCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(leafSource.Replace("4294967295", "2147483648",
+                StringComparison.Ordinal)), core);
+        Assert.That(incompatibleLeafCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleLeafCompilation.Diagnostics));
+        var incompatibleLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            incompatibleLeafCompilation.Program!, leafIdentity,
+            schemaIdentity, 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providerInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleLeafArtifact),
+            ]));
+    }
+
+    [Test]
     public void StandardFProviderClosureSupportsDiamondsAndChecksEveryView()
     {
         const string schemaIdentity

@@ -455,6 +455,18 @@ chain/diamond/mutual-cycle CLI JIT/AOT, no-entry DLL export invocation, PE
 import/export inspection and sentinel output preservation. Native input/
 compiler hashes and execution results are recorded in
 `artifacts\\log\\compiler-adoption-f-provider-closure-native-qualification.log`.
+The source-free NativeAddress reader now finalizes and verifies its native
+pointer-type table after reconstructing all direct NativeImports and the caller
+Body. This preserves typed pointer formals introduced by an uncalled imported
+declaration in a mixed owned/imported Module. A deep-provider regression
+preserves `NativeParameter` extent `0xffffffff` and rejects a provider with an
+incompatible extent. The final Debug fast build and combined
+NativeAddress/provider-CLI selection passed 146/146 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_04_56_net11.0.trx`.
+The normal analyzer build remains at its existing baseline: 709 errors and
+353 normalized identities, with zero additions/removals against
+`artifacts\\log\\compiler-adoption-final-debug-analyzers.log`; output:
+`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final8.log`.
 This remains provisional, not formal approval or full Standard conformance.
 Further evidence is still required for a transitive acyclic chain with every
 Module co-located, broader Module/Import/Body permutation and re-encoding, Unicode

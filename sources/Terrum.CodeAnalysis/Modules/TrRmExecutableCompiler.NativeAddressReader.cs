@@ -645,13 +645,6 @@ public static partial class TrRmExecutableCompiler
                     signatureIndexByAnchorMethod, structureTypeByTypeDef,
                     [], out arrayTypeByTypeSpecRow)
                 : [];
-        var typeArray = nativePointerTypeDefinitions.ToImmutableArray();
-        if (!NativePointerTypeContract.IsValidTable(typeArray, [],
-                functionPointerSignatures))
-        {
-            throw Invalid("Invalid native pointer type table.");
-        }
-
         var functionIndexByMethodRow = new int[tables.Methods.Count + 1];
         Array.Fill(functionIndexByMethodRow, -1);
         var functionIndex = 0;
@@ -736,6 +729,13 @@ public static partial class TrRmExecutableCompiler
             targetParameterTypes, functionPointerSignatures[0],
             nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
             structureTypeByTypeDef, directCallTargets);
+        var typeArray = nativePointerTypeDefinitions.ToImmutableArray();
+        if (!NativePointerTypeContract.IsValidTable(typeArray, [],
+                functionPointerSignatures))
+        {
+            throw Invalid("Invalid native pointer type table.");
+        }
+
         var functions = ImmutableArray.CreateBuilder<BoundFunction>(
             methodEnd - methodStart - 1);
         for (var row = methodStart; row < methodEnd; row++)
