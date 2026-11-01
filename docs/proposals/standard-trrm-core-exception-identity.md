@@ -37,8 +37,9 @@ chooses this conservative restriction; it does not infer a composite schema.
 
 This fills E1's exact Core selection/binding deferral. It does not redesign
 events, handlers, dispatch, exception creation, cleanup or the common member
-API. It selects no production Module identity, export-key spelling, source
-annotation, public host API, ABI or private persistence contract.
+API. It selects no production Module identity or export-key spelling. It
+proposes the explicit nonserialized host/CLI selection record below, but no
+source annotation, ABI or private persistence contract.
 Standard `runtimePolicy=0` remains fail-fast for unhandled failures; Core
 identity selection adds no runtime-policy opt-in or native-unwind admission.
 
@@ -102,6 +103,42 @@ Profile selection is still necessary: ordinary import resolution identifies
 *a declaration*, but cannot decide which declaration the authorized profile
 designates as Core. Supplying that existing authority's exact selection is
 not a new identity registry or a permission for packages to self-register.
+
+### Host and CLI selection shape
+
+The smallest candidate transport is one immutable
+`CoreExceptionIdentitySelection` per using Module, with exactly these fields:
+
+| Field | Meaning |
+|---|---|
+| `usingModuleIdentity` | Exact logical Module whose retained E1 uses are checked. |
+| `exceptionInterfaceProducerIdentity`, `exceptionInterfaceExportKey` | Exact provider Module and public local TypeDef ExportKey for `IException<TSelf>`. |
+| `unreachableProducerIdentity`, `unreachableExportKey` | Exact provider Module and public local TypeDef ExportKey for `UnreachableException`. |
+
+Carry the records as explicit inputs to source verification/emission and to
+source-independent Standard loading/reference/provider-binding operations.
+The exact C# namespace/property names may follow the owning API, but the
+record fields and identity comparisons above are the contract. The provider
+artifact bytes and their exact case-sensitive schema identities remain the
+separately supplied `TrRmStandardArtifactInput` values; the role record does
+not infer schema, revision, Module row or actual provider. Require exactly one
+selection per using Module whose retained records/types use any E1 exception
+role, view, witness or implicit `UnreachableException`; that record selects
+both anchors so either role has one stable Module-level meaning. Modules with
+no retained E1 exception/Core use need no record. Missing, duplicate,
+conflicting or malformed selections decline before affected use. No
+name-derived/default key or first-provider fallback is permitted.
+
+For CLI artifact commands, propose the repeatable option
+`--trrm-core-exception-anchor <using-module> <role> <producer-module> <export-key>`,
+where `<role>` is exactly `exception-interface` or `unreachable-payload`.
+Require exactly one option for each of the two roles for each selected Module
+with any retained E1 exception/Core use; retain the
+existing explicit `--trrm-schema`, `--trrm-module` and `--trrm-provider`
+selections. Source compilation transports the same role records through its
+explicit Core/reference inputs; an ordinary source package cannot authorize
+or override them. The option and API shape remain unapproved and are not
+implemented by this proposal.
 
 ## Required selection context
 
@@ -377,6 +414,7 @@ edits made by this document:
 | [Logical failure records](../specs/representation/logical-records.md#local-failure-eligibility-and-catch-inputs-encoding-pending), [instruction owner](../specs/il-instruction-set.md) | Complete only the Core identity/evidence-selection deferral and `unreachable`'s implicit exact-type dependency. Leave region/event/runtime and unrelated generic/publication gates with their existing owners. |
 | [Binding and replacement](../specs/representation/binding-and-replacement.md), [admission](../specs/representation/requirements-and-admission.md), [reader trust](../specs/representation/reader-trust.md) | Apply original Core selections, complete witness comparisons, boundary-family equality and retained stronger facts. Keep mandatory binding/support checks separate from producer Body truth. Preserve the general independent-schema permission. |
 | [E1 proposal](standard-trrm-register-body-exception-regions.md#exact-schema-composition-and-prerequisites) | Supersede only its unchosen exact-Core mechanism with this context/procedure. Incorporate the explicit initial E1-only provider restriction into its prerequisites/remapping boundary; retain all current allocations and noncomposition exclusions. |
+| [Standard artifact/compilation APIs](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.StandardConsumption.cs), [TRRM CLI](../../sources/terrumc/Program.TrRmExecution.cs), [CLI protocol](../specs/cli-protocol.md) | Add the proposed nonserialized per-Module Core identity selection input and repeatable `--trrm-core-exception-anchor` transport. Validate roles, uniqueness, using Module and selected provider/key before affected use. Provider artifact schema remains the separate exact `TrRmStandardArtifactInput` selection; no identity is inferred from it. |
 | [Modules](../specs/modules.md), [JIT](../specs/jit.md#replacement-and-code-lifetime), [native lifetime](../specs/native.md#runtime-and-code-lifetime) | Apply original/actual Core/class/witness/code lifetime retention without choosing a dispatch ABI, deployment format or servicing protocol. |
 | [Binding cases](../specs/conformance/il-binding-and-replacement.md), [local-failure cases](../specs/conformance/source-local-failures.md) | Add the identity, schema, substitution, replacement and lifetime cases below after adoption; distinguish logical requirements from implementation/runtime evidence. |
 
@@ -428,6 +466,7 @@ a new internal-access grant or a semantic Body audit to check identity.
 | Aliases and several retained expectations | Check every view; accept keys resolving to one actual TypeDef only while preserving retained equality and all contracts. Reject conflicting mappings, duplicate triples and weakest-view substitution. |
 | Cross-provider class and Core dependencies | Accept an exception class in a separately selected E1 provider bound to the same exact Core family. Reject a different Core family across an admitted propagation boundary; no event conversion. |
 | Explicit schemas | Accept eligible explicitly selected E1 providers after checks. Reject omitted/unknown/case-changed selectors and all initial non-E1 providers, including B metadata-only and unused supplied artifacts. Reject mixed-schema packing and Feature/row sniffing. |
+| Core selection transport | Accept one record with both exact anchor identities per using Module with retained E1 exception/Core use; reject missing, duplicate, malformed or conflicting selections, unknown roles, absent provider Modules and ExportKey mismatches before use. Omit the record only when the Module retains no Core exception role, view, witness or implicit Unreachable dependency. |
 | Compatible replacement | Accept an explicitly selected revision preserving original Module/keys, owners, complete Core/class/witness contracts, stronger facts and runtime obligations despite changed private Bodies/rows. This is binding evidence, not automatic live replacement. |
 | Incompatible replacement | Reject removed/rebound keys, split aliases, changed arity/self/type/representation, added caller requirements, changed failure/cleanup guarantees or loss of a relied-on positive/negative witness fact. |
 | Packing/remapping | Preserve all contexts and nested/implicit dependencies through import-to-direct rewriting and contextual row cloning. Reject a rewrite that discards surviving original expectations or changes an E1 meaning to fit another schema. |
@@ -435,9 +474,10 @@ a new internal-access grant or a semantic Body audit to check identity.
 | Support and truth boundary | Missing required publication, generic, event/root, dispatch or ABI support declines use. A structurally valid producer lie is not required to become a consumer semantic-reproof test. |
 
 The outstanding approval is **ordinary bindings with profile-supplied
-anchors, a derived common view, and the initial E1-only provider rule**.
-Concrete production Core Modules/keys must be supplied by the authorized
-profile; host API names and deployment configuration syntax are not chosen
-here. No unresolved numeric allocation or new identity codec is required
-for this recommendation. Implementation and runtime qualification remain
-separate work, and this proposal remains unapproved and provisional.
+anchors, a derived common view, the nonserialized role-record/CLI transport,
+and the initial E1-only provider rule**. Concrete production Core Modules/
+keys must be supplied by the authorized profile. The API record and CLI option
+are proposed here, not adopted. No unresolved numeric allocation or new
+identity codec is required for this recommendation. Implementation and runtime
+qualification remain separate work, and this proposal remains unapproved and
+provisional.
