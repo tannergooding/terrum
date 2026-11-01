@@ -97,12 +97,13 @@ Boolean conditional expressions, and non-Boolean scalar comparisons (`==`,
 Boolean equality/inequality uses assigned `0x32` XOR and `0x33` NOT. Comparison
 operands may be Home reads or admitted direct NativeImport calls; a left Home
 read is snapshotted before a right-side call, and nested checked argument
-failure prevents the branch. The focused A2EU producer/reader/JIT/AOT
-selection passed 60/60 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-comparison-call-operands-final2\\a2eu-comparison-call-operands-final2.trx`.
-Boolean literal operands, non-source predicate masks, and call forms outside
-the direct NativeImport capture profile remain unsupported. A co-located
-selected-provider regression shifts the conditional caller to Body row 2,
+failure prevents the branch. Boolean `==`/`!=` with one literal lowers by
+inverting the existing read/call branch. The focused A2EU
+producer/reader/JIT/AOT selection passed 76/76 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-boolean-literal-comparisons-final3\\a2eu-boolean-literal-comparisons-final3.trx`.
+Numeric literal comparison operands, non-source predicate masks, and call
+forms outside the direct NativeImport capture profile remain unsupported. A
+co-located selected-provider regression shifts the conditional caller to Body row 2,
 remaps its maps, preserves body-local
 branches/records, and checks compatible and incompatible provider replacement.
 Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast,

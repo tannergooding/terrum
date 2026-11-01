@@ -145,9 +145,11 @@ instructions. Boolean Home-read equality/inequality also lower through
 assigned `0x32` XOR and `0x33` NOT. Comparison operands may be Home reads or
 admitted direct NativeImport calls; a left Home read is snapshotted before a
 right-side call, and nested checked argument failure prevents the branch. The
-focused A2EU producer/reader/JIT/AOT selection passed 60/60 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-comparison-call-operands-final2\\a2eu-comparison-call-operands-final2.trx`.
-Boolean literal operands, non-source predicate masks, and call forms outside
+Boolean `==`/`!=` with one literal lowers by inverting the existing read/call
+branch. The focused A2EU producer/reader/JIT/AOT selection passed 76/76 with
+zero skips at
+`artifacts\\tst\\Debug\\a2eu-boolean-literal-comparisons-final3\\a2eu-boolean-literal-comparisons-final3.trx`.
+Numeric literal comparison operands, non-source predicate masks, and call forms outside
 the direct NativeImport capture profile remain outside this Body profile. The
 corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)

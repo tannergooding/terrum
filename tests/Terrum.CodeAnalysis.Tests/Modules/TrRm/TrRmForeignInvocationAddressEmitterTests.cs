@@ -1711,6 +1711,14 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(false, false, "choose == other", false)]
     [TestCase(true, false, "choose != other", false)]
     [TestCase(false, false, "choose != other", false)]
+    [TestCase(true, false, "choose == true", false)]
+    [TestCase(false, false, "choose == true", false)]
+    [TestCase(true, false, "choose == false", false)]
+    [TestCase(false, false, "choose == false", false)]
+    [TestCase(true, false, "choose != true", false)]
+    [TestCase(false, false, "choose != true", false)]
+    [TestCase(true, false, "choose != false", false)]
+    [TestCase(false, false, "choose != false", false)]
     [TestCase(true, false, "clearError == GetCurrentProcessId()", false)]
     [TestCase(true, false, "GetCurrentProcessId() > clearError", false)]
     [TestCase(true, false,
@@ -1777,6 +1785,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 or "markedError <= clearError" => false,
             "choose == other" => choose,
             "choose != other" => !choose,
+            "choose == true" or "choose != false" => choose,
+            "choose == false" or "choose != true" => !choose,
             "clearError == GetCurrentProcessId()" => false,
             "GetCurrentProcessId() > clearError" => true,
             "GetCurrentProcessId() == GetCurrentProcessId()"
@@ -1814,6 +1824,14 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(false, false, "choose == other", false)]
     [TestCase(true, false, "choose != other", false)]
     [TestCase(false, false, "choose != other", false)]
+    [TestCase(true, false, "choose == true", false)]
+    [TestCase(false, false, "choose == true", false)]
+    [TestCase(true, false, "choose == false", false)]
+    [TestCase(false, false, "choose == false", false)]
+    [TestCase(true, false, "choose != true", false)]
+    [TestCase(false, false, "choose != true", false)]
+    [TestCase(true, false, "choose != false", false)]
+    [TestCase(false, false, "choose != false", false)]
     [TestCase(true, false, "clearError == GetCurrentProcessId()", false)]
     [TestCase(true, false, "GetCurrentProcessId() > clearError", false)]
     [TestCase(true, false,
@@ -1892,6 +1910,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "markedError <= clearError" => false,
                 "choose == other" => choose,
                 "choose != other" => !choose,
+                "choose == true" or "choose != false" => choose,
+                "choose == false" or "choose != true" => !choose,
                 "clearError == GetCurrentProcessId()" => false,
                 "GetCurrentProcessId() > clearError" => true,
                 "GetCurrentProcessId() == GetCurrentProcessId()"

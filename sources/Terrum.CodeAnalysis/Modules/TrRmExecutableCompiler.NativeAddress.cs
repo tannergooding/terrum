@@ -2151,19 +2151,25 @@ public static partial class TrRmExecutableCompiler
         BoundBinary comparison)
     {
         if (comparison.Type != PrimitiveType.Bool
-            || comparison.Left.Type != comparison.Right.Type
-            || (comparison.Left is not BoundRead
-                && comparison.Left is not BoundCall)
-            || (comparison.Right is not BoundRead
-                && comparison.Right is not BoundCall))
+            || comparison.Left.Type != comparison.Right.Type)
         {
             return false;
         }
 
         if (comparison.Left.Type == PrimitiveType.Bool)
         {
-            return comparison.Operator is TokenKind.EqualsEquals
+            var isEquality = comparison.Operator is TokenKind.EqualsEquals
                 or TokenKind.BangEquals;
+            return isEquality
+                && IsSupportedNativeUnitBooleanComparisonOperand(comparison.Left)
+                && IsSupportedNativeUnitBooleanComparisonOperand(
+                    comparison.Right);
+        }
+
+        if (comparison.Left is not (BoundRead or BoundCall)
+            || comparison.Right is not (BoundRead or BoundCall))
+        {
+            return false;
         }
 
         return DirectNativeImportContract.IsScalar(comparison.Left.Type)
@@ -2181,6 +2187,52 @@ public static partial class TrRmExecutableCompiler
             && binary.Right.Type == PrimitiveType.Bool
             && (binary.Left is BoundRead || binary.Left is BoundCall)
             && (binary.Right is BoundRead || binary.Right is BoundCall);
+
+    private static bool IsSupportedNativeUnitBooleanComparisonOperand(
+        BoundExpression expression)
+        => expression is BoundRead or BoundCall or BoundConstant {
+                Type: PrimitiveType.Bool,
+                Bits.Low: <= 1,
+                Bits.High: 0,
+            };
+
+    private static bool TryGetNativeAddressBooleanLiteralComparison(
+        BoundBinary comparison, out BoundExpression operand, out bool negate)
+    {
+        operand = null!;
+        negate = false;
+        if (comparison.Type != PrimitiveType.Bool
+            || comparison.Left.Type != PrimitiveType.Bool
+            || comparison.Right.Type != PrimitiveType.Bool
+            || comparison.Operator is not (
+                TokenKind.EqualsEquals or TokenKind.BangEquals))
+        {
+            return false;
+        }
+
+        BoundConstant literal;
+        if (comparison.Left is BoundConstant leftLiteral
+            && comparison.Right is BoundRead or BoundCall)
+        {
+            literal = leftLiteral;
+            operand = comparison.Right;
+        }
+        else if (comparison.Right is BoundConstant rightLiteral
+            && comparison.Left is BoundRead or BoundCall)
+        {
+            literal = rightLiteral;
+            operand = comparison.Left;
+        }
+        else
+        {
+            return false;
+        }
+
+        var literalValue = literal.Bits.Low == 1;
+        negate = comparison.Operator == TokenKind.EqualsEquals
+            ? !literalValue : literalValue;
+        return true;
+    }
 
     private static bool TryGetNativeAddressKnownBoolean(
         BoundExpression expression, out bool value)
@@ -3028,6 +3080,15 @@ public static partial class TrRmExecutableCompiler
 
             switch (condition)
             {
+                case BoundBinary comparison
+                    when TryGetNativeAddressBooleanLiteralComparison(
+                        comparison, out var comparisonOperand,
+                        out var negateComparison):
+                    AppendConditionalControlFlow(comparisonOperand,
+                        negateComparison ? appendFalse : appendTrue,
+                        negateComparison ? appendTrue : appendFalse);
+                    return;
+
                 case BoundUnary {
                     Operator: TokenKind.Bang,
                     Type: PrimitiveType.Bool,
