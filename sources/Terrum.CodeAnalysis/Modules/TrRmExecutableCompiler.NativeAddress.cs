@@ -15,7 +15,8 @@ public static partial class TrRmExecutableCompiler
     internal static byte[] EmitForeignInvocationDraftNativeAddressLibrary(
         BoundProgram program, string moduleIdentity,
         TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
-        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
+        IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
@@ -38,6 +39,11 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported(
                 "Explicit A2/A2E TypeDef exports require a type-only source library.");
         }
+        a3LayoutResourceLedger = schema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                ? a3LayoutResourceLedger
+                    ?? new TrRmA3LayoutResourceLedger(moduleIdentity)
+                : null;
         if (program.EntryPoint < 0)
         {
             SemanticVerifier.VerifyLibraryWithDirectNativeImports(program);
@@ -1026,8 +1032,11 @@ public static partial class TrRmExecutableCompiler
             => left.Kind.CompareTo(right.Kind));
 
         var artifact = TrRmArtifactWriter.Encode(sections,
-            schema);
-        var artifactIndex = schema.UsesForeignInvocationStorageFixedArrays()
+            schema, a3LayoutResourceLedger);
+        var artifactIndex = a3LayoutResourceLedger is not null
+            ? new TrRmArtifactIndex(artifact, schema,
+                a3LayoutResourceLedger)
+            : schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
@@ -1045,7 +1054,12 @@ public static partial class TrRmExecutableCompiler
             : schema.UsesForeignInvocationStorageAddresses()
                 ? TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact)
                 : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
-        var tables = schema.UsesForeignInvocationStorageFixedArrays()
+        var tables = a3LayoutResourceLedger is not null
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                    artifactIndex, a3LayoutResourceLedger,
+                    createA3ResourceLedger: false)
+            : schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmStructuralMetadataValidator

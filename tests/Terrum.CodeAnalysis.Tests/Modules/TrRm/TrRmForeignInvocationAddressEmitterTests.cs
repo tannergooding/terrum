@@ -149,6 +149,31 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void A3NativeAddressProducerUsesOneRootLedgerForArtifactValidation()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+        const string moduleIdentity = "native-address-a3";
+        var compilation = CreateNativeAddressCompilation("example.dll");
+        var program = compilation.Program
+            ?? throw new InvalidOperationException(
+                "A successful compilation must contain a bound program.");
+        var publicArtifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1);
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var artifact = TrRmExecutableCompiler
+                .EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayGenericCopyDraft,
+                    a3LayoutResourceLedger: ledger);
+            Assert.That(artifact, Is.EqualTo(publicArtifact));
+        });
+    }
+
+    [Test]
     public void StorageAddressSchemaSelectionPreservesForeignInvocationLoading()
     {
         const string schemaIdentity

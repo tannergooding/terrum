@@ -34,6 +34,20 @@ public sealed class TrRmArtifactWriterTests
     }
 
     [Test]
+    public void A3ArtifactWriterChargesFramingAndOutputAtTheExactWorkBoundary()
+    {
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var artifact = TrRmArtifactWriter.Encode([
+                new TrRmSection(0x0001, 0, 1, Module()),
+            ],
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+                ledger);
+            Assert.That(artifact.Length, Is.EqualTo(96));
+        });
+    }
+
+    [Test]
     public void ValidatesOptionalReferenceSlotsAgainstTheCompletedDirectory()
     {
         var extension = new byte[21];

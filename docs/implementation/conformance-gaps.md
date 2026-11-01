@@ -652,9 +652,21 @@ Repeated retained-plan work shares the same budget: after an earlier
 no-`NativeImport` attempt, changed-provider revalidation can correctly exhaust
 the remaining work before establishing incompatibility. Separate within-budget
 provider mismatch and exact-limit tests remain active.
-The bounded-expansion subtask is complete; the full deterministic
-field/action/payload recipe and remaining table/body/provider state charges
-are still unfinished. A broader `Modules.TrRm` selection later reported 2,378
+The selected A3 structural table/Body consumer route is reconciled, but the
+full deterministic field/action/payload recipe remains unfinished. The current
+producer gap is the exact-A3 Standard dispatch from `EmitStandardCore` to
+`EmitForeignInvocationDraftNativeAddressLibrary`: it constructs the artifact
+and performs final index/structural validation. That route now creates one A3
+root ledger, reserves final framed-artifact bytes before allocating the output,
+and passes the same ledger through `TrRmArtifactWriter`, the final
+`TrRmArtifactIndex` and structural validation. The focused writer/emitter
+selection passed 153/153 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_11_15_30_net11.0.trx`. Its
+intermediate table/body section buffers are still produced before any A3
+resource reservation; that is the next producer-metering gap. The
+NativeAddress emitter's fixed-array TypeSpec path currently accepts only
+A2/A2E/A2EU, so A3 source array production remains a separate unsupported gap.
+A broader `Modules.TrRm` selection later reported 2,378
 passes but was aborted when the test host crashed; it is incomplete evidence,
 not a passing suite.
 The nested constructed-provider checks now retain a one-entry validated
@@ -668,7 +680,7 @@ with zero skips at
 `artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
 baseline; the normalized comparison in
-`artifacts\\log\\compiler-adoption-a3-variable-table-index-analyzers.log` has 352
+`artifacts\\log\\compiler-adoption-a3-producer-frame-analyzers.log` has 352
 unique diagnostic identities versus the 353-identity baseline, with no
 additions and one removed diagnostic.
 
