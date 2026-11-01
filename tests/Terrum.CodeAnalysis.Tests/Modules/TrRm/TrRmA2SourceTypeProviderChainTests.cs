@@ -18,6 +18,52 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
 {
     private const string SchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+    private const string EmptyInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+
+    [Test]
+    public void StandardA2EConsumerBindsA2TypeProviders()
+    {
+        var rootArtifact = CreateRootArtifact();
+        var providerArtifact = CreateProviderArtifact();
+        var leafArtifact = CreateLeafProviderArtifact();
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                EmptyInitializationSchemaIdentity, rootArtifact),
+            "Root",
+            [
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    providerArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ],
+            ["ContainerKey"]);
+
+        var pair = reference.Structures.Single(static structure
+            => structure.Name == "Pair");
+        Assert.That(pair.StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("Provider"));
+        Assert.That(pair.StandardTypeOrigin.Expectations.Any(
+            static expectation
+                => expectation.UsingModule.ModuleIdentity == "Provider"
+                    && expectation.ExportKey == "ProviderLeafKey"), Is.True);
+
+        var a2eProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(
+                    EmptyInitializationSchemaIdentity, rootArtifact),
+                "Root",
+                [
+                    new TrRmStandardArtifactInput(
+                        EmptyInitializationSchemaIdentity, providerArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        leafArtifact),
+                ],
+                ["ContainerKey"]);
+        Assert.That(a2eProviderReference.Structures.Single(
+            static structure => structure.Name == "Pair")
+            .StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("Provider"));
+    }
 
     [Test]
     public void StandardA2SourceReferencePreservesProviderOwnedTypeImports()

@@ -42,6 +42,7 @@ public readonly ref struct TrRmParamTableReader
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft

@@ -152,6 +152,7 @@ public readonly ref struct TrRmFeatureTableReader
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
@@ -281,6 +282,7 @@ public readonly ref struct TrRmFeatureTableReader
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
@@ -329,6 +331,7 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
@@ -363,6 +366,7 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft

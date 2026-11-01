@@ -199,6 +199,72 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task BuildTrRmSelectsA2EArtifactSchemaAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+        const string moduleIdentity = "a2e-cli-selection";
+        var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"a2e-cli-{Guid.NewGuid():N}.trrm");
+        var imagePath = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"a2e-cli-{Guid.NewGuid():N}.exe");
+        try
+        {
+            var options = new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            };
+            var compilation = Compilation.Create(SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport(
+                    "example.dll",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+                [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+                internal extern void Observe(
+                    ptr<uint32> value,
+                    write ptr<int32> output);
+
+                int32 Main() {
+                    [uint32; 0] empty = [];
+                    mut uint32 input = 0;
+                    mut int32 output = 0;
+                    unsafe {
+                        var callback = &Observe;
+                        callback(&input, &output);
+                    }
+                    return output;
+                }
+                """), options);
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            var artifact = TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, moduleIdentity, schemaIdentity, 1);
+            await File.WriteAllBytesAsync(artifactPath, artifact)
+                .ConfigureAwait(true);
+
+            var (exit, output, error) = await RunAsync([], "build-trrm",
+                artifactPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", moduleIdentity, "-o",
+                imagePath, "--json").ConfigureAwait(true);
+            Assert.That(exit, Is.Zero,
+                $"{output}{Environment.NewLine}{error}");
+            Assert.That(error, Is.Empty);
+            Assert.That(File.Exists(imagePath), Is.True);
+            using var document = JsonDocument.Parse(output);
+            Assert.That(document.RootElement.GetProperty("success")
+                .GetBoolean(), Is.True);
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(artifactPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task PersistedTrRmRunsAndBuildsWithoutProducerSourceAsync()
     {
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath, $"trrm-consumer-{Guid.NewGuid():N}");

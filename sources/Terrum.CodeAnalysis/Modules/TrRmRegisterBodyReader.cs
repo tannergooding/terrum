@@ -45,6 +45,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
@@ -985,13 +986,25 @@ internal readonly ref struct TrRmRegisterBodyReader
                 }
                 break;
             case 0x05:
+                var isEmptyArrayInitialization
+                    = _schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                    && payload.Length == 16 && payload[0] == 1
+                    && payload[1] == 0 && payload[2] == 1
+                    && payload[3] == 0
+                    && ReadUInt16(payload, 6) == 0
+                    && ReadUInt32(payload, 8) == 0
+                    && payload[12] == 0 && payload[13] == 0
+                    && ReadUInt16(payload, 14) == 0;
                 if (payload.Length != 16 || payload[0] is < 1 or > 2
-                    || payload[1] is < 1 or > 2
+                    || payload[1] > 2
                     || payload[2] is < 1 or > 3
-                    || payload[3] is < 1 or > 5
+                    || payload[3] > 5
                     || payload[12] > 1 || payload[13] != 0
                     || !IsValidSelector(payload[0], ReadUInt16(payload, 4))
                     || !IsValidSelector(payload[1], ReadUInt16(payload, 6))
+                    || (payload[1] == 0
+                        ? !isEmptyArrayInitialization
+                        : payload[3] is < 1 or > 5)
                     || (payload[12] == 0
                         && (ReadUInt16(payload, 14) != 0
                             || ReadUInt32(payload, 8) != 0))

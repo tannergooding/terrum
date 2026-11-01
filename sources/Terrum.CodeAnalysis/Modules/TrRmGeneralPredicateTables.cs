@@ -158,6 +158,7 @@ internal readonly ref struct TrRmPredicateNodeTableReader
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
@@ -290,6 +291,7 @@ internal readonly ref struct TrRmPredicateNodeOperandTableReader
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
@@ -418,6 +420,7 @@ internal readonly ref struct TrRmPredicateReadRootTableReader
                 or TrRmArtifactSchema.ForeignInvocationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft

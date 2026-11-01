@@ -14,9 +14,26 @@ public static class TrRmTargetProfileTableWriter
     /// <param name="rows">The ordered profile identities.</param>
     /// <returns>The encoded TargetProfile section.</returns>
     public static byte[] Encode(IReadOnlyList<TrRmTargetProfileRow> rows)
+        => Encode(rows, TrRmArtifactSchema.Standard);
+
+    internal static byte[] Encode(IReadOnlyList<TrRmTargetProfileRow> rows,
+        TrRmArtifactSchema schema)
     {
         ArgumentNullException.ThrowIfNull(rows);
-        if (rows.Count > 0xFF_FFFF)
+        if (rows.Count > 0xFF_FFFF
+            || schema is not (TrRmArtifactSchema.Standard
+                or TrRmArtifactSchema.Development
+                or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
+                or TrRmArtifactSchema.CopyOriginDraft
+                or TrRmArtifactSchema.ForeignInvocationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                or TrRmArtifactSchema.ScalarFrozenValuesDraft
+                or TrRmArtifactSchema.NominalEnumsDraft
+                or TrRmArtifactSchema.RootPinRuntimeDraft
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(rows));
         }
@@ -26,7 +43,7 @@ public static class TrRmTargetProfileTableWriter
         {
             var row = rows[index];
             if (!TrRmTargetProfileTableReader.IsAssigned(
-                    row.ProfileId, row.RuleRevision))
+                    row.ProfileId, row.RuleRevision, schema))
             {
                 throw new InvalidDataException("Unassigned TRRM TargetProfile identity.");
             }
@@ -37,7 +54,7 @@ public static class TrRmTargetProfileTableWriter
                 result.AsSpan((index * sizeof(ulong)) + sizeof(uint)), row.RuleRevision);
         }
 
-        _ = new TrRmTargetProfileTableReader(result, rows.Count);
+        _ = new TrRmTargetProfileTableReader(result, rows.Count, schema);
         return result;
     }
 }

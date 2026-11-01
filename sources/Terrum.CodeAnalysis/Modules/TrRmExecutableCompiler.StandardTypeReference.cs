@@ -71,18 +71,20 @@ public static partial class TrRmExecutableCompiler
 
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
-        if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardForeignInvocationStorageFixedArraySchemaIdentity))
+        if (schemaIdentities[0] is not (
+                StandardForeignInvocationStorageFixedArraySchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
         {
             throw Unsupported(
-                "Explicit TypeDef roots require the exact A2 schema.");
+                "Explicit TypeDef roots require the exact A2 or A2E schema.");
         }
         if (schemaIdentities.Skip(1).Any(schemaIdentity =>
-                !StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardForeignInvocationStorageFixedArraySchemaIdentity)))
+                schemaIdentity is not (
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)))
         {
             throw Unsupported(
-                "The bounded A2 type-reference projection requires A2 provider artifacts.");
+                "The bounded A2 type-reference projection requires A2 or A2E provider artifacts.");
         }
 
         var program = LoadStandardProgram(artifacts, schemaIdentities,
@@ -110,8 +112,9 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetTypeDefRange(moduleRow);
         var (methodStart, methodEnd)
             = tables.Modules.GetMethodDefRange(moduleRow);
-        if (tables.Schema
-                != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+        if (tables.Schema is not (
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
             || moduleRow <= 0 || moduleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd - typeDefStart
                 != program.Structures.Length
@@ -614,10 +617,13 @@ public static partial class TrRmExecutableCompiler
         int moduleRow,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
     {
-        if (!StringComparer.Ordinal.Equals(schemaIdentities[0],
+        if (!(StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardForeignInvocationStorageFixedArraySchemaIdentity)
-            || tables.Schema
-                != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
+            || tables.Schema is not (
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty)
         {
@@ -651,11 +657,12 @@ public static partial class TrRmExecutableCompiler
             }
 
             var schemaIdentity = schemaIdentities[artifactIndex];
-            if (!StringComparer.Ordinal.Equals(schemaIdentity,
-                    StandardForeignInvocationStorageFixedArraySchemaIdentity))
+            if (schemaIdentity is not (
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
             {
                 throw Unsupported(
-                    "Loaded A2 type origins require A2 provider snapshots.");
+                    "Loaded A2 type origins require A2 or A2E provider snapshots.");
             }
 
             var providerTables = ValidateForeignInvocationArtifact(

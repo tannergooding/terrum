@@ -132,12 +132,14 @@ internal static partial class Program
                         "trrm/1-draft-foreign-invocation-contracts-1"
                         or "trrm/1-draft-foreign-invocation-storage-addresses-1"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
+                        or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1")
                     || providers.Exists(static provider =>
                         provider.SchemaIdentity is not (
                             "trrm/1-draft-foreign-invocation-contracts-1"
                             or "trrm/1-draft-foreign-invocation-storage-addresses-1"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
+                            or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"))))
             {
                 WriteInputError(json, "TRM2000", Usage);

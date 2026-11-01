@@ -20,10 +20,15 @@ public static partial class TrRmExecutableCompiler
 
     private static byte[] EmitForeignInvocationStorageFixedArrayCopyDeclarations(
         BoundProgram program, string moduleIdentity,
+        TrRmArtifactSchema schema,
         IReadOnlyList<TrRmSourceTypeExport>? sourceTypeExports = null)
     {
-        const TrRmArtifactSchema schema
-            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        if (schema is not (
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft))
+        {
+            throw new ArgumentOutOfRangeException(nameof(schema));
+        }
         if (program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty             || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
@@ -57,9 +62,11 @@ public static partial class TrRmExecutableCompiler
 
         var typeDefCount = program.Structures.Length;
         var structureTypeDefRows = new Dictionary<int, int>(typeDefCount);
-        for (var index = 0; index < typeDefCount; index++)
+        for (var structureOrdinal = 0;
+            structureOrdinal < typeDefCount; structureOrdinal++)
         {
-            structureTypeDefRows.Add(index, index + 1);
+            structureTypeDefRows.Add(structureOrdinal,
+                structureOrdinal + 1);
         }
 
         foreach (var structure in program.Structures)
@@ -213,9 +220,10 @@ public static partial class TrRmExecutableCompiler
 
         var hasCopyEvidence = false;
         var typeDefRows = new TrRmTypeDefRow[typeDefCount];
-        for (var index = 0; index < typeDefCount; index++)
+        for (var typeDefOrdinal = 0;
+            typeDefOrdinal < typeDefCount; typeDefOrdinal++)
         {
-            var structure = program.Structures[index];
+            var structure = program.Structures[typeDefOrdinal];
             var separator = structure.Name.LastIndexOf('.',
                 StringComparison.Ordinal);
             var typeNamespace = separator < 0 ? "" : structure.Name[..separator];
@@ -227,10 +235,12 @@ public static partial class TrRmExecutableCompiler
                     $"A2 Copy declaration identity '{structure.Name}' is invalid.");
             }
 
-            structureNamespaceRows[index] = GetStringRow(typeNamespace);
-            structureNameRows[index] = GetStringRow(typeName);
-            structureFieldNameRows[index] = new int[structure.Fields.Length];
-            fieldFirstByStructure[index] = fieldRows.Count + 1;
+            structureNamespaceRows[typeDefOrdinal]
+                = GetStringRow(typeNamespace);
+            structureNameRows[typeDefOrdinal] = GetStringRow(typeName);
+            structureFieldNameRows[typeDefOrdinal]
+                = new int[structure.Fields.Length];
+            fieldFirstByStructure[typeDefOrdinal] = fieldRows.Count + 1;
             for (var field = 0; field < structure.Fields.Length; field++)
             {
                 var fieldDefinition = structure.Fields[field];
@@ -240,28 +250,28 @@ public static partial class TrRmExecutableCompiler
                     : fieldDefinition.IsInternal ? 1u : 2u;
                 var fieldFlags = visibility
                     | (fieldDefinition.IsMutable ? 4u : 0u);
-                structureFieldNameRows[index][field]
+                structureFieldNameRows[typeDefOrdinal][field]
                     = GetStringRow(fieldDefinition.Name);
-                fieldRows.Add(new TrRmFieldDefRow(index + 1,
-                    structureFieldNameRows[index][field],
+                fieldRows.Add(new TrRmFieldDefRow(typeDefOrdinal + 1,
+                    structureFieldNameRows[typeDefOrdinal][field],
                     fieldTypeSpecRef, fieldFlags));
             }
 
-            layoutFirstByStructure[index] = layoutRows.Count + 1;
+            layoutFirstByStructure[typeDefOrdinal] = layoutRows.Count + 1;
             var layoutKind = structure.IsSequential ? (byte)1 : (byte)3;
             var pack = structure.IsSequential ? 16u : 0u;
             for (var variant = 0; variant < 2; variant++)
             {
                 var layoutRow = layoutRows.Count + 1;
                 var layoutFieldFirst = layoutFieldRows.Count + 1;
-                layoutRows.Add(new TrRmLayoutRow(index + 1,
+                layoutRows.Add(new TrRmLayoutRow(typeDefOrdinal + 1,
                     variant == 0 ? 0u : 1u, layoutKind,
                     variant == 0 ? (byte)0 : (byte)1,
                     0, pack, layoutFieldFirst, structure.Fields.Length));
                 for (var field = 0; field < structure.Fields.Length; field++)
                 {
                     layoutFieldRows.Add(new TrRmLayoutFieldRow(layoutRow,
-                        field, fieldFirstByStructure[index] + field));
+                        field, fieldFirstByStructure[typeDefOrdinal] + field));
                 }
             }
 
@@ -272,13 +282,15 @@ public static partial class TrRmExecutableCompiler
             {
                 hasCopyEvidence = true;
             }
-            typeDefRows[index] = new TrRmTypeDefRow(
-                structureNamespaceRows[index], structureNameRows[index],
+            typeDefRows[typeDefOrdinal] = new TrRmTypeDefRow(
+                structureNamespaceRows[typeDefOrdinal],
+                structureNameRows[typeDefOrdinal],
                 visibilityFlags | 4u
                     | (declaredCopy
                         ? TrRmTypeDefTableReader.DeclaredCopyFlag : 0u),
-                fieldFirstByStructure[index], structure.Fields.Length,
-                0, 0, layoutFirstByStructure[index], 2, 0, 0);
+                fieldFirstByStructure[typeDefOrdinal],
+                structure.Fields.Length,
+                0, 0, layoutFirstByStructure[typeDefOrdinal], 2, 0, 0);
         }
 
         for (var arrayIndex = 0;
@@ -409,10 +421,26 @@ public static partial class TrRmExecutableCompiler
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        _ = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        var index = schema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                        artifact)
+                : TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        if (schema
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
+                    index);
+        }
+        else
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    index);
+        }
         return artifact;
     }
 

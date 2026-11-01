@@ -42,6 +42,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-storage-addresses-1";
     private const string StandardForeignInvocationStorageFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+    private const string StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
     private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
 
@@ -87,7 +89,7 @@ public static partial class TrRmExecutableCompiler
         => EmitStandardCore(program, moduleIdentity, schemaIdentity,
             moduleTargetRequirement, null);
 
-    /// <summary>Emits an A2 type library with explicit source TypeDef exports.</summary>
+    /// <summary>Emits an A2/A2E type library with explicit source TypeDef exports.</summary>
     /// <param name="program">The checked source-bound type library to serialize.</param>
     /// <param name="moduleIdentity">The output Module identity.</param>
     /// <param name="schemaIdentity">The exact out-of-band Standard schema identity.</param>
@@ -121,10 +123,12 @@ public static partial class TrRmExecutableCompiler
                 moduleTargetRequirement);
         }
         if (!StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardForeignInvocationStorageFixedArraySchemaIdentity))
+                StandardForeignInvocationStorageFixedArraySchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
         {
             throw Unsupported(
-                "Explicit source TypeDef exports require the exact A2 schema.");
+                "Explicit source TypeDef exports require the exact A2 or A2E schema.");
         }
         if (program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty)
@@ -158,6 +162,7 @@ public static partial class TrRmExecutableCompiler
         if ((schemaIdentity is StandardForeignInvocationSchemaIdentity
                 or StandardForeignInvocationStorageAddressSchemaIdentity
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                 or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
             && moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
@@ -185,6 +190,12 @@ public static partial class TrRmExecutableCompiler
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft,
+                    sourceTypeExports),
+            StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft,
                     sourceTypeExports),
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
@@ -3018,7 +3029,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, int> nativePointerTypeRows,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
         Dictionary<int, int> structureTypeDefRows,
-        Dictionary<int, int> typeDefTypeSpecRows)
+        Dictionary<int, int> typeDefTypeSpecRows,
+        Func<PrimitiveType, int>? typeSpecRowOverride = null)
     {
         if (BoundEnumTypes.IsType(type))
         {
@@ -3028,7 +3040,8 @@ public static partial class TrRmExecutableCompiler
         {
             return NativePointerTypeRow(type, nativeRawPointerTypeRow,
                 nativeFunctionPointerTypeRows, typeRows, nativePointerTypeRows,
-                nativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows);
+                nativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows,
+                typeSpecRowOverride);
         }
 
         if (NativeFunctionPointerTypes.IsType(type))
@@ -3065,7 +3078,8 @@ public static partial class TrRmExecutableCompiler
         Dictionary<PrimitiveType, int> nativePointerTypeRows,
         ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
         Dictionary<int, int> structureTypeDefRows,
-        Dictionary<int, int> typeDefTypeSpecRows)
+        Dictionary<int, int> typeDefTypeSpecRows,
+        Func<PrimitiveType, int>? typeSpecRowOverride = null)
     {
         if (nativePointerTypeRows.TryGetValue(pointerType, out var row))
         {
@@ -3094,10 +3108,12 @@ public static partial class TrRmExecutableCompiler
         }
         else
         {
-            var pointeeRow = NativeValueTypeRow(definition.PointeeType,
-                nativeRawPointerTypeRow, nativeFunctionPointerTypeRows,
-                typeRows, nativePointerTypeRows, nativePointerTypes,
-                structureTypeDefRows, typeDefTypeSpecRows);
+            var pointeeRow = typeSpecRowOverride is null
+                ? NativeValueTypeRow(definition.PointeeType,
+                    nativeRawPointerTypeRow, nativeFunctionPointerTypeRows,
+                    typeRows, nativePointerTypeRows, nativePointerTypes,
+                    structureTypeDefRows, typeDefTypeSpecRows)
+                : typeSpecRowOverride(definition.PointeeType);
             row = typeRows.Count + 1;
             typeRows.Add(TrRmTypeSpecTableWriter.IndexedFamily(0x8C,
                 checked((uint)pointeeRow), qualifiers));
@@ -3112,7 +3128,8 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType fieldType, int nativeRawPointerTypeRow,
         Dictionary<PrimitiveType, int> nativeFunctionPointerTypeRows,
         Dictionary<PrimitiveType, int> nativePointerTypeRows,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        Func<PrimitiveType, int>? typeSpecRowOverride = null)
     {
         if (BoundEnumTypes.IsType(fieldType))
         {
@@ -3130,7 +3147,8 @@ public static partial class TrRmExecutableCompiler
 
         return NativeValueTypeRow(fieldType, nativeRawPointerTypeRow,
             nativeFunctionPointerTypeRows, typeRows, nativePointerTypeRows,
-            nativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows);
+            nativePointerTypes, structureTypeDefRows, typeDefTypeSpecRows,
+            typeSpecRowOverride);
     }
 
     private static int TypeDefTypeSpecRow(List<ReadOnlyMemory<byte>> typeRows,

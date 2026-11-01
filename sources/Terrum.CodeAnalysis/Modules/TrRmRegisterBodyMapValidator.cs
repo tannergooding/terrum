@@ -1833,6 +1833,14 @@ internal static class TrRmRegisterBodyMapValidator
 
         if (opcode == 0xD9)
         {
+            var store = GetRecordPayload(body,
+                ReadUInt16(body, instruction, 2));
+            if (ReadByte(body, store, 1) == 0)
+            {
+                ValidateEmptyArrayInitializationStore(body, store,
+                    registerTypes, methods.GetOwnerModule(methodDefRow),
+                    typeSpecs, constantValues);
+            }
             return;
         }
 
@@ -2235,6 +2243,16 @@ internal static class TrRmRegisterBodyMapValidator
         var payload = record[4..];
         if (ReadByte(body, payload, 9) != 3)
         {
+            if (body.Schema
+                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                && ReadByte(body, payload, 0) == 1)
+            {
+                UpdateEmptyArrayHomePlaceRegister(body, payload,
+                    registerTypes, ownerModule, typeSpecs, constantValues,
+                    recordIndex, destination, codeOffset);
+                return;
+            }
+
             ClearRegisterTypeStates(body, registerTypes);
             return;
         }
@@ -2353,6 +2371,195 @@ internal static class TrRmRegisterBodyMapValidator
         SetRegisterTypeState(body, registerTypes, destination,
             RegisterTypeState.FromPlace(elementTypeSpecRef, recordIndex,
                 accessKind, placeOrigins));
+    }
+
+    private static void UpdateEmptyArrayHomePlaceRegister(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
+        RegisterTypeState[] registerTypes, int ownerModule,
+        TrRmTypeSpecTableReader typeSpecs,
+        ConstantSourceValueContext constantValues, int recordIndex,
+        int destination, int codeOffset)
+    {
+        var targetRef = ReadUInt32(body, payload, 12);
+        var referentTypeMapIndex = ReadUInt16(body, payload, 16);
+        if (ReadByte(body, payload, 1) != 3
+            || ReadByte(body, payload, 2) != 1
+            || ReadByte(body, payload, 3) != 0
+            || ReadUInt16(body, payload, 4) != destination
+            || ReadUInt16(body, payload, 6) != 0
+            || ReadByte(body, payload, 8) != 0
+            || ReadByte(body, payload, 9) != 0
+            || ReadUInt16(body, payload, 10) != 0
+            || ReadUInt16(body, payload, 18) != 0
+            || targetRef >= (uint)body.HomeCount)
+        {
+            throw InvalidMap();
+        }
+
+        var homeIndex = checked((int)targetRef);
+        var home = GetHomeMapEntry(body, homeIndex);
+        var typeSpecRef = GetTypeMapTypeSpecRef(body,
+            ReadUInt16(body, home, 2));
+        var referentTypeSpecRef = GetTypeMapTypeSpecRef(body,
+            referentTypeMapIndex);
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (ReadByte(body, home, 0) != 3
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                typeSpecRef, referentTypeSpecRef)
+            || !type.IsRow || type.Form != 0x11
+            || !typeSpecs.TryGetFixedInlineArray(typeSpecRef, out _, out var count)
+            || count != 0
+            || !TrRmFeatureManifestValidator.Requires(
+                constantValues.Features, constantValues.Modules,
+                ownerModule,
+                TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
+                body.Schema)
+            || !constantValues.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw InvalidMap();
+        }
+
+        var layoutRow = constantValues.FixedArrayLayouts.FindRow(ownerModule,
+            (uint)type.Row, (uint)profileRow);
+        if (layoutRow == 0)
+        {
+            throw InvalidMap();
+        }
+
+        var layout = constantValues.FixedArrayLayouts.GetRow(layoutRow);
+        if (layout.OwnerModuleRow != ownerModule || layout.ByteExtent != 0
+            || layout.Alignment == 0)
+        {
+            throw InvalidMap();
+        }
+
+        SetRegisterTypeState(body, registerTypes, destination,
+            RegisterTypeState.FromPlace(referentTypeSpecRef, recordIndex, 3,
+                [new PlaceHandleOrigin(recordIndex, homeIndex, codeOffset)]));
+    }
+
+    private static void ValidateEmptyArrayInitializationStore(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
+        RegisterTypeState[] registerTypes, int ownerModule,
+        TrRmTypeSpecTableReader typeSpecs,
+        ConstantSourceValueContext constantValues)
+    {
+        var placeIndex = ReadUInt16(body, payload, 4);
+        if (!body.Schema
+                .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+            || payload.Length != 16 || ReadByte(body, payload, 0) != 1
+            || ReadByte(body, payload, 1) != 0
+            || ReadByte(body, payload, 2) != 1
+            || ReadByte(body, payload, 3) != 0
+            || placeIndex > 13
+            || ReadUInt16(body, payload, 6) != 0
+            || ReadUInt32(body, payload, 8) != 0
+            || ReadByte(body, payload, 12) != 0
+            || ReadByte(body, payload, 13) != 0
+            || ReadUInt16(body, payload, 14) != 0)
+        {
+            throw InvalidMap();
+        }
+
+        var place = GetRegisterTypeState(body, registerTypes, placeIndex);
+        if (!place.IsPlaceHandle || place.AccessKind != 3
+            || place.PlaceOrigins.Length == 0)
+        {
+            throw InvalidMap();
+        }
+
+        var emptyArrayTypeSpecRef = GetRegisterTypeSpecRef(body, place);
+        var emptyArrayType = typeSpecs.GetTypeSpecRef(
+            emptyArrayTypeSpecRef);
+        if (!emptyArrayType.IsRow || emptyArrayType.Form != 0x11
+            || !typeSpecs.TryGetFixedInlineArray(
+                emptyArrayTypeSpecRef, out _, out var elementCount)
+            || elementCount != 0
+            || !TrRmFeatureManifestValidator.Requires(
+                constantValues.Features, constantValues.Modules,
+                ownerModule,
+                TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
+                body.Schema)
+            || !constantValues.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw InvalidMap();
+        }
+
+        var emptyArrayLayoutRow = constantValues.FixedArrayLayouts.FindRow(
+            ownerModule, (uint)emptyArrayType.Row, (uint)profileRow);
+        if (emptyArrayLayoutRow == 0
+            || constantValues.FixedArrayLayouts.GetRow(
+                emptyArrayLayoutRow).ByteExtent != 0)
+        {
+            throw InvalidMap();
+        }
+
+        foreach (var origin in place.PlaceOrigins)
+        {
+            ConsumeWork(body);
+            if (origin.RootHomeIndex < 0
+                || origin.RootHomeIndex >= body.HomeCount
+                || origin.PlaceSelectionRecordIndex < 0)
+            {
+                throw InvalidMap();
+            }
+
+            var rootHome = GetHomeMapEntry(body, origin.RootHomeIndex);
+            var selection = GetRecordPayload(body,
+                origin.PlaceSelectionRecordIndex);
+            if (ReadByte(body, rootHome, 0) != 3
+                || ReadByte(body, selection, 1) != 3
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    GetTypeMapTypeSpecRef(body,
+                        ReadUInt16(body, selection, 16)),
+                    emptyArrayTypeSpecRef))
+            {
+                throw InvalidMap();
+            }
+
+            var targetKind = ReadByte(body, selection, 0);
+            var targetRefKind = ReadByte(body, selection, 9);
+            var targetRef = ReadUInt32(body, selection, 12);
+            if (targetKind == 1)
+            {
+                if (targetRefKind != 0
+                    || targetRef != (uint)origin.RootHomeIndex)
+                {
+                    throw InvalidMap();
+                }
+            }
+            else if (targetKind == 3)
+            {
+                if (targetRefKind != 3 || targetRef == 0
+                    || targetRef
+                        > (uint)constantValues.FixedArrayLayouts.Count)
+                {
+                    throw InvalidMap();
+                }
+
+                var parentLayout = constantValues.FixedArrayLayouts.GetRow(
+                    checked((int)targetRef));
+                if (parentLayout.OwnerModuleRow != ownerModule
+                    || !typeSpecs.TryGetFixedInlineArray(
+                        (uint)parentLayout.ArrayTypeSpecRow,
+                        out var childTypeSpecRef, out _)
+                    || !typeSpecs.AreEquivalentTypeSpecRefs(
+                        childTypeSpecRef, emptyArrayTypeSpecRef))
+                {
+                    throw InvalidMap();
+                }
+            }
+            else
+            {
+                throw InvalidMap();
+            }
+        }
     }
 
     private static void UpdateStorageAddressResult(

@@ -119,6 +119,25 @@ internal static class TrRmRegisterBodyRecordWriter
         return result;
     }
 
+    internal static byte[] EncodeEmptyArrayInitialization(
+        ushort placeIndex, TrRmArtifactSchema schema)
+    {
+        if (!schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+            || placeIndex > 13)
+        {
+            throw new ArgumentOutOfRangeException(nameof(placeIndex));
+        }
+
+        var result = new byte[20];
+        result[0] = 0x05;
+        result[RecordHeaderSize] = 1;
+        result[RecordHeaderSize + 1] = 0;
+        result[RecordHeaderSize + 2] = 1;
+        result[RecordHeaderSize + 3] = 0;
+        Write(result, RecordHeaderSize + 4, placeIndex);
+        return result;
+    }
+
     internal static byte[] EncodeRootPinReferenceSupport(byte sourceKind,
         byte resultCarrier, ushort sourceIndex, byte resultRegister,
         byte sourceMode, ushort sourceTypeMapIndex, ushort resultTypeMapIndex)

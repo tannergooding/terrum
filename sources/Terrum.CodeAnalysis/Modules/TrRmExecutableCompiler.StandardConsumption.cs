@@ -193,6 +193,7 @@ public static partial class TrRmExecutableCompiler
             createA3ResourceLedger: false);
         if (schemaIdentities[0] is
             StandardForeignInvocationStorageFixedArraySchemaIdentity
+            or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
         {
             typeProviderBindings = TrRmFixedArrayProviderBindingValidator
@@ -526,6 +527,7 @@ public static partial class TrRmExecutableCompiler
         if (input.SchemaIdentity is not (StandardForeignInvocationSchemaIdentity
             or StandardForeignInvocationStorageAddressSchemaIdentity
             or StandardForeignInvocationStorageFixedArraySchemaIdentity
+            or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
             or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity))
         {
             throw new ArgumentException(
@@ -560,6 +562,9 @@ public static partial class TrRmExecutableCompiler
                 => TrRmArtifactSchema.ForeignInvocationStorageAddressDraft,
             StandardForeignInvocationStorageFixedArraySchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft,
+            StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+                => TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft,
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
             _ => throw new ArgumentException(
@@ -576,8 +581,12 @@ public static partial class TrRmExecutableCompiler
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
-                : TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)
+                : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                    ? TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                            artifact)
+                    : TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)
             : schema.UsesForeignInvocationStorageAddresses()
                 ? TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact)
                 : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
@@ -595,9 +604,14 @@ public static partial class TrRmExecutableCompiler
                 ? TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
                         index, a3LayoutResourceLedger, createA3ResourceLedger)
-                : TrRmStructuralMetadataValidator
-                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                        index, a3LayoutResourceLedger)
+                : GetForeignInvocationSchema(schemaIdentity)
+                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
+                            index)
+                    : TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                            index, a3LayoutResourceLedger)
             : GetForeignInvocationSchema(schemaIdentity)
                 .UsesForeignInvocationStorageAddresses()
                 ? TrRmStructuralMetadataValidator
@@ -652,6 +666,9 @@ public static partial class TrRmExecutableCompiler
 
                 var (featureStart, featureCount)
                     = tables.Modules.GetFeatureRange(moduleRow);
+                var supportsA2Features = schemaIdentities[index] is
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity;
                 for (var offset = 0; offset < featureCount; offset++)
                 {
                     var feature = tables.Features.GetFeature(
@@ -660,8 +677,7 @@ public static partial class TrRmExecutableCompiler
                         is not (TrRmFeatureTableReader.NativeExportEntriesFeatureId
                             or TrRmFeatureTableReader.RootlessNativeValuesFeatureId
                             or TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId)
-                        && !(schemaIdentities[index]
-                                == StandardForeignInvocationStorageFixedArraySchemaIdentity
+                        && !(supportsA2Features
                             && feature.FeatureId
                                 == TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId))
                     {
@@ -689,8 +705,9 @@ public static partial class TrRmExecutableCompiler
                 var isSelectedRoot = index == 0
                     && moduleRow == rootModuleRow;
                 var isA2TypeOnlyModule
-                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
-                        StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                    = (schemaIdentities[index] is
+                        StandardForeignInvocationStorageFixedArraySchemaIdentity
+                        or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
                     && methodEnd == methodStart && typeEnd > typeStart;
                 if (!isSelectedRoot && moduleRefEnd != moduleRefStart
                     && !isA2TypeOnlyModule)
@@ -758,8 +775,9 @@ public static partial class TrRmExecutableCompiler
             var (rootTypeStart, rootTypeEnd)
                 = tables.Modules.GetTypeDefRange(rootModuleRow);
             var rootIsA2TypeLibrary = index == 0
-                && StringComparer.Ordinal.Equals(schemaIdentities[0],
-                    StandardForeignInvocationStorageFixedArraySchemaIdentity)
+                && (schemaIdentities[0] is
+                    StandardForeignInvocationStorageFixedArraySchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
                 && rootMethodStart == rootMethodEnd
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;

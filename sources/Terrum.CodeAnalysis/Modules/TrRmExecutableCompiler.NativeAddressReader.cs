@@ -19,7 +19,8 @@ public static partial class TrRmExecutableCompiler
         uint RequiredElementCount);
 
     private readonly record struct NativeArrayPlaceSelectionFacts(
-        int RecordIndex, int DestinationRegister, byte AccessKind,
+        int RecordIndex, int DestinationRegister, byte TargetKind,
+        byte AccessKind,
         int BaseHome, byte IndexKind, int IndexHome, int IndexRegister,
         int ArrayTypeSpecRow, int FixedArrayLayoutRow, PrimitiveType ArrayType,
         PrimitiveType ElementType, ulong ElementCount);
@@ -53,8 +54,12 @@ public static partial class TrRmExecutableCompiler
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
-                : TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)
+                : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                    ? TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                            artifact)
+                    : TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)
             : schema.UsesForeignInvocationStorageAddresses()
                 ? TrRmArtifactIndex.ForForeignInvocationStorageAddressDraft(artifact)
                 : TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
@@ -65,8 +70,13 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
                         index, a3LayoutResourceLedger,
                         createA3ResourceLedger: a3LayoutResourceLedger is null)
-                : TrRmStructuralMetadataValidator
-                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(index)
+                : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
+                            index)
+                    : TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                            index)
             : schema.UsesForeignInvocationStorageAddresses()
                 ? TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index)
@@ -79,18 +89,21 @@ public static partial class TrRmExecutableCompiler
                 or 0x0016 or 0x0017 or 0x0018 or 0x001B or 0x001C
                 or 0x001D or 0x0020 or 0x0021)
                 && !(kind == 0x0012
-                    && schema
-                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft)
-                && !(schema
-                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                    && (schema is
+                        TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft))
+                && !((schema
+                        is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
                     && tables.TypeDefs.Count != 0
                     && (kind == 0x0013 || kind == 0x0014
                         || kind == 0x0015 || kind == 0x0023))
                 && !(kind == 0x0048
                     && (tables.FixedArrayLayouts.Count != 0
                         || tables.TypeDefs.Count != 0)
-                    && schema
-                        == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft))
+                    && (schema is
+                        TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)))
             {
                 throw Unsupported(
                     $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
@@ -123,8 +136,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+        if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
             && tables.TypeDefs.Count != 0 && methodEnd == methodStart
             && selectedModuleImport is null)
         {
@@ -397,8 +410,9 @@ public static partial class TrRmExecutableCompiler
         }
 
         var arrayTypeByTypeSpecRow = new Dictionary<int, PrimitiveType>();
-        var nativeFixedArrayTypes = schema
-            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+        var nativeFixedArrayTypes = (schema is
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
                 ? ReadForeignInvocationFixedArrayTypes(tables,
                     selectedModuleRow, nativePointerTypeDefinitions,
                     signatureIndexByAnchorMethod, structureTypeByTypeDef,
@@ -427,7 +441,8 @@ public static partial class TrRmExecutableCompiler
         var targetIndex = functionIndexByMethodRow[targetMethodRow];
         var (callerBody, callerVariables) = ReadForeignInvocationCallerBody(
             body, tables.TypeSpecs, tables.Imports,
-            tables.FixedArrayLayouts, arrayTypeByTypeSpecRow,
+            tables.TargetProfiles, tables.FixedArrayLayouts,
+            arrayTypeByTypeSpecRow,
             nativeFixedArrayTypes, selectedModuleRow,
             targetMethodRow, targetIndex,
             callerParameterTypes, callerResultType,
@@ -496,6 +511,7 @@ public static partial class TrRmExecutableCompiler
         ReadForeignInvocationCallerBody(
         TrRmRegisterBodyReader body, TrRmTypeSpecTableReader typeSpecs,
         TrRmImportTableReader imports,
+        TrRmTargetProfileTableReader targetProfiles,
         TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
         IReadOnlyDictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
         ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
@@ -530,7 +546,7 @@ public static partial class TrRmExecutableCompiler
         if (hasStorageAddressRecords)
         {
             return ReadForeignInvocationStorageAddressCallerBody(body,
-                typeSpecs, imports, fixedArrayLayouts,
+                typeSpecs, imports, targetProfiles, fixedArrayLayouts,
                 arrayTypeByTypeSpecRow, nativeFixedArrayTypes,
                 selectedModuleRow, targetMethodRow, targetIndex,
                 callerParameterTypes, callerResultType, targetParameterTypes,
@@ -862,6 +878,7 @@ public static partial class TrRmExecutableCompiler
         ReadForeignInvocationStorageAddressCallerBody(
             TrRmRegisterBodyReader body, TrRmTypeSpecTableReader typeSpecs,
             TrRmImportTableReader imports,
+            TrRmTargetProfileTableReader targetProfiles,
             TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
             IReadOnlyDictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
             ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
@@ -1286,7 +1303,7 @@ public static partial class TrRmExecutableCompiler
 
                     placeSelectionsByRegister.Add(instruction.Register,
                         ReadForeignInvocationArrayPlaceSelection(
-                            body, typeSpecs, fixedArrayLayouts,
+                            body, typeSpecs, targetProfiles, fixedArrayLayouts,
                             arrayTypeByTypeSpecRow, nativeFixedArrayTypes,
                             nativePointerTypeDefinitions,
                             signatureIndexByAnchorMethod,
@@ -1305,125 +1322,210 @@ public static partial class TrRmExecutableCompiler
                     var sourceRegister
                         = BinaryPrimitives.ReadUInt16LittleEndian(
                             storePayload[6..]);
+                    var isEmptyArrayInitialization
+                        = storePayload[1] == 0;
                     if (instructionOrdinal == 0
                         || previousInstruction.Opcode != 0xD8
                         || previousInstruction.Register != placeRegister
                         || storeRecord[0] != 0x05
                         || storePayload[0] != 1
-                        || storePayload[1] != 1
                         || storePayload[2] != 1
-                        || storePayload[3] != 1
+                        || storePayload[3] != (isEmptyArrayInitialization
+                            ? 0 : 1)
                         || BinaryPrimitives.ReadUInt32LittleEndian(
                             storePayload[8..]) != 0
                         || storePayload[12] != 0 || storePayload[13] != 0
                         || BinaryPrimitives.ReadUInt16LittleEndian(
                             storePayload[14..]) != 0
-                        || sourceRegister is not (14 or 15)
+                        || (isEmptyArrayInitialization
+                            ? !body.Schema
+                                .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                                || sourceRegister != 0
+                            : storePayload[1] != 1
+                                || sourceRegister is not (14 or 15))
                         || !placeSelectionsByRegister.TryGetValue(
                             placeRegister, out var initializationSelection)
                         || initializationSelection.RecordIndex
                             != previousInstruction.Index
-                        || initializationSelection.AccessKind != 3
-                        || initializationSelection.ElementCount == 0
-                        || localVariableByHome[
-                            initializationSelection.BaseHome] != -1
-                        || !TryGetContextualConstant(
-                            checked((byte)sourceRegister),
-                            initializationSelection.ElementType,
-                            out var initializationValue))
+                        || initializationSelection.AccessKind != 3)
                     {
                         throw Invalid(
                             "The F+S SemanticStore does not initialize its selected array element.");
                     }
 
-                    var initializedArrayHome
-                        = initializationSelection.BaseHome;
-                    ulong selectedElementIndex;
-                    if (initializationSelection.IndexKind == 1)
+                    if (isEmptyArrayInitialization)
                     {
-                        if (!registerConstants.TryGetValue(
-                                initializationSelection.IndexRegister,
-                                out var registerIndex)
-                            || registerIndex.Type != PrimitiveType.Int32
-                            || registerIndex.Bits > int.MaxValue)
+                        var emptyArrayType
+                            = initializationSelection.TargetKind == 1
+                                ? initializationSelection.ArrayType
+                                : initializationSelection.ElementType;
+                        if (!NativeFixedArrayTypes.IsType(emptyArrayType))
                         {
                             throw Invalid(
-                                "The F+S initializer index register is invalid.");
+                                "The A2E SemanticStore does not target an empty array type.");
                         }
 
-                        selectedElementIndex = registerIndex.Bits;
-                    }
-                    else if (initializationSelection.IndexKind == 2)
-                    {
-                        if (!localConstantByHome.TryGetValue(
-                                initializationSelection.IndexHome,
-                                out var homeIndex)
-                            || homeIndex < 0)
+                        var emptyArrayLayout = nativeFixedArrayTypes[
+                            NativeFixedArrayTypes.Index(emptyArrayType)];
+                        if (emptyArrayLayout.ElementCount != 0
+                            || emptyArrayLayout.ByteExtent != 0
+                            || initializationSelection.TargetKind is not (1 or 3)
+                            || localVariableByHome[
+                                initializationSelection.BaseHome] != -1)
                         {
                             throw Invalid(
-                                "The F+S initializer index Home is invalid.");
+                                "The A2E SemanticStore does not initialize a vacant empty array.");
                         }
 
-                        selectedElementIndex = checked((ulong)homeIndex);
+                        var emptyInitialization
+                            = new BoundNativeFixedArrayInitialization(
+                                new BoundNativeFixedArrayLayout(
+                                    emptyArrayType, emptyArrayLayout.ElementType,
+                                    emptyArrayLayout.ElementCount,
+                                    emptyArrayLayout.ElementStride,
+                                    emptyArrayLayout.ByteExtent,
+                                    emptyArrayLayout.Alignment,
+                                    emptyArrayLayout.RequiredAlignment),
+                                [], default);
+                        if (initializationSelection.TargetKind == 1)
+                        {
+                            if (initializationSelection.ElementCount != 0)
+                            {
+                                throw Invalid(
+                                    "The A2E Home selection has an invalid element count.");
+                            }
+
+                            var emptyArrayHome
+                                = initializationSelection.BaseHome;
+                            if ((uint)emptyArrayHome >= (uint)body.HomeCount
+                                || body.HomeMap[emptyArrayHome * 8] != 3)
+                            {
+                                throw Invalid(
+                                    "The A2E Home selection has no local Home.");
+                            }
+
+                            var emptyArrayVariable = variables.Count;
+                            localVariableByHome[emptyArrayHome]
+                                = emptyArrayVariable;
+                            variables.Add(new BoundVariable(
+                                $"__trrm_home_{emptyArrayHome}",
+                                emptyArrayType,
+                                body.HomeMap[(emptyArrayHome * 8) + 1] != 0,
+                                default));
+                            statements.Add(new BoundLocal(
+                                emptyArrayVariable, emptyInitialization,
+                                default));
+                        }
+                        else
+                        {
+                            var initializedArrayHome
+                                = initializationSelection.BaseHome;
+                            var selectedElementIndex
+                                = ReadArrayInitializationElementIndex(
+                                    initializationSelection, body,
+                                    registerConstants, localConstantByHome);
+                            if (initializationSelection.ElementCount == 0
+                                || selectedElementIndex
+                                    >= initializationSelection.ElementCount)
+                            {
+                                throw Invalid(
+                                    "The A2E child initialization has an invalid array index.");
+                            }
+
+                            if (!arrayInitializationElementsByHome.TryGetValue(
+                                    initializedArrayHome,
+                                    out var initializedElements))
+                            {
+                                initializedElements = [];
+                                arrayInitializationElementsByHome.Add(
+                                    initializedArrayHome,
+                                    initializedElements);
+                            }
+                            if (selectedElementIndex
+                                    != (ulong)initializedElements.Count
+                                || body.HomeMap[initializedArrayHome * 8] != 3)
+                            {
+                                throw Invalid(
+                                    "The A2E child initializations are not complete and source-ordered.");
+                            }
+
+                            initializedElements.Add(emptyInitialization);
+                            if ((ulong)initializedElements.Count
+                                == initializationSelection.ElementCount)
+                            {
+                                AddInitializedArrayLocal(
+                                    initializationSelection.ArrayType,
+                                    initializedArrayHome,
+                                    initializationSelection.ElementCount,
+                                    initializedElements, body,
+                                    nativeFixedArrayTypes,
+                                    localVariableByHome, variables,
+                                    statements);
+                                _ = arrayInitializationElementsByHome.Remove(
+                                    initializedArrayHome);
+                            }
+                        }
                     }
                     else
                     {
-                        throw Invalid(
-                            "The F+S initializer has an unsupported index selector.");
+                        if (initializationSelection.TargetKind != 3
+                            || initializationSelection.ElementCount == 0
+                            || localVariableByHome[
+                                initializationSelection.BaseHome] != -1
+                            || !TryGetContextualConstant(
+                                checked((byte)sourceRegister),
+                                initializationSelection.ElementType,
+                                out var initializationValue))
+                        {
+                            throw Invalid(
+                                "The F+S SemanticStore does not initialize its selected array element.");
+                        }
+
+                        var initializedArrayHome
+                            = initializationSelection.BaseHome;
+                        var selectedElementIndex
+                            = ReadArrayInitializationElementIndex(
+                                initializationSelection, body,
+                                registerConstants, localConstantByHome);
+
+                        if (selectedElementIndex
+                                != (ulong)GetArrayInitializationElementCount(
+                                    initializedArrayHome,
+                                    arrayInitializationElementsByHome)
+                            || selectedElementIndex
+                                >= initializationSelection.ElementCount
+                            || body.HomeMap[initializedArrayHome * 8] != 3)
+                        {
+                            throw Invalid(
+                                "The F+S array element initializations are not complete and source-ordered.");
+                        }
+
+                        if (!arrayInitializationElementsByHome.TryGetValue(
+                                initializedArrayHome,
+                                out var initializedElements))
+                        {
+                            initializedElements = [];
+                            arrayInitializationElementsByHome.Add(
+                                initializedArrayHome, initializedElements);
+                        }
+                        initializedElements.Add(new BoundConstant(
+                            initializationValue,
+                            initializationSelection.ElementType, default));
+                        if ((ulong)initializedElements.Count
+                            == initializationSelection.ElementCount)
+                        {
+                            AddInitializedArrayLocal(
+                                initializationSelection.ArrayType,
+                                initializedArrayHome,
+                                initializationSelection.ElementCount,
+                                initializedElements, body,
+                                nativeFixedArrayTypes, localVariableByHome,
+                                variables, statements);
+                            _ = arrayInitializationElementsByHome.Remove(
+                                initializedArrayHome);
+                        }
                     }
 
-                    if (!arrayInitializationElementsByHome.TryGetValue(
-                            initializedArrayHome, out var initializedElements))
-                    {
-                        initializedElements = [];
-                        arrayInitializationElementsByHome.Add(
-                            initializedArrayHome, initializedElements);
-                    }
-                    if (selectedElementIndex
-                            != (ulong)initializedElements.Count
-                        || selectedElementIndex
-                            >= initializationSelection.ElementCount
-                        || body.HomeMap[initializedArrayHome * 8] != 3)
-                    {
-                        throw Invalid(
-                            "The F+S array element initializations are not complete and source-ordered.");
-                    }
-
-                    initializedElements.Add(new BoundConstant(
-                        initializationValue,
-                        initializationSelection.ElementType, default));
-                    if ((ulong)initializedElements.Count
-                        == initializationSelection.ElementCount)
-                    {
-                        var initializedArrayLayout
-                            = nativeFixedArrayTypes[
-                                NativeFixedArrayTypes.Index(
-                                    initializationSelection.ArrayType)];
-                        var initializedArrayVariable = variables.Count;
-                        localVariableByHome[initializedArrayHome]
-                            = initializedArrayVariable;
-                        variables.Add(new BoundVariable(
-                            $"__trrm_home_{initializedArrayHome}",
-                            initializationSelection.ArrayType,
-                            body.HomeMap[(initializedArrayHome * 8) + 1] != 0,
-                            default));
-                        statements.Add(new BoundLocal(
-                            initializedArrayVariable,
-                            new BoundNativeFixedArrayInitialization(
-                                new BoundNativeFixedArrayLayout(
-                                    initializationSelection.ArrayType,
-                                    initializedArrayLayout.ElementType,
-                                    initializedArrayLayout.ElementCount,
-                                    initializedArrayLayout.ElementStride,
-                                    initializedArrayLayout.ByteExtent,
-                                    initializedArrayLayout.Alignment,
-                                    initializedArrayLayout.RequiredAlignment),
-                                [.. initializedElements],
-                                default),
-                            default));
-                        _ = arrayInitializationElementsByHome.Remove(
-                            initializedArrayHome);
-                    }
                     _ = placeSelectionsByRegister.Remove(placeRegister);
                     break;
 
@@ -1818,6 +1920,7 @@ public static partial class TrRmExecutableCompiler
     private static NativeArrayPlaceSelectionFacts
         ReadForeignInvocationArrayPlaceSelection(
             TrRmRegisterBodyReader body, TrRmTypeSpecTableReader typeSpecs,
+            TrRmTargetProfileTableReader targetProfiles,
             TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
             IReadOnlyDictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
             ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
@@ -1842,21 +1945,107 @@ public static partial class TrRmExecutableCompiler
         var indexKind = payload[8];
         var targetRefKind = payload[9];
         var indexIndex = BinaryPrimitives.ReadUInt16LittleEndian(payload[10..]);
+        var targetRef = BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]);
         var layoutRow = BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]);
         var referentTypeMapIndex
             = BinaryPrimitives.ReadUInt16LittleEndian(payload[16..]);
-        if (targetKind != 3 || accessKind is < 1 or > 3
-            || destinationKind != 1
+        if (destinationKind != 1
             || selectedRegister != destinationRegister
+            || payload[17] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(payload[18..]) != 0)
+        {
+            throw Invalid("The F+S PlaceSelection shape is unsupported.");
+        }
+
+        if (targetKind == 1)
+        {
+            if (!body.Schema
+                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                || accessKind != 3 || baseKind != 0 || baseHome != 0
+                || indexKind != 0 || targetRefKind != 0 || indexIndex != 0
+                || targetRef >= (uint)body.HomeCount)
+            {
+                throw Invalid(
+                    "The A2E Home PlaceSelection shape is unsupported.");
+            }
+
+            var homeIndex = checked((int)targetRef);
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            var emptyArrayTypeSpecRef = ReadForeignInvocationBodyTypeSpec(body,
+                BinaryPrimitives.ReadUInt16LittleEndian(home[2..]));
+            var arrayTypeReference = typeSpecs.GetTypeSpecRef(
+                emptyArrayTypeSpecRef);
+            if (home[0] != 3 || !arrayTypeReference.IsRow
+                || arrayTypeReference.Form != 0x11
+                || !arrayTypeByTypeSpecRow.TryGetValue(
+                    arrayTypeReference.Row, out var emptyArrayType)
+                || !NativeFixedArrayTypes.IsType(emptyArrayType)
+                || !typeSpecs.TryGetFixedInlineArray(
+                    (uint)arrayTypeReference.Row,
+                    out var emptyElementTypeSpecRef,
+                    out var emptyElementCount)
+                || emptyElementCount != 0
+                || !targetProfiles.TryGetProfile(
+                    TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                    TrRmTargetProfileTableReader
+                        .WindowsX64NativeProfileRuleRevision,
+                    out var profileRow))
+            {
+                throw Invalid(
+                    "The A2E Home PlaceSelection does not name an empty local array.");
+            }
+
+            var emptyArrayLayoutRow = fixedArrayLayouts.FindRow(ownerModule,
+                (uint)arrayTypeReference.Row, (uint)profileRow);
+            if (emptyArrayLayoutRow == 0)
+            {
+                throw Invalid(
+                    "The A2E Home PlaceSelection has no exact fixed-array layout.");
+            }
+
+            var emptyArrayLayout = fixedArrayLayouts.GetRow(
+                emptyArrayLayoutRow);
+            var emptyArrayDefinition = nativeFixedArrayTypes[
+                NativeFixedArrayTypes.Index(emptyArrayType)];
+            var emptyElementType = ReadForeignInvocationType(typeSpecs,
+                emptyElementTypeSpecRef, nativePointerTypeDefinitions,
+                signatureIndexByAnchorMethod, structureTypeByTypeDef,
+                arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
+            if (emptyArrayLayout.OwnerModuleRow != ownerModule
+                || emptyArrayLayout.ArrayTypeSpecRow
+                    != arrayTypeReference.Row
+                || emptyArrayLayout.ByteExtent != 0
+                || emptyArrayLayout.Alignment == 0
+                || emptyArrayDefinition.ElementType != emptyElementType
+                || emptyArrayDefinition.ElementCount != 0
+                || emptyArrayDefinition.ElementStride
+                    != emptyArrayLayout.ElementStride
+                || emptyArrayDefinition.ByteExtent
+                    != emptyArrayLayout.ByteExtent
+                || emptyArrayDefinition.Alignment
+                    != emptyArrayLayout.Alignment
+                || !typeSpecs.AreEquivalentTypeSpecRefs(
+                    ReadForeignInvocationBodyTypeSpec(body,
+                        referentTypeMapIndex), emptyArrayTypeSpecRef))
+            {
+                throw Invalid(
+                    "The A2E Home PlaceSelection does not match its empty-array layout.");
+            }
+
+            return new NativeArrayPlaceSelectionFacts(recordIndex,
+                destinationRegister, targetKind, accessKind, homeIndex, 0,
+                -1, -1, arrayTypeReference.Row, emptyArrayLayoutRow,
+                emptyArrayType, emptyElementType, 0);
+        }
+
+        if (targetKind != 3 || accessKind is < 1 or > 3
             || baseKind != 2 || baseHome >= body.HomeCount
             || indexKind is not (1 or 2)
             || (indexKind == 1
                 ? indexIndex > 13
                 : indexIndex >= body.HomeCount)
             || targetRefKind != 3 || layoutRow == 0
-            || layoutRow > (uint)fixedArrayLayouts.Count
-            || payload[17] != 0
-            || BinaryPrimitives.ReadUInt16LittleEndian(payload[18..]) != 0)
+            || layoutRow > (uint)fixedArrayLayouts.Count)
         {
             throw Invalid("The F+S PlaceSelection shape is unsupported.");
         }
@@ -1930,9 +2119,89 @@ public static partial class TrRmExecutableCompiler
         }
 
         return new NativeArrayPlaceSelectionFacts(recordIndex,
-            destinationRegister, accessKind, baseHome, indexKind,
+            destinationRegister, targetKind, accessKind, baseHome, indexKind,
             indexHome, indexRegister, fixedArrayLayout.ArrayTypeSpecRow,
             checked((int)layoutRow), arrayType, elementType, elementCount);
+    }
+
+    private static ulong ReadArrayInitializationElementIndex(
+        NativeArrayPlaceSelectionFacts selection,
+        TrRmRegisterBodyReader body,
+        Dictionary<int, NativeAddressRegisterConstant> registerConstants,
+        Dictionary<int, long> localConstantByHome)
+    {
+        if (selection.IndexKind == 1)
+        {
+            if (!registerConstants.TryGetValue(selection.IndexRegister,
+                    out var registerIndex)
+                || registerIndex.Type != PrimitiveType.Int32
+                || registerIndex.Bits > int.MaxValue)
+            {
+                throw Invalid(
+                    "The F+S initializer index register is invalid.");
+            }
+
+            return registerIndex.Bits;
+        }
+
+        if (selection.IndexKind == 2
+            && (uint)selection.IndexHome < (uint)body.HomeCount
+            && localConstantByHome.TryGetValue(selection.IndexHome,
+                out var homeIndex)
+            && homeIndex >= 0)
+        {
+            return checked((ulong)homeIndex);
+        }
+
+        throw Invalid("The F+S initializer has an unsupported index selector.");
+    }
+
+    private static int GetArrayInitializationElementCount(int home,
+        Dictionary<int, List<BoundExpression>> elementsByHome)
+        => elementsByHome.TryGetValue(home, out var elements)
+            ? elements.Count : 0;
+
+    private static void AddInitializedArrayLocal(PrimitiveType arrayType,
+        int home, ulong elementCount, List<BoundExpression> elements,
+        TrRmRegisterBodyReader body,
+        ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
+        int[] localVariableByHome,         ImmutableArray<BoundVariable>.Builder variables,
+        ImmutableArray<BoundStatement>.Builder statements)
+    {
+        if (!NativeFixedArrayTypes.IsType(arrayType)
+            || (uint)home >= (uint)body.HomeCount
+            || body.HomeMap[home * 8] != 3
+            || localVariableByHome[home] != -1)
+        {
+            throw Invalid("The F+S array Home cannot be initialized.");
+        }
+
+        var arrayIndex = NativeFixedArrayTypes.Index(arrayType);
+        if ((uint)arrayIndex >= (uint)nativeFixedArrayTypes.Length)
+        {
+            throw Invalid("The F+S array initialization type is invalid.");
+        }
+
+        var layout = nativeFixedArrayTypes[arrayIndex];
+        if (layout.ElementCount != elementCount
+            || (ulong)elements.Count != elementCount)
+        {
+            throw Invalid(
+                "The F+S array initialization does not provide every element.");
+        }
+
+        var variable = variables.Count;
+        localVariableByHome[home] = variable;
+        variables.Add(new BoundVariable($"__trrm_home_{home}", arrayType,
+            body.HomeMap[(home * 8) + 1] != 0, default));
+        statements.Add(new BoundLocal(variable,
+            new BoundNativeFixedArrayInitialization(
+                new BoundNativeFixedArrayLayout(arrayType,
+                    layout.ElementType, layout.ElementCount,
+                    layout.ElementStride, layout.ByteExtent,
+                    layout.Alignment, layout.RequiredAlignment),
+                [.. elements], default),
+            default));
     }
 
     private static bool TryGetContextualConstant(byte sourceRegister,
@@ -2168,8 +2437,9 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetTypeDefRange(selectedModuleRow);
         var (moduleRefStart, moduleRefEnd)
             = tables.Modules.GetModuleRefRange(selectedModuleRow);
-        if (tables.Schema
-                != TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+        if (tables.Schema is not (
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
             || selectedModuleRow <= 0
             || selectedModuleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd <= typeDefStart

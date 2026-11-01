@@ -45,12 +45,14 @@ usage errors, and a failed selected emission does not replace the output.
 The public `EmitStandard` API also selects the unapproved
 `trrm/1-draft-foreign-invocation-contracts-1` (F) and
 `trrm/1-draft-foreign-invocation-storage-addresses-1` (F+S) and
-`trrm/1-draft-foreign-invocation-storage-fixed-arrays-2` (A2) identities.
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-2` (A2),
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1`
+(A2E) identities.
 The CLI does not accept an explicit `NativeCoreRegistration` input, so it
 cannot author the NativeImport source required by these bounded producers.
 Artifact commands accept exact per-artifact F or F+S schema identities and a
 root Module identity, plus repeatable explicitly selected provider
-schema/path pairs including A2; they preflight selections before reading
+schema/path pairs including A2 and A2E; they preflight selections before reading
 artifacts, and the Development default remains unchanged. Exact A3 selection
 uses `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`; the
 flag-free `...-3` identity is not an alias. For an A3 root only, marked
@@ -61,9 +63,12 @@ and `TRM5007`/2 (deterministic resource refusal). A2 retains its existing
 diagnostics. These A3-only codes and the host resource envelope are
 provisional candidates under the unapproved
 [A3 failure-class proposal](../proposals/standard-trrm-a3-layout-failure-classes.md),
-not `terrum.cli/1` assignments. The A2 CLI route is currently qualified only
-for the inherited scalar F+S path; A2 array metadata and PlaceSelection rows
-are not source-free executable support. The
+not `terrum.cli/1` assignments. The artifact-command selectors include exact A2 and A2E identities. Source-free
+loading reconstructs the exercised A2 positive-count scalar initialization and
+A2E direct/nested empty-array initialization paths; an A2E artifact also passes
+the CLI PE-build path. These checks establish reconstruction and emission, not
+native execution or zero-extent backing. Other element values and complete
+JIT/AOT runtime qualification remain open. The
 bounded F route runs/builds direct NativeImport
 executables and emits direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected

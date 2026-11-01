@@ -184,32 +184,51 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2",
-        false)]
+        false, false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1",
+        false, true)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
-        true)]
+        true, false)]
     public void FixedArraySchemaSelectionPreservesStorageAddressLoading(
-        string schemaIdentity, bool usesGenericSchema)
+        string schemaIdentity, bool usesGenericSchema,
+        bool usesEmptyInitializationSchema)
     {
         const string moduleIdentity = "native-address-fixed-array-schema";
         var expectedSchema = usesGenericSchema
             ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-            : TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+            : usesEmptyInitializationSchema
+                ? TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                : TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
         var artifact = CreateStorageAddressArtifact(moduleIdentity,
             schemaIdentity);
-        var index = expectedSchema
-            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-            ? TrRmArtifactIndex
-                .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
-            : TrRmArtifactIndex
-                .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
-        var tables = expectedSchema
-            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-            ? TrRmStructuralMetadataValidator
-                .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
-                    index)
-            : TrRmStructuralMetadataValidator
+        var index = expectedSchema switch
+        {
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                => TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                        artifact),
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                => TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                        artifact),
+            _ => TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyDraft(artifact),
+        };
+        var tables = expectedSchema switch
+        {
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
+                => TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                        index),
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                => TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
+                        index),
+            _ => TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                    index);
+                    index),
+        };
         Assert.That(tables.Schema, Is.EqualTo(expectedSchema));
         Assert.That(tables.FixedArrayLayouts.Count, Is.Zero);
         var caller = 0;
@@ -251,6 +270,145 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             Is.Not.Null);
         Assert.That(loaded.Functions.Single(static function =>
             function.Name == "Main").Body, Is.Not.Null);
+    }
+
+    [Test]
+    public void StandardA2EInitializesEmptyLocalAndRejectsTheRecordUnderA2()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+        const string moduleIdentity = "a2e-empty-array-initialization";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                [uint32; 0] empty = [];
+                int32 zeroIndex = 0;
+                mut [[uint32; 0]; 2] nested = [[], []];
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var program = compilation.Program!;
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+                "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2", 1));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                        artifact));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(2));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        AssertHomeFirstUseTypeMap(body);
+        var homePlaceSelections = 0;
+        var elementPlaceSelections = 0;
+        var nullaryStores = 0;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] == 0x04 && record[4] == 1)
+            {
+                homePlaceSelections++;
+            }
+            else if (record[0] == 0x04 && record[4] == 3)
+            {
+                elementPlaceSelections++;
+            }
+            else if (record[0] == 0x05 && record[5] == 0)
+            {
+                nullaryStores++;
+                Assert.That(record[6], Is.EqualTo(1));
+                Assert.That(record[7], Is.Zero);
+                Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                    record[10..]), Is.Zero);
+            }
+        }
+        Assert.That(homePlaceSelections, Is.EqualTo(1));
+        Assert.That(elementPlaceSelections, Is.EqualTo(2));
+        Assert.That(nullaryStores, Is.EqualTo(3));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var emptyInitializations = new List<BoundNativeFixedArrayInitialization>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayInitialization initialization
+                    && initialization.Layout.ElementCount == 0)
+                {
+                    emptyInitializations.Add(initialization);
+                }
+            }), Is.True);
+        Assert.That(emptyInitializations, Has.Count.EqualTo(3));
+        Assert.That(emptyInitializations.All(static initialization =>
+            initialization.Elements.IsEmpty), Is.True);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+
+        var a2Tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        var a2CallerRow = 0;
+        for (var row = 1; row <= a2Tables.Methods.Count; row++)
+        {
+            if (a2Tables.Methods.GetName(row) == "Main")
+            {
+                a2CallerRow = row;
+                break;
+            }
+        }
+        Assert.That(a2CallerRow, Is.GreaterThan(0));
+        var rejectedByA2 = false;
+        try
+        {
+            a2Tables.ValidateRegisterBodyMapsForMethod(a2CallerRow);
+        }
+        catch (InvalidDataException)
+        {
+            rejectedByA2 = true;
+        }
+        Assert.That(rejectedByA2, Is.True);
     }
 
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]

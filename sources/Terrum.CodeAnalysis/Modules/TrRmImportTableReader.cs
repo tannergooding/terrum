@@ -113,8 +113,8 @@ public readonly ref struct TrRmImportTableReader
         _resourceLedger = resourceLedger;
         _resourceLedger?.ConsumeWork((ulong)recordCount);
         var allowsTypeDefAliases = profileAware
-            && (schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft);
+            && (schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft);
         if (allowsTypeDefAliases)
         {
             resourceLedger?.ConsumeWork(
