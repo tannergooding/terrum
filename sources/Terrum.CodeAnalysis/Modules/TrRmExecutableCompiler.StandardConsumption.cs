@@ -80,13 +80,13 @@ public static partial class TrRmExecutableCompiler
 
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity,
-            verifySemantics: true, out var providerBinding,
+            verifySemantics: true, out var providerBindings,
             out var typeProviderBindings, out var moduleValidation,
             out var a3LayoutResourceLedger);
         return new TrRmStandardNativeBindingPlan(program, moduleIdentity,
             artifacts, schemaIdentities,
             moduleValidation.Modules, moduleValidation.RootModuleRow,
-            operation, runtimePolicy, providerBinding,
+            operation, runtimePolicy, providerBindings,
             typeProviderBindings, a3LayoutResourceLedger);
     }
 
@@ -195,7 +195,8 @@ public static partial class TrRmExecutableCompiler
     private static BoundProgram LoadStandardProgram(byte[][] artifacts,
         string[] schemaIdentities, string moduleIdentity,
         bool verifySemantics,
-        out TrRmStandardNativeProviderBinding? providerBinding,
+        out ImmutableArray<TrRmStandardNativeProviderBinding>
+            providerBindings,
         out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         out StandardModuleValidation moduleValidation,
         out TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
@@ -210,7 +211,7 @@ public static partial class TrRmExecutableCompiler
         {
             return LoadStandardProgramCore(artifacts, schemaIdentities,
                 moduleIdentity, verifySemantics, a3LayoutResourceLedger,
-                out providerBinding, out typeProviderBindings,
+                out providerBindings, out typeProviderBindings,
                 out moduleValidation, coreExceptionIdentitySelections);
         }
         catch (Exception exception)
@@ -225,13 +226,14 @@ public static partial class TrRmExecutableCompiler
         string[] schemaIdentities, string moduleIdentity,
         bool verifySemantics,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
-        out TrRmStandardNativeProviderBinding? providerBinding,
+        out ImmutableArray<TrRmStandardNativeProviderBinding>
+            providerBindings,
         out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         out StandardModuleValidation moduleValidation,
         ImmutableArray<CoreExceptionIdentitySelection>
             coreExceptionIdentitySelections = default)
     {
-        providerBinding = null;
+        providerBindings = [];
         typeProviderBindings = [];
         var includesRegisterExceptionRegions
             = schemaIdentities.Contains(
@@ -334,7 +336,8 @@ public static partial class TrRmExecutableCompiler
             .Where(static binding => binding.ConsumerArtifactIndex == 0)
             .Select(static binding => binding.ImportRow)
             .ToHashSet();
-        var methodImportRow = 0;
+        var methodImportRows = new List<int>();
+        var importedMethodRows = new HashSet<int>();
         var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
         for (var importRow = 1; importRow <= tables.Imports.Count;
             importRow++)
@@ -351,17 +354,42 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
-            if (definitionKind == 0x16 && methodImportRow == 0)
+            if (definitionKind == 0x16)
             {
-                methodImportRow = importRow;
+                var targetMethodRow = checked((int)
+                    (importedDefinition & 0x00FF_FFFF));
+                if (!tables.StandardNativeImports.HasImportForMethod(
+                        targetMethodRow)
+                    || !importedMethodRows.Add(targetMethodRow))
+                {
+                    throw Invalid(
+                        "A retained MethodDef Import has no unique NativeImport expectation.");
+                }
+
+                methodImportRows.Add(importRow);
                 var importModuleRefRow = tables.Imports
                     .GetModuleRefForImportRow(importRow);
+                if (tables.ModuleRefs.GetOwnerModule(importModuleRefRow)
+                    != rootModuleRow)
+                {
+                    throw Invalid(
+                        "A retained MethodDef Import is not owned by the selected root Module.");
+                }
+
                 moduleRefsUsed[importModuleRefRow] = true;
                 continue;
             }
 
             throw Unsupported(
-                "The bounded F consumer supports A2 array TypeDef Imports and one NativeImport MethodDef target.");
+                "The bounded F consumer supports A2 array TypeDef Imports and NativeImport MethodDef targets only.");
+        }
+
+        if (methodImportRows.Count > 1
+            && !StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardForeignInvocationSchemaIdentity))
+        {
+            throw Unsupported(
+                "Multiple root MethodDef Imports are supported only by the exact F schema.");
         }
 
         var (rootModuleRefStart, rootModuleRefEnd)
@@ -376,7 +404,7 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (methodImportRow == 0)
+        if (methodImportRows.Count == 0)
         {
             var loadedProgram = LoadForeignInvocationDraftNativeAddressLibrary(
                 artifacts[0], rootModuleRow, null, verifySemantics,
@@ -388,65 +416,87 @@ public static partial class TrRmExecutableCompiler
                 typeProviderBindings);
         }
 
-        var expectedDefinition = tables.Imports
-            .GetExpectedDefinitionForImportRow(methodImportRow);
-
-        var targetMethodRow = checked((int)(expectedDefinition & 0x00FF_FFFF));
-        if (!tables.StandardNativeImports.HasImportForMethod(targetMethodRow)
-            || !tables.Imports.TryGetExpectedBinding(expectedDefinition,
-                out var expectedBinding))
+        var selectedModuleImports = new Dictionary<int, BoundModuleImport>(
+            methodImportRows.Count);
+        var providerBindingsBuilder
+            = ImmutableArray.CreateBuilder<TrRmStandardNativeProviderBinding>(
+                methodImportRows.Count);
+        foreach (var importRow in methodImportRows)
         {
-            throw Invalid("The NativeAddress target has no retained NativeImport expectation.");
+            var expectedDefinition = tables.Imports
+                .GetExpectedDefinitionForImportRow(importRow);
+            var targetMethodRow = checked((int)
+                (expectedDefinition & 0x00FF_FFFF));
+            if (!tables.Imports.TryGetExpectedBinding(expectedDefinition,
+                    out var expectedBinding))
+            {
+                throw Invalid(
+                    "A retained NativeImport has no original provider expectation.");
+            }
+
+            var moduleRefRow
+                = tables.Imports.GetModuleRefForImportRow(importRow);
+            var moduleRefIdentity
+                = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
+            var (moduleRefTargetRequirement, moduleRefRuntimePolicy)
+                = tables.ModuleRefs.GetRequirements(moduleRefRow);
+            if (!StringComparer.Ordinal.Equals(moduleRefIdentity,
+                    expectedBinding.ProducerIdentity)
+                || moduleRefTargetRequirement
+                    != expectedBinding.TargetRequirement
+                || moduleRefRuntimePolicy != expectedBinding.RuntimePolicy)
+            {
+                throw Invalid(
+                    "A retained ModuleRef and Import context differ.");
+            }
+
+            if (StringComparer.Ordinal.Equals(
+                    tables.Modules.GetIdentity(rootModuleRow),
+                    expectedBinding.ProducerIdentity))
+            {
+                throw Unsupported(
+                    "The bounded F consumer does not permit the selected root Module to satisfy its own Import.");
+            }
+
+            var (providerArtifactIndex, providerArtifact,
+                providerModuleRow)
+                = FindSelectedProviderModule(artifacts,
+                    moduleValidation.Modules, rootModuleRow,
+                    expectedBinding.ProducerIdentity);
+            var (providerMethodRow, providerLibraryName,
+                providerExportName)
+                = ValidateNativeImportProvider(tables, targetMethodRow,
+                    expectedBinding, providerArtifact, providerModuleRow,
+                    schemaIdentities[providerArtifactIndex],
+                    a3LayoutResourceLedger);
+            if (!selectedModuleImports.TryAdd(targetMethodRow,
+                    new BoundModuleImport(expectedBinding.ProducerIdentity,
+                        expectedBinding.ExportKey,
+                        expectedBinding.TargetRequirement,
+                        expectedBinding.RuntimePolicy)))
+            {
+                throw Invalid(
+                    "A root NativeImport has more than one selected provider binding.");
+            }
+
+            providerBindingsBuilder.Add(
+                new TrRmStandardNativeProviderBinding(
+                    tables.Methods.GetName(targetMethodRow),
+                    expectedBinding.ProducerIdentity, expectedBinding.ExportKey,
+                    expectedBinding.TargetRequirement,
+                    expectedBinding.RuntimePolicy, rootModuleRow,
+                    importRow, moduleRefRow, targetMethodRow,
+                    providerArtifactIndex,
+                    providerModuleRow, providerMethodRow,
+                    providerLibraryName, providerExportName));
         }
 
-        var moduleRefRow
-            = tables.Imports.GetModuleRefForImportRow(methodImportRow);
-        if (tables.ModuleRefs.GetOwnerModule(moduleRefRow) != rootModuleRow)
-        {
-            throw Invalid("The retained Import is not owned by the selected root Module.");
-        }
-        var moduleRefIdentity
-            = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
-        var (moduleRefTargetRequirement, moduleRefRuntimePolicy)
-            = tables.ModuleRefs.GetRequirements(moduleRefRow);
-        if (!StringComparer.Ordinal.Equals(moduleRefIdentity,
-                expectedBinding.ProducerIdentity)
-            || moduleRefTargetRequirement != expectedBinding.TargetRequirement
-            || moduleRefRuntimePolicy != expectedBinding.RuntimePolicy)
-        {
-            throw Invalid("The retained ModuleRef and Import contexts differ.");
-        }
-
-        if (StringComparer.Ordinal.Equals(
-                tables.Modules.GetIdentity(rootModuleRow),
-                expectedBinding.ProducerIdentity))
-        {
-            throw Unsupported(
-                "The bounded F consumer does not permit the selected root Module to satisfy its own Import.");
-        }
-
-        var (providerArtifactIndex, providerArtifact, providerModuleRow)
-            = FindSelectedProviderModule(artifacts, moduleValidation.Modules,
-                rootModuleRow, expectedBinding.ProducerIdentity);
-        var (providerMethodRow, providerLibraryName, providerExportName)
-            = ValidateNativeImportProvider(tables,
-            targetMethodRow, expectedBinding, providerArtifact,
-            providerModuleRow, schemaIdentities[providerArtifactIndex],
-            a3LayoutResourceLedger);
-        var moduleImport = new BoundModuleImport(
-            expectedBinding.ProducerIdentity, expectedBinding.ExportKey,
-            expectedBinding.TargetRequirement, expectedBinding.RuntimePolicy);
         var program = LoadForeignInvocationDraftNativeAddressLibrary(
-            artifacts[0], rootModuleRow, moduleImport, verifySemantics,
+            artifacts[0], rootModuleRow, selectedModuleImports,
+            verifySemantics,
             schema: GetForeignInvocationSchema(schemaIdentities[0]),
             a3LayoutResourceLedger: a3LayoutResourceLedger);
-        providerBinding = new TrRmStandardNativeProviderBinding(
-            tables.Methods.GetName(targetMethodRow),
-            expectedBinding.ProducerIdentity, expectedBinding.ExportKey,
-            expectedBinding.TargetRequirement, expectedBinding.RuntimePolicy,
-            rootModuleRow, targetMethodRow, providerArtifactIndex,
-            providerModuleRow, providerMethodRow,
-            providerLibraryName, providerExportName);
+        providerBindings = providerBindingsBuilder.MoveToImmutable();
         return program;
     }
 

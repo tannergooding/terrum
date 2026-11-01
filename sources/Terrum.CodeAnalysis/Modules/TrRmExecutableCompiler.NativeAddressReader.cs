@@ -80,15 +80,17 @@ public static partial class TrRmExecutableCompiler
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
 
     private static BoundProgram LoadForeignInvocationDraftNativeAddressLibrary(
-        ReadOnlySpan<byte> artifact, BoundModuleImport? selectedModuleImport,
+        ReadOnlySpan<byte> artifact,
+        IReadOnlyDictionary<int, BoundModuleImport>? selectedModuleImports,
         bool verifySemantics)
         => LoadForeignInvocationDraftNativeAddressLibrary(artifact, 1,
-            selectedModuleImport, verifySemantics,
+            selectedModuleImports, verifySemantics,
             schema: TrRmArtifactSchema.ForeignInvocationDraft);
 
     private static BoundProgram LoadForeignInvocationDraftNativeAddressLibrary(
         ReadOnlySpan<byte> artifact, int selectedModuleRow,
-        BoundModuleImport? selectedModuleImport, bool verifySemantics,
+        IReadOnlyDictionary<int, BoundModuleImport>? selectedModuleImports,
+        bool verifySemantics,
         TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings
@@ -175,7 +177,7 @@ public static partial class TrRmExecutableCompiler
             ? tables.Modules.GetModuleRefRange(selectedModuleRow)
             : (0, 0);
         var selectedImportCount = 0;
-        var selectedImportRow = 0;
+        var selectedImportRows = new Dictionary<int, int>();
         if (selectedModuleIsValid)
         {
             for (var importRow = 1; importRow <= tables.Imports.Count;
@@ -187,7 +189,18 @@ public static partial class TrRmExecutableCompiler
                     == selectedModuleRow)
                 {
                     selectedImportCount++;
-                    selectedImportRow = importRow;
+                    var expectedDefinition = tables.Imports
+                        .GetExpectedDefinitionForImportRow(importRow);
+                    if ((expectedDefinition >> 24) == 0x16)
+                    {
+                        var methodRow = checked((int)
+                            (expectedDefinition & 0x00FF_FFFF));
+                        if (!selectedImportRows.TryAdd(methodRow, importRow))
+                        {
+                            throw Invalid(
+                                "A root MethodDef has more than one retained Import.");
+                        }
+                    }
                 }
             }
         }
@@ -196,7 +209,7 @@ public static partial class TrRmExecutableCompiler
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
             && tables.TypeDefs.Count != 0 && methodEnd == methodStart
-            && selectedModuleImport is null)
+            && selectedModuleImports is null)
         {
             return LoadForeignInvocationFixedArrayTypeLibrary(tables,
                 selectedModuleRow, verifySemantics, typeProviderBindings);
@@ -215,13 +228,71 @@ public static partial class TrRmExecutableCompiler
             || tables.NativeCallables.Count != 0
             || tables.NativeVTables.Count != 0
             || tables.NativeExports.Count != 0
-            || (selectedModuleImport is null
+            || (selectedModuleImports is null
                 ? moduleRefEnd != moduleRefStart || selectedImportCount != 0
-                : moduleRefEnd - moduleRefStart != 1
-                    || selectedImportCount != 1))
+                : moduleRefEnd == moduleRefStart
+                    || selectedImportCount != selectedModuleImports.Count
+                    || selectedImportRows.Count
+                        != selectedModuleImports.Count))
         {
             throw Unsupported(
                 "The source-free loader supports one caller Body, one address anchor and direct NativeImport methods under the selected profile.");
+        }
+
+        if (selectedModuleImports is not null)
+        {
+            foreach (var (methodRow, selectedModuleImport)
+                in selectedModuleImports)
+            {
+                if (!selectedImportRows.TryGetValue(methodRow,
+                        out var importRow))
+                {
+                    throw Invalid(
+                        "A selected ModuleImport has no matching root Import.");
+                }
+
+                var moduleRefRow = tables.Imports
+                    .GetModuleRefForImportRow(importRow);
+                var expectedDefinition = tables.Imports
+                    .GetExpectedDefinitionForImportRow(importRow);
+                if (expectedDefinition != (0x1600_0000u | (uint)methodRow)
+                    || moduleRefRow < moduleRefStart
+                    || moduleRefRow >= moduleRefEnd
+                    || tables.ModuleRefs.GetOwnerModule(moduleRefRow)
+                        != selectedModuleRow
+                    || !tables.Imports.TryGetExpectedBinding(
+                        expectedDefinition, out var expectedBinding))
+                {
+                    throw Invalid(
+                        "A selected ModuleImport does not match its root Import.");
+                }
+
+                var moduleRefIdentity
+                    = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
+                var (moduleRefTargetRequirement, moduleRefRuntimePolicy)
+                    = tables.ModuleRefs.GetRequirements(moduleRefRow);
+                if (!StringComparer.Ordinal.Equals(
+                        moduleRefIdentity,
+                        expectedBinding.ProducerIdentity)
+                    || moduleRefTargetRequirement
+                        != expectedBinding.TargetRequirement
+                    || moduleRefRuntimePolicy
+                        != expectedBinding.RuntimePolicy
+                    || !StringComparer.Ordinal.Equals(
+                        expectedBinding.ProducerIdentity,
+                        selectedModuleImport.ProducerIdentity)
+                    || !StringComparer.Ordinal.Equals(
+                        expectedBinding.ExportKey,
+                        selectedModuleImport.ExportKey)
+                    || expectedBinding.TargetRequirement
+                        != selectedModuleImport.TargetRequirement
+                    || expectedBinding.RuntimePolicy
+                        != selectedModuleImport.RuntimePolicy)
+                {
+                    throw Invalid(
+                        "A selected ModuleImport differs from its retained Import expectation.");
+                }
+            }
         }
 
         var callerMethodRow = 0;
@@ -259,10 +330,17 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var isMultiImportFProviderRoot
+            = schema == TrRmArtifactSchema.ForeignInvocationDraft
+                && selectedModuleImports is { Count: > 1 }
+                && selectedModuleImports.Count == nativeImportMethodRows.Count
+                && nativeImportMethodRows.All(selectedModuleImports
+                    .ContainsKey);
         if (nativeImportMethodRows.Count
                 != methodEnd - methodStart - 2
             || (nativeImportMethodRows.Count > 1
-                && !schema.UsesForeignInvocationStorageAddresses())
+                && !schema.UsesForeignInvocationStorageAddresses()
+                && !isMultiImportFProviderRoot)
             || callerMethodRow == 0 || anchorMethodRow == 0
             || callerMethodRow == anchorMethodRow
             || tables.Methods.GetOwnerType(callerMethodRow) != 0
@@ -273,6 +351,26 @@ public static partial class TrRmExecutableCompiler
             || tables.Methods.GetBodyRow(anchorMethodRow) != 0)
         {
             throw Invalid("Invalid bounded foreign-invocation method roles.");
+        }
+
+        if (isMultiImportFProviderRoot)
+        {
+            var functionNames = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var importMethodRow in nativeImportMethodRows)
+            {
+                if (!functionNames.Add(
+                        tables.Methods.GetName(importMethodRow)))
+                {
+                    throw Unsupported(
+                        "The bounded multi-Import F root requires distinct imported MethodDef names.");
+                }
+            }
+
+            if (!functionNames.Add(tables.Methods.GetName(callerMethodRow)))
+            {
+                throw Unsupported(
+                    "The bounded multi-Import F root requires the caller name to differ from every imported MethodDef name.");
+            }
         }
 
         foreach (var importMethodRow in nativeImportMethodRows)
@@ -299,36 +397,18 @@ public static partial class TrRmExecutableCompiler
                 "The NativeAddress target is not a selected direct NativeImport.");
         }
 
+        if (selectedModuleImports is not null
+            && !selectedModuleImports.ContainsKey(targetMethodRow))
+        {
+            throw Invalid(
+                "The NativeAddress target has no selected provider binding.");
+        }
+
         var entryMethodRow = tables.Modules.GetEntryMethod(selectedModuleRow);
         if (entryMethodRow != 0 && entryMethodRow != callerMethodRow)
         {
             throw Unsupported(
                 "The source-free NativeAddress loader supports the caller as the Module entry.");
-        }
-
-        if (selectedModuleImport is not null)
-        {
-            var expectedDefinition = 0x1600_0000u | (uint)targetMethodRow;
-            if (selectedImportRow == 0
-                || tables.Imports.GetExpectedDefinitionForImportRow(
-                    selectedImportRow) != expectedDefinition
-                || tables.Imports.GetModuleRefForImportRow(selectedImportRow)
-                    != moduleRefStart
-                || !tables.Imports.TryGetExpectedBinding(expectedDefinition,
-                    out var expectedBinding)
-                || !StringComparer.Ordinal.Equals(
-                    expectedBinding.ProducerIdentity,
-                    selectedModuleImport.ProducerIdentity)
-                || !StringComparer.Ordinal.Equals(expectedBinding.ExportKey,
-                    selectedModuleImport.ExportKey)
-                || expectedBinding.TargetRequirement
-                    != selectedModuleImport.TargetRequirement
-                || expectedBinding.RuntimePolicy
-                    != selectedModuleImport.RuntimePolicy)
-            {
-                throw Invalid(
-                    "The selected ModuleImport differs from the retained Import expectation.");
-            }
         }
 
         foreach (var importMethodRow in nativeImportMethodRows)
@@ -628,7 +708,11 @@ public static partial class TrRmExecutableCompiler
                         "A non-caller MethodDef has no NativeImport binding.");
                 }
 
-                var isSelectedTarget = row == targetMethodRow;
+                var selectedModuleImport
+                    = selectedModuleImports is not null
+                        && selectedModuleImports.TryGetValue(row,
+                            out var moduleImport)
+                            ? moduleImport : null;
                 function = new BoundFunction(tables.Methods.GetName(row),
                     importedTarget.ReturnType,
                     CreateVariables(importedTarget.ParameterTypes, "arg"),
@@ -637,10 +721,8 @@ public static partial class TrRmExecutableCompiler
                 {
                     DirectNativeImport
                         = directNativeImportsByMethodRow[row],
-                    ModuleImport = isSelectedTarget
-                        ? selectedModuleImport : null,
-                    IsModuleReference = isSelectedTarget
-                        && selectedModuleImport is not null,
+                    ModuleImport = selectedModuleImport,
+                    IsModuleReference = selectedModuleImport is not null,
                     IsExternal = true,
                     RequiresUnsafeCaller = true,
                     IsPrivate = flags == 0,

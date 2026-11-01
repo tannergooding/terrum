@@ -831,7 +831,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
                 artifacts, schemaIdentities, modules, 1,
                 TrRmStandardNativeOperation.EmitExecutable,
-                NativeRuntimePolicy.FailFast, null, typeBindings,
+                NativeRuntimePolicy.FailFast, [], typeBindings,
                 resourceLedger);
 
             try
@@ -888,7 +888,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
                 artifacts, schemaIdentities, modules, 1,
                 TrRmStandardNativeOperation.EmitExecutable,
-                NativeRuntimePolicy.FailFast, null, typeBindings,
+                NativeRuntimePolicy.FailFast, [], typeBindings,
                 resourceLedger);
 
             try
@@ -938,7 +938,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var plan = new TrRmStandardNativeBindingPlan(rootProgram, "Root",
             artifacts, schemaIdentities, modules, 1,
             TrRmStandardNativeOperation.EmitExecutable,
-            NativeRuntimePolicy.FailFast, null, typeBindings, null);
+            NativeRuntimePolicy.FailFast, [], typeBindings, null);
 
         var noImport = Assert.Throws<NotSupportedException>(() =>
             plan.CreateLoweringInputs(
@@ -1128,7 +1128,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var plan = new TrRmStandardNativeBindingPlan(
             rootProgram, "Root", artifacts, schemaIdentities, modules, 1,
             TrRmStandardNativeOperation.EmitExecutable,
-            NativeRuntimePolicy.FailFast, null, typeBindings,
+            NativeRuntimePolicy.FailFast, [], typeBindings,
             rootTables.A3LayoutResourceLedger);
         var ledger = rootTables.A3LayoutResourceLedger
             ?? throw new InvalidOperationException(

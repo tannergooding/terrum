@@ -887,6 +887,85 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task SelectedFMultipleProvidersRunAndBuildAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, secondProviderArtifact, _)
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateMultipleRootMethodImportArtifacts();
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-multi-provider-{Guid.NewGuid():N}");
+        var rootPath = prefix + "-root.trrm";
+        var firstProviderPath = prefix + "-first.trrm";
+        var secondProviderPath = prefix + "-second.trrm";
+        var imagePath = prefix + ".exe";
+        var retainedOutputPath = prefix + "-retained.exe";
+        byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+        try
+        {
+            await File.WriteAllBytesAsync(rootPath, rootArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(firstProviderPath,
+                firstProviderArtifact).ConfigureAwait(true);
+            await File.WriteAllBytesAsync(secondProviderPath,
+                secondProviderArtifact).ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                rootPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", rootIdentity,
+                "--trrm-provider", schemaIdentity, firstProviderPath,
+                "--trrm-provider", schemaIdentity, secondProviderPath,
+                "--json");
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", rootPath, "-o", imagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, firstProviderPath, "--trrm-provider",
+                schemaIdentity, secondProviderPath, "--json");
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(imagePath),
+                Is.GreaterThan(0));
+
+            await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
+                .ConfigureAwait(true);
+            var (rejected, rejectionOutput, rejectionError) = await RunAsync(
+                [], "build-trrm", rootPath, "-o", retainedOutputPath,
+                "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, firstProviderPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(rejected, Is.EqualTo(1),
+                $"{rejectionOutput}{Environment.NewLine}{rejectionError}");
+            Assert.That(rejectionError, Is.Empty);
+            using var rejectionDocument = JsonDocument.Parse(rejectionOutput);
+            Assert.That(rejectionDocument.RootElement.GetProperty("diagnostics")[0]
+                .GetProperty("code").GetString(), Is.EqualTo("TRM5001"));
+            Assert.That(await File.ReadAllBytesAsync(retainedOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+        }
+        finally
+        {
+            File.Delete(rootPath);
+            File.Delete(firstProviderPath);
+            File.Delete(secondProviderPath);
+            File.Delete(retainedOutputPath);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task SelectedFCoLocatedProviderRunsAndBuildsAsync()
     {
         Assume.That(OperatingSystem.IsWindows()

@@ -4376,6 +4376,211 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFMultipleImportsBindUncalledProviderBeforeLowering()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, secondProviderArtifact, _)
+            = CreateMultipleRootMethodImportArtifacts();
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var firstProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            firstProviderArtifact);
+        var secondProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            secondProviderArtifact);
+        var providers = new[] { firstProviderInput, secondProviderInput };
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        var first = loaded.Functions.Single(static function =>
+            function.Name == "First");
+        var second = loaded.Functions.Single(static function =>
+            function.Name == "Second");
+        Assert.That(first.ModuleImport!.ProducerIdentity, Is.EqualTo("First"));
+        Assert.That(second.ModuleImport!.ProducerIdentity, Is.EqualTo("Second"));
+        Assert.That(first.ModuleImport.ExportKey, Is.EqualTo("First"));
+        Assert.That(second.ModuleImport.ExportKey, Is.EqualTo("Second"));
+        Assert.That(first.DirectNativeImport!.ExportName,
+            Is.EqualTo("GetCurrentProcessId"));
+        Assert.That(second.DirectNativeImport!.ExportName,
+            Is.EqualTo("GetCurrentThreadId"));
+
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var addresses = new List<BoundNativeFunctionAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFunctionAddress address)
+                {
+                    addresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(addresses, Has.Count.EqualTo(1));
+        Assert.That(addresses[0].Function,
+            Is.EqualTo(loaded.Functions.IndexOf(first)));
+
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity, providers,
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        var (loweredProgram, nativeImports) = plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable);
+        Assert.That(nativeImports.Select(static binding =>
+                binding.FunctionName),
+            Is.EquivalentTo(["First", "Second"]));
+        Assert.That(loweredProgram.Functions.Where(static function =>
+                function.Name is "First" or "Second")
+            .All(static function => function.ModuleImport is null
+                && !function.IsModuleReference), Is.True);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity,
+                [firstProviderInput]));
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var incompatibleProvider = CreateMultipleImportProviderCompilation(
+            "Second", "GetTickCount", core);
+        var incompatibleProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity,
+            TrRmExecutableCompiler.EmitStandard(
+                incompatibleProvider.Program!, "Second", schemaIdentity, 1));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            NativeModuleCompiler.EmitStandardExecutable(rootInput,
+                rootIdentity, [firstProviderInput, incompatibleProviderInput],
+                NativeRuntimePolicy.FailFast));
+
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            rootIdentity, providers, NativeRuntimePolicy.FailFast);
+        Assert.That(image.Length, Is.GreaterThan(2));
+        Assert.That(image[0], Is.EqualTo((byte)'M'));
+        Assert.That(image[1], Is.EqualTo((byte)'Z'));
+    }
+
+    [TestCase(true, 1)]
+    [TestCase(false, 2)]
+    public void StandardFMultipleImportsPermitModuleRefReuse(
+        bool reuseModuleRef, int expectedModuleRefCount)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, _, _)
+            = CreateMultipleRootMethodImportArtifacts(
+                "GetCurrentProcessId", "First", "First", reuseModuleRef);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var firstProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            firstProviderArtifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(rootArtifact));
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(expectedModuleRefCount));
+        Assert.That(tables.Imports.Count, Is.EqualTo(2));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [firstProviderInput]);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "First").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("First"));
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Second").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("First"));
+    }
+
+    [Test]
+    public void StandardFMultipleImportsRejectSameRootMethodNames()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, secondProviderArtifact, _)
+            = CreateMultipleRootMethodImportArtifacts(
+                duplicateSecondMethodName: true);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, rootArtifact),
+                rootIdentity, [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        firstProviderArtifact),
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        secondProviderArtifact),
+                ]));
+    }
+
+    [Test]
+    public void StandardFMultipleImportsSupportThreeProviderBindings()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, secondProviderArtifact,
+            thirdProviderArtifact)
+            = CreateMultipleRootMethodImportArtifacts(importCount: 3);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providers = new[]
+        {
+            new TrRmStandardArtifactInput(schemaIdentity,
+                firstProviderArtifact),
+            new TrRmStandardArtifactInput(schemaIdentity,
+                secondProviderArtifact),
+            new TrRmStandardArtifactInput(schemaIdentity,
+                thirdProviderArtifact),
+        };
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(rootArtifact));
+        Assert.That(tables.Imports.Count, Is.EqualTo(3));
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(3));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Second").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("Second"));
+        var third = loaded.Functions.Single(static function =>
+            function.Name == "Third");
+        Assert.That(third.ModuleImport!.ProducerIdentity,
+            Is.EqualTo("Third"));
+        Assert.That(third.DirectNativeImport!.ExportName,
+            Is.EqualTo("GetTickCount"));
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity, providers,
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        var (_, nativeImports) = plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable);
+        Assert.That(nativeImports.Select(static binding =>
+                binding.FunctionName),
+            Is.EquivalentTo(["First", "Second", "Third"]));
+    }
+
+    [Test]
+    public void StandardFMultipleImportJitExecutesSelectedProvider()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, secondProviderArtifact, _)
+            = CreateMultipleRootMethodImportArtifacts();
+        var result = NativeModuleCompiler.ExecuteStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, rootArtifact),
+            rootIdentity, [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    firstProviderArtifact),
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    secondProviderArtifact),
+            ], NativeRuntimePolicy.FailFast);
+        Assert.That(result, Is.GreaterThan(0));
+    }
+
+    [Test]
     public void ReconstructsFProfileExecutableEntry()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -4418,6 +4623,316 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             loaded, moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
         Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
             Is.GreaterThan(0));
+    }
+
+    internal static (byte[] RootArtifact, byte[] FirstProviderArtifact,
+        byte[] SecondProviderArtifact, byte[] ThirdProviderArtifact)
+        CreateMultipleRootMethodImportArtifacts(
+        string secondRootImportExport = "GetCurrentThreadId",
+        string secondProducerIdentity = "Second",
+        string secondExportKey = "Second", bool reuseModuleRef = false,
+        bool duplicateSecondMethodName = false, int importCount = 2)
+    {
+        if (importCount is < 2 or > 3)
+        {
+            throw new ArgumentOutOfRangeException(nameof(importCount));
+        }
+
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var firstProvider = CreateMultipleImportProviderCompilation(
+            "First", "GetCurrentProcessId", core);
+        var secondProvider = CreateMultipleImportProviderCompilation(
+            "Second", "GetCurrentThreadId", core);
+        var thirdProvider = CreateMultipleImportProviderCompilation(
+            "Third", "GetTickCount", core);
+        var thirdDeclaration = importCount == 3
+            ? """
+              [Terrum.Interop.NativeImport(
+                  "kernel32.dll",
+                  "GetTickCount",
+                  CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+              internal extern int32 Third();
+              """
+            : string.Empty;
+        var root = Compilation.Create(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetCurrentProcessId",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern int32 First();
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "{{secondRootImportExport}}",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern int32 Second();
+
+            {{thirdDeclaration}}
+
+            int32 Main() {
+                unsafe {
+                    var callback = &First;
+                    return callback();
+                }
+            }
+            """), core);
+        Assert.That(root.HasErrors, Is.False,
+            string.Join(Environment.NewLine, root.Diagnostics));
+
+        var rootArtifact = TrRmExecutableCompiler.EmitStandard(
+            root.Program!, rootIdentity, schemaIdentity, 1);
+        var importBindings = new List<(string MethodName,
+            string ProducerIdentity, string ExportKey)>
+        {
+            ("First", "First", "First"),
+            ("Second", secondProducerIdentity, secondExportKey),
+        };
+        if (importCount == 3)
+        {
+            importBindings.Add(("Third", "Third", "Third"));
+        }
+
+        rootArtifact = AddRootMethodImports(rootArtifact, importBindings,
+            reuseModuleRef, duplicateSecondMethodName);
+
+        return (rootArtifact,
+            TrRmExecutableCompiler.EmitStandard(firstProvider.Program!,
+                "First", schemaIdentity, 1),
+            TrRmExecutableCompiler.EmitStandard(secondProvider.Program!,
+                "Second", schemaIdentity, 1),
+            TrRmExecutableCompiler.EmitStandard(thirdProvider.Program!,
+                "Third", schemaIdentity, 1));
+    }
+
+    private static Compilation CreateMultipleImportProviderCompilation(
+        string methodName, string nativeExport,
+        CompilationReference core)
+    {
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "{{nativeExport}}",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            public extern int32 {{methodName}}();
+
+            internal int32 ProviderBody() {
+                unsafe {
+                    var callback = &{{methodName}};
+                    return callback();
+                }
+            }
+            """), core);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        return compilation;
+    }
+
+    private static byte[] AddRootMethodImports(byte[] artifact,
+        IReadOnlyList<(string MethodName, string ProducerIdentity,
+            string ExportKey)> bindings, bool reuseModuleRefs,
+        bool duplicateSecondMethodName)
+    {
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        Assert.That(tables.Modules.Count, Is.EqualTo(1));
+        Assert.That(tables.ModuleRefs.Count, Is.Zero);
+        Assert.That(tables.Imports.Count, Is.Zero);
+        Assert.That(bindings, Is.Not.Empty);
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes,
+            out var moduleCount), Is.True);
+        Assert.That(index.TryGetSection(0x0016, out var methodSectionBytes,
+            out var methodCount), Is.True);
+        Assert.That(index.TryGetSection(0x0002, out _, out var stringCount),
+            Is.True);
+
+        var moduleRefCount = reuseModuleRefs
+            ? bindings.Select(static binding =>
+                binding.ProducerIdentity).Distinct(StringComparer.Ordinal)
+                .Count()
+            : bindings.Count;
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            tables.Strings, moduleRefCount, tables.Modules.TypeDefCount,
+            tables.Modules.MethodDefCount, tables.Modules.SourceFileCount,
+            tables.Features.Count);
+        var (targetRequirement, runtimePolicy)
+            = tables.Modules.GetRequirements(1);
+        var moduleRefRows = new List<TrRmModuleRefRow>();
+        var moduleRefRowByIdentity = new Dictionary<string, int>(
+            StringComparer.Ordinal);
+        var importRows = new List<TrRmImportRow>(bindings.Count);
+        foreach (var binding in bindings)
+        {
+            var producerStringRow = FindStringRow(tables.Strings,
+                stringCount, binding.ProducerIdentity);
+            var moduleRefRow = 0;
+            if (reuseModuleRefs)
+            {
+                _ = moduleRefRowByIdentity.TryGetValue(
+                    binding.ProducerIdentity, out moduleRefRow);
+            }
+
+            if (moduleRefRow == 0)
+            {
+                moduleRefRows.Add(new TrRmModuleRefRow(producerStringRow,
+                    targetRequirement, runtimePolicy));
+                moduleRefRow = moduleRefRows.Count;
+                if (reuseModuleRefs)
+                {
+                    moduleRefRowByIdentity.Add(binding.ProducerIdentity,
+                        moduleRefRow);
+                }
+            }
+
+            var expectedMethodRow = 0;
+            for (var methodRow = 1; methodRow <= tables.Methods.Count;
+                methodRow++)
+            {
+                if (tables.Methods.GetOwnerModule(methodRow) == 1
+                    && tables.Methods.GetName(methodRow)
+                        == binding.MethodName
+                    && tables.StandardNativeImports
+                        .HasImportForMethod(methodRow))
+                {
+                    if (expectedMethodRow != 0)
+                    {
+                        throw new InvalidDataException(
+                            "The test artifact has duplicate NativeImport MethodDefs.");
+                    }
+
+                    expectedMethodRow = methodRow;
+                }
+            }
+
+            Assert.That(expectedMethodRow, Is.GreaterThan(0));
+            var exportKeyStringRow = FindStringRow(tables.Strings,
+                stringCount, binding.ExportKey);
+            importRows.Add(new TrRmImportRow(moduleRefRow,
+                exportKeyStringRow,
+                0x1600_0000u | (uint)expectedMethodRow));
+        }
+
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode(moduleRefRows,
+            tables.Strings, modules);
+        var moduleRefs = new TrRmModuleRefTableReader(moduleRefBytes,
+            moduleRefRows.Count, tables.Strings, modules);
+        var importBytes = TrRmImportTableWriter.Encode(importRows,
+            tables.Strings, moduleRefs, tables.TypeDefs, tables.Methods,
+            default, default, default, default, tables.Features, modules,
+            TrRmArtifactSchema.ForeignInvocationDraft);
+        var methodBytes = methodSectionBytes.ToArray();
+        if (duplicateSecondMethodName)
+        {
+            var firstNameStringRow = FindStringRow(tables.Strings,
+                stringCount, "First");
+            var secondMethodRow = 0;
+            for (var methodRow = 1; methodRow <= tables.Methods.Count;
+                methodRow++)
+            {
+                if (tables.Methods.GetName(methodRow) == "Second"
+                    && tables.StandardNativeImports
+                        .HasImportForMethod(methodRow))
+                {
+                    secondMethodRow = methodRow;
+                    break;
+                }
+            }
+
+            Assert.That(secondMethodRow, Is.GreaterThan(0));
+            var methodRows = new List<TrRmMethodDefRow>(methodCount);
+            for (var methodRow = 1; methodRow <= methodCount; methodRow++)
+            {
+                var row = methodSectionBytes.Slice((methodRow - 1) * 28, 28);
+                var nameStringRow = checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(row[4..]));
+                if (methodRow == secondMethodRow)
+                {
+                    nameStringRow = firstNameStringRow;
+                }
+
+                methodRows.Add(new TrRmMethodDefRow(
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(row)),
+                    nameStringRow,
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        row[8..])),
+                    BinaryPrimitives.ReadUInt32LittleEndian(row[12..]),
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        row[16..])),
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        row[20..])),
+                    checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                        row[24..]))));
+            }
+
+            methodBytes = TrRmMethodDefTableWriter.Encode(methodRows,
+                tables.Strings, modules, tables.TypeDefs, tables.Signatures,
+                tables.Contracts.Count, tables.Bodies.Count);
+        }
+
+        var sections = new List<TrRmSection>(index.SectionCount + 2);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            if (kind is 0x0010 or 0x001C)
+            {
+                Assert.That(recordCount, Is.Zero);
+                continue;
+            }
+
+            sections.Add(kind == 0x0016 && duplicateSecondMethodName
+                ? new TrRmSection(kind, flags, (uint)recordCount,
+                    methodBytes)
+                : new TrRmSection(kind, flags, (uint)recordCount,
+                    bytes.ToArray()));
+        }
+
+        sections.Add(new TrRmSection(0x0010, 0,
+            (uint)moduleRefRows.Count, moduleRefBytes));
+        sections.Add(new TrRmSection(0x001C, 0,
+            (uint)importRows.Count, importBytes));
+        sections.Sort(static (left, right) =>
+            left.Kind.CompareTo(right.Kind));
+        var result = TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ForeignInvocationDraft);
+        var resultTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(result));
+        Assert.That(resultTables.ModuleRefs.Count,
+            Is.EqualTo(moduleRefRows.Count));
+        Assert.That(resultTables.Imports.Count, Is.EqualTo(importRows.Count));
+        for (var methodRow = 1; methodRow <= resultTables.Methods.Count;
+            methodRow++)
+        {
+            if (resultTables.Methods.GetBodyRow(methodRow) != 0)
+            {
+                resultTables.ValidateRegisterBodyMapsForMethod(methodRow);
+            }
+        }
+
+        return result;
+    }
+
+    private static int FindStringRow(TrRmStringTableReader strings,
+        int stringCount, string text)
+    {
+        for (var row = 1; row <= stringCount; row++)
+        {
+            if (StringComparer.Ordinal.Equals(
+                    strings.DecodeNamespace(row), text))
+            {
+                return row;
+            }
+        }
+
+        throw new InvalidDataException(
+            $"The test artifact has no String row for '{text}'.");
     }
 
     private static byte[] AddLeadingEmptyModule(byte[] artifact,

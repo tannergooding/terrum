@@ -28,6 +28,8 @@ internal sealed record TrRmStandardNativeProviderBinding(
     uint TargetRequirement,
     uint RuntimePolicy,
     int RootModuleRow,
+    int RootImportRow,
+    int RootModuleRefRow,
     int RootMethodRow,
     int ProviderArtifactIndex,
     int ProviderModuleRow,
@@ -63,7 +65,7 @@ internal sealed class TrRmStandardNativeBindingPlan
         ImmutableArray<TrRmStandardModuleSelection> modules,
         int rootModuleRow, TrRmStandardNativeOperation operation,
         NativeRuntimePolicy runtimePolicy,
-        TrRmStandardNativeProviderBinding? providerBinding,
+        ImmutableArray<TrRmStandardNativeProviderBinding> providerBindings,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
@@ -83,12 +85,12 @@ internal sealed class TrRmStandardNativeBindingPlan
         _a3LayoutResourceLedger = a3LayoutResourceLedger;
         _a3LayoutResourceLedger?.ConsumeWork(checked(
             (ulong)artifacts.Length + (ulong)schemaIdentityCount + 2UL
-            + (providerBinding is null ? 0UL : 2UL)));
+            + ((ulong)providerBindings.Length * 2UL)));
         ModuleIdentity = moduleIdentity;
         _artifacts = [.. artifacts];
         _schemaIdentities = [.. schemaIdentities];
         _modules = modules;
-        _providerBindings = providerBinding is null ? [] : [providerBinding];
+        _providerBindings = providerBindings.IsDefault ? [] : providerBindings;
         _typeProviderBindings = typeProviderBindings;
         RootModuleRow = rootModuleRow;
         Operation = operation;
@@ -281,11 +283,17 @@ internal sealed class TrRmStandardNativeBindingPlan
             }
         }
 
+        var rootImportRows = new HashSet<int>();
+        var rootMethodRows = new HashSet<int>();
         foreach (var binding in _providerBindings)
         {
             if (binding.RootModuleRow != RootModuleRow
+                || binding.RootImportRow <= 0
+                || binding.RootModuleRefRow <= 0
                 || binding.RootMethodRow < selectedRoot.MethodDefStart
-                || binding.RootMethodRow >= selectedRoot.MethodDefEnd)
+                || binding.RootMethodRow >= selectedRoot.MethodDefEnd
+                || !rootImportRows.Add(binding.RootImportRow)
+                || !rootMethodRows.Add(binding.RootMethodRow))
             {
                 throw new InvalidDataException(
                     "The Standard native binding plan has an invalid root Import origin.");

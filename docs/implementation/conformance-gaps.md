@@ -433,6 +433,22 @@ provisional schema. Active
 and [vtable](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeVTableCallTests.cs)
 cases are bounded implementation evidence, not approval.
 
+The separate unapproved F selected-provider consumer and native-lowering
+candidates now provisionally bind every root MethodDef Import to its exact
+selected leaf-provider Module/Export, retain each original expectation and
+actual origin, and preserve the single NativeAddress target. The multiple-
+Import amendment requires distinct root function names for the expanded
+multi-import case and includes uncalled Imports in pre-lowering validation.
+The final Debug fast build passed; the combined complete
+`TrRmForeignInvocationAddressEmitterTests` class and selected separate/
+co-located/multi-provider CLI tests passed 131/131 with zero skips at
+`artifacts\\tst\\Debug\\standard-multi-import-final2\\standard-multi-import-final2.trx`,
+including a three-provider import case.
+This does not admit provider chains, same-name root lowering, general source
+production/re-emission of non-target provider imports, broader schema
+compositions or the remaining accepted native contract. It is not formal
+approval or full Standard conformance.
+
 The original unapproved A1 fixed-array identity candidate was superseded for
 integrated nominal-array use by an independently drafted A2 Copy-evidence
 composition. Current A2 prototype code carries TypeSpec form `0x11`,
