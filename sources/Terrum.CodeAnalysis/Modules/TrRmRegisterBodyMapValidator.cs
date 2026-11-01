@@ -11,6 +11,7 @@ namespace Terrum.CodeAnalysis.Modules;
 internal static class TrRmRegisterBodyMapValidator
 {
     private const uint UnitTypeSpecRef = 0xF200_0000;
+    private const uint BooleanTypeSpecRef = 0xF200_0001;
 
     private static void ConsumeWork(TrRmRegisterBodyReader body,
         ulong units = 1)
@@ -1230,6 +1231,11 @@ internal static class TrRmRegisterBodyMapValidator
                         RejectNonReturningMethodMapTarget(
                             body, methodMapIndex, methods, contracts, imports);
                         break;
+                    case 0xB6:
+                    case 0xEA:
+                        ValidateExceptionFilterResult(body, instruction,
+                            registerTypes, typeSpecs);
+                        break;
                 }
 
                 if (opcode is not (0x90 or 0xE0))
@@ -1244,6 +1250,57 @@ internal static class TrRmRegisterBodyMapValidator
         }
 
         return registerTypeEntries;
+    }
+
+    private static void ValidateExceptionFilterResult(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
+        RegisterTypeState[] registerTypes,
+        TrRmTypeSpecTableReader typeSpecs)
+    {
+        if (!body.HasExceptionDirectory)
+        {
+            return;
+        }
+
+        var opcode = ReadByte(body, instruction, 0);
+        var recordIndex = opcode == 0xB6
+            ? ReadByte(body, instruction, 1)
+            : ReadUInt16(body, instruction, 2);
+        var payload = GetRecordPayload(body, recordIndex);
+        if (ReadByte(body, payload, 0) != 3)
+        {
+            return;
+        }
+
+        var valueKind = ReadByte(body, payload, 4);
+        var valueIndex = ReadUInt16(body, payload, 6);
+        uint resultTypeSpecRef;
+        if (valueKind == 1)
+        {
+            var registerType = GetRegisterTypeState(body, registerTypes,
+                valueIndex);
+            if (registerType.IsPlaceHandle)
+            {
+                throw InvalidMap();
+            }
+
+            resultTypeSpecRef = GetRegisterTypeSpecRef(body, registerType);
+        }
+        else if (valueKind == 2)
+        {
+            resultTypeSpecRef = GetTypeMapTypeSpecRef(body,
+                GetHomeTypeMapIndex(body, valueIndex));
+        }
+        else
+        {
+            throw InvalidMap();
+        }
+
+        if (!typeSpecs.AreEquivalentTypeSpecRefs(resultTypeSpecRef,
+                BooleanTypeSpecRef))
+        {
+            throw InvalidMap();
+        }
     }
 
     private static void UpdateCallSiteRegisterTypes(

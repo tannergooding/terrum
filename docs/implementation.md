@@ -981,10 +981,14 @@ producer-trust bypass. General imported-call linking and standard
 exception-region Body support are not implemented.
 The unapproved exact `B+E1` candidate now routes scalar compact Bodies through
 Standard emission/loading, source-reference creation, and CLI run/build. Its
-structural `0F`/`0A` readers do not bind or execute exception dispatch;
-Standard stream-Body production/loading, provider imports/remapping, source
-catch/filter forms, and JIT/AOT continuations remain incomplete. This candidate
-does not change current conformance. Body-local optional scalar values use
+structural `0F`/`0A` readers validate directory ownership, and the mandatory
+Body-map validator checks exact Boolean typing for `FilterComplete` values,
+including register-state liveness. Home initialization remains a
+producer/verifier obligation; exact Core/witness binding and exception
+dispatch are not implemented. Standard stream-Body production/loading,
+provider imports/remapping, source catch/filter forms, and JIT/AOT continuations
+remain incomplete. This candidate does not change current conformance.
+Body-local optional scalar values use
 independent presence and payload state, with the
 assigned optional operations covered by linear/indexed JIT and AOT tests.
 Optional floating types remain rejected, and optional `char16` is limited to

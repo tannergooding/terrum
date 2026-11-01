@@ -1719,7 +1719,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                     if (hasTarget != 0 || valueKind is not (1 or 2)
                         || valueUse != 1 || exceptionRegionCount != 1
                         || (valueKind == 1
-                            ? valueIndex > 13 : valueIndex >= HomeCount))
+                            ? valueIndex > 15 : valueIndex >= HomeCount))
                     {
                         throw InvalidBody();
                     }

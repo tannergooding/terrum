@@ -178,6 +178,31 @@ public sealed class TrRmRegisterBodyReaderTests
             records, code: [0xE8, 1, 1, 0]));
     }
 
+    [TestCase((byte)1)]
+    [TestCase((byte)2)]
+    public void RegisterExceptionFilterCompletionRequiresBooleanValue(
+        byte valueKind)
+    {
+        ValidateRegisterExceptionBodyMaps(
+            CreateRegisterExceptionFilterBody(1, valueKind, 0), 1);
+
+        AssertInvalidRegisterExceptionBodyMaps(
+            CreateRegisterExceptionFilterBody(8, valueKind, 0), 8);
+
+        if (valueKind == 1)
+        {
+            AssertInvalidRegisterExceptionBodyMaps(
+                CreateRegisterExceptionFilterBody(1, valueKind, 0,
+                    initializeRegister: false), 1);
+
+            var reservedRegister = CreateRegisterExceptionFilterBody(
+                1, valueKind, 15);
+            _ = new TrRmRegisterBodyReader(reservedRegister,
+                schema: TrRmArtifactSchema.RegisterExceptionRegionsDraft);
+            AssertInvalidRegisterExceptionBodyMaps(reservedRegister, 1);
+        }
+    }
+
     [Test]
     public void ValidatesShortInstructionMapAndRecordIndexes()
     {
@@ -1675,6 +1700,139 @@ public sealed class TrRmRegisterBodyReaderTests
         var tables = TrRmStructuralMetadataValidator.ValidateAndGetExecutionTables(
             new TrRmArtifactIndex(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static void ValidateRegisterExceptionBodyMaps(byte[] body,
+        byte parameterTypeCode)
+    {
+        var artifact = CreateRegisterExceptionFilterArtifact(body,
+            parameterTypeCode);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateRegisterExceptionRegionsDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForRegisterExceptionRegionsDraft(artifact));
+        tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static void AssertInvalidRegisterExceptionBodyMaps(byte[] body,
+        byte parameterTypeCode)
+        => Assert.Throws<InvalidDataException>(() =>
+            ValidateRegisterExceptionBodyMaps(body, parameterTypeCode));
+
+    private static byte[] CreateRegisterExceptionFilterBody(
+        byte parameterTypeCode, byte valueKind, ushort valueIndex,
+        bool initializeRegister = true)
+    {
+        var blockRegions = new byte[4 * sizeof(ushort)];
+        for (var block = 0; block < 4; block++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                blockRegions.AsSpan(block * sizeof(ushort)),
+                checked((ushort)block));
+        }
+
+        var directory = TrRmRegisterBodyRecordWriter
+            .EncodeExceptionDirectory(
+            [
+                new TrRmExceptionRegionRow(0, 0, 0, 0, 0, 0, 0),
+                new TrRmExceptionRegionRow(1, 0, 0, 1, 0, 0, 1),
+                new TrRmExceptionRegionRow(2, 0, 1, 2, 0, 0, 0),
+                new TrRmExceptionRegionRow(3, 0, 1, 3, 0, 0, 0),
+            ],
+            [new TrRmExceptionHandlerRow(1, 0, 0, 0, 0, 1, 2, 3, 0)],
+            blockRegions);
+        var filterExit = TrRmRegisterBodyRecordWriter.EncodeRegionExit(
+            3, 0, 0, valueKind, 1, valueIndex, [2]);
+        var handlerExit = TrRmRegisterBodyRecordWriter.EncodeRegionExit(
+            2, 0, 0, 0, 0, 0, [3, 1]);
+        var blockEntryState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        var records = new ReadOnlyMemory<byte>[]
+        {
+            directory,
+            blockEntryState,
+            blockEntryState,
+            blockEntryState,
+            blockEntryState,
+            filterExit,
+            handlerExit,
+        };
+        var filterCode = valueKind == 1 && initializeRegister
+            ? new byte[] { 0x13, 0, 0xB6, 5 }
+            : new byte[] { 0xB6, 5 };
+        var filterOffset = 4;
+        var handlerOffset = filterOffset + filterCode.Length;
+        var code = new byte[handlerOffset + 2];
+        code[0] = 0xB0;
+        code[1] = 1;
+        code[2] = 0xB5;
+        code[3] = 0;
+        filterCode.CopyTo(code, filterOffset);
+        code[handlerOffset] = 0xB6;
+        code[handlerOffset + 1] = 6;
+
+        var homeMap = new byte[] { 2, 0, 0, 0, 0, 0, 0, 0 };
+        var typeMap = new byte[sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(typeMap,
+            0xF200_0000u | parameterTypeCode);
+        return TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
+            ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
+            ReadOnlyMemory<byte>.Empty,
+            [
+                new TrRmRegisterBodyBlock(0, 2, 1),
+                new TrRmRegisterBodyBlock(2, 2, 2),
+                new TrRmRegisterBodyBlock(4,
+                    checked((uint)filterCode.Length), 3),
+                new TrRmRegisterBodyBlock(checked((uint)handlerOffset), 2, 4),
+            ],
+            records, code,
+            schema: TrRmArtifactSchema.RegisterExceptionRegionsDraft);
+    }
+
+    private static byte[] CreateRegisterExceptionFilterArtifact(
+        byte[] body, byte parameterTypeCode)
+    {
+        var schema = TrRmArtifactSchema.RegisterExceptionRegionsDraft;
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows([
+            ("", 0), ("module", 0), ("Filter", 0),
+        ]);
+        var strings = new TrRmStringTableReader(stringBytes, 3);
+        var featureBytes = TrRmFeatureTableWriter.Encode(
+            [TrRmFeatureRow.RegisterExceptionRegionsCandidate], schema);
+        var moduleBytes = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(2, 0, 0, 0, 1, 1, 1, 1, 1, 1),
+        ], strings, 0, 0, 1, 0, 1);
+        var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
+            0, 0, 1, 0, 1);
+        var typeSpecBytes = TrRmTypeSpecTableWriter.Encode([
+            TrRmTypeSpecTableWriter.Builtin(0),
+            TrRmTypeSpecTableWriter.Builtin(parameterTypeCode),
+        ], 0, 0, 0, 0, schema);
+        var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes, 2,
+            0, 0, 0, 0, schema);
+        var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
+            0, 0, 0, 0, schema);
+        var signatureBytes = TrRmMethodSigTableWriter.Encode([
+            new TrRmMethodSigRow(0xF200_0000, 0, 1, 1, 0, 0),
+        ], typeSpecs, 1, 0);
+        var signatures = new TrRmMethodSigTableReader(signatureBytes, 1,
+            typeSpecs, 1, 0);
+        var parameterTypeSpecRef = 0xF200_0000u | parameterTypeCode;
+        var parameterBytes = TrRmParamTableWriter.Encode([
+            new TrRmParamRow(1, 0, parameterTypeSpecRef, 0),
+        ], signatures, typeSpecs, schema);
+        var methodBytes = TrRmMethodDefTableWriter.Encode([
+            new TrRmMethodDefRow(0, 3, 1, 0, 0, 0, 1),
+        ], strings, modules, typeDefs, signatures, 0, 1);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, moduleBytes),
+            new TrRmSection(0x0002, 0, 3, stringBytes),
+            new TrRmSection(0x0004, 0, 1, featureBytes),
+            new TrRmSection(0x0011, 0, 2, typeSpecBytes),
+            new TrRmSection(0x0016, 0, 1, methodBytes),
+            new TrRmSection(0x0017, 0, 1, signatureBytes),
+            new TrRmSection(0x0018, 0, 1, parameterBytes),
+            new TrRmSection(0x0020, 0, 1,
+                TrRmVariableTableWriter.EncodeBodies([body])),
+        ], schema);
     }
 
     private static void ValidateSelectedArtifactBodyMaps(byte[] artifact)

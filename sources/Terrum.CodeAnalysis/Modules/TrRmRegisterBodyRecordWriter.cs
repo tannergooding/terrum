@@ -97,7 +97,7 @@ internal static class TrRmRegisterBodyRecordWriter
                 && valueUse == 0 && valueIndex == 0 && regions.Count == 2,
             3 => hasTarget == 0 && (valueKind is 1 or 2)
                 && valueUse == 1 && regions.Count == 1
-                && (valueKind != 1 || valueIndex <= 13),
+                && (valueKind != 1 || valueIndex <= 15),
             4 => hasTarget == 0 && !hasValue && valueKind == 0
                 && valueUse == 0 && valueIndex == 0 && regions.Count == 1,
             _ => false,
