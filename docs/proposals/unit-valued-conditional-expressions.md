@@ -141,7 +141,8 @@ reconstructs structured `BoundIf` control flow and canonically re-emits the
 artifact. The active Body regression covers nested arms, checked
 int32/uint32 division/remainder captures, a checked fixed-array-address
 argument, and rejection of an invalid condition register. This establishes
-Body encoding/reconstruction, not provider Body-row remapping or A2EU native
+Body encoding/reconstruction and selected-provider Body-row remapping,
+including compatible and incompatible replacement checks, but not A2EU native
 runtime qualification. These are source/test observations, not checks run by
 proposal authoring.
 

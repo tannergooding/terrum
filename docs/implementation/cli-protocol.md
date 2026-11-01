@@ -87,9 +87,11 @@ multi-block `E4`/`ConditionalEdge` branches and `E3` joins. Source-free loading
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 Body, including nested checked scalar and storage-address arguments. Its
 condition subset is currently Boolean Home reads or direct Boolean
-NativeImport results. Provider Body-row remapping and A2EU JIT/AOT runtime
-qualification remain open; other effectful expressions and cleanup/loan
-transport are incomplete.
+NativeImport results. A co-located selected-provider regression shifts the
+conditional caller to Body row 2, remaps its maps, preserves body-local
+branches/records, and checks compatible and incompatible provider replacement.
+Supervised A2EU JIT/AOT runtime qualification remains open; other effectful
+expressions and cleanup/loan transport are incomplete.
 The bounded F route runs/builds direct NativeImport executables and emits
 direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected
