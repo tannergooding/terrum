@@ -796,38 +796,19 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var statement in callerStatements)
             {
-                if (statement is BoundExpressionStatement
-                    { Expression: BoundCall call })
-                {
-                    AddCallMethodMapTokens(call);
-                    continue;
-                }
-
-                if (statement is not BoundLocal local)
-                {
-                    continue;
-                }
-
-                if (local.Initializer is BoundNativeFunctionAddress)
+                if (statement is BoundLocal
+                    { Initializer: BoundNativeFunctionAddress })
                 {
                     if (methodMapTokenSet.Add(targetMethodMapToken))
                     {
                         methodMapTokens.Add(targetMethodMapToken);
                     }
                 }
-                else if (local.Initializer
-                    is BoundNativeFixedArrayInitialization initialization)
-                {
-                    foreach (var initializerCall in initialization.Elements
-                        .OfType<BoundCall>())
-                    {
-                        AddCallMethodMapTokens(initializerCall);
-                    }
-                }
-                else if (local.Initializer is BoundCall localCall)
-                {
-                    AddCallMethodMapTokens(localCall);
-                }
+            }
+
+            foreach (var unitCall in storageCall.UnitInitializerCalls)
+            {
+                AddCallMethodMapTokens(unitCall.Call);
             }
         }
 
@@ -1116,6 +1097,7 @@ public static partial class TrRmExecutableCompiler
         BoundIndirectCall Call, int TargetVariable, int ReturnVariable,
         ImmutableArray<NativeAddressStorageArgument> StorageArguments,
         ImmutableArray<NativeAddressUnitInitializerCall> UnitInitializerCalls,
+        int ConditionalEdgeCount,
         int ArrayInitializationIndexVariable);
 
     private static ImmutableArray<NativeAddressUnitCallHome>
@@ -1222,16 +1204,55 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
-        var localDeclarations = statements
+        var topLevelLocalDeclarations = statements
             .Take(callStatements[0].index)
             .OfType<BoundLocal>()
             .ToArray();
-        if (localDeclarations.Length
+        var localDeclarations = new List<BoundLocal>();
+        void CollectLocalDeclarations(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundLocal local:
+                    localDeclarations.Add(local);
+                    break;
+
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        CollectLocalDeclarations(nested);
+                    }
+                    break;
+
+                case BoundIf branch:
+                    CollectLocalDeclarations(branch.Then);
+                    if (branch.Else is not null)
+                    {
+                        CollectLocalDeclarations(branch.Else);
+                    }
+                    break;
+
+                case BoundUnsafe unsafeBlock:
+                    CollectLocalDeclarations(unsafeBlock.Body);
+                    break;
+            }
+        }
+
+        foreach (var statement in statements.Take(callStatements[0].index))
+        {
+            CollectLocalDeclarations(statement);
+        }
+
+        if (localDeclarations.Count
                 != function.Variables.Length - function.ParameterCount
             || statements.Take(callStatements[0].index)
                 .Any(static statement => statement is not BoundLocal
+                    and not BoundIf
                     and not BoundExpressionStatement
-                        { Expression: BoundCall }))
+                        { Expression: BoundCall }
+                    and not BoundExpressionStatement
+                        { Expression: BoundConditional
+                            { Type: PrimitiveType.Void } }))
         {
             return false;
         }
@@ -1416,6 +1437,7 @@ public static partial class TrRmExecutableCompiler
             = ImmutableArray.CreateBuilder<NativeAddressUnitInitializerCall>();
         var nextUnitCallResultHome
             = function.Variables.Length - function.ParameterCount;
+        var conditionalEdgeCount = 0;
         bool AddUnitInitializerCall(BoundCall unitCall,
             int initializerArrayVariable, int resultVariable)
         {
@@ -1499,46 +1521,147 @@ public static partial class TrRmExecutableCompiler
             return true;
         }
 
-        foreach (var statement in statements.Take(callStatements[0].index))
+        bool AddUnitInitializerExpression(BoundExpression expression,
+            int initializerArrayVariable)
         {
-            if (statement is BoundExpressionStatement
-                { Expression: BoundCall unitCall })
+            switch (expression)
             {
-                if (unitCall.Type != PrimitiveType.Void
-                    || !AddUnitInitializerCall(unitCall, -1, -1))
-                {
+                case BoundCall unitCall:
+                    return unitCall.Type == PrimitiveType.Void
+                        && AddUnitInitializerCall(unitCall,
+                            initializerArrayVariable, -1);
+
+                case BoundConstant { Type: PrimitiveType.Void, Bits.Low: 0, Bits.High: 0 }:
+                    return true;
+
+                case BoundConditional conditional
+                    when conditional.Type == PrimitiveType.Void
+                        && IsSupportedNativeUnitConditionalCondition(
+                            conditional.Condition):
+                    if (conditional.Condition is BoundRead conditionRead
+                        && (uint)conditionRead.Variable
+                            < (uint)function.Variables.Length
+                        && conditionRead.Type == PrimitiveType.Bool
+                        && (conditionRead.Variable < function.ParameterCount
+                            || localVariables.Contains(
+                                conditionRead.Variable)))
+                    {
+                    }
+                    else if (conditional.Condition is BoundCall conditionCall
+                        && AddUnitInitializerCall(conditionCall, -1, -1))
+                    {
+                    }
+                    else
+                    {
+                        return false;
+                    }
+
+                    conditionalEdgeCount++;
+                    return AddUnitInitializerExpression(conditional.WhenTrue,
+                            initializerArrayVariable)
+                        && AddUnitInitializerExpression(conditional.WhenFalse,
+                            initializerArrayVariable);
+
+                default:
                     return false;
-                }
             }
-            else if (statement is BoundLocal
-                {
-                    Initializer: BoundCall localCall,
-                } localCallDeclaration)
+        }
+
+        bool AddUnitInitializerStatement(BoundStatement statement)
+        {
+            switch (statement)
             {
-                if (!AddUnitInitializerCall(localCall, -1,
-                    localCallDeclaration.Variable))
+            case BoundBlock block when block.RetiredManagedLocals.IsEmpty:
+                foreach (var nested in block.Statements)
                 {
-                    return false;
-                }
-            }
-            else if (statement is BoundLocal
-                {
-                    Initializer: BoundNativeFixedArrayInitialization initialization,
-                } arrayLocal)
-            {
-                foreach (var element in initialization.Elements)
-                {
-                    if (element is BoundCall arrayElementCall
-                        && !AddUnitInitializerCall(arrayElementCall,
-                            arrayLocal.Variable, -1))
+                    if (!AddUnitInitializerStatement(nested))
                     {
                         return false;
                     }
                 }
+                return true;
+
+            case BoundLocal local:
+                if (local.Initializer is BoundCall localCall)
+                {
+                    return AddUnitInitializerCall(localCall, -1,
+                        local.Variable);
+                }
+
+                if (local.Initializer
+                    is BoundNativeFixedArrayInitialization initialization)
+                {
+                    foreach (var element in initialization.Elements)
+                    {
+                        if (element is BoundCall initializerCall
+                            && !AddUnitInitializerCall(initializerCall,
+                                local.Variable, -1))
+                        {
+                            return false;
+                        }
+                        if (element is BoundConditional conditional
+                            && !AddUnitInitializerExpression(conditional,
+                                local.Variable))
+                        {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+
+            case BoundExpressionStatement
+                { Expression: BoundCall call }:
+                return call.Type == PrimitiveType.Void
+                    && AddUnitInitializerCall(call, -1, -1);
+
+            case BoundExpressionStatement
+                { Expression: BoundConditional conditional }:
+                return AddUnitInitializerExpression(conditional, -1);
+
+            case BoundIf branch:
+                if (!IsSupportedNativeUnitConditionalCondition(
+                        branch.Condition))
+                {
+                    return false;
+                }
+
+                if (branch.Condition is BoundRead conditionRead
+                    && ((uint)conditionRead.Variable
+                            >= (uint)function.Variables.Length
+                        || conditionRead.Type != PrimitiveType.Bool
+                        || (conditionRead.Variable
+                                >= function.ParameterCount
+                            && !localVariables.Contains(
+                                conditionRead.Variable))))
+                {
+                    return false;
+                }
+
+                if (branch.Condition is BoundCall conditionCall
+                    && !AddUnitInitializerCall(conditionCall, -1, -1))
+                {
+                    return false;
+                }
+
+                conditionalEdgeCount++;
+                return AddUnitInitializerStatement(branch.Then)
+                    && (branch.Else is null
+                        || AddUnitInitializerStatement(branch.Else));
+
+            default:
+                return false;
             }
         }
 
-        var hasPositiveArrayLocal = localDeclarations.Any(declaration =>
+        foreach (var statement in statements.Take(callStatements[0].index))
+        {
+            if (!AddUnitInitializerStatement(statement))
+            {
+            return false;
+            }
+        }
+
+        var hasPositiveArrayLocal = topLevelLocalDeclarations.Any(declaration =>
             NativeFixedArrayTypes.IsType(
                 function.Variables[declaration.Variable].Type)
             && program.NativeFixedArrayTypes[NativeFixedArrayTypes.Index(
@@ -1547,11 +1670,11 @@ public static partial class TrRmExecutableCompiler
         var arrayInitializationIndexVariable = -1;
         if (hasPositiveArrayLocal)
         {
-            var localDeclarationIndex = localDeclarations
+            var localDeclarationIndex = topLevelLocalDeclarations
                 .Select((declaration, index) => (declaration, index))
                 .ToDictionary(static item => item.declaration.Variable,
                     static item => item.index);
-            foreach (var declaration in localDeclarations)
+            foreach (var declaration in topLevelLocalDeclarations)
             {
                 var variable = function.Variables[declaration.Variable];
                 if (NativeFixedArrayTypes.IsType(variable.Type))
@@ -1579,7 +1702,7 @@ public static partial class TrRmExecutableCompiler
 
             var initializationIndex = localDeclarationIndex[
                 arrayInitializationIndexVariable];
-            if (localDeclarations
+            if (topLevelLocalDeclarations
                 .Select((declaration, index) => (declaration, index))
                 .Any(item => NativeFixedArrayTypes.IsType(
                         function.Variables[item.declaration.Variable].Type)
@@ -1596,6 +1719,7 @@ public static partial class TrRmExecutableCompiler
         plan = new NativeAddressStorageCallPlan(call, targetRead.Variable,
             returnRead.Variable, storageArguments.ToImmutable(),
             unitInitializerCalls.ToImmutable(),
+            conditionalEdgeCount,
             arrayInitializationIndexVariable);
         return true;
     }
@@ -1808,6 +1932,13 @@ public static partial class TrRmExecutableCompiler
                 continue;
             }
 
+            if (layout.ElementType == PrimitiveType.Void
+                && schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                && IsSupportedNativeUnitConditionalExpression(element))
+            {
+                continue;
+            }
+
             if (!schema
                     .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
                 || !NativeFixedArrayTypes.IsType(layout.ElementType)
@@ -1832,6 +1963,28 @@ public static partial class TrRmExecutableCompiler
 
         return true;
     }
+
+    private static bool IsSupportedNativeUnitConditionalExpression(
+        BoundExpression expression)
+        => expression switch {
+            BoundConstant { Type: PrimitiveType.Void, Bits.Low: 0, Bits.High: 0 }
+                => true,
+            BoundCall { Type: PrimitiveType.Void } => true,
+            BoundConditional {
+                Type: PrimitiveType.Void,
+                Condition: var condition,
+                WhenTrue: var whenTrue,
+                WhenFalse: var whenFalse,
+            } => IsSupportedNativeUnitConditionalCondition(condition)
+                && IsSupportedNativeUnitConditionalExpression(whenTrue)
+                && IsSupportedNativeUnitConditionalExpression(whenFalse),
+            _ => false,
+        };
+
+    private static bool IsSupportedNativeUnitConditionalCondition(
+        BoundExpression condition)
+        => condition.Type == PrimitiveType.Bool
+            && condition is BoundRead or BoundCall;
 
     private static bool TryGetContextualInitializationRegister(
         BoundConstant constant, PrimitiveType type,
@@ -2054,6 +2207,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         long recordCount = 3 + storageCall.StorageArguments.Length
+            + storageCall.ConditionalEdgeCount
             + storageCall.UnitInitializerCalls.Length;
         foreach (var unitCall in storageCall.UnitInitializerCalls)
         {
@@ -2107,6 +2261,21 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(0x1100_0001)),
         };
         var code = new List<byte>();
+        var blocks = new List<TrRmRegisterBodyBlock>();
+        var currentBlockStart = 0;
+        void EndCurrentBlock()
+        {
+            if (code.Count <= currentBlockStart)
+            {
+                throw Unsupported("An A2EU control-flow block is empty.");
+            }
+
+            blocks.Add(new TrRmRegisterBodyBlock(
+                checked((uint)currentBlockStart),
+                checked((uint)(code.Count - currentBlockStart)), 0));
+            currentBlockStart = code.Count;
+        }
+
         int GetCallerHome(int variableIndex)
         {
             if ((uint)variableIndex >= (uint)homeIndexByVariable.Length)
@@ -2464,6 +2633,246 @@ public static partial class TrRmExecutableCompiler
             unitCallIndex++;
         }
 
+        void AppendUnitInitializerCondition(BoundExpression condition)
+        {
+            switch (condition)
+            {
+                case BoundRead read:
+                    AppendHomeLoad(code, 0,
+                        GetCallerHome(read.Variable));
+                    break;
+
+                case BoundCall conditionCall:
+                    AppendUnitInitializerCall(conditionCall);
+                    if (!unitCallResultHomeByCall.TryGetValue(conditionCall,
+                            out var conditionResultHome))
+                    {
+                        throw Unsupported(
+                            "An A2EU branch condition call has no result Home.");
+                    }
+
+                    AppendHomeLoad(code, 0, conditionResultHome);
+                    break;
+
+                default:
+                    throw Unsupported(
+                        "A2EU conditional control flow requires a Boolean Home, constant or direct call.");
+            }
+        }
+
+        void AppendConditionalControlFlow(BoundExpression condition,
+            Action appendTrue, Action appendFalse)
+        {
+            AppendUnitInitializerCondition(condition);
+            if (records.Count > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "The A2EU conditional edge exceeds the record-index domain.");
+            }
+
+            var conditionalEdgeIndex = checked((ushort)records.Count);
+            var conditionalEdge
+                = TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(0, 1);
+            records.Add(conditionalEdge);
+            code.Add(0xE4);
+            code.Add(0);
+            code.Add((byte)conditionalEdgeIndex);
+            code.Add((byte)(conditionalEdgeIndex >> 8));
+            EndCurrentBlock();
+
+            var trueBlockIndex = blocks.Count;
+            appendTrue();
+            var trueExitPatch = AppendBranchPlaceholder();
+            EndCurrentBlock();
+
+            var falseBlockIndex = blocks.Count;
+            appendFalse();
+            var falseExitPatch = AppendBranchPlaceholder();
+            EndCurrentBlock();
+
+            var joinBlockIndex = blocks.Count;
+            if ((uint)trueBlockIndex > ushort.MaxValue
+                || (uint)falseBlockIndex > ushort.MaxValue
+                || (uint)joinBlockIndex > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "The A2EU conditional exceeds the Block-index domain.");
+            }
+
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                conditionalEdge.AsSpan(4),
+                checked((ushort)trueBlockIndex));
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                conditionalEdge.AsSpan(6),
+                checked((ushort)falseBlockIndex));
+            PatchBranchTarget(trueExitPatch,
+                checked((ushort)joinBlockIndex));
+            PatchBranchTarget(falseExitPatch,
+                checked((ushort)joinBlockIndex));
+        }
+
+        void AppendUnitInitializerExpression(BoundExpression expression)
+        {
+            switch (expression)
+            {
+                case BoundCall unitCall
+                    when unitCall.Type == PrimitiveType.Void:
+                    AppendUnitInitializerCall(unitCall);
+                    return;
+
+                case BoundConstant {
+                    Type: PrimitiveType.Void,
+                    Bits.Low: 0,
+                    Bits.High: 0,
+                }:
+                    return;
+
+                case BoundConditional conditional
+                    when conditional.Type == PrimitiveType.Void
+                        && IsSupportedNativeUnitConditionalCondition(
+                            conditional.Condition):
+                    AppendConditionalControlFlow(conditional.Condition,
+                        () => AppendUnitInitializerExpression(
+                            conditional.WhenTrue),
+                        () => AppendUnitInitializerExpression(
+                            conditional.WhenFalse));
+                    return;
+
+                default:
+                    throw Unsupported(
+                        "The A2EU unit initializer expression is outside the conditional capture subset.");
+            }
+        }
+
+        void AppendUnitInitializerLocal(BoundLocal local)
+        {
+            var homeIndex = homeIndexByVariable[local.Variable];
+            if (homeIndex < 0
+                || local.Variable == storageCall.TargetVariable
+                || NativeFixedArrayTypes.IsType(
+                    caller.Variables[local.Variable].Type))
+            {
+                throw Unsupported(
+                    "A conditional A2EU local capture has no supported Home.");
+            }
+
+            if (local.Initializer is BoundCall localCall)
+            {
+                AppendUnitInitializerCall(localCall);
+                return;
+            }
+
+            if (local.Initializer is BoundRead localRead)
+            {
+                var sourceHome
+                    = localRead.Variable < caller.ParameterCount
+                        ? formalHomeStart + localRead.Variable
+                        : homeIndexByVariable[localRead.Variable];
+                if (sourceHome < 0)
+                {
+                    throw Unsupported(
+                        "A conditional A2EU local copy has no source Home.");
+                }
+
+                AppendHomeLoad(code, 0, sourceHome);
+                AppendHomeStore(code, 0, homeIndex);
+                return;
+            }
+
+            if (local.Initializer is BoundBinary scalarCheck
+                && schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                && IsSupportedNativeUnitInitializerScalarCheck(scalarCheck))
+            {
+                AppendA2EUCheckedScalarCapture(scalarCheck, homeIndex);
+                return;
+            }
+
+            if (local.Initializer is BoundConstant constant
+                && TryGetContextualInitializationRegister(constant,
+                    caller.Variables[local.Variable].Type, schema,
+                    out var sourceRegister))
+            {
+                AppendHomeStore(code, sourceRegister, homeIndex);
+                return;
+            }
+
+            throw Unsupported(
+                "A conditional A2EU local initializer is outside the supported typed subset.");
+        }
+
+        void AppendUnitInitializerStatement(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block when block.RetiredManagedLocals.IsEmpty:
+                    foreach (var nested in block.Statements)
+                    {
+                        AppendUnitInitializerStatement(nested);
+                    }
+                    return;
+
+                case BoundLocal local:
+                    AppendUnitInitializerLocal(local);
+                    return;
+
+                case BoundExpressionStatement
+                    { Expression: BoundCall call }
+                    when call.Type == PrimitiveType.Void:
+                    AppendUnitInitializerCall(call);
+                    return;
+
+                case BoundExpressionStatement
+                    { Expression: BoundConditional conditional }:
+                    AppendUnitInitializerExpression(conditional);
+                    return;
+
+                case BoundIf branch:
+                    AppendUnitInitializerIf(branch);
+                    return;
+
+                default:
+                    throw Unsupported(
+                        "A conditional A2EU branch contains an unsupported statement.");
+            }
+        }
+
+        void AppendUnitInitializerIf(BoundIf branch)
+        {
+            if (!IsSupportedNativeUnitConditionalCondition(
+                    branch.Condition))
+            {
+                throw Unsupported(
+                    "A conditional A2EU branch requires an admitted Boolean condition.");
+            }
+
+            AppendConditionalControlFlow(branch.Condition,
+                () => AppendUnitInitializerStatement(branch.Then),
+                () =>
+                {
+                    if (branch.Else is not null)
+                    {
+                        AppendUnitInitializerStatement(branch.Else);
+                    }
+                });
+        }
+
+        int AppendBranchPlaceholder()
+        {
+            code.Add(0xE3);
+            code.Add(0);
+            var targetOffset = code.Count;
+            code.Add(0);
+            code.Add(0);
+            return targetOffset;
+        }
+
+        void PatchBranchTarget(int targetOffset, ushort blockIndex)
+        {
+            code[targetOffset] = (byte)blockIndex;
+            code[targetOffset + 1] = (byte)(blockIndex >> 8);
+        }
+
         foreach (var statement in statements)
         {
             switch (statement)
@@ -2548,6 +2957,12 @@ public static partial class TrRmExecutableCompiler
                                 AppendUnitInitializerCall(
                                     unitInitializerCall);
                             }
+                            else if (initializer is BoundConditional
+                                unitConditional)
+                            {
+                                AppendUnitInitializerExpression(
+                                    unitConditional);
+                            }
                         }
 
                         var indexHome = homeIndexByVariable[
@@ -2630,6 +3045,8 @@ public static partial class TrRmExecutableCompiler
                             {
                                 if (arrayInitialization.Elements[elementIndex]
                                     is BoundCall { Type: PrimitiveType.Void }
+                                        or BoundConditional
+                                            { Type: PrimitiveType.Void }
                                     && schema
                                         .UsesForeignInvocationStorageFixedArrayUnitInitialization())
                                 {
@@ -2711,6 +3128,15 @@ public static partial class TrRmExecutableCompiler
                 case BoundExpressionStatement
                     { Expression: BoundCall unitCall }:
                     AppendUnitInitializerCall(unitCall);
+                    break;
+
+                case BoundIf branch:
+                    AppendUnitInitializerIf(branch);
+                    break;
+
+                case BoundExpressionStatement
+                    { Expression: BoundConditional unitConditional }:
+                    AppendUnitInitializerExpression(unitConditional);
                     break;
 
                 case BoundExpressionStatement
@@ -2897,10 +3323,11 @@ public static partial class TrRmExecutableCompiler
                 "The A2EU unit-call plan does not match the encoded arrays.");
         }
 
+        EndCurrentBlock();
         var codeBytes = code.ToArray();
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
-            [new TrRmRegisterBodyBlock(0, (uint)codeBytes.Length, 0)],
+            blocks,
             records, codeBytes, contractCount,
             schema);
     }

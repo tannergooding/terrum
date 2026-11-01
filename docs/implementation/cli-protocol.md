@@ -82,9 +82,14 @@ behavior. Provisional source support admits exact Unit/Unit conditional
 expressions in return and expression-statement contexts; both selected arms
 pass native JIT under both runtime policies. Explicit/inferred Unit locals
 remain unsupported, and the proposal remains unapproved. The Standard A2EU
-Body path is still single-block and rejects `BoundConditional`; conditional
-Body reconstruction and A2EU JIT/AOT runtime qualification remain open.
-Other effectful expressions and cleanup/loan transport are also incomplete.
+Body path now encodes nested Unit-valued array-initializer conditionals as
+multi-block `E4`/`ConditionalEdge` branches and `E3` joins. Source-free loading
+reconstructs structured `BoundIf` control flow and canonically re-emits the
+Body, including nested checked scalar and storage-address arguments. Its
+condition subset is currently Boolean Home reads or direct Boolean
+NativeImport results. Provider Body-row remapping and A2EU JIT/AOT runtime
+qualification remain open; other effectful expressions and cleanup/loan
+transport are incomplete.
 The bounded F route runs/builds direct NativeImport executables and emits
 direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected

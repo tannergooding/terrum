@@ -1398,6 +1398,274 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
+    [Test]
+    public void StandardA2EUCapturesAndReconstructsUnitConditionalArms()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-unit-array-conditional";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void RecordFirst(int32 value);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            internal extern void RecordSecond(ptr<uint32> value);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void RecordThird(uint32 value);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                bool choose = true;
+                bool useFirst = false;
+                int32 numerator = 0;
+                int32 divisor = -1;
+                uint32 unsignedNumerator = 0;
+                uint32 unsignedDivisor = 0;
+                int32 invalidIndex = -1;
+                mut [uint32; 1] source = [0];
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    mut [void; 2] values = [
+                        choose
+                            ? (useFirst
+                                ? RecordFirst(numerator / divisor)
+                                : RecordSecond(&source[invalidIndex]))
+                            : RecordThird(unsignedNumerator % unsignedDivisor),
+                        ()
+                    ];
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        Assert.That(body.BlockCount, Is.EqualTo(7));
+
+        var conditionalEdges = new List<(
+            int BlockIndex, int RecordIndex, int TrueBlock, int FalseBlock)>();
+        var directCallBlocks = new List<int>();
+        var storeBlocks = new List<int>();
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var opcode = code[position];
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(opcode,
+                        body.Schema);
+                if (opcode == 0xE4)
+                {
+                    var conditionalEdgeIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            code[(position + 2)..]);
+                    var edge = body.GetRecord(conditionalEdgeIndex);
+                    conditionalEdges.Add((blockIndex, conditionalEdgeIndex,
+                        BinaryPrimitives.ReadUInt16LittleEndian(edge[4..]),
+                        BinaryPrimitives.ReadUInt16LittleEndian(edge[6..])));
+                }
+                else if (opcode == 0xE0)
+                {
+                    var callSite = body.GetRecord(
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            code[(position + 2)..]));
+                    if (callSite[4] == 1)
+                    {
+                        directCallBlocks.Add(blockIndex);
+                    }
+                }
+                else if (opcode == 0xD9)
+                {
+                    storeBlocks.Add(blockIndex);
+                }
+
+                position += instructionLength;
+            }
+        }
+
+        Assert.That(conditionalEdges, Has.Count.EqualTo(2));
+        var outerEdge = conditionalEdges.Single(static edge =>
+            edge.BlockIndex == 0);
+        var innerEdge = conditionalEdges.Single(static edge =>
+            edge.BlockIndex == 1);
+        Assert.That(outerEdge.RecordIndex, Is.GreaterThanOrEqualTo(0));
+        Assert.That(innerEdge.RecordIndex, Is.GreaterThanOrEqualTo(0));
+        Assert.That(body.GetRecord(outerEdge.RecordIndex)[0],
+            Is.EqualTo(0x06));
+        Assert.That(body.GetRecord(innerEdge.RecordIndex)[0],
+            Is.EqualTo(0x06));
+        Assert.That(outerEdge.TrueBlock, Is.Not.EqualTo(outerEdge.FalseBlock));
+        Assert.That(innerEdge.TrueBlock, Is.Not.EqualTo(innerEdge.FalseBlock));
+        Assert.That(directCallBlocks,
+            Is.EquivalentTo(new[] {
+                innerEdge.TrueBlock, innerEdge.FalseBlock, outerEdge.FalseBlock,
+            }));
+        var unitStoreBlocks = storeBlocks.Where(blockIndex =>
+            blockIndex > Math.Max(innerEdge.FalseBlock,
+                outerEdge.FalseBlock)).ToArray();
+        Assert.That(unitStoreBlocks, Has.Length.EqualTo(2));
+        Assert.That(unitStoreBlocks.All(blockIndex =>
+            blockIndex == unitStoreBlocks[0]), Is.True);
+        var trueArmCode = body.GetBlockCode(innerEdge.TrueBlock);
+        var falseArmCode = body.GetBlockCode(innerEdge.FalseBlock);
+        var outerFalseArmCode = body.GetBlockCode(outerEdge.FalseBlock);
+        Assert.That(trueArmCode.IndexOf((byte)0x24),
+            Is.GreaterThanOrEqualTo(0));
+        Assert.That(falseArmCode.IndexOf((byte)0xD8),
+            Is.GreaterThanOrEqualTo(0));
+        Assert.That(falseArmCode.IndexOf((byte)0xEC),
+            Is.GreaterThan(falseArmCode.IndexOf((byte)0xD8)));
+        Assert.That(outerFalseArmCode.IndexOf((byte)0x25),
+            Is.GreaterThanOrEqualTo(0));
+        static int FindInstructionOffset(ReadOnlySpan<byte> code,
+            byte targetOpcode)
+        {
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], TrRmArtifactSchema
+                            .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft);
+                if (code[position] == targetOpcode)
+                {
+                    return position;
+                }
+
+                position += instructionLength;
+            }
+
+            return -1;
+        }
+
+        Assert.That(FindInstructionOffset(trueArmCode, 0x24),
+            Is.LessThan(FindInstructionOffset(trueArmCode, 0xE0)));
+        var falsePlaceOffset = FindInstructionOffset(falseArmCode, 0xD8);
+        Assert.That(falsePlaceOffset,
+            Is.LessThan(FindInstructionOffset(falseArmCode, 0xEC)));
+        Assert.That(FindInstructionOffset(falseArmCode, 0xEC),
+            Is.LessThan(FindInstructionOffset(falseArmCode, 0xE0)));
+        Assert.That(FindInstructionOffset(outerFalseArmCode, 0x25),
+            Is.LessThan(FindInstructionOffset(outerFalseArmCode, 0xE0)));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var conditionals = new List<BoundIf>();
+        Assert.That(BoundTreeTraversal.VisitStatements(loadedMain.Body,
+            statement =>
+            {
+                if (statement is BoundIf branch)
+                {
+                    conditionals.Add(branch);
+                }
+            }), Is.True);
+        Assert.That(conditionals, Has.Count.EqualTo(2));
+        var outerConditional = conditionals.Single(branch =>
+        {
+            var nestedConditionals = 0;
+            Assert.That(BoundTreeTraversal.VisitStatements(
+                new BoundBlock([branch.Then], default),
+                statement =>
+                {
+                    if (statement is BoundIf)
+                    {
+                        nestedConditionals++;
+                    }
+                }), Is.True);
+            return nestedConditionals == 1;
+        });
+        var innerConditional = conditionals.Single(branch =>
+            !ReferenceEquals(branch, outerConditional));
+        static string[] GetCallNames(BoundStatement statement,
+            BoundProgram program)
+        {
+            var names = new List<string>();
+            Assert.That(BoundTreeTraversal.VisitExpressions(
+                new BoundBlock([statement], default),
+                expression =>
+                {
+                    if (expression is BoundCall call)
+                    {
+                        names.Add(program.Functions[call.Function].Name);
+                    }
+                }), Is.True);
+            return [.. names];
+        }
+
+        Assert.That(GetCallNames(outerConditional.Then, loaded),
+            Is.EquivalentTo(new[] { "RecordFirst", "RecordSecond" }));
+        Assert.That(GetCallNames(outerConditional.Else!, loaded),
+            Is.EqualTo(new[] { "RecordThird" }));
+        Assert.That(GetCallNames(innerConditional.Then, loaded),
+            Is.EqualTo(new[] { "RecordFirst" }));
+        Assert.That(GetCallNames(innerConditional.Else!, loaded),
+            Is.EqualTo(new[] { "RecordSecond" }));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+
+        var malformed = RewriteA2EUConditionalRegisterArtifact(artifact, 0,
+            14);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity, malformed),
+                moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+        var malformedTarget = RewriteA2EUConditionalTargetArtifact(artifact,
+            outerEdge.RecordIndex, checked((ushort)body.BlockCount));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedTarget),
+                moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
     [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false)]
     [TestCase(2, "int32", "[0, -1]", PrimitiveType.Int32, true)]
@@ -4996,6 +5264,119 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
 
         return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] RewriteA2EUConditionalRegisterArtifact(
+        byte[] artifact, int blockIndex, byte conditionRegister)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            _ = flags;
+            if (kind != 0x0020)
+            {
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var bodyBytes = bodyTable.GetRow(1);
+            var body = new TrRmRegisterBodyReader(bodyBytes, contractCount,
+                schema);
+            var code = body.GetBlockCode(blockIndex);
+            var bodyOffset = section.IndexOf(bodyBytes);
+            var codeOffset = bodyBytes.IndexOf(code);
+            var sectionOffset = artifact.AsSpan().IndexOf(section);
+            if (bodyOffset < 0 || codeOffset < 0 || sectionOffset < 0)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU conditional Body has no serialized code range.");
+            }
+
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], schema);
+                if (code[position] == 0xE4)
+                {
+                    var malformed = (byte[])artifact.Clone();
+                    var controlOffset = sectionOffset + bodyOffset
+                        + codeOffset + position + 1;
+                    malformed[controlOffset] = (byte)(
+                        (malformed[controlOffset] & 0xF0)
+                        | (conditionRegister & 0x0F));
+                    return malformed;
+                }
+
+                position += instructionLength;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The A2EU Body contains no conditional branch.");
+    }
+
+    private static byte[] RewriteA2EUConditionalTargetArtifact(
+        byte[] artifact, int edgeRecordIndex, ushort targetBlock)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            _ = flags;
+            if (kind != 0x0020)
+            {
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var bodyBytes = bodyTable.GetRow(1);
+            var body = new TrRmRegisterBodyReader(bodyBytes, contractCount,
+                schema);
+            var edge = body.GetRecord(edgeRecordIndex);
+            if (edge[0] != 0x06)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU conditional record is not a ConditionalEdge.");
+            }
+
+            var sectionOffset = artifact.AsSpan().IndexOf(section);
+            var bodyOffset = section.IndexOf(bodyBytes);
+            var edgeOffset = bodyBytes.IndexOf(edge);
+            if (sectionOffset < 0 || bodyOffset < 0 || edgeOffset < 0)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU ConditionalEdge has no serialized offset.");
+            }
+
+            var malformed = (byte[])artifact.Clone();
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                malformed.AsSpan(sectionOffset + bodyOffset + edgeOffset + 4),
+                targetBlock);
+            return malformed;
+        }
+
+        throw new InvalidOperationException(
+            "The A2EU artifact has no Body table.");
     }
 
     internal static byte[] RewriteStorageAddressArtifact(byte[] artifact,

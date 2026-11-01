@@ -29,6 +29,39 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct NativeAddressRegisterConstant(
         PrimitiveType Type, uint Bits);
 
+    private sealed record NativeAddressConditionalReadState(
+        bool[] LocalInitializedByHome,
+        Dictionary<int, NativeStorageAddressFacts> StorageAddressesByHome,
+        HashSet<int> ConsumedStorageHomes,
+        List<int> CallArgumentHomeOrder,
+        Dictionary<int, long> LocalConstantByHome,
+        Dictionary<int, NativeArrayPlaceSelectionFacts> PlaceSelectionsByRegister,
+        Dictionary<int, NativeAddressRegisterConstant> RegisterConstants,
+        Dictionary<int, BoundExpression> RegisterExpressions,
+        Dictionary<int, List<BoundExpression>> ArrayInitializationElementsByHome);
+
+    private sealed class NativeAddressConditionalFrame(
+        BoundExpression condition,
+        NativeAddressConditionalReadState initialState,
+        List<BoundStatement> parentStatements)
+    {
+        internal BoundExpression Condition { get; } = condition;
+
+        internal NativeAddressConditionalReadState InitialState { get; }
+            = initialState;
+
+        internal List<BoundStatement> ParentStatements { get; }
+            = parentStatements;
+
+        internal List<BoundStatement> TrueStatements { get; } = [];
+
+        internal List<BoundStatement> FalseStatements { get; } = [];
+
+        internal NativeAddressConditionalReadState? TrueState { get; set; }
+
+        internal bool HasElse { get; set; }
+    }
+
     private readonly record struct NativeAddressDirectCallTarget(
         int FunctionIndex, ImmutableArray<PrimitiveType> ParameterTypes,
         PrimitiveType ReturnType,
@@ -659,7 +692,7 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<int, NativeAddressDirectCallTarget>
             directCallTargets)
     {
-        if (body.BlockCount != 1 || body.RecordCount < 2)
+        if (body.RecordCount < 2)
         {
             throw Unsupported("The caller Body is outside the bounded NativeAddress subset.");
         }
@@ -688,6 +721,12 @@ public static partial class TrRmExecutableCompiler
                 signature, nativePointerTypeDefinitions,
                 signatureIndexByAnchorMethod, structureTypeByTypeDef,
                 directCallTargets);
+        }
+
+        if (body.BlockCount != 1)
+        {
+            throw Unsupported(
+                "The caller Body is outside the bounded NativeAddress subset.");
         }
 
         var nativeAddress = body.GetRecord(1);
@@ -1054,15 +1093,32 @@ public static partial class TrRmExecutableCompiler
         var nativeAddressRecordIndex = -1;
         var callSiteRecordIndex = -1;
         var returnHome = -1;
-        var code = body.GetBlockCode(0);
-        var position = 0;
-        while (position < code.Length)
+        var rawInstructions
+            = ReadForeignInvocationStorageBodyInstructions(body);
+        for (var instructionIndex = 0;
+            instructionIndex < rawInstructions.Count; instructionIndex++)
         {
-            var instructionLength = TrRmRegisterBodyReader.InstructionLength(
-                code[position], body.Schema);
-            var instruction = code.Slice(position, instructionLength);
+            var instruction = rawInstructions[instructionIndex].AsSpan();
             switch (instruction[0])
             {
+                case 0xFC:
+                    var conditionalRecordIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    if (!referencedRecords.Add(conditionalRecordIndex))
+                    {
+                        throw Invalid(
+                            "An A2EU ConditionalEdge record is referenced more than once.");
+                    }
+                    instructions.Add((0xFC, conditionalRecordIndex,
+                        instruction[1]));
+                    break;
+
+                case 0xFD:
+                case 0xFE:
+                    instructions.Add((instruction[0], 0, 0));
+                    break;
+
                 case 0x14:
                     var shortSource = instruction[1] >> 4;
                     if (shortSource is not (14 or 15))
@@ -1203,7 +1259,7 @@ public static partial class TrRmExecutableCompiler
 
                 case 0xB8:
                     if (returnHome != -1
-                        || position + instructionLength != code.Length)
+                        || instructionIndex + 1 != rawInstructions.Count)
                     {
                         throw Unsupported(
                             "The F+S Body supports one terminal ReturnHome.");
@@ -1216,8 +1272,6 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported(
                         "The F+S Body contains an unsupported instruction.");
             }
-
-            position += instructionLength;
         }
 
         if (nativeAddressRecordIndex <= 0 || callSiteRecordIndex <= 0
@@ -1343,14 +1397,251 @@ public static partial class TrRmExecutableCompiler
         }
         var arrayInitializationElementsByHome
             = new Dictionary<int, List<BoundExpression>>();
-        var statements = ImmutableArray.CreateBuilder<BoundStatement>();
+        var rootStatements = new List<BoundStatement>();
+        var currentStatements = rootStatements;
+        var conditionalFrames
+            = new Stack<NativeAddressConditionalFrame>();
         var sawCallSite = false;
         var sawReturn = false;
         var instructionOrdinal = 0;
+
+        NativeAddressConditionalReadState CaptureConditionalState()
+        {
+            return new NativeAddressConditionalReadState(
+                (bool[])localInitializedByHome.Clone(),
+                new Dictionary<int, NativeStorageAddressFacts>(
+                    storageAddressesByHome),
+                [.. consumedStorageHomes],
+                [.. callArgumentHomeOrder],
+                new Dictionary<int, long>(localConstantByHome),
+                new Dictionary<int, NativeArrayPlaceSelectionFacts>(
+                    placeSelectionsByRegister),
+                new Dictionary<int, NativeAddressRegisterConstant>(
+                    registerConstants),
+                new Dictionary<int, BoundExpression>(registerExpressions),
+                arrayInitializationElementsByHome.ToDictionary(
+                    static pair => pair.Key,
+                    static pair => (List<BoundExpression>)[.. pair.Value]));
+        }
+
+        void RestoreConditionalState(
+            NativeAddressConditionalReadState state)
+        {
+            Array.Copy(state.LocalInitializedByHome, localInitializedByHome,
+                localInitializedByHome.Length);
+
+            storageAddressesByHome.Clear();
+            foreach (var pair in state.StorageAddressesByHome)
+            {
+                storageAddressesByHome.Add(pair.Key, pair.Value);
+            }
+
+            consumedStorageHomes.Clear();
+            consumedStorageHomes.UnionWith(state.ConsumedStorageHomes);
+            callArgumentHomeOrder.Clear();
+            callArgumentHomeOrder.AddRange(state.CallArgumentHomeOrder);
+
+            localConstantByHome.Clear();
+            foreach (var pair in state.LocalConstantByHome)
+            {
+                localConstantByHome.Add(pair.Key, pair.Value);
+            }
+
+            placeSelectionsByRegister.Clear();
+            foreach (var pair in state.PlaceSelectionsByRegister)
+            {
+                placeSelectionsByRegister.Add(pair.Key, pair.Value);
+            }
+
+            registerConstants.Clear();
+            foreach (var pair in state.RegisterConstants)
+            {
+                registerConstants.Add(pair.Key, pair.Value);
+            }
+
+            registerExpressions.Clear();
+            foreach (var pair in state.RegisterExpressions)
+            {
+                registerExpressions.Add(pair.Key, pair.Value);
+            }
+
+            arrayInitializationElementsByHome.Clear();
+            foreach (var pair in state.ArrayInitializationElementsByHome)
+            {
+                arrayInitializationElementsByHome.Add(pair.Key,
+                    [.. pair.Value]);
+            }
+        }
+
+        void MergeConditionalStates(
+            NativeAddressConditionalFrame frame,
+            NativeAddressConditionalReadState falseState)
+        {
+            var trueState = frame.TrueState
+                ?? throw Invalid("The A2EU conditional has no true-branch state.");
+            var initial = frame.InitialState;
+            if (!trueState.CallArgumentHomeOrder.SequenceEqual(
+                    initial.CallArgumentHomeOrder)
+                || !falseState.CallArgumentHomeOrder.SequenceEqual(
+                    initial.CallArgumentHomeOrder)
+                || !DictionaryEquals(trueState.PlaceSelectionsByRegister,
+                    initial.PlaceSelectionsByRegister)
+                || !DictionaryEquals(falseState.PlaceSelectionsByRegister,
+                    initial.PlaceSelectionsByRegister)
+                || !ArrayInitializationElementsEqual(
+                    trueState.ArrayInitializationElementsByHome,
+                    initial.ArrayInitializationElementsByHome)
+                || !ArrayInitializationElementsEqual(
+                    falseState.ArrayInitializationElementsByHome,
+                    initial.ArrayInitializationElementsByHome))
+            {
+                throw Invalid(
+                    "The A2EU conditional branches leave incompatible pending Body state.");
+            }
+
+            RestoreConditionalState(initial);
+            for (var homeIndex = 0;
+                homeIndex < localInitializedByHome.Length; homeIndex++)
+            {
+                localInitializedByHome[homeIndex]
+                    = initial.LocalInitializedByHome[homeIndex]
+                    || (trueState.LocalInitializedByHome[homeIndex]
+                        && falseState.LocalInitializedByHome[homeIndex]);
+            }
+
+            foreach (var pair in trueState.StorageAddressesByHome)
+            {
+                if (!storageAddressesByHome.TryAdd(pair.Key, pair.Value)
+                    && storageAddressesByHome[pair.Key] != pair.Value)
+                {
+                    throw Invalid(
+                        "A2EU conditional branches assign one storage Home differently.");
+                }
+            }
+            foreach (var pair in falseState.StorageAddressesByHome)
+            {
+                if (!storageAddressesByHome.TryAdd(pair.Key, pair.Value)
+                    && storageAddressesByHome[pair.Key] != pair.Value)
+                {
+                    throw Invalid(
+                        "A2EU conditional branches assign one storage Home differently.");
+                }
+            }
+
+            consumedStorageHomes.UnionWith(
+                trueState.ConsumedStorageHomes);
+            consumedStorageHomes.UnionWith(
+                falseState.ConsumedStorageHomes);
+            foreach (var pair in trueState.LocalConstantByHome)
+            {
+                if (falseState.LocalConstantByHome.TryGetValue(pair.Key,
+                        out var falseValue)
+                    && falseValue == pair.Value)
+                {
+                    localConstantByHome[pair.Key] = pair.Value;
+                }
+            }
+        }
+
+        static bool DictionaryEquals<TKey, TValue>(
+            Dictionary<TKey, TValue> left, Dictionary<TKey, TValue> right)
+            where TKey : notnull
+        {
+            if (left.Count != right.Count)
+            {
+                return false;
+            }
+
+            foreach (var pair in left)
+            {
+                if (!right.TryGetValue(pair.Key, out var value)
+                    || !EqualityComparer<TValue>.Default.Equals(
+                        pair.Value, value))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        static bool ArrayInitializationElementsEqual(
+            Dictionary<int, List<BoundExpression>> left,
+            Dictionary<int, List<BoundExpression>> right)
+        {
+            if (left.Count != right.Count)
+            {
+                return false;
+            }
+
+            foreach (var pair in left)
+            {
+                if (!right.TryGetValue(pair.Key, out var elements)
+                    || !pair.Value.SequenceEqual(elements))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         foreach (var instruction in instructions)
         {
             switch (instruction.Opcode)
             {
+                case 0xFC:
+                    BoundExpression condition;
+                    if (instruction.Register >= 14
+                        || !registerExpressions.TryGetValue(
+                            instruction.Register, out var conditionExpression)
+                        || conditionExpression.Type != PrimitiveType.Bool)
+                    {
+                        throw Invalid(
+                            "The A2EU conditional register is not a checked Boolean.");
+                    }
+
+                    condition = conditionExpression;
+                    var conditionalFrame = new NativeAddressConditionalFrame(
+                        condition, CaptureConditionalState(),
+                        currentStatements);
+                    conditionalFrames.Push(conditionalFrame);
+                    currentStatements = conditionalFrame.TrueStatements;
+                    break;
+
+                case 0xFD:
+                    if (!conditionalFrames.TryPeek(out var elseFrame)
+                        || elseFrame.HasElse)
+                    {
+                        throw Invalid(
+                            "The A2EU conditional has an unexpected false-branch marker.");
+                    }
+
+                    elseFrame.TrueState = CaptureConditionalState();
+                    elseFrame.HasElse = true;
+                    RestoreConditionalState(elseFrame.InitialState);
+                    currentStatements = elseFrame.FalseStatements;
+                    break;
+
+                case 0xFE:
+                    if (!conditionalFrames.TryPeek(out var endFrame)
+                        || !endFrame.HasElse
+                        || endFrame.TrueState is null)
+                    {
+                        throw Invalid(
+                            "The A2EU conditional has an incomplete branch structure.");
+                    }
+
+                    var falseState = CaptureConditionalState();
+                    MergeConditionalStates(endFrame, falseState);
+                    _ = conditionalFrames.Pop();
+                    currentStatements = endFrame.ParentStatements;
+                    currentStatements.Add(new BoundIf(endFrame.Condition,
+                        new BoundBlock([.. endFrame.TrueStatements], default),
+                        new BoundBlock([.. endFrame.FalseStatements], default),
+                        default));
+                    break;
+
                 case 0x14:
                 case 0xD6:
                     var localHome = instruction.Index;
@@ -1404,7 +1695,7 @@ public static partial class TrRmExecutableCompiler
 
                     var localVariable = localVariableByHome[localHome];
                     localInitializedByHome[localHome] = true;
-                    statements.Add(new BoundLocal(localVariable, localValue,
+                    currentStatements.Add(new BoundLocal(localVariable, localValue,
                         default));
                     break;
 
@@ -1711,7 +2002,7 @@ public static partial class TrRmExecutableCompiler
                             }
 
                             localInitializedByHome[emptyArrayHome] = true;
-                            statements.Add(new BoundLocal(
+                            currentStatements.Add(new BoundLocal(
                                 emptyArrayVariable, emptyInitialization,
                                 default));
                         }
@@ -1760,7 +2051,7 @@ public static partial class TrRmExecutableCompiler
                                     nativeFixedArrayTypes,
                                     localVariableByHome,
                                     localInitializedByHome,
-                                    statements);
+                                    currentStatements);
                                 _ = arrayInitializationElementsByHome.Remove(
                                     initializedArrayHome);
                             }
@@ -1821,7 +2112,7 @@ public static partial class TrRmExecutableCompiler
                                 initializationSelection.ElementCount,
                                 initializedElements, body,
                                 nativeFixedArrayTypes, localVariableByHome,
-                                localInitializedByHome, statements);
+                                localInitializedByHome,                                 currentStatements);
                             _ = arrayInitializationElementsByHome.Remove(
                                 initializedArrayHome);
                         }
@@ -1848,7 +2139,7 @@ public static partial class TrRmExecutableCompiler
 
                     var targetVariable = localVariableByHome[targetHome];
                     localInitializedByHome[targetHome] = true;
-                    statements.Add(new BoundLocal(targetVariable,
+                    currentStatements.Add(new BoundLocal(targetVariable,
                         new BoundNativeFunctionAddress(targetIndex,
                             pointerType, default)
                         {
@@ -2084,12 +2375,12 @@ public static partial class TrRmExecutableCompiler
                             var resultVariable = localVariableByHome[
                                 directCallResultHome];
                             localInitializedByHome[directCallResultHome] = true;
-                            statements.Add(new BoundLocal(resultVariable,
+                            currentStatements.Add(new BoundLocal(resultVariable,
                                 directUnitCall, default));
                         }
                         else
                         {
-                            statements.Add(new BoundExpressionStatement(
+                            currentStatements.Add(new BoundExpressionStatement(
                                 directUnitCall, default));
                         }
                         for (var register = 0; register < 14; register++)
@@ -2248,7 +2539,7 @@ public static partial class TrRmExecutableCompiler
                         }
                     }
 
-                    statements.Add(new BoundExpressionStatement(
+                    currentStatements.Add(new BoundExpressionStatement(
                         new BoundIndirectCall(
                             new BoundRead(localVariableByHome[targetHome],
                                 pointerType, default),
@@ -2278,7 +2569,7 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid(
                             "The F+S caller must return a fresh read of addressed storage.");
                     }
-                    statements.Add(new BoundReturn(new BoundRead(
+                    currentStatements.Add(new BoundReturn(new BoundRead(
                         returnVariable, callerResultType, default), default));
                     sawReturn = true;
                     break;
@@ -2287,7 +2578,7 @@ public static partial class TrRmExecutableCompiler
             instructionOrdinal++;
         }
 
-        if (!sawCallSite || !sawReturn
+        if (!sawCallSite || !sawReturn || conditionalFrames.Count != 0
             || placeSelectionsByRegister.Count != 0
             || arrayInitializationElementsByHome.Count != 0
             || callArgumentHomeOrder.Count != 0
@@ -2295,6 +2586,21 @@ public static partial class TrRmExecutableCompiler
                 !consumedStorageHomes.Contains(home)))
         {
             throw Invalid("The F+S caller Body is incomplete.");
+        }
+
+        var reconstructedBody = new BoundBlock([.. rootStatements], default);
+        var initializedLocalVariables = new HashSet<int>();
+        if (!BoundTreeTraversal.VisitStatements(reconstructedBody,
+                statement =>
+                {
+                    if (statement is BoundLocal local)
+                    {
+                        _ = initializedLocalVariables.Add(local.Variable);
+                    }
+                }))
+        {
+            throw Unsupported(
+                "The reconstructed F+S caller exceeds the bound-tree analysis limits.");
         }
 
         for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
@@ -2306,7 +2612,8 @@ public static partial class TrRmExecutableCompiler
 
             if (localVariableByHome[homeIndex] >= 0)
             {
-                if (!localInitializedByHome[homeIndex])
+                if (!initializedLocalVariables.Contains(
+                        localVariableByHome[homeIndex]))
                 {
                     throw Invalid(
                         "An F+S local Home has no initialization operation.");
@@ -2319,10 +2626,306 @@ public static partial class TrRmExecutableCompiler
         }
 
         return (new BoundBlock([
-                new BoundUnsafe(new BoundBlock(statements.ToImmutable(), default),
+                new BoundUnsafe(reconstructedBody,
                     default),
             ], default),
             variables.ToImmutable());
+    }
+
+    private static List<byte[]> ReadForeignInvocationStorageBodyInstructions(
+        TrRmRegisterBodyReader body)
+    {
+        var schema = body.Schema;
+        var blockCount = body.BlockCount;
+        var codeByBlock = new byte[blockCount][];
+        var entryStateRecordIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetBlock(0)[8..]);
+        var entryState = body.GetRecord(entryStateRecordIndex);
+        if (entryState[0] != 0x01
+            || BinaryPrimitives.ReadUInt32LittleEndian(entryState[4..]) != 0)
+        {
+            throw Invalid("The F+S caller has unexpected entry registers.");
+        }
+
+        var terminalOpcodes = new byte[blockCount];
+        var terminalOffsets = new int[blockCount];
+        var terminalLengths = new int[blockCount];
+        var successors = new int[blockCount][];
+        var edgeRecordIndexes = new ushort[blockCount];
+        var conditionRegisters = new byte[blockCount];
+        for (var blockIndex = 0; blockIndex < blockCount; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            if (BinaryPrimitives.ReadUInt16LittleEndian(block[8..])
+                != entryStateRecordIndex)
+            {
+                throw Unsupported(
+                    "The F+S conditional subset requires one shared entry state.");
+            }
+
+            var code = body.GetBlockCode(blockIndex);
+            codeByBlock[blockIndex] = code.ToArray();
+            var position = 0;
+            var terminalOffset = -1;
+            var terminalLength = 0;
+            while (position < code.Length)
+            {
+                terminalOffset = position;
+                terminalLength = TrRmRegisterBodyReader.InstructionLength(
+                    code[position], schema);
+                position += terminalLength;
+            }
+
+            if (terminalOffset < 0 || position != code.Length)
+            {
+                throw Invalid("The F+S Body contains an empty or truncated Block.");
+            }
+
+            var opcode = code[terminalOffset];
+            terminalOpcodes[blockIndex] = opcode;
+            terminalOffsets[blockIndex] = terminalOffset;
+            terminalLengths[blockIndex] = terminalLength;
+            if (opcode == 0xE3)
+            {
+                var target = BinaryPrimitives.ReadUInt16LittleEndian(
+                    code[(terminalOffset + 2)..]);
+                if (code[terminalOffset + 1] != 0
+                    || target <= blockIndex || target >= blockCount)
+                {
+                    throw Invalid("The F+S unconditional branch is invalid.");
+                }
+
+                successors[blockIndex] = [target];
+            }
+            else if (opcode == 0xE4)
+            {
+                if (!schema
+                        .UsesForeignInvocationStorageFixedArrayUnitInitialization())
+                {
+                    throw Unsupported(
+                        "Conditional Body control flow requires the exact A2EU schema.");
+                }
+
+                var control = code[terminalOffset + 1];
+                var edgeRecordIndex
+                    = BinaryPrimitives.ReadUInt16LittleEndian(
+                        code[(terminalOffset + 2)..]);
+                var edge = body.GetRecord(edgeRecordIndex);
+                if ((control & 0xF0) != 0 || (control & 0x0F) >= 14
+                    || edge[0] != 0x06
+                    || edge.Length != 8)
+                {
+                    throw Invalid("The A2EU conditional branch record is invalid.");
+                }
+
+                var trueBlock = BinaryPrimitives.ReadUInt16LittleEndian(
+                    edge[4..]);
+                var falseBlock = BinaryPrimitives.ReadUInt16LittleEndian(
+                    edge[6..]);
+                if (trueBlock == falseBlock || trueBlock <= blockIndex
+                    || falseBlock <= blockIndex
+                || trueBlock >= blockCount
+                || falseBlock >= blockCount)
+                {
+                    throw Invalid("The A2EU ConditionalEdge targets are invalid.");
+                }
+
+                edgeRecordIndexes[blockIndex] = edgeRecordIndex;
+                conditionRegisters[blockIndex] = (byte)(control & 0x0F);
+                successors[blockIndex] = [trueBlock, falseBlock];
+            }
+            else if (opcode == 0xB8)
+            {
+                successors[blockIndex] = [];
+            }
+            else
+            {
+                throw Unsupported(
+                    "Each F+S Block must end in a supported branch or ReturnHome.");
+            }
+        }
+
+        var remainingWork = 1_000_000;
+        HashSet<int> GetReachableBlocks(int startBlock)
+        {
+            var reachable = new HashSet<int>();
+            var pending = new Stack<int>();
+            pending.Push(startBlock);
+            while (pending.TryPop(out var blockIndex))
+            {
+                if (--remainingWork < 0)
+                {
+                    throw Unsupported(
+                        "The A2EU conditional CFG exceeds its bounded analysis work.");
+                }
+
+                if (!reachable.Add(blockIndex))
+                {
+                    continue;
+                }
+
+                foreach (var successor in successors[blockIndex])
+                {
+                    pending.Push(successor);
+                }
+            }
+
+            return reachable;
+        }
+
+        int FindConditionalJoin(int blockIndex)
+        {
+            var trueTarget = successors[blockIndex][0];
+            var falseTarget = successors[blockIndex][1];
+            var trueReachable = GetReachableBlocks(trueTarget);
+            var falseReachable = GetReachableBlocks(falseTarget);
+            var join = int.MaxValue;
+            foreach (var candidate in trueReachable)
+            {
+                if (candidate > blockIndex
+                    && candidate < join
+                    && falseReachable.Contains(candidate))
+                {
+                    join = candidate;
+                }
+            }
+
+            if (join == int.MaxValue)
+            {
+                throw Invalid(
+                    "The A2EU conditional branches have no normal join Block.");
+            }
+
+            return join;
+        }
+
+        var flattened = new List<byte[]>();
+        var visitedBlocks = new HashSet<int>();
+        void AppendBlockBody(int blockIndex)
+        {
+            var code = codeByBlock[blockIndex].AsSpan();
+            var position = 0;
+            var end = terminalOffsets[blockIndex];
+            while (position < end)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], schema);
+                flattened.Add(code.Slice(position, instructionLength)
+                    .ToArray());
+                position += instructionLength;
+            }
+        }
+
+        void AppendConditionalRegion(int startBlock, int stopBlock,
+            int depth)
+        {
+            if (depth > 128)
+            {
+                throw Unsupported(
+                    "The A2EU conditional nesting exceeds the bounded Body reader.");
+            }
+
+            var blockIndex = startBlock;
+            while (blockIndex != stopBlock)
+            {
+                if (blockIndex >= stopBlock
+                    || !visitedBlocks.Add(blockIndex))
+                {
+                    throw Invalid(
+                        "The A2EU conditional regions overlap or are not forward structured.");
+                }
+
+                AppendBlockBody(blockIndex);
+                var opcode = terminalOpcodes[blockIndex];
+                if (opcode == 0xE3)
+                {
+                    blockIndex = successors[blockIndex][0];
+                    continue;
+                }
+
+                if (opcode != 0xE4)
+                {
+                    throw Invalid(
+                        "An A2EU conditional arm exits before its join Block.");
+                }
+
+                var joinBlock = FindConditionalJoin(blockIndex);
+                if (joinBlock >= stopBlock)
+                {
+                    throw Invalid(
+                        "A nested A2EU conditional escapes its containing region.");
+                }
+
+                flattened.Add([
+                    0xFC,
+                    conditionRegisters[blockIndex],
+                    (byte)edgeRecordIndexes[blockIndex],
+                    (byte)(edgeRecordIndexes[blockIndex] >> 8),
+                ]);
+                AppendConditionalRegion(successors[blockIndex][0],
+                    joinBlock, depth + 1);
+                flattened.Add([0xFD, 0, 0, 0]);
+                AppendConditionalRegion(successors[blockIndex][1],
+                    joinBlock, depth + 1);
+                flattened.Add([0xFE, 0, 0, 0]);
+                blockIndex = joinBlock;
+            }
+        }
+
+        var currentBlock = 0;
+        while (true)
+        {
+            if (!visitedBlocks.Add(currentBlock))
+            {
+                throw Invalid("The A2EU caller CFG contains a cycle.");
+            }
+
+            AppendBlockBody(currentBlock);
+            var opcode = terminalOpcodes[currentBlock];
+            if (opcode == 0xE3)
+            {
+                currentBlock = successors[currentBlock][0];
+                continue;
+            }
+
+            if (opcode == 0xE4)
+            {
+                var joinBlock = FindConditionalJoin(currentBlock);
+                flattened.Add([
+                    0xFC,
+                    conditionRegisters[currentBlock],
+                    (byte)edgeRecordIndexes[currentBlock],
+                    (byte)(edgeRecordIndexes[currentBlock] >> 8),
+                ]);
+                AppendConditionalRegion(successors[currentBlock][0],
+                    joinBlock, 1);
+                flattened.Add([0xFD, 0, 0, 0]);
+                AppendConditionalRegion(successors[currentBlock][1],
+                    joinBlock, 1);
+                flattened.Add([0xFE, 0, 0, 0]);
+                currentBlock = joinBlock;
+                continue;
+            }
+
+            if (opcode != 0xB8)
+            {
+                throw Invalid("The A2EU caller has no terminal ReturnHome.");
+            }
+
+            var terminalCode = codeByBlock[currentBlock].AsSpan();
+            flattened.Add(terminalCode.Slice(
+                terminalOffsets[currentBlock],
+                terminalLengths[currentBlock]).ToArray());
+            break;
+        }
+
+        if (visitedBlocks.Count != blockCount)
+        {
+            throw Invalid("The A2EU caller contains unreachable Blocks.");
+        }
+
+        return flattened;
     }
 
     private static NativeArrayPlaceSelectionFacts
@@ -2574,7 +3177,7 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyReader body,
         ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
         int[] localVariableByHome, bool[] localInitializedByHome,
-        ImmutableArray<BoundStatement>.Builder statements)
+        List<BoundStatement> statements)
     {
         if (!NativeFixedArrayTypes.IsType(arrayType)
             || (uint)home >= (uint)body.HomeCount
@@ -3655,37 +4258,40 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyReader body, TrRmImportTableReader imports)
     {
         var targetMethodRow = 0;
-        var code = body.GetBlockCode(0);
-        for (var position = 0; position < code.Length;)
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
-            var instructionLength
-                = TrRmRegisterBodyReader.InstructionLength(
-                    code[position], body.Schema);
-            var instruction = code.Slice(position, instructionLength);
-            if (instruction[0] == 0xE9)
+            var code = body.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
             {
-                if (instruction[1] != 0 || targetMethodRow != 0)
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], body.Schema);
+                var instruction = code.Slice(position, instructionLength);
+                if (instruction[0] == 0xE9)
                 {
-                    throw Invalid(
-                        "The NativeAddress Body has an invalid target formation.");
+                    if (instruction[1] != 0 || targetMethodRow != 0)
+                    {
+                        throw Invalid(
+                            "The NativeAddress Body has an invalid target formation.");
+                    }
+
+                    var recordIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]);
+                    var record = body.GetRecord(recordIndex);
+                    if (record[0] != 0x0D)
+                    {
+                        throw Invalid(
+                            "The NativeAddress formation has an invalid record.");
+                    }
+
+                    targetMethodRow = ReadForeignInvocationBodyMethodDef(body,
+                        imports,
+                        BinaryPrimitives.ReadUInt16LittleEndian(record[8..]));
                 }
 
-                var recordIndex
-                    = BinaryPrimitives.ReadUInt16LittleEndian(
-                        instruction[2..]);
-                var record = body.GetRecord(recordIndex);
-                if (record[0] != 0x0D)
-                {
-                    throw Invalid(
-                        "The NativeAddress formation has an invalid record.");
-                }
-
-                targetMethodRow = ReadForeignInvocationBodyMethodDef(body,
-                    imports,
-                    BinaryPrimitives.ReadUInt16LittleEndian(record[8..]));
+                position += instructionLength;
             }
-
-            position += instructionLength;
         }
 
         return targetMethodRow != 0 ? targetMethodRow

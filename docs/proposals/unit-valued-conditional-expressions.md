@@ -125,21 +125,25 @@ completion, or permission to initialize early; None is not a unit store source.
 
 The source-level both-arm behavior is exercised by
 [`UnitConditionalExecutesOnlyItsSelectedArm`](../../tests/Terrum.CodeAnalysis.Tests/Semantics/ConditionalExpressionTests.cs).
-It does not establish conditional capture in a Standard Body; explicit and
-inferred Unit local declarations remain unimplemented.
+It does not establish A2EU runtime behavior; explicit and inferred Unit local
+declarations remain unimplemented.
 
 Current [array Body production](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs),
-including `IsSupportedNativeFixedArrayInitialization`, admits unit constants
-and bounded unit-returning calls, not a `BoundConditional` initializer.
-Its simple capture path and the corresponding
+including `IsSupportedNativeFixedArrayInitialization`, now provisionally
+admits nested Unit-valued `BoundConditional` initializers. It emits
+multi-block `E4`/`ConditionalEdge` branches with `E3` joins using assigned
+records, and performs the Unit stores only after the selected-arm effects
+complete. The supported condition forms are typed Boolean Home reads and
+direct Boolean NativeImport results; condition constants and other Boolean
+expression forms remain outside this Body profile. The corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
-are single-block. Current A2EU tests cover direct/distinct and nested
-NativeImport calls, checked int32/uint32 division/remainder argument captures,
-and checked fixed-array-address argument captures in
-[the active Body tests](../../tests/Terrum.CodeAnalysis.Tests/Modules/TrRm/TrRmForeignInvocationAddressEmitterTests.cs).
-Those cases do **not** establish conditional capture support or A2EU native
-runtime qualification. These are source/test observations, not checks run
-by proposal authoring.
+reconstructs structured `BoundIf` control flow and canonically re-emits the
+artifact. The active Body regression covers nested arms, checked
+int32/uint32 division/remainder captures, a checked fixed-array-address
+argument, and rejection of an invalid condition register. This establishes
+Body encoding/reconstruction, not provider Body-row remapping or A2EU native
+runtime qualification. These are source/test observations, not checks run by
+proposal authoring.
 
 Allocate no conditional record, opcode, wire ID, Feature or schema successor.
 Keep A2EU's exact schema and unit-store meaning unchanged; do not infer

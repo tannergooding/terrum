@@ -138,6 +138,21 @@ internal static class TrRmRegisterBodyRecordWriter
         return result;
     }
 
+    internal static byte[] EncodeConditionalEdge(ushort trueBlock,
+        ushort falseBlock)
+    {
+        if (trueBlock == falseBlock)
+        {
+            throw new ArgumentOutOfRangeException(nameof(falseBlock));
+        }
+
+        var result = new byte[8];
+        result[0] = 0x06;
+        Write(result, RecordHeaderSize, trueBlock);
+        Write(result, RecordHeaderSize + 2, falseBlock);
+        return result;
+    }
+
     internal static byte[] EncodeRootPinReferenceSupport(byte sourceKind,
         byte resultCarrier, ushort sourceIndex, byte resultRegister,
         byte sourceMode, ushort sourceTypeMapIndex, ushort resultTypeMapIndex)
