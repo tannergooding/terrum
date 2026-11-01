@@ -74,9 +74,12 @@ checks establish reconstruction and emission, not native execution or
 zero-extent backing. A2EU also captures checked `int32`/`uint32` division and
 remainder over Home reads in direct NativeImport arguments, reconstructing
 checked expressions and preserving operation-before-call/store order through
-canonical re-emission. This remains a bounded operand profile; other
-effectful expressions, cleanup/loan transport, and complete JIT/AOT runtime
-qualification remain open. The
+canonical re-emission. It also retains checked fixed-array element-address
+arguments as PlaceSelection plus StorageAddress operations before the direct
+call, preserving the dynamic index Home through source-free reconstruction.
+These checks establish encoded ordering and re-emission, not runtime failure
+behavior. This remains a bounded operand profile; other effectful expressions,
+cleanup/loan transport, and complete JIT/AOT runtime qualification remain open. The
 bounded F route runs/builds direct NativeImport
 executables and emits direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected

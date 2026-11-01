@@ -1247,6 +1247,157 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
     }
 
+    [Test]
+    public void StandardA2EUCapturesCheckedArrayAddressBeforeUnitCalls()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-unit-array-checked-address";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            internal extern void ReadElement(ptr<uint32> value);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void RecordUnit();
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                int32 invalidIndex = -1;
+                mut [uint32; 1] source = [0];
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    mut [void; 2] values = [
+                        ReadElement(&source[invalidIndex]),
+                        RecordUnit()
+                    ];
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+
+        var checkedAddressOffset = -1;
+        var storageAddressOffset = -1;
+        var directCallOffsets = new List<int>();
+        var storeOffsets = new List<int>();
+        var code = body.GetBlockCode(0);
+        for (var position = 0; position < code.Length;)
+        {
+            var opcode = code[position];
+            var instructionLength = TrRmRegisterBodyReader.InstructionLength(
+                opcode, body.Schema);
+            if (opcode == 0xD8)
+            {
+                var selection = body.GetRecord(
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        code[(position + 2)..]));
+                if (selection[0] == 0x04 && selection[4] == 3
+                    && selection[5] == 1 && selection[12] == 2
+                    && selection[13] == 3)
+                {
+                    Assert.That(checkedAddressOffset, Is.EqualTo(-1));
+                    checkedAddressOffset = position;
+                }
+            }
+            else if (opcode == 0xEC && checkedAddressOffset >= 0
+                && storageAddressOffset < 0)
+            {
+                storageAddressOffset = position;
+            }
+            else if (opcode == 0xE0)
+            {
+                var callRecord = body.GetRecord(
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        code[(position + 2)..]));
+                if (callRecord[4] == 1)
+                {
+                    directCallOffsets.Add(position);
+                }
+            }
+            else if (opcode == 0xD9)
+            {
+                storeOffsets.Add(position);
+            }
+
+            position += instructionLength;
+        }
+        Assert.That(checkedAddressOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(storageAddressOffset,
+            Is.GreaterThan(checkedAddressOffset));
+        Assert.That(directCallOffsets, Has.Count.EqualTo(2));
+        Assert.That(storageAddressOffset,
+            Is.LessThan(directCallOffsets[0]));
+        Assert.That(directCallOffsets[^1],
+            Is.LessThan(storeOffsets.First(offset =>
+                offset > directCallOffsets[^1])));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var checkedAddressCalls = new List<BoundCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundCall call
+                    && loaded.Functions[call.Function].Name == "ReadElement")
+                {
+                    checkedAddressCalls.Add(call);
+                }
+            }), Is.True);
+        var checkedAddressCall = checkedAddressCalls.Single();
+        var address = checkedAddressCall.Arguments
+            .OfType<BoundNativeStorageAddress>().Single();
+        Assert.That(address.Index, Is.TypeOf<BoundRead>());
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
     [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false)]
     [TestCase(2, "int32", "[0, -1]", PrimitiveType.Int32, true)]
