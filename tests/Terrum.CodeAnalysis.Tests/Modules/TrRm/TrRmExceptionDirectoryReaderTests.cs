@@ -28,6 +28,17 @@ public sealed class TrRmExceptionDirectoryReaderTests
     }
 
     [Test]
+    public void ExceptionRecordWritersEmitAssignedAnchorsAndPayloads()
+    {
+        var root = new TrRmExceptionRegionRow(0, 0, 0, 0, 0, 0, 0);
+        var directory = TrRmRegisterBodyRecordWriter.EncodeExceptionDirectory(
+            [root], [], new byte[sizeof(ushort)]);
+        Assert.That(directory, Is.EqualTo(CreateRootOnlyDirectory()));
+        Assert.That(TrRmRegisterBodyRecordWriter.EncodeRegionExit(
+            1, 1, 0, 0, 0, 0, [1]), Is.EqualTo(LeaveRecord(0, 1)));
+    }
+
+    [Test]
     public void ReadsOrderedCatchFilterHandlerAndFinallyRows()
     {
         var bytes = new byte[126];

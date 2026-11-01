@@ -13,6 +13,118 @@ internal static class TrRmRegisterBodyRecordWriter
 {
     private const int RecordHeaderSize = 4;
 
+    internal static byte[] EncodeExceptionDirectory(
+        IReadOnlyList<TrRmExceptionRegionRow> regions,
+        IReadOnlyList<TrRmExceptionHandlerRow> handlers,
+        ReadOnlyMemory<byte> blockRegions)
+    {
+        ArgumentNullException.ThrowIfNull(regions);
+        ArgumentNullException.ThrowIfNull(handlers);
+        if (regions.Count is < 1 or > 65_536
+            || handlers.Count > 65_536
+            || blockRegions.Length is < 2 or > 131_072
+            || (blockRegions.Length % sizeof(ushort)) != 0
+            || blockRegions.Length / sizeof(ushort) > 65_536)
+        {
+            throw new ArgumentOutOfRangeException(nameof(regions));
+        }
+
+        var size = 16L + ((long)regions.Count * 16)
+            + ((long)handlers.Count * 20) + blockRegions.Length;
+        if (size > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(nameof(blockRegions));
+        }
+
+        var result = new byte[(int)size];
+        result[0] = 0x0F;
+        Write(result, RecordHeaderSize, checked((uint)regions.Count));
+        Write(result, RecordHeaderSize + sizeof(uint),
+            checked((uint)handlers.Count));
+        Write(result, RecordHeaderSize + (2 * sizeof(uint)),
+            checked((uint)(blockRegions.Length / sizeof(ushort))));
+        var position = 16;
+        foreach (var region in regions)
+        {
+            result[position] = region.Kind;
+            result[position + 1] = region.Flags;
+            Write(result, position + 2, region.ParentRegionIndex);
+            Write(result, position + 4, region.EntryBlock);
+            Write(result, position + 6, region.FinallyRegionIndex);
+            Write(result, position + 8, region.HandlerFirst);
+            Write(result, position + 12, region.HandlerCount);
+            position += 16;
+        }
+
+        foreach (var handler in handlers)
+        {
+            Write(result, position, handler.ProtectedRegionIndex);
+            result[position + 2] = handler.CatchKind;
+            result[position + 3] = handler.HasBinding;
+            Write(result, position + 4, handler.CatchTypeMapIndex);
+            Write(result, position + 6, handler.BindingHomeIndex);
+            result[position + 8] = handler.HasFilter;
+            Write(result, position + 10, handler.FilterRegionIndex);
+            Write(result, position + 12, handler.HandlerRegionIndex);
+            Write(result, position + 16, handler.ExceptionWitnessRow);
+            position += 20;
+        }
+
+        blockRegions.Span.CopyTo(result.AsSpan(position));
+        _ = new TrRmExceptionDirectoryReader(result,
+            blockRegions.Length / sizeof(ushort), 65_536, 65_536);
+        return result;
+    }
+
+    internal static byte[] EncodeRegionExit(byte exitKind, byte hasTarget,
+        ushort targetBlock, byte valueKind, byte valueUse, ushort valueIndex,
+        IReadOnlyList<ushort> regions)
+    {
+        ArgumentNullException.ThrowIfNull(regions);
+        if (exitKind is < 1 or > 4 || hasTarget > 1
+            || (hasTarget == 0 && targetBlock != 0)
+            || regions.Count > 65_535)
+        {
+            throw new ArgumentOutOfRangeException(nameof(exitKind));
+        }
+
+        var hasValue = valueKind is 1 or 2;
+        var valid = exitKind switch
+        {
+            1 => hasTarget == 1 && valueKind == 0 && valueUse == 0
+                && valueIndex == 0 && regions.Count is > 0 and <= 65_535,
+            2 => hasTarget == 0 && !hasValue && valueKind == 0
+                && valueUse == 0 && valueIndex == 0 && regions.Count == 2,
+            3 => hasTarget == 0 && (valueKind is 1 or 2)
+                && valueUse == 1 && regions.Count == 1
+                && (valueKind != 1 || valueIndex <= 13),
+            4 => hasTarget == 0 && !hasValue && valueKind == 0
+                && valueUse == 0 && valueIndex == 0 && regions.Count == 1,
+            _ => false,
+        };
+        if (!valid)
+        {
+            throw new ArgumentOutOfRangeException(nameof(valueKind));
+        }
+
+        var result = new byte[16 + (regions.Count * sizeof(ushort))];
+        result[0] = 0x0A;
+        result[RecordHeaderSize] = exitKind;
+        result[RecordHeaderSize + 1] = hasTarget;
+        Write(result, RecordHeaderSize + 2, targetBlock);
+        result[RecordHeaderSize + 4] = valueKind;
+        result[RecordHeaderSize + 5] = valueUse;
+        Write(result, RecordHeaderSize + 6, valueIndex);
+        Write(result, RecordHeaderSize + 8, checked((uint)regions.Count));
+        for (var index = 0; index < regions.Count; index++)
+        {
+            Write(result, RecordHeaderSize + 12 + (index * sizeof(ushort)),
+                regions[index]);
+        }
+
+        return result;
+    }
+
     internal static byte[] EncodeNativeAddress(byte resultKind, ushort resultIndex,
         ushort methodMapIndex, ushort pointerTypeMapIndex)
     {
