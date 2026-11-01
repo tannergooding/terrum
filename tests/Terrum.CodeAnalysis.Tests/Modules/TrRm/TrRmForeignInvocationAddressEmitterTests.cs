@@ -4402,9 +4402,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             providerArtifact);
         var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
             leafArtifact);
+        var emptyModuleInput = new TrRmStandardArtifactInput(schemaIdentity,
+            CreateEmptyFModuleArtifact("EmptyF"));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
-            rootIdentity, [providerInput, leafInput]);
+            rootIdentity, [providerInput, leafInput, emptyModuleInput]);
         var imported = loaded.Functions.Single(static function =>
             function.Name == "Owned");
         Assert.That(imported.ModuleImport!.ProducerIdentity,
@@ -4544,6 +4546,78 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     incompatibleSecondArtifact),
                 providers[2],
             ]));
+    }
+
+    [Test]
+    public void StandardFProviderClosureValidatesChainsLongerThanTwoEdges()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "Root";
+        const string providerIdentity = "Owned";
+        const string secondIdentity = "Leaf";
+        const string thirdIdentity = "Deep";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootArtifact = CreateRootMethodImportArtifact(rootIdentity,
+            "Owned", providerIdentity, "Owned", core);
+        var providerArtifact = CreateMixedImportProviderArtifact(
+            providerIdentity, "Owned", "GetCurrentProcessId",
+            "Leaf", "GetTickCount", secondIdentity, "Leaf", core);
+        var secondArtifact = CreateMixedImportProviderArtifact(secondIdentity,
+            "Leaf", "GetTickCount", "Deep", "GetCurrentThreadId",
+            thirdIdentity, "Deep", core);
+        var thirdCompilation = CreateMultipleImportProviderCompilation(
+            "Deep", "GetCurrentThreadId", core);
+        var thirdArtifact = TrRmExecutableCompiler.EmitStandard(
+            thirdCompilation.Program!, thirdIdentity, schemaIdentity, 1);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var secondInput = new TrRmStandardArtifactInput(schemaIdentity,
+            secondArtifact);
+        var thirdInput = new TrRmStandardArtifactInput(schemaIdentity,
+            thirdArtifact);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [providerInput, secondInput, thirdInput]);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport!.ProducerIdentity,
+            Is.EqualTo(providerIdentity));
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity,
+            [providerInput, secondInput, thirdInput],
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings,
+            Has.Length.EqualTo(1));
+
+        var incompatibleThird = CreateMultipleImportProviderCompilation(
+            "Deep", "GetTickCount", core);
+        var incompatibleThirdArtifact = TrRmExecutableCompiler.EmitStandard(
+            incompatibleThird.Program!, thirdIdentity, schemaIdentity, 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providerInput,
+                secondInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleThirdArtifact),
+            ]));
+
+        var coLocatedProviderArtifact
+            = CombinePopulatedNativeAddressModules(providerArtifact,
+                secondArtifact);
+        var coLocatedProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, coLocatedProviderArtifact);
+        var hybridLoaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [coLocatedProviderInput, thirdInput]);
+        Assert.That(hybridLoaded.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport!.ProducerIdentity,
+            Is.EqualTo(providerIdentity));
     }
 
     [Test]
@@ -5479,6 +5553,20 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         return AddRootMethodImports(artifact, [
             (methodName, producerIdentity, exportKey),
         ], reuseModuleRefs: false, duplicateSecondMethodName: false);
+    }
+
+    private static byte[] CreateEmptyFModuleArtifact(string moduleIdentity)
+    {
+        var stringsBytes
+            = TrRmStringTableWriter.EncodeNames([(moduleIdentity, 0)]);
+        var strings = new TrRmStringTableReader(stringsBytes, 1);
+        var modules = TrRmModuleTableWriter.Encode([
+            new TrRmModuleRow(1, 1, 0, 0, 1, 1, 1, 1),
+        ], strings, 0, 0, 0, 0, 0);
+        return TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, modules),
+            new TrRmSection(0x0002, 0, 1, stringsBytes),
+        ], TrRmArtifactSchema.ForeignInvocationDraft);
     }
 
     internal static byte[] CreateMixedImportProviderArtifact(
