@@ -654,6 +654,7 @@ public static partial class TrRmExecutableCompiler
         var unitCallTemporaryHomes = storageCall is null
             ? []
             : GetNativeAddressUnitCallHomes(storageCall.UnitInitializerCalls,
+                storageCall.ConditionCaptures,
                 callerLocalTypeSpecRefs.Length);
         var typeMapTokenCapacity = storageCall is null
             ? 1 + (callResultHomeIndex >= 0 ? 1 : 0)
@@ -1090,6 +1091,9 @@ public static partial class TrRmExecutableCompiler
         BoundCall Call, NativeFunctionPointerSignatureDefinition Signature,
         int ResultHome, ImmutableArray<int> ArgumentCaptureHomes);
 
+    private readonly record struct NativeAddressUnitConditionCapture(
+        BoundBinary Condition, int Home);
+
     private readonly record struct NativeAddressUnitCallHome(
         int Index, PrimitiveType Type);
 
@@ -1097,12 +1101,14 @@ public static partial class TrRmExecutableCompiler
         BoundIndirectCall Call, int TargetVariable, int ReturnVariable,
         ImmutableArray<NativeAddressStorageArgument> StorageArguments,
         ImmutableArray<NativeAddressUnitInitializerCall> UnitInitializerCalls,
+        ImmutableArray<NativeAddressUnitConditionCapture> ConditionCaptures,
         int ConditionalEdgeCount,
         int ArrayInitializationIndexVariable);
 
     private static ImmutableArray<NativeAddressUnitCallHome>
         GetNativeAddressUnitCallHomes(
             ImmutableArray<NativeAddressUnitInitializerCall> calls,
+            ImmutableArray<NativeAddressUnitConditionCapture> captures,
             int localCount)
     {
         var homesByIndex = new SortedDictionary<int, PrimitiveType>();
@@ -1127,6 +1133,17 @@ public static partial class TrRmExecutableCompiler
                     throw Unsupported(
                         "The A2EU argument capture Home is reused.");
                 }
+            }
+        }
+
+        foreach (var capture in captures)
+        {
+            if (capture.Home >= localCount
+                && !homesByIndex.TryAdd(capture.Home,
+                    capture.Condition.Left.Type))
+            {
+                throw Unsupported(
+                    "The A2EU condition capture Home is reused.");
             }
         }
 
@@ -1435,6 +1452,8 @@ public static partial class TrRmExecutableCompiler
 
         var unitInitializerCalls
             = ImmutableArray.CreateBuilder<NativeAddressUnitInitializerCall>();
+        var conditionCaptures
+            = ImmutableArray.CreateBuilder<NativeAddressUnitConditionCapture>();
         var nextUnitCallResultHome
             = function.Variables.Length - function.ParameterCount;
         var conditionalEdgeCount = 0;
@@ -1588,16 +1607,40 @@ public static partial class TrRmExecutableCompiler
                             comparison)
                         || IsSupportedNativeUnitConditionalBooleanXor(
                             comparison):
-                    if (comparison.Left is not BoundRead leftRead
-                        || comparison.Right is not BoundRead rightRead
-                        || (uint)leftRead.Variable
-                            >= (uint)function.Variables.Length
-                        || (uint)rightRead.Variable
-                            >= (uint)function.Variables.Length
-                        || (leftRead.Variable >= function.ParameterCount
-                            && !localVariables.Contains(leftRead.Variable))
-                        || (rightRead.Variable >= function.ParameterCount
-                            && !localVariables.Contains(rightRead.Variable)))
+                    if (comparison.Left is BoundRead leftRead
+                        && ((uint)leftRead.Variable
+                                >= (uint)function.Variables.Length
+                            || (leftRead.Variable >= function.ParameterCount
+                                && !localVariables.Contains(leftRead.Variable))))
+                    {
+                        return false;
+                    }
+
+                    if (comparison.Right is BoundRead rightRead
+                        && ((uint)rightRead.Variable
+                                >= (uint)function.Variables.Length
+                            || (rightRead.Variable >= function.ParameterCount
+                                && !localVariables.Contains(rightRead.Variable))))
+                    {
+                        return false;
+                    }
+
+                    if (comparison.Left is BoundRead
+                        && comparison.Right is BoundCall)
+                    {
+                        conditionCaptures.Add(
+                            new NativeAddressUnitConditionCapture(
+                                comparison, nextUnitCallResultHome++));
+                    }
+
+                    if (comparison.Left is BoundCall leftCall
+                        && !AddUnitInitializerCall(leftCall, -1, -1))
+                    {
+                        return false;
+                    }
+
+                    if (comparison.Right is BoundCall rightCall
+                        && !AddUnitInitializerCall(rightCall, -1, -1))
                     {
                         return false;
                     }
@@ -1775,6 +1818,7 @@ public static partial class TrRmExecutableCompiler
         plan = new NativeAddressStorageCallPlan(call, targetRead.Variable,
             returnRead.Variable, storageArguments.ToImmutable(),
             unitInitializerCalls.ToImmutable(),
+            conditionCaptures.ToImmutable(),
             conditionalEdgeCount,
             arrayInitializationIndexVariable);
         return true;
@@ -2108,8 +2152,10 @@ public static partial class TrRmExecutableCompiler
     {
         if (comparison.Type != PrimitiveType.Bool
             || comparison.Left.Type != comparison.Right.Type
-            || comparison.Left is not BoundRead
-            || comparison.Right is not BoundRead)
+            || (comparison.Left is not BoundRead
+                && comparison.Left is not BoundCall)
+            || (comparison.Right is not BoundRead
+                && comparison.Right is not BoundCall))
         {
             return false;
         }
@@ -2133,8 +2179,8 @@ public static partial class TrRmExecutableCompiler
             && binary.Type == PrimitiveType.Bool
             && binary.Left.Type == PrimitiveType.Bool
             && binary.Right.Type == PrimitiveType.Bool
-            && binary.Left is BoundRead
-            && binary.Right is BoundRead;
+            && (binary.Left is BoundRead || binary.Left is BoundCall)
+            && (binary.Right is BoundRead || binary.Right is BoundCall);
 
     private static bool TryGetNativeAddressKnownBoolean(
         BoundExpression expression, out bool value)
@@ -2287,7 +2333,8 @@ public static partial class TrRmExecutableCompiler
     {
         var localCount = caller.Variables.Length - caller.ParameterCount;
         var unitCallTemporaryHomes = GetNativeAddressUnitCallHomes(
-            storageCall.UnitInitializerCalls, localCount);
+            storageCall.UnitInitializerCalls, storageCall.ConditionCaptures,
+            localCount);
         var unitCallResultHomeEnd
             = localCount + unitCallTemporaryHomes.Length;
         var unitCallStorageHomeByArgument
@@ -2542,6 +2589,19 @@ public static partial class TrRmExecutableCompiler
             .ToDictionary(static argument => argument.ParameterOrdinal);
         var unitCallPlanIndexesByCall = new Dictionary<BoundCall, Queue<int>>(
             ReferenceEqualityComparer.Instance);
+        var conditionCaptureHomeByExpression
+            = new Dictionary<BoundBinary, int>(
+                ReferenceEqualityComparer.Instance);
+        foreach (var conditionCapture in storageCall.ConditionCaptures)
+        {
+            if (!conditionCaptureHomeByExpression.TryAdd(
+                    conditionCapture.Condition, conditionCapture.Home))
+            {
+                throw Unsupported(
+                    "The A2EU condition capture is duplicated.");
+            }
+        }
+
         for (var callIndex = 0;
             callIndex < storageCall.UnitInitializerCalls.Length;
             callIndex++)
@@ -2872,16 +2932,55 @@ public static partial class TrRmExecutableCompiler
                     break;
 
                 case BoundBinary comparison
-                    when (IsSupportedNativeUnitConditionalComparison(
+                    when IsSupportedNativeUnitConditionalComparison(
                             comparison)
                         || IsSupportedNativeUnitConditionalBooleanXor(
-                            comparison))
-                        && comparison.Left is BoundRead leftRead
-                        && comparison.Right is BoundRead rightRead:
-                    AppendHomeLoad(code, 0,
-                        GetCallerHome(leftRead.Variable));
-                    AppendHomeLoad(code, 1,
-                        GetCallerHome(rightRead.Variable));
+                            comparison):
+                    int leftHome;
+                    if (comparison.Left is BoundRead leftRead)
+                    {
+                        leftHome = GetCallerHome(leftRead.Variable);
+                        if (conditionCaptureHomeByExpression.TryGetValue(
+                                comparison, out var captureHome))
+                        {
+                            AppendHomeLoad(code, 0, leftHome);
+                            AppendHomeStore(code, 0, captureHome);
+                            leftHome = captureHome;
+                        }
+                    }
+                    else if (comparison.Left is BoundCall leftCall)
+                    {
+                        leftHome = AppendUnitInitializerCall(leftCall);
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "An A2EU comparison has no supported left operand.");
+                    }
+
+                    int rightHome;
+                    if (comparison.Right is BoundRead rightRead)
+                    {
+                        rightHome = GetCallerHome(rightRead.Variable);
+                    }
+                    else if (comparison.Right is BoundCall rightCall)
+                    {
+                        rightHome = AppendUnitInitializerCall(rightCall);
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            "An A2EU comparison has no supported right operand.");
+                    }
+
+                    if (leftHome < 0 || rightHome < 0)
+                    {
+                        throw Unsupported(
+                            "An A2EU comparison operand has no result Home.");
+                    }
+
+                    AppendHomeLoad(code, 0, leftHome);
+                    AppendHomeLoad(code, 1, rightHome);
                     if (comparison.Left.Type == PrimitiveType.Bool)
                     {
                         code.Add(0x32);

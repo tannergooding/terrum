@@ -92,20 +92,22 @@ reconstructs structured `BoundIf` control flow and canonically re-emits the
 Body, including nested checked scalar and storage-address arguments. Its
 condition subset now includes Boolean Home reads, direct Boolean NativeImport
 results, constant selection, logical-not, short-circuit `&&`/`||`, nested
-Boolean conditional expressions, and non-Boolean scalar Home-read comparisons
-(`==`, `!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41` instructions.
-Boolean Home-read equality/inequality also lower through assigned `0x32` XOR
-and `0x33` NOT. Right-side calls and checks stay on reached paths. The focused
-A2EU producer/reader/JIT/AOT selection passed 51/51 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-boolean-equality-conditions\\a2eu-boolean-equality-conditions.trx`.
-Boolean literal/call operands, non-source predicate masks, and comparisons
-with effectful scalar call operands remain unsupported. A co-located
+Boolean conditional expressions, and non-Boolean scalar comparisons (`==`,
+`!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41` instructions.
+Boolean equality/inequality uses assigned `0x32` XOR and `0x33` NOT. Comparison
+operands may be Home reads or admitted direct NativeImport calls; a left Home
+read is snapshotted before a right-side call, and nested checked argument
+failure prevents the branch. The focused A2EU producer/reader/JIT/AOT
+selection passed 60/60 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-comparison-call-operands-final2\\a2eu-comparison-call-operands-final2.trx`.
+Boolean literal operands, non-source predicate masks, and call forms outside
+the direct NativeImport capture profile remain unsupported. A co-located
 selected-provider regression shifts the conditional caller to Body row 2,
 remaps its maps, preserves body-local
 branches/records, and checks compatible and incompatible provider replacement.
-Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast;
-CheckedExceptions, effectful comparison operands, and cleanup/loan transport
-remain incomplete.
+Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast,
+including selected comparison-call failure; CheckedExceptions and
+cleanup/loan transport remain incomplete.
 The bounded F route runs/builds direct NativeImport executables and emits
 direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected

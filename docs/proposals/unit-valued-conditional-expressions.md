@@ -142,12 +142,14 @@ NativeImport results, constant selection, logical-not, short-circuit `&&`/`||`,
 nested Boolean conditional expressions, and non-Boolean scalar Home-read
 comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41`
 instructions. Boolean Home-read equality/inequality also lower through
-assigned `0x32` XOR and `0x33` NOT. Right-side calls and checks stay on reached
-paths. The focused A2EU producer/reader/JIT/AOT selection passed 51/51 with
-zero skips at
-`artifacts\\tst\\Debug\\a2eu-boolean-equality-conditions\\a2eu-boolean-equality-conditions.trx`.
-Boolean literal/call operands, non-source predicate masks, and comparisons
-with effectful scalar call operands remain outside this Body profile. The corresponding
+assigned `0x32` XOR and `0x33` NOT. Comparison operands may be Home reads or
+admitted direct NativeImport calls; a left Home read is snapshotted before a
+right-side call, and nested checked argument failure prevents the branch. The
+focused A2EU producer/reader/JIT/AOT selection passed 60/60 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-comparison-call-operands-final2\\a2eu-comparison-call-operands-final2.trx`.
+Boolean literal operands, non-source predicate masks, and call forms outside
+the direct NativeImport capture profile remain outside this Body profile. The
+corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 artifact. The active Body regression covers nested arms, checked
@@ -156,9 +158,9 @@ argument, and rejection of an invalid condition register. This establishes
 Body encoding/reconstruction and selected-provider Body-row remapping,
 including compatible and incompatible replacement checks. Separate
 supervised source-free JIT/AOT cases exercise Boolean and scalar-comparison
-conditions under FailFast; CheckedExceptions and general cleanup/failure
-transport remain open. These are source/test observations, not checks run by
-proposal authoring.
+conditions under FailFast, including selected comparison-call failure;
+CheckedExceptions and general cleanup/failure transport remain open. These are
+source/test observations, not checks run by proposal authoring.
 
 Allocate no conditional record, opcode, wire ID, Feature or schema successor.
 Keep A2EU's exact schema and unit-store meaning unchanged; do not infer

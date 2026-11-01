@@ -1711,6 +1711,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(false, false, "choose == other", false)]
     [TestCase(true, false, "choose != other", false)]
     [TestCase(false, false, "choose != other", false)]
+    [TestCase(true, false, "clearError == GetCurrentProcessId()", false)]
+    [TestCase(true, false, "GetCurrentProcessId() > clearError", false)]
+    [TestCase(true, false,
+        "GetCurrentProcessId() == GetCurrentProcessId()", false)]
+    [TestCase(true, false,
+        "IsProcessorFeaturePresent(markedError) == IsProcessorFeaturePresent(markedError)", false)]
     [TestCase(true, false,
         "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
     public void StandardA2EUConditionalJitExecutesOnlyTheSelectedNativeArm(
@@ -1745,6 +1751,18 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, input.SchemaIdentity, 1);
         Assert.That(reemitted, Is.EqualTo(input.Artifact.ToArray()));
+        if (conditionExpression == "clearError == GetCurrentProcessId()")
+        {
+            AssertA2EUComparisonCallSequence(input.Artifact.ToArray(), 2,
+                requiresReadSnapshot: true);
+        }
+        else if (conditionExpression
+            == "GetCurrentProcessId() == GetCurrentProcessId()")
+        {
+            AssertA2EUComparisonCallSequence(input.Artifact.ToArray(), 3,
+                requiresReadSnapshot: false);
+        }
+
         var result = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
         var conditionValue = conditionExpression switch {
             "choose" => choose,
@@ -1759,13 +1777,17 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 or "markedError <= clearError" => false,
             "choose == other" => choose,
             "choose != other" => !choose,
+            "clearError == GetCurrentProcessId()" => false,
+            "GetCurrentProcessId() > clearError" => true,
+            "GetCurrentProcessId() == GetCurrentProcessId()"
+                or "IsProcessorFeaturePresent(markedError) == IsProcessorFeaturePresent(markedError)" => true,
             _ => throw new InvalidOperationException(
                 "The A2EU test condition has no expected normal result."),
         };
+        var expected = conditionValue ? 0 : Environment.ProcessId;
         TestContext.WriteLine(
-            $"A2EU source-free JIT: choose={choose}; failFalseArm={failFalseArm}; useIfStatement={useIfStatement}; condition={conditionExpression}; policy=FailFast; expected={(conditionValue ? 0 : Environment.ProcessId)}; actual={result}.");
-        Assert.That(result,
-            Is.EqualTo(conditionValue ? 0 : Environment.ProcessId));
+            $"A2EU source-free JIT: choose={choose}; failFalseArm={failFalseArm}; useIfStatement={useIfStatement}; condition={conditionExpression}; policy=FailFast; expected={expected}; actual={result}.");
+        Assert.That(result, Is.EqualTo(expected));
     }
 
     [TestCase(true, false, "choose", false)]
@@ -1792,6 +1814,14 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(false, false, "choose == other", false)]
     [TestCase(true, false, "choose != other", false)]
     [TestCase(false, false, "choose != other", false)]
+    [TestCase(true, false, "clearError == GetCurrentProcessId()", false)]
+    [TestCase(true, false, "GetCurrentProcessId() > clearError", false)]
+    [TestCase(true, false,
+        "GetCurrentProcessId() == GetCurrentProcessId()", false)]
+    [TestCase(true, false,
+        "IsProcessorFeaturePresent(markedError) == IsProcessorFeaturePresent(markedError)", false)]
+    [TestCase(true, false,
+        "IsProcessorFeaturePresent(markedError / clearError) == other", false)]
     public async Task StandardA2EUConditionalAotExecutesOnlyTheSelectedNativeArm(
         bool choose, bool failFalseArm, string conditionExpression,
         bool useIfStatement)
@@ -1847,6 +1877,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                         => !choose,
                     "choose && IsProcessorFeaturePresent(markedError / clearError)"
                         => choose,
+                    "IsProcessorFeaturePresent(markedError / clearError) == other"
+                        => true,
                     _ => false,
                 };
             var conditionValue = conditionExpression switch {
@@ -1860,6 +1892,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "markedError <= clearError" => false,
                 "choose == other" => choose,
                 "choose != other" => !choose,
+                "clearError == GetCurrentProcessId()" => false,
+                "GetCurrentProcessId() > clearError" => true,
+                "GetCurrentProcessId() == GetCurrentProcessId()"
+                    or "IsProcessorFeaturePresent(markedError) == IsProcessorFeaturePresent(markedError)" => true,
+                "IsProcessorFeaturePresent(markedError / clearError) == other" => false,
                 _ => throw new InvalidOperationException(
                     "The A2EU test condition has no expected normal result."),
             };
@@ -1972,6 +2009,82 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+    }
+
+    private static void AssertA2EUComparisonCallSequence(byte[] artifact,
+        int expectedCallCount, bool requiresReadSnapshot)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            _ = flags;
+            if (kind != 0x0020)
+            {
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
+                contractCount, schema);
+            for (var blockIndex = 0; blockIndex < body.BlockCount;
+                blockIndex++)
+            {
+                var code = body.GetBlockCode(blockIndex);
+                var callOffsets = new List<int>();
+                var copyStoreOffsets = new List<int>();
+                var compareOffset = -1;
+                for (var position = 0; position < code.Length;)
+                {
+                    var opcode = code[position];
+                    var instructionLength
+                        = TrRmRegisterBodyReader.InstructionLength(
+                            opcode, schema);
+                    if (opcode == 0xE0)
+                    {
+                        callOffsets.Add(position);
+                    }
+                    else if (opcode == 0xD6)
+                    {
+                        copyStoreOffsets.Add(position);
+                    }
+                    else if (opcode == 0x40)
+                    {
+                        compareOffset = position;
+                    }
+
+                    position += instructionLength;
+                }
+
+                if (compareOffset < 0)
+                {
+                    continue;
+                }
+
+                Assert.That(callOffsets, Has.Count.EqualTo(expectedCallCount));
+                Assert.That(callOffsets[^1], Is.LessThan(compareOffset));
+                if (requiresReadSnapshot)
+                {
+                    Assert.That(copyStoreOffsets.Any(offset =>
+                        offset > callOffsets[0]
+                        && offset < callOffsets[1]), Is.True);
+                }
+
+                return;
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The A2EU artifact has no scalar comparison call block.");
     }
 
     [Test]
