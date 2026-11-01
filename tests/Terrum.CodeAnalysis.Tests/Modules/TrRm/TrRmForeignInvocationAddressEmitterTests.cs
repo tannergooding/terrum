@@ -3007,6 +3007,130 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public async Task StandardA2NestedArraySourceFreeJitAndAotExecute()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-nested-array-runtime";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "IsBadReadPtr",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            internal extern bool IsBadReadPtr(
+                ptr<int32> memory,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [[[int32; 2]; 2]; 2] values = [
+                    [[0, -1], [-1, 0]],
+                    [[-1, 0], [0, -1]]];
+                mut int32 output = 0;
+                uint64 byteCount = 0;
+                unsafe {
+                    var callback = &IsBadReadPtr;
+                    callback(&output, byteCount);
+                }
+                return output;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1);
+        Assert.That(reemitted, Is.EqualTo(artifact));
+
+        var compilerPath = typeof(TrRmExecutableCompiler).Assembly.Location;
+        var importPath = Path.Combine(Environment.SystemDirectory,
+            "kernel32.dll");
+        TestContext.WriteLine(
+            $"A2 nested source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!IsBadReadPtr; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
+        var jitResult = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2 nested source-free JIT: policy=FailFast; expected=0; actual={jitResult}.");
+        Assert.That(jitResult, Is.Zero);
+
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        Assert.That(image, Is.Not.Empty);
+        var imagePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-{moduleIdentity}-{Guid.NewGuid():N}.exe");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            process = Process.Start(new ProcessStartInfo(imagePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException(
+                "The A2 nested-array executable was not started.");
+            var processId = process.Id;
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"A2 nested-array executable exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            var output = await stdout.ConfigureAwait(true);
+            var error = await stderr.ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"A2 nested source-free AOT: policy=FailFast; pid={processId}; expected=0; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
+            Assert.That(process.ExitCode, Is.Zero);
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public void StandardA2DeclarationProducerPublishesCheckedCopyEvidence()
     {
         const string schemaIdentity
