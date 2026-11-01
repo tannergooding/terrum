@@ -978,6 +978,28 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         Assert.That(arrayPermutedRows.FixedArrayLayoutRow,
             Is.Not.EqualTo(originalRows.FixedArrayLayoutRow));
 
+        var coLocatedProvider = CreateProviderArtifact(
+            coLocateLeafProvider: true);
+        var coLocatedPermutedProvider = ReverseLayoutVariants(
+            PermuteFieldDefOwnerBlocks(ReverseTypeSpecRows(
+                coLocatedProvider)));
+        var coLocatedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    CreateRootArtifact()),
+                "Root",
+                [new TrRmStandardArtifactInput(SchemaIdentity,
+                    coLocatedPermutedProvider)],
+                ["ContainerKey"]);
+        Assert.That(coLocatedReference.Structures.Single(
+            static structure => structure.Name == "Pair")
+            .StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("Provider"));
+        Assert.That(coLocatedReference.Structures.Single(
+            static structure => structure.Name == "Leaf")
+            .StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("LeafProvider"));
+
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(SchemaIdentity, originalProvider),
             "Provider", [], ["ContainerAKey"]);
