@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
+using System.Linq;
 using Terrum.CodeAnalysis.Native;
 using Terrum.CodeAnalysis.Semantics;
 
@@ -37,6 +38,30 @@ internal sealed record TrRmStandardNativeProviderBinding(
     string ActualLibraryName,
     string ActualExportName);
 
+internal sealed record TrRmStandardNativeDependencyBinding(
+    int ConsumerArtifactIndex,
+    int ConsumerModuleRow,
+    string ConsumerModuleIdentity,
+    int ConsumerImportRow,
+    int ConsumerModuleRefRow,
+    int ExpectedMethodRow,
+    string ProducerIdentity,
+    string ExportKey,
+    uint TargetRequirement,
+    uint RuntimePolicy,
+    int ProviderArtifactIndex,
+    int ProviderModuleRow,
+    int ProviderMethodRow,
+    string ActualLibraryName,
+    string ActualExportName);
+
+internal readonly record struct TrRmStandardNativeProviderClosureValidation(
+    BoundProgram RootProgram,
+    int RootModuleRow,
+    ImmutableArray<TrRmStandardModuleSelection> Modules,
+    ImmutableArray<TrRmStandardNativeProviderBinding> RootProviderBindings,
+    ImmutableArray<TrRmStandardNativeDependencyBinding> DependencyBindings);
+
 internal sealed class TrRmStandardNativeBindingPlan
 {
     private const string ForeignInvocationSchemaIdentity
@@ -58,6 +83,8 @@ internal sealed class TrRmStandardNativeBindingPlan
     private readonly ImmutableArray<string> _schemaIdentities;
     private readonly ImmutableArray<TrRmStandardModuleSelection> _modules;
     private readonly ImmutableArray<TrRmStandardNativeProviderBinding> _providerBindings;
+    private readonly ImmutableArray<TrRmStandardNativeDependencyBinding>
+        _providerDependencyBindings;
 
     internal TrRmStandardNativeBindingPlan(BoundProgram rootProgram,
         string moduleIdentity, byte[][] artifacts,
@@ -66,6 +93,23 @@ internal sealed class TrRmStandardNativeBindingPlan
         int rootModuleRow, TrRmStandardNativeOperation operation,
         NativeRuntimePolicy runtimePolicy,
         ImmutableArray<TrRmStandardNativeProviderBinding> providerBindings,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
+        : this(rootProgram, moduleIdentity, artifacts, schemaIdentities,
+            modules, rootModuleRow, operation, runtimePolicy, providerBindings,
+            [], typeProviderBindings, a3LayoutResourceLedger)
+    {
+    }
+
+    internal TrRmStandardNativeBindingPlan(BoundProgram rootProgram,
+        string moduleIdentity, byte[][] artifacts,
+        IReadOnlyList<string> schemaIdentities,
+        ImmutableArray<TrRmStandardModuleSelection> modules,
+        int rootModuleRow, TrRmStandardNativeOperation operation,
+        NativeRuntimePolicy runtimePolicy,
+        ImmutableArray<TrRmStandardNativeProviderBinding> providerBindings,
+        ImmutableArray<TrRmStandardNativeDependencyBinding>
+            providerDependencyBindings,
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
@@ -85,12 +129,15 @@ internal sealed class TrRmStandardNativeBindingPlan
         _a3LayoutResourceLedger = a3LayoutResourceLedger;
         _a3LayoutResourceLedger?.ConsumeWork(checked(
             (ulong)artifacts.Length + (ulong)schemaIdentityCount + 2UL
-            + ((ulong)providerBindings.Length * 2UL)));
+            + ((ulong)providerBindings.Length * 2UL)
+            + ((ulong)providerDependencyBindings.Length * 2UL)));
         ModuleIdentity = moduleIdentity;
         _artifacts = [.. artifacts];
         _schemaIdentities = [.. schemaIdentities];
         _modules = modules;
         _providerBindings = providerBindings.IsDefault ? [] : providerBindings;
+        _providerDependencyBindings = providerDependencyBindings.IsDefault
+            ? [] : providerDependencyBindings;
         _typeProviderBindings = typeProviderBindings;
         RootModuleRow = rootModuleRow;
         Operation = operation;
@@ -113,9 +160,7 @@ internal sealed class TrRmStandardNativeBindingPlan
             for (var index = 0; index < exports.Count; index++)
             {
                 if (StringComparer.Ordinal.Equals(exports[index],
-                        binding.RootTargetName)
-                    || StringComparer.Ordinal.Equals(exports[index],
-                        binding.ExportKey))
+                        binding.RootTargetName))
                 {
                     throw new ArgumentException(
                         "A selected provider Import is not a root-owned library export.",
@@ -211,6 +256,30 @@ internal sealed class TrRmStandardNativeBindingPlan
         {
             throw new InvalidDataException(
                 "The Standard native binding plan lost its selected root Module.");
+        }
+
+        if (TrRmExecutableCompiler.IsExactForeignInvocationSchemaSet(
+                _schemaIdentities))
+        {
+            var closure = TrRmExecutableCompiler
+                .ValidateStandardProviderClosure([.. _artifacts],
+                    [.. _schemaIdentities], ModuleIdentity,
+                    verifyRootSemantics: false);
+            if (closure.RootModuleRow != RootModuleRow
+                || !closure.Modules.SequenceEqual(_modules)
+                || !closure.RootProviderBindings.SequenceEqual(
+                    _providerBindings)
+                || !closure.DependencyBindings.SequenceEqual(
+                    _providerDependencyBindings))
+            {
+                throw new InvalidDataException(
+                    "The Standard native binding plan changed its complete provider closure.");
+            }
+        }
+        else if (!_providerDependencyBindings.IsDefaultOrEmpty)
+        {
+            throw new InvalidDataException(
+                "The Standard native binding plan has provider closure bindings under another schema.");
         }
 
         if (!_typeProviderBindings.IsDefaultOrEmpty)
@@ -338,8 +407,6 @@ internal sealed class TrRmStandardNativeBindingPlan
                 || binding.ProviderArtifactIndex >= _artifacts.Length
                 || binding.ProviderModuleRow <= 0
                 || binding.ProviderMethodRow <= 0
-                || (binding.ProviderArtifactIndex == 0
-                    && binding.ProviderModuleRow == RootModuleRow)
                 || !providerBindingsByTarget.TryAdd(binding.RootTargetName,
                     binding))
             {

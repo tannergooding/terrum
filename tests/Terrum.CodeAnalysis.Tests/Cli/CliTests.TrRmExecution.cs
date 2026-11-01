@@ -966,6 +966,134 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task SelectedFProviderClosureRunsBuildsAndRejectsDeepFailureAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "Root";
+        const string providerIdentity = "Owned";
+        const string leafIdentity = "Leaf";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootArtifact = TrRmForeignInvocationAddressEmitterTests
+            .CreateRootMethodImportArtifact(rootIdentity, "Owned",
+                providerIdentity, "Owned", core);
+        var providerArtifact = TrRmForeignInvocationAddressEmitterTests
+            .CreateMixedImportProviderArtifact(providerIdentity, "Owned",
+                "GetCurrentProcessId", "Leaf", "GetCurrentProcessId",
+                leafIdentity, "Leaf", core);
+        var leafCompilation
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateMultipleImportProviderCompilation(
+                    "Leaf", "GetCurrentProcessId", core);
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        var incompatibleLeafCompilation
+            = TrRmForeignInvocationAddressEmitterTests
+                .CreateMultipleImportProviderCompilation(
+                    "Leaf", "GetCurrentThreadId", core);
+        var incompatibleLeafArtifact = TrRmExecutableCompiler.EmitStandard(
+            incompatibleLeafCompilation.Program!, leafIdentity,
+            schemaIdentity, 1);
+
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-provider-closure-{Guid.NewGuid():N}");
+        var rootPath = prefix + "-root.trrm";
+        var providerPath = prefix + "-provider.trrm";
+        var leafPath = prefix + "-leaf.trrm";
+        var incompatibleLeafPath = prefix + "-incompatible-leaf.trrm";
+        var imagePath = prefix + ".exe";
+        var retainedOutputPath = prefix + "-retained.exe";
+        byte[] retainedOutput = [0xA5, 0x5A, 0xC3, 0x3C];
+        try
+        {
+            await File.WriteAllBytesAsync(rootPath, rootArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(providerPath, providerArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(leafPath, leafArtifact)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(incompatibleLeafPath,
+                incompatibleLeafArtifact).ConfigureAwait(true);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                rootPath, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", rootIdentity,
+                "--trrm-provider", schemaIdentity, providerPath,
+                "--trrm-provider", schemaIdentity, leafPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(ran, Is.GreaterThan(0),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([],
+                "build-trrm", rootPath, "-o", imagePath, "--runtime",
+                "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, providerPath, "--trrm-provider",
+                schemaIdentity, leafPath, "--json").ConfigureAwait(true);
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(imagePath)
+                .ConfigureAwait(true), Is.GreaterThan(0));
+
+            await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
+                .ConfigureAwait(true);
+            var (missingLeaf, missingOutput, missingError) = await RunAsync(
+                [], "build-trrm", rootPath, "-o", retainedOutputPath,
+                "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, providerPath, "--json").ConfigureAwait(true);
+            Assert.That(missingLeaf, Is.EqualTo(1),
+                $"{missingOutput}{Environment.NewLine}{missingError}");
+            Assert.That(missingError, Is.Empty);
+            using (var missingDocument = JsonDocument.Parse(missingOutput))
+            {
+                Assert.That(missingDocument.RootElement
+                        .GetProperty("diagnostics")[0]
+                        .GetProperty("code").GetString(),
+                    Is.EqualTo("TRM5001"));
+            }
+
+            Assert.That(await File.ReadAllBytesAsync(retainedOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+            var (rejected, rejectionOutput, rejectionError) = await RunAsync(
+                [], "build-trrm", rootPath, "-o", retainedOutputPath,
+                "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
+                "--trrm-module", rootIdentity, "--trrm-provider",
+                schemaIdentity, providerPath, "--trrm-provider",
+                schemaIdentity, incompatibleLeafPath, "--json")
+                .ConfigureAwait(true);
+            Assert.That(rejected, Is.EqualTo(1),
+                $"{rejectionOutput}{Environment.NewLine}{rejectionError}");
+            Assert.That(rejectionError, Is.Empty);
+            using var rejectionDocument = JsonDocument.Parse(rejectionOutput);
+            Assert.That(rejectionDocument.RootElement
+                    .GetProperty("diagnostics")[0]
+                    .GetProperty("code").GetString(),
+                Is.EqualTo("TRM5001"));
+            Assert.That(await File.ReadAllBytesAsync(retainedOutputPath)
+                .ConfigureAwait(true), Is.EqualTo(retainedOutput));
+        }
+        finally
+        {
+            File.Delete(rootPath);
+            File.Delete(providerPath);
+            File.Delete(leafPath);
+            File.Delete(incompatibleLeafPath);
+            File.Delete(retainedOutputPath);
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [Test]
     public async Task SelectedFCoLocatedProviderRunsAndBuildsAsync()
     {
         Assume.That(OperatingSystem.IsWindows()

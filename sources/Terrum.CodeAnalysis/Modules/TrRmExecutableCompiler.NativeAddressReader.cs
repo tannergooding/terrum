@@ -137,36 +137,22 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageAddressDraftAndGetExecutionTables(index)
                 : TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationDraftAndGetExecutionTables(index);
-        for (var section = 0; section < index.SectionCount; section++)
-        {
-            index.GetSection(section, out var kind, out _, out _, out _);
-            if (kind is not (0x0001 or 0x0002 or 0x0004 or 0x0010 or 0x0011
-                or 0x0016 or 0x0017 or 0x0018 or 0x001B or 0x001C
-                or 0x001D or 0x0020 or 0x0021)
-                && !(kind == 0x0012
-                    && (schema is
-                        TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
-                && !((schema
-                        is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
-                    && tables.TypeDefs.Count != 0
-                    && (kind == 0x0013 || kind == 0x0014
-                        || kind == 0x0015 || kind == 0x0023))
-                && !(kind == 0x0048
-                    && (tables.FixedArrayLayouts.Count != 0
-                        || tables.TypeDefs.Count != 0)
-                    && (schema is
-                        TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)))
-            {
-                throw Unsupported(
-                    $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
-            }
-        }
+        return LoadForeignInvocationDraftNativeAddressLibrary(index, tables,
+            selectedModuleRow, selectedModuleImports, verifySemantics, schema,
+            a3LayoutResourceLedger, typeProviderBindings);
+    }
+
+    private static BoundProgram LoadForeignInvocationDraftNativeAddressLibrary(
+        TrRmArtifactIndex index,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow,
+        IReadOnlyDictionary<int, BoundModuleImport>? selectedModuleImports,
+        bool verifySemantics,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
+        ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings)
+    {
+        ValidateNativeAddressArtifactSections(index, tables, schema);
 
         var selectedModuleIsValid = selectedModuleRow > 0
             && selectedModuleRow <= tables.Modules.Count;
@@ -215,19 +201,11 @@ public static partial class TrRmExecutableCompiler
                 selectedModuleRow, verifySemantics, typeProviderBindings);
         }
 
+        ValidateNativeAddressArtifactTables(tables);
         if (tables.Schema != schema
             || !selectedModuleIsValid
-            || tables.TypeDefs.Count != 0
-            || tables.Fields.Count != 0
-            || tables.EnumDefs.Count != 0
-            || tables.EnumMembers.Count != 0
-            || tables.Interfaces.Count != 0
             || tables.Modules.GetRequirements(selectedModuleRow) != (1u, 0u)
             || methodEnd - methodStart < 3
-            || tables.NativeFunctionPointerSignatures.Count != 0
-            || tables.NativeCallables.Count != 0
-            || tables.NativeVTables.Count != 0
-            || tables.NativeExports.Count != 0
             || (selectedModuleImports is null
                 ? moduleRefEnd != moduleRefStart || selectedImportCount != 0
                 : moduleRefEnd == moduleRefStart
@@ -330,17 +308,22 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        var isMultiImportFProviderRoot
+        var importedNativeImportCount = selectedImportRows.Count;
+        var ownedNativeImportCount = nativeImportMethodRows.Count
+            - importedNativeImportCount;
+        var isExpandedFProviderModule
             = schema == TrRmArtifactSchema.ForeignInvocationDraft
-                && selectedModuleImports is { Count: > 1 }
-                && selectedModuleImports.Count == nativeImportMethodRows.Count
-                && nativeImportMethodRows.All(selectedModuleImports
-                    .ContainsKey);
+                && selectedModuleImports is { Count: > 0 }
+                && selectedModuleImports.Count == importedNativeImportCount
+                && importedNativeImportCount <= nativeImportMethodRows.Count
+                && selectedImportRows.Keys.All(
+                    nativeImportMethodRows.Contains)
+                && ownedNativeImportCount is 0 or 1;
         if (nativeImportMethodRows.Count
                 != methodEnd - methodStart - 2
             || (nativeImportMethodRows.Count > 1
                 && !schema.UsesForeignInvocationStorageAddresses()
-                && !isMultiImportFProviderRoot)
+                && !isExpandedFProviderModule)
             || callerMethodRow == 0 || anchorMethodRow == 0
             || callerMethodRow == anchorMethodRow
             || tables.Methods.GetOwnerType(callerMethodRow) != 0
@@ -353,7 +336,8 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("Invalid bounded foreign-invocation method roles.");
         }
 
-        if (isMultiImportFProviderRoot)
+        if (schema == TrRmArtifactSchema.ForeignInvocationDraft
+            && nativeImportMethodRows.Count > 1)
         {
             var functionNames = new HashSet<string>(StringComparer.Ordinal);
             foreach (var importMethodRow in nativeImportMethodRows)
@@ -362,14 +346,14 @@ public static partial class TrRmExecutableCompiler
                         tables.Methods.GetName(importMethodRow)))
                 {
                     throw Unsupported(
-                        "The bounded multi-Import F root requires distinct imported MethodDef names.");
+                        "The expanded F Module requires distinct native callable MethodDef names.");
                 }
             }
 
             if (!functionNames.Add(tables.Methods.GetName(callerMethodRow)))
             {
                 throw Unsupported(
-                    "The bounded multi-Import F root requires the caller name to differ from every imported MethodDef name.");
+                    "The expanded F Module requires the caller name to differ from every native callable MethodDef name.");
             }
         }
 
@@ -386,23 +370,6 @@ public static partial class TrRmExecutableCompiler
         }
 
         tables.ValidateRegisterBodyMapsForMethod(callerMethodRow);
-        var candidateBody = tables.Bodies.GetRegisterBody(
-            tables.Methods.GetBodyRow(callerMethodRow),
-            tables.Contracts.Count);
-        var targetMethodRow = ReadForeignInvocationNativeAddressTargetMethod(
-            candidateBody, tables.Imports);
-        if (!nativeImportMethodRows.Contains(targetMethodRow))
-        {
-            throw Invalid(
-                "The NativeAddress target is not a selected direct NativeImport.");
-        }
-
-        if (selectedModuleImports is not null
-            && !selectedModuleImports.ContainsKey(targetMethodRow))
-        {
-            throw Invalid(
-                "The NativeAddress target has no selected provider binding.");
-        }
 
         var entryMethodRow = tables.Modules.GetEntryMethod(selectedModuleRow);
         if (entryMethodRow != 0 && entryMethodRow != callerMethodRow)
@@ -436,6 +403,97 @@ public static partial class TrRmExecutableCompiler
         {
             throw Unsupported(
                 "The source-free NativeAddress loader supports caller-unsafe imports without output contracts or additional effects.");
+        }
+
+        return ReconstructForeignInvocationNativeAddressLibrary(tables,
+            selectedModuleRow, selectedModuleImports, verifySemantics, schema,
+            methodStart, methodEnd, selectedImportRows,
+            nativeImportMethodRows, callerMethodRow, anchorMethodRow,
+            entryMethodRow);
+    }
+
+    private static void ValidateNativeAddressArtifactSections(
+        TrRmArtifactIndex index,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        TrRmArtifactSchema schema)
+    {
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out _, out _, out _);
+            if (kind is not (0x0001 or 0x0002 or 0x0004 or 0x0010 or 0x0011
+                or 0x0016 or 0x0017 or 0x0018 or 0x001B or 0x001C
+                or 0x001D or 0x0020 or 0x0021)
+                && !(kind == 0x0012
+                    && (schema is
+                        TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
+                && !((schema
+                        is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                    && tables.TypeDefs.Count != 0
+                    && (kind == 0x0013 || kind == 0x0014
+                        || kind == 0x0015 || kind == 0x0023))
+                && !(kind == 0x0048
+                    && (tables.FixedArrayLayouts.Count != 0
+                        || tables.TypeDefs.Count != 0)
+                    && (schema is
+                        TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)))
+            {
+                throw Unsupported(
+                    $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
+            }
+        }
+    }
+
+    private static void ValidateNativeAddressArtifactTables(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        if (tables.TypeDefs.Count != 0
+            || tables.Fields.Count != 0
+            || tables.EnumDefs.Count != 0
+            || tables.EnumMembers.Count != 0
+            || tables.Interfaces.Count != 0
+            || tables.NativeFunctionPointerSignatures.Count != 0
+            || tables.NativeCallables.Count != 0
+            || tables.NativeVTables.Count != 0
+            || tables.NativeExports.Count != 0)
+        {
+            throw Unsupported(
+                "The source-free loader supports one caller Body, one address anchor and direct NativeImport methods under the selected profile.");
+        }
+    }
+
+    private static BoundProgram ReconstructForeignInvocationNativeAddressLibrary(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        int selectedModuleRow,
+        IReadOnlyDictionary<int, BoundModuleImport>? selectedModuleImports,
+        bool verifySemantics, TrRmArtifactSchema schema,
+        int methodStart, int methodEnd,
+        Dictionary<int, int> selectedImportRows,
+        List<int> nativeImportMethodRows, int callerMethodRow,
+        int anchorMethodRow, int entryMethodRow)
+    {
+        var candidateBody = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerMethodRow),
+            tables.Contracts.Count);
+        var targetMethodRow = ReadForeignInvocationNativeAddressTargetMethod(
+            candidateBody, tables.Imports);
+        if (!nativeImportMethodRows.Contains(targetMethodRow))
+        {
+            throw Invalid(
+                "The NativeAddress target is not a selected direct NativeImport.");
+        }
+
+        if (selectedModuleImports is not null
+            && selectedImportRows.ContainsKey(targetMethodRow)
+            && !selectedModuleImports.ContainsKey(targetMethodRow))
+        {
+            throw Invalid(
+                "The NativeAddress target has no selected provider binding.");
         }
 
         var structureTypeByTypeDef = new int[tables.TypeDefs.Count + 1];

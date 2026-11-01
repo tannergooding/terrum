@@ -4376,6 +4376,309 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFProviderClosureValidatesMixedProviderDependencies()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "Root";
+        const string providerIdentity = "Owned";
+        const string leafIdentity = "Leaf";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootArtifact = CreateRootMethodImportArtifact(rootIdentity,
+            "Owned", providerIdentity, "Owned", core);
+        var providerArtifact = CreateMixedImportProviderArtifact(
+            providerIdentity, "Owned", "GetCurrentProcessId",
+            "Leaf", "GetTickCount", leafIdentity, "Leaf", core);
+        var leafCompilation = CreateMultipleImportProviderCompilation(
+            "Leaf", "GetTickCount", core);
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, [providerInput, leafInput]);
+        var imported = loaded.Functions.Single(static function =>
+            function.Name == "Owned");
+        Assert.That(imported.ModuleImport!.ProducerIdentity,
+            Is.EqualTo(providerIdentity));
+        Assert.That(imported.DirectNativeImport!.ExportName,
+            Is.EqualTo("GetCurrentProcessId"));
+
+        var nonFirstRootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            AddLeadingEmptyModule(rootArtifact, "Main"));
+        var nonFirstProviderInput = new TrRmStandardArtifactInput(
+            schemaIdentity, AddLeadingEmptyModule(providerArtifact,
+                "ProviderBody"));
+        var nonFirstLoaded = TrRmExecutableCompiler.LoadStandard(
+            nonFirstRootInput, rootIdentity,
+            [nonFirstProviderInput, leafInput]);
+        Assert.That(nonFirstLoaded.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport!.ProducerIdentity,
+            Is.EqualTo(providerIdentity));
+        var nonFirstProviderReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                nonFirstProviderInput, providerIdentity, [leafInput]);
+        Assert.That(nonFirstProviderReference.Functions.Single(
+            static function => function.Name == "Owned").Name,
+            Is.EqualTo("Owned"));
+
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, [leafInput]);
+        Assert.That(providerReference.Functions.Select(
+                static function => function.Name),
+            Does.Contain("Owned").And.Not.Contain("Leaf"));
+
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity, [providerInput, leafInput],
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        var (loweredProgram, nativeImports) = plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable);
+        Assert.That(nativeImports.Select(static binding =>
+                binding.FunctionName),
+            Is.EquivalentTo(["Owned"]));
+        Assert.That(loweredProgram.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport, Is.Null);
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            rootIdentity, [providerInput, leafInput],
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image.Take(2), Is.EqualTo([(byte)'M', (byte)'Z']));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity,
+                [providerInput]));
+
+        var incompatibleLeafCompilation
+            = CreateMultipleImportProviderCompilation(
+                "Leaf", "GetCurrentThreadId", core);
+        var incompatibleLeafArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleLeafCompilation.Program!, leafIdentity,
+                schemaIdentity, 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providerInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleLeafArtifact),
+            ]));
+
+        var disconnectedArtifact = CreateMixedImportProviderArtifact(
+            "closure-disconnected", "DisconnectedOwned",
+            "GetCurrentThreadId", "Leaf",
+            "GetTickCount", leafIdentity, "GetTickCount", core);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providerInput,
+                leafInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    disconnectedArtifact),
+            ]));
+    }
+
+    [Test]
+    public void StandardFProviderClosureSupportsDiamondsAndChecksEveryView()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        const string leafIdentity = "Leaf";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var (rootArtifact, _, _, _) =
+            CreateMultipleRootMethodImportArtifacts();
+        var firstProviderArtifact = CreateMixedImportProviderArtifact(
+            "First", "First", "GetCurrentProcessId", "Leaf",
+            "GetTickCount", leafIdentity, "Leaf", core);
+        var secondProviderArtifact = CreateMixedImportProviderArtifact(
+            "Second", "Second", "GetCurrentThreadId", "Leaf",
+            "GetTickCount", leafIdentity, "Leaf", core);
+        var leafCompilation = CreateMultipleImportProviderCompilation(
+            "Leaf", "GetTickCount", core);
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providers = new[]
+        {
+            new TrRmStandardArtifactInput(schemaIdentity,
+                firstProviderArtifact),
+            new TrRmStandardArtifactInput(schemaIdentity,
+                secondProviderArtifact),
+            new TrRmStandardArtifactInput(schemaIdentity, leafArtifact),
+        };
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "First").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("First"));
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Second").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("Second"));
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            rootInput, rootIdentity, providers,
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings.Select(
+                static binding => binding.FunctionName),
+            Is.EquivalentTo(["First", "Second"]));
+
+        var incompatibleSecondArtifact = CreateMixedImportProviderArtifact(
+            "Second", "Second", "GetCurrentThreadId", "Leaf",
+            "GetCurrentProcessId", leafIdentity, "Leaf", core);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providers[0],
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleSecondArtifact),
+                providers[2],
+            ]));
+    }
+
+    [Test]
+    public void StandardFProviderClosureSupportsMixedMultipleImports()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string providerIdentity = "Provider";
+        const string leafIdentity = "LeafA";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Terrum.Interop.NativeImport(
+                    "kernel32.dll",
+                    "GetCurrentProcessId",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                public extern int32 Owned();
+
+                [Terrum.Interop.NativeImport(
+                    "kernel32.dll",
+                    "GetTickCount",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                internal extern int32 LeafA();
+
+                [Terrum.Interop.NativeImport(
+                    "kernel32.dll",
+                    "GetTickCount",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                internal extern int32 LeafB();
+
+                internal int32 ProviderBody() {
+                    unsafe {
+                        var callback = &Owned;
+                        return callback();
+                    }
+                }
+                """), core);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        providerArtifact = AddRootMethodImports(providerArtifact, [
+            ("LeafA", leafIdentity, "GetTickCount"),
+            ("LeafB", leafIdentity, "GetTickCount"),
+        ], reuseModuleRefs: true, duplicateSecondMethodName: false);
+        var leafCompilation = CreateMultipleImportProviderCompilation(
+            "GetTickCount", "GetTickCount", core);
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var leafInput = new TrRmStandardArtifactInput(schemaIdentity,
+            leafArtifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(
+                TrRmArtifactIndex.ForForeignInvocationDraft(providerArtifact));
+        Assert.That(tables.Imports.Count, Is.EqualTo(2));
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(1));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(providerInput,
+            providerIdentity, [leafInput]);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "LeafA").ModuleImport!.ProducerIdentity,
+            Is.EqualTo(leafIdentity));
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "LeafB").ModuleImport!.ExportKey,
+            Is.EqualTo("GetTickCount"));
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            providerInput, providerIdentity, [leafInput],
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings.Select(
+                static binding => binding.FunctionName),
+            Is.EquivalentTo(["Owned", "LeafA", "LeafB"]));
+    }
+
+    [Test]
+    public void StandardFProviderClosureSupportsSelfAndMutualDependencies()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var selfArtifact = CreateMixedImportProviderArtifact(
+            "SelfDependency", "Owned", "GetCurrentProcessId",
+            "SelfDependency", "GetCurrentProcessId", "SelfDependency",
+            "Owned", core);
+        var selfInput = new TrRmStandardArtifactInput(schemaIdentity,
+            selfArtifact);
+        var selfLoaded = TrRmExecutableCompiler.LoadStandard(selfInput,
+            "SelfDependency", []);
+        Assert.That(selfLoaded.Functions.Single(static function =>
+            function.Name == "SelfDependency").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("SelfDependency"));
+        var selfPlan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            selfInput, "SelfDependency", [],
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        var (_, selfImports) = selfPlan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable);
+        Assert.That(selfImports.Select(static binding => binding.FunctionName),
+            Is.EquivalentTo(["Owned", "SelfDependency"]));
+        selfPlan.ValidateLibraryExports(["Owned"]);
+        _ = Assert.Throws<ArgumentException>(() =>
+            selfPlan.ValidateLibraryExports(["SelfDependency"]));
+
+        var pArtifact = CreateMixedImportProviderArtifact("CycleP",
+            "CycleP", "GetCurrentProcessId", "CycleQ",
+            "GetCurrentProcessId", "CycleQ", "CycleQ", core);
+        var qArtifact = CreateMixedImportProviderArtifact("CycleQ",
+            "CycleQ", "GetCurrentProcessId", "CycleP",
+            "GetCurrentProcessId", "CycleP", "CycleP", core);
+        var pInput = new TrRmStandardArtifactInput(schemaIdentity, pArtifact);
+        var qInput = new TrRmStandardArtifactInput(schemaIdentity, qArtifact);
+        var pLoaded = TrRmExecutableCompiler.LoadStandard(pInput,
+            "CycleP", [qInput]);
+        Assert.That(pLoaded.Functions.Single(static function =>
+            function.Name == "CycleQ").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("CycleQ"));
+        var cyclePlan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            pInput, "CycleP", [qInput],
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(cyclePlan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings,
+            Has.Length.EqualTo(2));
+    }
+
+    [Test]
     public void StandardFMultipleImportsBindUncalledProviderBeforeLowering()
     {
         const string schemaIdentity
@@ -4710,7 +5013,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "Third", schemaIdentity, 1));
     }
 
-    private static Compilation CreateMultipleImportProviderCompilation(
+    internal static Compilation CreateMultipleImportProviderCompilation(
         string methodName, string nativeExport,
         CompilationReference core)
     {
@@ -5147,6 +5450,72 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         return compilation;
+    }
+
+    internal static byte[] CreateRootMethodImportArtifact(
+        string moduleIdentity, string methodName,
+        string producerIdentity, string exportKey, CompilationReference core)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetCurrentProcessId",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern int32 {{methodName}}();
+
+            int32 Main() {
+                unsafe {
+                    var callback = &{{methodName}};
+                    return callback();
+                }
+            }
+            """), core);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        return AddRootMethodImports(artifact, [
+            (methodName, producerIdentity, exportKey),
+        ], reuseModuleRefs: false, duplicateSecondMethodName: false);
+    }
+
+    internal static byte[] CreateMixedImportProviderArtifact(
+        string moduleIdentity, string ownedMethodName,
+        string ownedNativeExport, string importedMethodName,
+        string importedNativeExport, string producerIdentity,
+        string exportKey, CompilationReference core)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "{{ownedNativeExport}}",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            public extern int32 {{ownedMethodName}}();
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "{{importedNativeExport}}",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern int32 {{importedMethodName}}();
+
+            internal int32 ProviderBody() {
+                unsafe {
+                    var callback = &{{ownedMethodName}};
+                    return callback();
+                }
+            }
+            """), core);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        return AddRootMethodImports(artifact, [
+            (importedMethodName, producerIdentity, exportKey),
+        ], reuseModuleRefs: false, duplicateSecondMethodName: false);
     }
 
     internal static Compilation CreateCurrentProcessIdCompilation()

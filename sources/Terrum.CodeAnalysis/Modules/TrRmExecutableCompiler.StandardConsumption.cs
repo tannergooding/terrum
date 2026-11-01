@@ -57,7 +57,7 @@ public static partial class TrRmExecutableCompiler
         var artifacts = SnapshotStandardInputs(input, providers);
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         return LoadStandardProgram(artifacts, schemaIdentities, moduleIdentity,
-            verifySemantics: true, out _, out _, out _, out _,
+            verifySemantics: true, out _, out _, out _, out _, out _,
             coreExceptionIdentitySelections);
     }
 
@@ -81,12 +81,14 @@ public static partial class TrRmExecutableCompiler
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity,
             verifySemantics: true, out var providerBindings,
-            out var typeProviderBindings, out var moduleValidation,
+            out var providerDependencyBindings, out var typeProviderBindings,
+            out var moduleValidation,
             out var a3LayoutResourceLedger);
         return new TrRmStandardNativeBindingPlan(program, moduleIdentity,
             artifacts, schemaIdentities,
             moduleValidation.Modules, moduleValidation.RootModuleRow,
             operation, runtimePolicy, providerBindings,
+            providerDependencyBindings,
             typeProviderBindings, a3LayoutResourceLedger);
     }
 
@@ -131,7 +133,7 @@ public static partial class TrRmExecutableCompiler
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         var program = LoadStandardProgram(artifacts, schemaIdentities,
             moduleIdentity,
-            verifySemantics: false, out _, out _, out _,
+            verifySemantics: false, out _, out _, out _, out _,
             out var a3LayoutResourceLedger,
             coreExceptionIdentitySelections);
         var index = CreateForeignInvocationIndex(artifacts[0],
@@ -197,6 +199,8 @@ public static partial class TrRmExecutableCompiler
         bool verifySemantics,
         out ImmutableArray<TrRmStandardNativeProviderBinding>
             providerBindings,
+        out ImmutableArray<TrRmStandardNativeDependencyBinding>
+            providerDependencyBindings,
         out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         out StandardModuleValidation moduleValidation,
         out TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
@@ -211,7 +215,8 @@ public static partial class TrRmExecutableCompiler
         {
             return LoadStandardProgramCore(artifacts, schemaIdentities,
                 moduleIdentity, verifySemantics, a3LayoutResourceLedger,
-                out providerBindings, out typeProviderBindings,
+                out providerBindings, out providerDependencyBindings,
+                out typeProviderBindings,
                 out moduleValidation, coreExceptionIdentitySelections);
         }
         catch (Exception exception)
@@ -228,12 +233,15 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger,
         out ImmutableArray<TrRmStandardNativeProviderBinding>
             providerBindings,
+        out ImmutableArray<TrRmStandardNativeDependencyBinding>
+            providerDependencyBindings,
         out ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings,
         out StandardModuleValidation moduleValidation,
         ImmutableArray<CoreExceptionIdentitySelection>
             coreExceptionIdentitySelections = default)
     {
         providerBindings = [];
+        providerDependencyBindings = [];
         typeProviderBindings = [];
         var includesRegisterExceptionRegions
             = schemaIdentities.Contains(
@@ -266,6 +274,15 @@ public static partial class TrRmExecutableCompiler
         moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger);
         var rootModuleRow = moduleValidation.RootModuleRow;
+        if (IsExactForeignInvocationSchemaSet(schemaIdentities))
+        {
+            var closure = ValidateStandardProviderClosureCore(artifacts,
+                schemaIdentities, moduleValidation, verifySemantics);
+            providerBindings = closure.RootProviderBindings;
+            providerDependencyBindings = closure.DependencyBindings;
+            return closure.RootProgram;
+        }
+
         var index = CreateForeignInvocationIndex(artifacts[0],
             schemaIdentities[0]);
         var tables = ValidateForeignInvocationArtifact(index,
@@ -548,7 +565,7 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
         var providerIndex = CreateForeignInvocationIndex(providerArtifact,
-        schemaIdentity);
+            schemaIdentity);
         var provider = ValidateForeignInvocationArtifact(providerIndex,
             schemaIdentity, a3LayoutResourceLedger,
             createA3ResourceLedger: false);
@@ -566,20 +583,45 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The selected provider Module does not match the retained ModuleRef.");
         }
 
-        var providerMethodRow = 0;
-        for (var row = methodStart; row < methodEnd; row++)
+        if (!provider.Exports.TryGetDefinitionForKey(providerModuleRow,
+                expectedBinding.ExportKey, out var providerDefinition)
+            || (providerDefinition >> 24) != 0x16)
         {
-            if (provider.Exports.TryGetExportKeyForDefinition(providerModuleRow,
-                    0x1600_0000u | (uint)row, out var exportKey)
-                && StringComparer.Ordinal.Equals(exportKey,
-                    expectedBinding.ExportKey))
-            {
-                providerMethodRow = row;
-                break;
-            }
+            throw Invalid("The selected provider ExportKey does not name a MethodDef.");
         }
 
-        if (providerMethodRow == 0
+        var providerMethodRow = checked((int)
+            (providerDefinition & 0x00FF_FFFF));
+        _ = LoadForeignInvocationDraftNativeAddressLibrary(providerArtifact,
+            providerModuleRow, null, verifySemantics: false,
+            schema: GetForeignInvocationSchema(schemaIdentity),
+            a3LayoutResourceLedger: a3LayoutResourceLedger);
+        return ValidateNativeImportProvider(consumer, expectedMethodRow,
+            expectedBinding, provider, providerModuleRow, providerMethodRow);
+    }
+
+    private static (int MethodRow, string LibraryName, string ExportName)
+        ValidateNativeImportProvider(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
+        int expectedMethodRow, TrRmImportBinding expectedBinding,
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables provider,
+        int providerModuleRow, int providerMethodRow)
+    {
+        var (providerTargetRequirement, providerRuntimePolicy)
+            = provider.Modules.GetRequirements(providerModuleRow);
+        var (methodStart, methodEnd)
+            = provider.Modules.GetMethodDefRange(providerModuleRow);
+        var providerDefinition = 0x1600_0000u | (uint)providerMethodRow;
+        if (!StringComparer.Ordinal.Equals(
+                provider.Modules.GetIdentity(providerModuleRow),
+                expectedBinding.ProducerIdentity)
+            || providerTargetRequirement != expectedBinding.TargetRequirement
+            || providerRuntimePolicy != expectedBinding.RuntimePolicy
+            || providerMethodRow < methodStart || providerMethodRow >= methodEnd
+            || !provider.Exports.TryGetDefinitionForKey(providerModuleRow,
+                expectedBinding.ExportKey, out var exportedDefinition)
+            || exportedDefinition != providerDefinition
+            || provider.Imports.IsExpectedDefinition(providerDefinition)
             || provider.Methods.GetOwnerType(providerMethodRow) != 0
             || provider.Methods.GetOwnerModule(providerMethodRow)
                 != providerModuleRow
@@ -590,10 +632,6 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The selected export is not a provider-owned NativeImport.");
         }
 
-        _ = LoadForeignInvocationDraftNativeAddressLibrary(providerArtifact,
-            providerModuleRow, null, verifySemantics: false,
-            schema: GetForeignInvocationSchema(schemaIdentity),
-            a3LayoutResourceLedger: a3LayoutResourceLedger);
         EnsureNativeAddressContracts(provider.Methods, provider.Contracts,
             providerMethodRow,
             provider.Contracts.GetNativeParameters(providerMethodRow).Length + 1,
@@ -665,6 +703,401 @@ public static partial class TrRmExecutableCompiler
         }
 
         return (providerMethodRow, providerLibraryName, providerExportName);
+    }
+
+    private readonly record struct StandardProviderImportEdge(
+        int ConsumerArtifactIndex,
+        int ConsumerModuleRow,
+        string ConsumerModuleIdentity,
+        int ImportRow,
+        int ModuleRefRow,
+        int ExpectedMethodRow,
+        string ExpectedMethodName,
+        TrRmImportBinding ExpectedBinding,
+        int ProviderArtifactIndex,
+        int ProviderModuleRow);
+
+    internal static TrRmStandardNativeProviderClosureValidation
+        ValidateStandardProviderClosure(byte[][] artifacts,
+            string[] schemaIdentities, string moduleIdentity,
+            bool verifyRootSemantics)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(moduleIdentity);
+        if (!IsExactForeignInvocationSchemaSet(schemaIdentities))
+        {
+            throw Unsupported(
+                "The provider closure requires exact F selections for every supplied artifact.");
+        }
+
+        var moduleValidation = ValidateStandardInputModules(artifacts,
+            schemaIdentities, moduleIdentity, a3LayoutResourceLedger: null);
+        return ValidateStandardProviderClosureCore(artifacts,
+            schemaIdentities, moduleValidation, verifyRootSemantics);
+    }
+
+    internal static bool IsExactForeignInvocationSchemaSet(
+        IReadOnlyList<string> schemaIdentities)
+        => schemaIdentities.Count != 0
+            && schemaIdentities.All(static schemaIdentity =>
+                StringComparer.Ordinal.Equals(schemaIdentity,
+                    StandardForeignInvocationSchemaIdentity));
+
+    private static TrRmStandardNativeProviderClosureValidation
+        ValidateStandardProviderClosureCore(byte[][] artifacts,
+            string[] schemaIdentities,
+            StandardModuleValidation moduleValidation,
+            bool verifyRootSemantics)
+    {
+        if (!IsExactForeignInvocationSchemaSet(schemaIdentities)
+            || artifacts.Length != schemaIdentities.Length)
+        {
+            throw Unsupported(
+                "The provider closure requires exact F selections for every supplied artifact.");
+        }
+
+        var modulesByIdentity
+            = new Dictionary<string, TrRmStandardModuleSelection>(
+                moduleValidation.Modules.Length, StringComparer.Ordinal);
+        var modulesByArtifact
+            = new List<TrRmStandardModuleSelection>[artifacts.Length];
+        for (var artifactIndex = 0; artifactIndex < modulesByArtifact.Length;
+            artifactIndex++)
+        {
+            modulesByArtifact[artifactIndex] = [];
+        }
+
+        TrRmStandardModuleSelection? rootSelection = null;
+        foreach (var module in moduleValidation.Modules)
+        {
+            if ((uint)module.ArtifactIndex >= (uint)artifacts.Length
+                || !modulesByIdentity.TryAdd(module.Identity, module))
+            {
+                throw Invalid(
+                    "The provider closure has a duplicate or invalid Module selection.");
+            }
+
+            modulesByArtifact[module.ArtifactIndex].Add(module);
+            if (module.ArtifactIndex == 0
+                && module.ModuleRow == moduleValidation.RootModuleRow)
+            {
+                rootSelection = module;
+            }
+        }
+
+        if (rootSelection is not TrRmStandardModuleSelection selectedRoot)
+        {
+            throw Invalid("The provider closure lost its selected root Module.");
+        }
+
+        var edgePairs
+            = new Dictionary<(int ConsumerArtifactIndex,
+                int ProviderArtifactIndex), List<StandardProviderImportEdge>>();
+        var ownedNativeImportsByModule
+            = new Dictionary<(int ArtifactIndex, int ModuleRow), int>();
+        var rootModuleImports = (Dictionary<int, BoundModuleImport>?)null;
+        BoundProgram? rootProgram = null;
+
+        for (var artifactIndex = 0; artifactIndex < artifacts.Length;
+            artifactIndex++)
+        {
+            var index = CreateForeignInvocationIndex(artifacts[artifactIndex],
+                schemaIdentities[artifactIndex]);
+            var tables = ValidateForeignInvocationArtifact(index,
+                schemaIdentities[artifactIndex],
+                createA3ResourceLedger: false);
+            ValidateNativeAddressArtifactSections(index, tables,
+                TrRmArtifactSchema.ForeignInvocationDraft);
+            ValidateNativeAddressArtifactTables(tables);
+            var moduleRefsUsed = new bool[tables.ModuleRefs.Count + 1];
+            var edgesByModule
+                = new Dictionary<int, List<StandardProviderImportEdge>>();
+            foreach (var module in modulesByArtifact[artifactIndex])
+            {
+                edgesByModule.Add(module.ModuleRow, []);
+            }
+
+            for (var importRow = 1; importRow <= tables.Imports.Count;
+                importRow++)
+            {
+                var moduleRefRow
+                    = tables.Imports.GetModuleRefForImportRow(importRow);
+                var expectedDefinition
+                    = tables.Imports.GetExpectedDefinitionForImportRow(
+                        importRow);
+                if ((expectedDefinition >> 24) != 0x16)
+                {
+                    throw Unsupported(
+                        "The exact-F provider closure supports MethodDef Imports only.");
+                }
+
+                var expectedMethodRow = checked((int)
+                    (expectedDefinition & 0x00FF_FFFF));
+                var consumerModuleRow
+                    = tables.ModuleRefs.GetOwnerModule(moduleRefRow);
+                if (!edgesByModule.TryGetValue(consumerModuleRow,
+                        out var moduleEdges)
+                    || !tables.StandardNativeImports.HasImportForMethod(
+                        expectedMethodRow)
+                    || !tables.Imports.TryGetExpectedBinding(
+                        expectedDefinition, out var expectedBinding))
+                {
+                    throw Invalid(
+                        "A provider closure Import has no owned NativeImport expectation.");
+                }
+
+                var moduleRefIdentity
+                    = tables.ModuleRefs.GetProducerIdentity(moduleRefRow);
+                var (moduleRefTargetRequirement, moduleRefRuntimePolicy)
+                    = tables.ModuleRefs.GetRequirements(moduleRefRow);
+                if (!StringComparer.Ordinal.Equals(moduleRefIdentity,
+                        expectedBinding.ProducerIdentity)
+                    || moduleRefTargetRequirement
+                        != expectedBinding.TargetRequirement
+                    || moduleRefRuntimePolicy != expectedBinding.RuntimePolicy
+                    || !modulesByIdentity.TryGetValue(
+                        expectedBinding.ProducerIdentity,
+                        out var providerModule)
+                    || providerModule.TargetRequirement
+                        != expectedBinding.TargetRequirement
+                    || providerModule.RuntimePolicy
+                        != expectedBinding.RuntimePolicy)
+                {
+                    throw Invalid(
+                        "A provider closure ModuleRef does not select its retained producer requirements.");
+                }
+
+                moduleRefsUsed[moduleRefRow] = true;
+                moduleEdges.Add(new StandardProviderImportEdge(
+                    artifactIndex, consumerModuleRow, moduleRefIdentity,
+                    importRow, moduleRefRow, expectedMethodRow,
+                    tables.Methods.GetName(expectedMethodRow),
+                    expectedBinding, providerModule.ArtifactIndex,
+                    providerModule.ModuleRow));
+            }
+
+            foreach (var module in modulesByArtifact[artifactIndex])
+            {
+                var (moduleRefStart, moduleRefEnd)
+                    = tables.Modules.GetModuleRefRange(module.ModuleRow);
+                var (typeStart, typeEnd)
+                    = tables.Modules.GetTypeDefRange(module.ModuleRow);
+                var (sourceFileStart, sourceFileEnd)
+                    = tables.Modules.GetSourceFileRange(module.ModuleRow);
+                var moduleEdges = edgesByModule[module.ModuleRow];
+                var moduleRefCount = moduleRefEnd - moduleRefStart;
+                if ((moduleEdges.Count == 0 && moduleRefCount != 0)
+                    || (moduleEdges.Count != 0
+                        && (moduleRefCount == 0
+                            || moduleRefCount > moduleEdges.Count)))
+                {
+                    throw Invalid(
+                        "A provider Module has an unconsumed or inconsistent ModuleRef set.");
+                }
+
+                if (typeStart != typeEnd
+                    || sourceFileStart != sourceFileEnd)
+                {
+                    throw Unsupported(
+                        "The exact-F provider closure does not admit TypeDef or SourceFile declarations.");
+                }
+
+                for (var moduleRefRow = moduleRefStart;
+                    moduleRefRow < moduleRefEnd; moduleRefRow++)
+                {
+                    if (!moduleRefsUsed[moduleRefRow])
+                    {
+                        throw Invalid(
+                            "A provider Module has an unconsumed ModuleRef.");
+                    }
+                }
+
+                Dictionary<int, BoundModuleImport>? selectedModuleImports
+                    = null;
+                var importedMethodRows
+                    = new HashSet<int>(moduleEdges.Select(static edge =>
+                        edge.ExpectedMethodRow));
+                var ownedNativeImportCount = 0;
+                for (var methodRow = module.MethodDefStart;
+                    methodRow < module.MethodDefEnd; methodRow++)
+                {
+                    if (tables.StandardNativeImports.HasImportForMethod(
+                            methodRow)
+                        && !importedMethodRows.Contains(methodRow))
+                    {
+                        ownedNativeImportCount++;
+                    }
+                }
+
+                ownedNativeImportsByModule.Add(
+                    (artifactIndex, module.ModuleRow),
+                    ownedNativeImportCount);
+                if (moduleEdges.Count != 0)
+                {
+                    selectedModuleImports
+                        = new Dictionary<int, BoundModuleImport>(
+                            moduleEdges.Count);
+                    foreach (var edge in moduleEdges)
+                    {
+                        if (!selectedModuleImports.TryAdd(
+                                edge.ExpectedMethodRow,
+                                new BoundModuleImport(
+                                    edge.ExpectedBinding.ProducerIdentity,
+                                    edge.ExpectedBinding.ExportKey,
+                                    edge.ExpectedBinding.TargetRequirement,
+                                    edge.ExpectedBinding.RuntimePolicy)))
+                        {
+                            throw Invalid(
+                                "A provider Module has more than one Import for a MethodDef.");
+                        }
+                    }
+                }
+
+                if (module.MethodDefStart == module.MethodDefEnd)
+                {
+                    if (module.ModuleRow == selectedRoot.ModuleRow
+                        && artifactIndex == selectedRoot.ArtifactIndex)
+                    {
+                        throw Unsupported(
+                            "The selected exact-F root Module has no bounded NativeAddress caller.");
+                    }
+
+                    continue;
+                }
+
+                var isRoot = artifactIndex == selectedRoot.ArtifactIndex
+                    && module.ModuleRow == selectedRoot.ModuleRow;
+                var program = LoadForeignInvocationDraftNativeAddressLibrary(
+                    index, tables, module.ModuleRow,
+                    selectedModuleImports,
+                    verifySemantics: isRoot && verifyRootSemantics,
+                    schema: TrRmArtifactSchema.ForeignInvocationDraft,
+                    a3LayoutResourceLedger: null,
+                    typeProviderBindings: default);
+                if (isRoot)
+                {
+                    rootProgram = program;
+                    rootModuleImports = selectedModuleImports;
+                }
+
+                foreach (var edge in moduleEdges)
+                {
+                    var key = (edge.ConsumerArtifactIndex,
+                        edge.ProviderArtifactIndex);
+                    if (!edgePairs.TryGetValue(key, out var pairEdges))
+                    {
+                        pairEdges = [];
+                        edgePairs.Add(key, pairEdges);
+                    }
+
+                    pairEdges.Add(edge);
+                }
+            }
+        }
+
+        var dependencyBindings
+            = ImmutableArray.CreateBuilder<
+                TrRmStandardNativeDependencyBinding>();
+        var rootProviderBindings
+            = ImmutableArray.CreateBuilder<
+                TrRmStandardNativeProviderBinding>();
+        foreach (var pair in edgePairs.OrderBy(static pair =>
+                pair.Key.ConsumerArtifactIndex).ThenBy(static pair =>
+                pair.Key.ProviderArtifactIndex))
+        {
+            var consumerIndex = CreateForeignInvocationIndex(
+                artifacts[pair.Key.ConsumerArtifactIndex],
+                schemaIdentities[pair.Key.ConsumerArtifactIndex]);
+            var consumer = ValidateForeignInvocationArtifact(consumerIndex,
+                schemaIdentities[pair.Key.ConsumerArtifactIndex],
+                createA3ResourceLedger: false);
+            var provider = pair.Key.ConsumerArtifactIndex
+                    == pair.Key.ProviderArtifactIndex
+                ? consumer
+                : ValidateStandardFArtifact(
+                    artifacts[pair.Key.ProviderArtifactIndex]);
+
+            foreach (var edge in pair.Value)
+            {
+                if (edge.ConsumerArtifactIndex
+                        == edge.ProviderArtifactIndex
+                    && edge.ConsumerModuleRow == edge.ProviderModuleRow
+                    && ownedNativeImportsByModule[(
+                        edge.ProviderArtifactIndex, edge.ProviderModuleRow)] == 0)
+                {
+                    throw Unsupported(
+                        "An imported-only Module cannot satisfy its own Import.");
+                }
+
+                if (!provider.Exports.TryGetDefinitionForKey(
+                        edge.ProviderModuleRow, edge.ExpectedBinding.ExportKey,
+                        out var providerDefinition)
+                    || (providerDefinition >> 24) != 0x16)
+                {
+                    throw Invalid(
+                        "A provider closure ExportKey does not select a public local MethodDef.");
+                }
+
+                var providerMethodRow = checked((int)
+                    (providerDefinition & 0x00FF_FFFF));
+                var (actualMethodRow, libraryName, exportName)
+                    = ValidateNativeImportProvider(consumer,
+                        edge.ExpectedMethodRow, edge.ExpectedBinding, provider,
+                        edge.ProviderModuleRow, providerMethodRow);
+                dependencyBindings.Add(
+                    new TrRmStandardNativeDependencyBinding(
+                        edge.ConsumerArtifactIndex, edge.ConsumerModuleRow,
+                        edge.ConsumerModuleIdentity, edge.ImportRow,
+                        edge.ModuleRefRow, edge.ExpectedMethodRow,
+                        edge.ExpectedBinding.ProducerIdentity,
+                        edge.ExpectedBinding.ExportKey,
+                        edge.ExpectedBinding.TargetRequirement,
+                        edge.ExpectedBinding.RuntimePolicy,
+                        edge.ProviderArtifactIndex, edge.ProviderModuleRow,
+                        actualMethodRow, libraryName, exportName));
+                if (edge.ConsumerArtifactIndex == selectedRoot.ArtifactIndex
+                    && edge.ConsumerModuleRow == selectedRoot.ModuleRow)
+                {
+                    rootProviderBindings.Add(
+                        new TrRmStandardNativeProviderBinding(
+                            edge.ExpectedMethodName,
+                            edge.ExpectedBinding.ProducerIdentity,
+                            edge.ExpectedBinding.ExportKey,
+                            edge.ExpectedBinding.TargetRequirement,
+                            edge.ExpectedBinding.RuntimePolicy,
+                            edge.ConsumerModuleRow, edge.ImportRow,
+                            edge.ModuleRefRow, edge.ExpectedMethodRow,
+                            edge.ProviderArtifactIndex, edge.ProviderModuleRow,
+                            actualMethodRow, libraryName, exportName));
+                }
+            }
+        }
+
+        if (rootProgram is null)
+        {
+            throw Invalid("The provider closure did not reconstruct its selected root.");
+        }
+
+        var orderedDependencies = dependencyBindings
+            .OrderBy(static binding => binding.ConsumerArtifactIndex)
+            .ThenBy(static binding => binding.ConsumerModuleRow)
+            .ThenBy(static binding => binding.ConsumerImportRow)
+            .ToImmutableArray();
+        var orderedRootBindings = rootProviderBindings
+            .OrderBy(static binding => binding.RootImportRow)
+            .ToImmutableArray();
+        return new TrRmStandardNativeProviderClosureValidation(rootProgram,
+            moduleValidation.RootModuleRow, moduleValidation.Modules,
+            orderedRootBindings, orderedDependencies);
+    }
+
+    private static TrRmStructuralMetadataValidator.ValidatedExecutionTables
+        ValidateStandardFArtifact(byte[] artifact)
+    {
+        var index = CreateForeignInvocationIndex(artifact,
+            StandardForeignInvocationSchemaIdentity);
+        return ValidateForeignInvocationArtifact(index,
+            StandardForeignInvocationSchemaIdentity,
+            createA3ResourceLedger: false);
     }
 
     private static ImmutableArray<CoreExceptionIdentitySelection>
@@ -948,6 +1381,8 @@ public static partial class TrRmExecutableCompiler
         string rootModuleIdentity,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
+        var includesFProviderClosure
+            = IsExactForeignInvocationSchemaSet(schemaIdentities);
         var identities = new HashSet<string>(StringComparer.Ordinal);
         var rootModuleRow = 0;
         var moduleSelections
@@ -1038,7 +1473,7 @@ public static partial class TrRmExecutableCompiler
                         or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)
                     && methodEnd == methodStart && typeEnd > typeStart;
                 if (!isSelectedRoot && moduleRefEnd != moduleRefStart
-                    && !isA2TypeOnlyModule)
+                    && !isA2TypeOnlyModule && !includesFProviderClosure)
                 {
                     throw Unsupported(
                         "Only A2 type-only provider Modules may retain provider Imports in this F slice.");
@@ -1082,7 +1517,8 @@ public static partial class TrRmExecutableCompiler
                     }
                 }
 
-                if (!isSelectedRoot && methodEnd != methodStart)
+                if (!isSelectedRoot && methodEnd != methodStart
+                    && !includesFProviderClosure)
                 {
                     _ = LoadForeignInvocationDraftNativeAddressLibrary(
                         artifacts[index], moduleRow, null,
@@ -1098,10 +1534,18 @@ public static partial class TrRmExecutableCompiler
                     nameof(rootModuleIdentity));
             }
 
-            var (rootMethodStart, rootMethodEnd)
-                = tables.Modules.GetMethodDefRange(rootModuleRow);
-            var (rootTypeStart, rootTypeEnd)
-                = tables.Modules.GetTypeDefRange(rootModuleRow);
+            var rootMethodStart = 0;
+            var rootMethodEnd = 0;
+            var rootTypeStart = 0;
+            var rootTypeEnd = 0;
+            if (index == 0)
+            {
+                (rootMethodStart, rootMethodEnd)
+                    = tables.Modules.GetMethodDefRange(rootModuleRow);
+                (rootTypeStart, rootTypeEnd)
+                    = tables.Modules.GetTypeDefRange(rootModuleRow);
+            }
+
             var rootIsA2TypeLibrary = index == 0
                 && (schemaIdentities[0] is
                     StandardForeignInvocationStorageFixedArraySchemaIdentity
@@ -1110,7 +1554,8 @@ public static partial class TrRmExecutableCompiler
                 && rootMethodStart == rootMethodEnd
                 && rootTypeStart < rootTypeEnd
                 && tables.Modules.GetEntryMethod(rootModuleRow) == 0;
-            if (populatedModuleCount == 0
+            if ((populatedModuleCount == 0
+                    && !includesFProviderClosure)
                 || (index == 0 && rootMethodEnd == rootMethodStart
                     && !rootIsA2TypeLibrary))
             {

@@ -433,21 +433,26 @@ provisional schema. Active
 and [vtable](../../tests/Terrum.CodeAnalysis.Tests/Native/Interop/NativeVTableCallTests.cs)
 cases are bounded implementation evidence, not approval.
 
-The separate unapproved F selected-provider consumer and native-lowering
-candidates now provisionally bind every root MethodDef Import to its exact
-selected leaf-provider Module/Export, retain each original expectation and
-actual origin, and preserve the single NativeAddress target. The multiple-
-Import amendment requires distinct root function names for the expanded
-multi-import case and includes uncalled Imports in pre-lowering validation.
-The final Debug fast build passed; the combined complete
-`TrRmForeignInvocationAddressEmitterTests` class and selected separate/
-co-located/multi-provider CLI tests passed 131/131 with zero skips at
-`artifacts\\tst\\Debug\\standard-multi-import-final2\\standard-multi-import-final2.trx`,
-including a three-provider import case.
-This does not admit provider chains, same-name root lowering, general source
-production/re-emission of non-target provider imports, broader schema
-compositions or the remaining accepted native contract. It is not formal
-approval or full Standard conformance.
+The separate unapproved F selected-provider, multiple-Import and provider-
+closure candidates are provisionally implemented. Exact-F preparation checks
+every supplied Module, including disconnected Modules, and resolves every
+MethodDef Import by its exact ModuleRef identity/requirements and key to a
+public provider-owned NativeImport. It retains each edge's original Import,
+ModuleRef, expectation and actual origin; root imports alone are substituted
+for lowering. Mixed one-owned/imported Modules, chains, diamonds, repeated
+ModuleRefs, self-edges and mutual cycles are covered by public API tests;
+provider Bodies are not merged or invoked. The checked plan revalidates the
+complete retained closure before lowering. The Debug fast build and combined
+NativeAddress/provider-CLI selection passed 135/135 with zero skips at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_08_02_08_net11.0.trx`,
+including deep-provider rejection, non-first Modules, CLI JIT/AOT and
+sentinel-output preservation.
+This remains provisional, not formal approval or full Standard conformance.
+Further evidence is still required for longer chains, all-co-located/hybrid
+closure remapping, multiple public keys for one actual declaration, larger
+capacity boundaries, compatible deep replacement and PE import/export
+inspection. Same-name expanded lowering, general source production/re-emission
+of non-target Imports and broader schema compositions remain unsupported.
 
 The original unapproved A1 fixed-array identity candidate was superseded for
 integrated nominal-array use by an independently drafted A2 Copy-evidence
