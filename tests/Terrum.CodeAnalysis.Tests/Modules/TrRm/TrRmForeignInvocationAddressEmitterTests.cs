@@ -41,6 +41,31 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             Assert.That(typeMapIndex, Is.EqualTo(firstTypeMapIndex));
         }
 
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x04)
+            {
+                continue;
+            }
+
+            var typeMapIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                record[20..]);
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint),
+                    sizeof(uint)));
+            if (!firstTypeMapIndexByToken.TryGetValue(token,
+                    out var firstTypeMapIndex))
+            {
+                firstTypeMapIndex
+                    = checked((ushort)firstTypeMapIndexByToken.Count);
+                firstTypeMapIndexByToken.Add(token, firstTypeMapIndex);
+            }
+
+            Assert.That(typeMapIndex, Is.EqualTo(firstTypeMapIndex));
+        }
+
         Assert.That(firstTypeMapIndexByToken.Count,
             Is.EqualTo(body.TypeCount));
     }
@@ -226,6 +251,127 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             Is.Not.Null);
         Assert.That(loaded.Functions.Single(static function =>
             function.Name == "Main").Body, Is.Not.Null);
+    }
+
+    [Test]
+    public void StandardA2EmitsAndReconstructsInitializedArrayStorageAddress()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-array-storage-address";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [uint32; 1] values = [0];
+                mut int32 output = 0;
+                unsafe {
+                    var callback = &Observe;
+                    callback(&values[zeroIndex], &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(compilation.Program!,
+                moduleIdentity,
+                "trrm/1-draft-foreign-invocation-storage-addresses-1", 1));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(1));
+        Assert.That(tables.Features.TryGetFeature(
+            TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId,
+            out _), Is.True);
+
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        AssertHomeFirstUseTypeMap(body);
+        var placeSelectionCount = 0;
+        var semanticStoreCount = 0;
+        var storageAddressCount = 0;
+        for (var record = 0; record < body.RecordCount; record++)
+        {
+            switch (body.GetRecord(record)[0])
+            {
+                case 0x04:
+                    placeSelectionCount++;
+                    break;
+                case 0x05:
+                    semanticStoreCount++;
+                    break;
+                case 0x0E:
+                    storageAddressCount++;
+                    break;
+            }
+        }
+        Assert.That(placeSelectionCount, Is.EqualTo(2));
+        Assert.That(semanticStoreCount, Is.EqualTo(1));
+        Assert.That(storageAddressCount, Is.EqualTo(2));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var arrayInitializations = new List<BoundNativeFixedArrayInitialization>();
+        var storageAddresses = new List<BoundNativeStorageAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression
+                    is BoundNativeFixedArrayInitialization initialization)
+                {
+                    arrayInitializations.Add(initialization);
+                }
+                else if (expression is BoundNativeStorageAddress address)
+                {
+                    storageAddresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(arrayInitializations, Has.Count.EqualTo(1));
+        Assert.That(arrayInitializations[0].Elements.Length,
+            Is.EqualTo(1));
+        Assert.That(storageAddresses, Has.Count.EqualTo(2));
+        var arrayAddress = storageAddresses.Single(address =>
+            NativeFixedArrayTypes.IsType(address.CarrierType));
+        Assert.That(arrayAddress.ElementType, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(arrayAddress.ElementCount, Is.EqualTo(1));
+        Assert.That(arrayAddress.ElementStride, Is.EqualTo(4));
+        Assert.That(arrayAddress.ByteExtent, Is.EqualTo(4));
+        Assert.That(arrayAddress.Index, Is.TypeOf<BoundRead>());
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
     [Test]

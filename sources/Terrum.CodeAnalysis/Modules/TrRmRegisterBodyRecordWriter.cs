@@ -98,6 +98,27 @@ internal static class TrRmRegisterBodyRecordWriter
         return result;
     }
 
+    internal static byte[] EncodeSemanticStore(byte placeKind,
+        byte sourceKind, byte transition, byte sourceUse, ushort placeIndex,
+        ushort sourceIndex)
+    {
+        if (placeKind != 1 || sourceKind != 1 || transition != 1
+            || sourceUse != 1 || placeIndex > 13 || sourceIndex > 15)
+        {
+            throw new ArgumentOutOfRangeException(nameof(placeKind));
+        }
+
+        var result = new byte[20];
+        result[0] = 0x05;
+        result[RecordHeaderSize] = placeKind;
+        result[RecordHeaderSize + 1] = sourceKind;
+        result[RecordHeaderSize + 2] = transition;
+        result[RecordHeaderSize + 3] = sourceUse;
+        Write(result, RecordHeaderSize + 4, placeIndex);
+        Write(result, RecordHeaderSize + 6, sourceIndex);
+        return result;
+    }
+
     internal static byte[] EncodeRootPinReferenceSupport(byte sourceKind,
         byte resultCarrier, ushort sourceIndex, byte resultRegister,
         byte sourceMode, ushort sourceTypeMapIndex, ushort resultTypeMapIndex)
