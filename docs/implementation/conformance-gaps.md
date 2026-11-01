@@ -444,17 +444,21 @@ provider co-location, diamonds, repeated ModuleRefs, multiple public keys for
 one actual definition, 17-provider fan-in, self-edges and mutual cycles are
 covered by public API tests;
 provider Bodies are not merged or invoked. The checked plan revalidates the
-complete retained closure before lowering. The Debug fast build and combined NativeAddress/provider-CLI selection passed
-138/138 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_15_36_net11.0.trx`,
-including deep-provider rejection, empty and non-first Modules, CLI JIT/AOT
-and sentinel-output preservation.
+complete retained closure before lowering. The Debug fast build and combined
+NativeAddress/provider-CLI selection passed 140/140 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_31_54_net11.0.trx`,
+including deep-provider rejection, empty and non-first Modules, a non-first
+address target, 17-provider fan-in, UTF-16 ModuleRef identity and exact
+alternate ExportKey selection, compatible deep-body replacement, CLI JIT/AOT,
+PE import/export inspection, a self-edge DLL export invocation and sentinel
+output preservation. Native input/compiler hashes and results are recorded in
+`artifacts\\log\\compiler-adoption-f-provider-closure-native-qualification.log`.
 This remains provisional, not formal approval or full Standard conformance.
-Further evidence is still required for all-co-located closure and broader
-Module/Import/Body remapping, identity/key encoding and case boundaries,
-larger row/map/work capacity, compatible deep replacement and PE import/export
-inspection. Same-name expanded lowering, general source production/re-emission
-of non-target Imports and broader schema compositions remain unsupported.
+Further evidence is still required for a multi-edge chain with every Module
+co-located and broader Module/Import/Body remapping, identity normalization
+boundaries, and row/map/work limits beyond the tested fan-in of 17. Same-name
+expanded lowering, general source production/re-emission of non-target Imports
+and broader schema compositions remain unsupported.
 
 The original unapproved A1 fixed-array identity candidate was superseded for
 integrated nominal-array use by an independently drafted A2 Copy-evidence

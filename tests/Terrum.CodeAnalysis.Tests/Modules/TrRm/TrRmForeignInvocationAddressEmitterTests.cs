@@ -6,8 +6,10 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Reflection.PortableExecutable;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using Terrum.CodeAnalysis.Lexing;
@@ -22,6 +24,9 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmForeignInvocationAddressEmitterTests
 {
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    private delegate int NativeAddressExport();
+
     private static void AssertHomeFirstUseTypeMap(
         TrRmRegisterBodyReader body)
     {
@@ -4581,6 +4586,14 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             secondArtifact);
         var thirdInput = new TrRmStandardArtifactInput(schemaIdentity,
             thirdArtifact);
+        var compatibleThirdCompilation
+            = CreateMultipleImportProviderCompilation(
+                "Deep", "GetCurrentThreadId", core,
+                providerBodyName: "ReplacementBody");
+        var compatibleThirdArtifact = TrRmExecutableCompiler.EmitStandard(
+            compatibleThirdCompilation.Program!, thirdIdentity,
+            schemaIdentity, 1);
+        Assert.That(compatibleThirdArtifact, Is.Not.EqualTo(thirdArtifact));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
             rootIdentity, [providerInput, secondInput, thirdInput]);
@@ -4595,6 +4608,16 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(plan.CreateLoweringInputs(
             TrRmStandardNativeOperation.EmitExecutable).Bindings,
             Has.Length.EqualTo(1));
+        var compatibleReplacement = TrRmExecutableCompiler.LoadStandard(
+            rootInput, rootIdentity, [
+                providerInput,
+                secondInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    compatibleThirdArtifact),
+            ]);
+        Assert.That(compatibleReplacement.Functions.Single(
+            static function => function.Name == "Owned").ModuleImport!
+            .ProducerIdentity, Is.EqualTo(providerIdentity));
 
         var incompatibleThird = CreateMultipleImportProviderCompilation(
             "Deep", "GetTickCount", core);
@@ -4701,6 +4724,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [Test]
     public void StandardFProviderClosureSupportsFanInBeyondSixteenModules()
     {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-contracts-1";
         const string rootIdentity = "fan-in-root";
@@ -4742,12 +4767,16 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 identity, "GetCurrentProcessId", core);
             var providerArtifact = TrRmExecutableCompiler.EmitStandard(
                 compilation.Program!, identity, schemaIdentity, 1);
+            WriteStandardFArtifactEvidence("fan-in-provider", identity,
+                providerArtifact);
             providers[index] = new TrRmStandardArtifactInput(schemaIdentity,
                 providerArtifact);
         }
 
         rootArtifact = AddRootMethodImports(rootArtifact, bindings,
             reuseModuleRefs: false, duplicateSecondMethodName: false);
+        WriteStandardFArtifactEvidence("fan-in-root", rootIdentity,
+            rootArtifact);
         var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
             rootArtifact);
         var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
@@ -4764,6 +4793,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
             rootIdentity, providers, NativeRuntimePolicy.FailFast);
         Assert.That(image.Take(2), Is.EqualTo([(byte)'M', (byte)'Z']));
+        var imports = ReadPeImports(image,
+            NativeEmitter.System32ImportPath("kernel32.dll"));
+        TestContext.WriteLine(
+            $"Fan-in PE imports: {string.Join(",", imports)}; image-bytes={image.Length}; sha256={Convert.ToHexString(SHA256.HashData(image))}");
+        Assert.That(imports, Does.Contain("GetCurrentProcessId"));
     }
 
     [Test]
@@ -4779,6 +4813,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 NativeCoreRegistrationTests.CreateRegistration());
         var rootArtifact = CreateRootMethodImportArtifact(rootIdentity,
             "Owned", providerIdentity, "GetCurrentProcessId", core);
+        rootArtifact = ReencodeFirstModuleRefIdentity(rootArtifact,
+            providerIdentity, encoding: 2);
         var providerCompilation = CreateMultipleImportProviderCompilation(
             "Owned", "GetCurrentProcessId", core);
         var providerArtifact = TrRmExecutableCompiler.EmitStandard(
@@ -4801,6 +4837,13 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(plan.CreateLoweringInputs(
             TrRmStandardNativeOperation.EmitExecutable).Bindings,
             Has.Length.EqualTo(1));
+
+        var caseMismatchRootArtifact = CreateRootMethodImportArtifact(
+            "CaseRoot", "owned", "owned", "GetCurrentProcessId", core);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    caseMismatchRootArtifact), "CaseRoot", [providerInput]));
     }
 
     [Test]
@@ -4816,6 +4859,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             "SelfDependency", "Owned", "GetCurrentProcessId",
             "SelfDependency", "GetCurrentProcessId", "SelfDependency",
             "Owned", core);
+        WriteStandardFArtifactEvidence("self-edge", "SelfDependency",
+            selfArtifact);
         var selfInput = new TrRmStandardArtifactInput(schemaIdentity,
             selfArtifact);
         var selfLoaded = TrRmExecutableCompiler.LoadStandard(selfInput,
@@ -4834,6 +4879,30 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         selfPlan.ValidateLibraryExports(["Owned"]);
         _ = Assert.Throws<ArgumentException>(() =>
             selfPlan.ValidateLibraryExports(["SelfDependency"]));
+
+        var coLocatedProviderArtifact
+            = CreateMixedImportProviderArtifact("Owned", "Owned",
+                "GetCurrentProcessId", "SelfDependency",
+                "GetCurrentProcessId", "Owned", "Owned", core);
+        var coLocatedRootArtifact = CreateRootMethodImportArtifact(
+            "SelfRoot", "Owned", "Owned", "Owned", core);
+        var coLocatedArtifact = CombinePopulatedNativeAddressModules(
+            coLocatedProviderArtifact, coLocatedRootArtifact);
+        var coLocatedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            coLocatedArtifact);
+        var coLocatedLoaded = TrRmExecutableCompiler.LoadStandard(
+            coLocatedInput, "SelfRoot", []);
+        Assert.That(coLocatedLoaded.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("Owned"));
+        var coLocatedPlan
+            = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+                coLocatedInput, "SelfRoot", [],
+                TrRmStandardNativeOperation.EmitExecutable,
+                NativeRuntimePolicy.FailFast);
+        Assert.That(coLocatedPlan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings,
+            Has.Length.EqualTo(1));
 
         var pArtifact = CreateMixedImportProviderArtifact("CycleP",
             "CycleP", "GetCurrentProcessId", "CycleQ",
@@ -4855,6 +4924,61 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(cyclePlan.CreateLoweringInputs(
             TrRmStandardNativeOperation.EmitExecutable).Bindings,
             Has.Length.EqualTo(2));
+    }
+
+    [Test]
+    public async Task StandardFSelfProviderExportThunkRemainsInvocableAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string moduleIdentity = "SelfDependency";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var artifact = CreateMixedImportProviderArtifact(moduleIdentity,
+            "Owned", "GetCurrentProcessId", "SelfDependency",
+            "GetCurrentProcessId", moduleIdentity, "Owned", core);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var image = NativeModuleCompiler.EmitStandardLibrary(input,
+            moduleIdentity, [], ["Owned"], NativeRuntimePolicy.FailFast);
+        var exports = ReadPeExports(image);
+        TestContext.WriteLine(
+            $"Self-edge DLL exports: {string.Join(",", exports)}; image-bytes={image.Length}; sha256={Convert.ToHexString(SHA256.HashData(image))}");
+        Assert.That(exports,
+            Does.Contain("Owned").And.Not.Contain("SelfDependency"));
+        _ = Assert.Throws<ArgumentException>(() =>
+            NativeModuleCompiler.EmitStandardLibrary(input, moduleIdentity,
+                [], ["SelfDependency"], NativeRuntimePolicy.FailFast));
+
+        var path = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-f-self-export-{Guid.NewGuid():N}.dll");
+        try
+        {
+            await File.WriteAllBytesAsync(path, image).ConfigureAwait(true);
+            var handle = NativeLibrary.Load(path);
+            try
+            {
+                var function = Marshal.GetDelegateForFunctionPointer<
+                    NativeAddressExport>(NativeLibrary.GetExport(handle,
+                    "Owned"));
+                var result = function();
+                TestContext.WriteLine(
+                    $"Self-edge DLL Owned export result: {result}");
+                Assert.That(result, Is.GreaterThan(0));
+            }
+            finally
+            {
+                NativeLibrary.Free(handle);
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(path)
+                .ConfigureAwait(true);
+        }
     }
 
     [Test]
@@ -5042,6 +5166,64 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFMultipleImportsSelectNonFirstAddressTarget()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "multi-import-root";
+        var (rootArtifact, firstProviderArtifact, secondProviderArtifact,
+            thirdProviderArtifact) = CreateMultipleRootMethodImportArtifacts(
+                importCount: 3, targetMethodName: "Third");
+        WriteStandardFArtifactEvidence("non-first-target-root", rootIdentity,
+            rootArtifact);
+        WriteStandardFArtifactEvidence("non-first-target-first-provider",
+            "First", firstProviderArtifact);
+        WriteStandardFArtifactEvidence("non-first-target-second-provider",
+            "Second", secondProviderArtifact);
+        WriteStandardFArtifactEvidence("non-first-target-third-provider",
+            "Third", thirdProviderArtifact);
+        var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
+            rootArtifact);
+        var providers = new[]
+        {
+            new TrRmStandardArtifactInput(schemaIdentity,
+                firstProviderArtifact),
+            new TrRmStandardArtifactInput(schemaIdentity,
+                secondProviderArtifact),
+            new TrRmStandardArtifactInput(schemaIdentity,
+                thirdProviderArtifact),
+        };
+        var loaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers);
+        var caller = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var addresses = new List<BoundNativeFunctionAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(caller.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFunctionAddress address)
+                {
+                    addresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(addresses, Has.Count.EqualTo(1));
+        Assert.That(loaded.Functions[addresses[0].Function].Name,
+            Is.EqualTo("Third"));
+
+        var image = NativeModuleCompiler.EmitStandardExecutable(rootInput,
+            rootIdentity, providers, NativeRuntimePolicy.FailFast);
+        Assert.That(ReadPeImports(image,
+                NativeEmitter.System32ImportPath("kernel32.dll")),
+            Does.Contain("GetTickCount"));
+        var jitResult = NativeModuleCompiler.ExecuteStandard(rootInput,
+            rootIdentity, providers, NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine($"Non-first NativeAddress JIT result: {jitResult}");
+        Assert.That(jitResult, Is.GreaterThan(0));
+    }
+
+    [Test]
     public void StandardFMultipleImportJitExecutesSelectedProvider()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -5113,7 +5295,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         string secondRootImportExport = "GetCurrentThreadId",
         string secondProducerIdentity = "Second",
         string secondExportKey = "Second", bool reuseModuleRef = false,
-        bool duplicateSecondMethodName = false, int importCount = 2)
+        bool duplicateSecondMethodName = false, int importCount = 2,
+        string targetMethodName = "First")
     {
         if (importCount is < 2 or > 3)
         {
@@ -5159,7 +5342,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
             int32 Main() {
                 unsafe {
-                    var callback = &First;
+                    var callback = &{{targetMethodName}};
                     return callback();
                 }
             }
@@ -5194,7 +5377,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
     internal static Compilation CreateMultipleImportProviderCompilation(
         string methodName, string nativeExport,
-        CompilationReference core)
+        CompilationReference core, string providerBodyName = "ProviderBody")
     {
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Terrum.Interop.NativeImport(
@@ -5203,7 +5386,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
             public extern int32 {{methodName}}();
 
-            internal int32 ProviderBody() {
+            internal int32 {{providerBodyName}}() {
                 unsafe {
                     var callback = &{{methodName}};
                     return callback();
@@ -5723,6 +5906,151 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     exports)
                 : new TrRmSection(kind, flags, (uint)recordCount,
                     bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ForeignInvocationDraft);
+    }
+
+    private static List<string> ReadPeImports(byte[] image, string library)
+    {
+        using var stream = new MemoryStream(image, writable: false);
+        using var pe = new PEReader(stream);
+        var header = pe.PEHeaders.PEHeader
+            ?? throw new InvalidDataException("Missing PE header.");
+        var descriptors = pe.GetSectionData(
+            header.ImportTableDirectory.RelativeVirtualAddress).GetReader();
+        var result = new List<string>();
+        while (true)
+        {
+            var lookup = descriptors.ReadInt32();
+            _ = descriptors.ReadInt32();
+            _ = descriptors.ReadInt32();
+            var name = descriptors.ReadInt32();
+            _ = descriptors.ReadInt32();
+            if (lookup == 0)
+            {
+                return result;
+            }
+
+            if (!ReadPeName(pe, name).Equals(library,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var entries = pe.GetSectionData(lookup).GetReader();
+            for (var entry = entries.ReadUInt64(); entry != 0;
+                entry = entries.ReadUInt64())
+            {
+                Assert.That(entry & 0x8000_0000_0000_0000UL, Is.EqualTo(0UL));
+                result.Add(ReadPeName(pe, checked((int)entry + 2)));
+            }
+        }
+    }
+
+    private static string ReadPeName(PEReader pe, int rva)
+    {
+        var reader = pe.GetSectionData(rva).GetReader();
+        var text = new StringBuilder();
+        for (var value = reader.ReadByte(); value != 0;
+            value = reader.ReadByte())
+        {
+            _ = text.Append((char)value);
+        }
+
+        return text.ToString();
+    }
+
+    private static void WriteStandardFArtifactEvidence(string role,
+        string moduleIdentity, byte[] artifact)
+    {
+        TestContext.WriteLine(
+            $"Standard F input {role}: module={moduleIdentity}; bytes={artifact.Length}; sha256={Convert.ToHexString(SHA256.HashData(artifact))}");
+    }
+
+    private static string[] ReadPeExports(byte[] image)
+    {
+        using var stream = new MemoryStream(image, writable: false);
+        using var pe = new PEReader(stream);
+        var header = pe.PEHeaders.PEHeader
+            ?? throw new InvalidDataException("Missing PE header.");
+        var exportDirectory = header.ExportTableDirectory;
+        if (exportDirectory.RelativeVirtualAddress == 0
+            || exportDirectory.Size == 0)
+        {
+            return [];
+        }
+
+        var export = pe.GetSectionData(
+            exportDirectory.RelativeVirtualAddress).GetReader();
+        _ = export.ReadInt32();
+        _ = export.ReadInt32();
+        _ = export.ReadUInt16();
+        _ = export.ReadUInt16();
+        _ = export.ReadInt32();
+        _ = export.ReadInt32();
+        _ = export.ReadInt32();
+        var nameCount = export.ReadInt32();
+        _ = export.ReadInt32();
+        var namesRva = export.ReadInt32();
+        _ = export.ReadInt32();
+        var names = pe.GetSectionData(namesRva).GetReader();
+        var exports = new List<string>(nameCount);
+        for (var index = 0; index < nameCount; index++)
+        {
+            exports.Add(ReadPeName(pe, names.ReadInt32()));
+        }
+
+        return [.. exports];
+    }
+
+    private static byte[] ReencodeFirstModuleRefIdentity(byte[] artifact,
+        string identity, int encoding)
+    {
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        Assert.That(tables.ModuleRefs.Count, Is.EqualTo(1));
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes,
+            out var moduleCount), Is.True);
+        Assert.That(index.TryGetSection(0x0002, out _, out var stringCount),
+            Is.True);
+
+        var stringRows = new (string Text, int Encoding)[stringCount + 1];
+        for (var row = 1; row <= stringCount; row++)
+        {
+            stringRows[row - 1] = (tables.Strings.DecodeNamespace(row), 0);
+        }
+
+        stringRows[stringCount] = (identity, encoding);
+        var stringBytes = TrRmStringTableWriter.EncodeTextRows(stringRows);
+        var strings = new TrRmStringTableReader(stringBytes,
+            stringRows.Length);
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            strings, tables.ModuleRefs.Count, tables.TypeDefs.Count,
+            tables.Methods.Count, tables.Modules.SourceFileCount,
+            tables.Features.Count);
+        var (targetRequirement, runtimePolicy)
+            = tables.ModuleRefs.GetRequirements(1);
+        var moduleRefBytes = TrRmModuleRefTableWriter.Encode([
+            new TrRmModuleRefRow(stringRows.Length, targetRequirement,
+                runtimePolicy),
+        ], strings, modules);
+
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind switch
+            {
+                0x0002 => new TrRmSection(kind, flags,
+                    (uint)stringRows.Length, stringBytes),
+                0x0010 => new TrRmSection(kind, flags, 1, moduleRefBytes),
+                _ => new TrRmSection(kind, flags, (uint)recordCount,
+                    bytes.ToArray()),
+            });
         }
 
         return TrRmArtifactWriter.Encode(sections,

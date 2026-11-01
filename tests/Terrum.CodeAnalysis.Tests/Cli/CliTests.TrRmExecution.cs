@@ -897,7 +897,14 @@ public sealed partial class CliTests
         const string rootIdentity = "multi-import-root";
         var (rootArtifact, firstProviderArtifact, secondProviderArtifact, _)
             = TrRmForeignInvocationAddressEmitterTests
-                .CreateMultipleRootMethodImportArtifacts();
+                .CreateMultipleRootMethodImportArtifacts(
+                    targetMethodName: "Second");
+        WriteStandardFArtifactEvidence("multi-provider-root",
+            rootIdentity, rootArtifact);
+        WriteStandardFArtifactEvidence("multi-provider-first", "First",
+            firstProviderArtifact);
+        WriteStandardFArtifactEvidence("multi-provider-second", "Second",
+            secondProviderArtifact);
         var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-f-multi-provider-{Guid.NewGuid():N}");
         var rootPath = prefix + "-root.trrm";
@@ -921,6 +928,8 @@ public sealed partial class CliTests
                 "--trrm-provider", schemaIdentity, firstProviderPath,
                 "--trrm-provider", schemaIdentity, secondProviderPath,
                 "--json");
+            TestContext.WriteLine(
+                $"Non-first multi-provider CLI JIT exit: {ran}");
             Assert.That(ran, Is.GreaterThan(0),
                 $"{runOutput}{Environment.NewLine}{runError}");
             Assert.That(runOutput, Is.Empty);
@@ -935,8 +944,11 @@ public sealed partial class CliTests
             Assert.That(built, Is.Zero,
                 $"{buildOutput}{Environment.NewLine}{buildError}");
             Assert.That(buildError, Is.Empty);
-            Assert.That(await ExecuteTrRmImageAsync(imagePath),
-                Is.GreaterThan(0));
+            var imageResult = await ExecuteTrRmImageAsync(imagePath)
+                .ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"Non-first multi-provider emitted EXE result: {imageResult}");
+            Assert.That(imageResult, Is.GreaterThan(0));
 
             await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
                 .ConfigureAwait(true);
@@ -1033,6 +1045,7 @@ public sealed partial class CliTests
                 "--trrm-provider", schemaIdentity, providerPath,
                 "--trrm-provider", schemaIdentity, leafPath, "--json")
                 .ConfigureAwait(true);
+            TestContext.WriteLine($"Root->Owned->Leaf CLI JIT exit: {ran}");
             Assert.That(ran, Is.GreaterThan(0),
                 $"{runOutput}{Environment.NewLine}{runError}");
             Assert.That(runOutput, Is.Empty);
@@ -1047,8 +1060,11 @@ public sealed partial class CliTests
             Assert.That(built, Is.Zero,
                 $"{buildOutput}{Environment.NewLine}{buildError}");
             Assert.That(buildError, Is.Empty);
-            Assert.That(await ExecuteTrRmImageAsync(imagePath)
-                .ConfigureAwait(true), Is.GreaterThan(0));
+            var imageResult = await ExecuteTrRmImageAsync(imagePath)
+                .ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"Root->Owned->Leaf emitted EXE result: {imageResult}");
+            Assert.That(imageResult, Is.GreaterThan(0));
 
             await File.WriteAllBytesAsync(retainedOutputPath, retainedOutput)
                 .ConfigureAwait(true);
@@ -1057,6 +1073,8 @@ public sealed partial class CliTests
                 "--runtime", "fail-fast", "--trrm-schema", schemaIdentity,
                 "--trrm-module", rootIdentity, "--trrm-provider",
                 schemaIdentity, providerPath, "--json").ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"Missing deep provider build diagnostic exit: {missingLeaf}");
             Assert.That(missingLeaf, Is.EqualTo(1),
                 $"{missingOutput}{Environment.NewLine}{missingError}");
             Assert.That(missingError, Is.Empty);
@@ -1077,6 +1095,8 @@ public sealed partial class CliTests
                 schemaIdentity, providerPath, "--trrm-provider",
                 schemaIdentity, incompatibleLeafPath, "--json")
                 .ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"Incompatible deep provider build diagnostic exit: {rejected}");
             Assert.That(rejected, Is.EqualTo(1),
                 $"{rejectionOutput}{Environment.NewLine}{rejectionError}");
             Assert.That(rejectionError, Is.Empty);
