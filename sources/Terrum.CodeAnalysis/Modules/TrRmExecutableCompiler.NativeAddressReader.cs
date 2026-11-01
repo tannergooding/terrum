@@ -20,9 +20,12 @@ public static partial class TrRmExecutableCompiler
 
     private readonly record struct NativeArrayPlaceSelectionFacts(
         int RecordIndex, int DestinationRegister, byte AccessKind,
-        int BaseHome, int IndexHome, int ArrayTypeSpecRow,
-        int FixedArrayLayoutRow, PrimitiveType ArrayType,
+        int BaseHome, byte IndexKind, int IndexHome, int IndexRegister,
+        int ArrayTypeSpecRow, int FixedArrayLayoutRow, PrimitiveType ArrayType,
         PrimitiveType ElementType, ulong ElementCount);
+
+    private readonly record struct NativeAddressRegisterConstant(
+        PrimitiveType Type, uint Bits);
 
     internal static BoundProgram LoadForeignInvocationDraftNativeAddressLibrary(
         ReadOnlySpan<byte> artifact)
@@ -929,6 +932,25 @@ public static partial class TrRmExecutableCompiler
                             instruction[2..]), checked((byte)longSource)));
                     break;
 
+                case 0x13:
+                case 0x10:
+                case 0x20:
+                case 0x21:
+                case 0x33:
+                    instructions.Add((instruction[0], instruction[1], 0));
+                    break;
+
+                case 0xD5:
+                    if ((instruction[1] & 0xF0) != 0)
+                    {
+                        throw Invalid("Invalid F+S Home-load control.");
+                    }
+                    instructions.Add((0xD5,
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]),
+                        checked((byte)(instruction[1] & 0x0F))));
+                    break;
+
                 case 0xD8:
                 case 0xD9:
                     var placeRecordControl = instruction[1];
@@ -1091,6 +1113,10 @@ public static partial class TrRmExecutableCompiler
         var localConstantByHome = new Dictionary<int, long>();
         var placeSelectionsByRegister
             = new Dictionary<int, NativeArrayPlaceSelectionFacts>();
+        var registerConstants
+            = new Dictionary<int, NativeAddressRegisterConstant>();
+        var arrayInitializationElementsByHome
+            = new Dictionary<int, List<BoundExpression>>();
         var statements = ImmutableArray.CreateBuilder<BoundStatement>();
         var sawCallSite = false;
         var sawReturn = false;
@@ -1134,6 +1160,120 @@ public static partial class TrRmExecutableCompiler
                         new BoundConstant(initialValue, localType, default),
                         default));
                     localConstantByHome.Add(localHome, initialValue);
+                    break;
+
+                case 0x13:
+                    var shortLoadDestination = instruction.Index & 0x0F;
+                    var shortLoadHome = instruction.Index >> 4;
+                    if (shortLoadHome >= body.HomeCount
+                        || localVariableByHome[shortLoadHome] < 0
+                        || !localConstantByHome.TryGetValue(shortLoadHome,
+                            out var shortLoadValue)
+                        || variables[localVariableByHome[shortLoadHome]].Type
+                            != PrimitiveType.Int32)
+                    {
+                        throw Invalid(
+                            "The F+S array-index register load is unsupported.");
+                    }
+
+                    registerConstants[shortLoadDestination]
+                        = new NativeAddressRegisterConstant(
+                            PrimitiveType.Int32,
+                            unchecked((uint)shortLoadValue));
+                    break;
+
+                case 0xD5:
+                    var longLoadHome = instruction.Index;
+                    var longLoadDestination = instruction.Register;
+                    if (longLoadHome >= body.HomeCount
+                        || localVariableByHome[longLoadHome] < 0
+                        || !localConstantByHome.TryGetValue(longLoadHome,
+                            out var longLoadValue)
+                        || variables[localVariableByHome[longLoadHome]].Type
+                            != PrimitiveType.Int32)
+                    {
+                        throw Invalid(
+                            "The F+S array-index register load is unsupported.");
+                    }
+
+                    registerConstants[longLoadDestination]
+                        = new NativeAddressRegisterConstant(
+                            PrimitiveType.Int32,
+                            unchecked((uint)longLoadValue));
+                    break;
+
+                case 0x10:
+                case 0x20:
+                case 0x21:
+                case 0x33:
+                    var registerOperand = checked((byte)instruction.Index);
+                    var destinationRegister = registerOperand & 0x0F;
+                    var rightRegister = registerOperand >> 4;
+                    if (instruction.Opcode == 0x10)
+                    {
+                        if (!registerConstants.TryGetValue(rightRegister,
+                                out var moveSource))
+                        {
+                            throw Invalid(
+                                "The F+S array-index move has no constant source.");
+                        }
+
+                        registerConstants[destinationRegister] = moveSource;
+                        break;
+                    }
+
+                    if (!registerConstants.TryGetValue(destinationRegister,
+                            out var leftValue)
+                        || leftValue.Type != PrimitiveType.Int32)
+                    {
+                        throw Invalid(
+                            "The F+S array-index operation has no int32 destination.");
+                    }
+
+                    if (instruction.Opcode == 0x33)
+                    {
+                        if (!registerConstants.TryGetValue(rightRegister,
+                                out var notSource)
+                            || notSource.Type != PrimitiveType.Int32)
+                        {
+                            throw Invalid(
+                                "The F+S array-index NOT has no int32 source.");
+                        }
+
+                        registerConstants[destinationRegister]
+                            = notSource with { Bits = ~notSource.Bits };
+                    }
+                    else if (instruction.Opcode == 0x20)
+                    {
+                        if (!registerConstants.TryGetValue(rightRegister,
+                                out var negateSource)
+                            || negateSource.Type != PrimitiveType.Int32)
+                        {
+                            throw Invalid(
+                                "The F+S array-index negate has no int32 source.");
+                        }
+
+                        registerConstants[destinationRegister]
+                            = negateSource with {
+                                Bits = unchecked(0u - negateSource.Bits),
+                            };
+                    }
+                    else
+                    {
+                        if (!registerConstants.TryGetValue(rightRegister,
+                                out var addSource)
+                            || addSource.Type != PrimitiveType.Int32)
+                        {
+                            throw Invalid(
+                                "The F+S array-index addition has no int32 source.");
+                        }
+
+                        registerConstants[destinationRegister]
+                            = leftValue with {
+                                Bits = unchecked(leftValue.Bits
+                                    + addSource.Bits),
+                            };
+                    }
                     break;
 
                 case 0xD8:
@@ -1184,13 +1324,9 @@ public static partial class TrRmExecutableCompiler
                         || initializationSelection.RecordIndex
                             != previousInstruction.Index
                         || initializationSelection.AccessKind != 3
-                        || initializationSelection.ElementCount != 1
+                        || initializationSelection.ElementCount == 0
                         || localVariableByHome[
                             initializationSelection.BaseHome] != -1
-                        || !localConstantByHome.TryGetValue(
-                            initializationSelection.IndexHome,
-                            out var initializationIndex)
-                        || initializationIndex != 0
                         || !TryGetContextualConstant(
                             checked((byte)sourceRegister),
                             initializationSelection.ElementType,
@@ -1200,42 +1336,94 @@ public static partial class TrRmExecutableCompiler
                             "The F+S SemanticStore does not initialize its selected array element.");
                     }
 
-                    var initializedArrayLayout
-                        = nativeFixedArrayTypes[
-                            NativeFixedArrayTypes.Index(
-                                initializationSelection.ArrayType)];
                     var initializedArrayHome
                         = initializationSelection.BaseHome;
-                    if (body.HomeMap[initializedArrayHome * 8] != 3)
+                    ulong selectedElementIndex;
+                    if (initializationSelection.IndexKind == 1)
+                    {
+                        if (!registerConstants.TryGetValue(
+                                initializationSelection.IndexRegister,
+                                out var registerIndex)
+                            || registerIndex.Type != PrimitiveType.Int32
+                            || registerIndex.Bits > int.MaxValue)
+                        {
+                            throw Invalid(
+                                "The F+S initializer index register is invalid.");
+                        }
+
+                        selectedElementIndex = registerIndex.Bits;
+                    }
+                    else if (initializationSelection.IndexKind == 2)
+                    {
+                        if (!localConstantByHome.TryGetValue(
+                                initializationSelection.IndexHome,
+                                out var homeIndex)
+                            || homeIndex < 0)
+                        {
+                            throw Invalid(
+                                "The F+S initializer index Home is invalid.");
+                        }
+
+                        selectedElementIndex = checked((ulong)homeIndex);
+                    }
+                    else
                     {
                         throw Invalid(
-                            "The F+S initialized array is not a local Home.");
+                            "The F+S initializer has an unsupported index selector.");
                     }
 
-                    var initializedArrayVariable = variables.Count;
-                    localVariableByHome[initializedArrayHome]
-                        = initializedArrayVariable;
-                    variables.Add(new BoundVariable(
-                        $"__trrm_home_{initializedArrayHome}",
-                        initializationSelection.ArrayType,
-                        body.HomeMap[(initializedArrayHome * 8) + 1] != 0,
-                        default));
-                    statements.Add(new BoundLocal(
-                        initializedArrayVariable,
-                        new BoundNativeFixedArrayInitialization(
-                            new BoundNativeFixedArrayLayout(
-                                initializationSelection.ArrayType,
-                                initializedArrayLayout.ElementType,
-                                initializedArrayLayout.ElementCount,
-                                initializedArrayLayout.ElementStride,
-                                initializedArrayLayout.ByteExtent,
-                                initializedArrayLayout.Alignment,
-                                initializedArrayLayout.RequiredAlignment),
-                            [new BoundConstant(initializationValue,
-                                initializationSelection.ElementType,
-                                default)],
-                            default),
-                        default));
+                    if (!arrayInitializationElementsByHome.TryGetValue(
+                            initializedArrayHome, out var initializedElements))
+                    {
+                        initializedElements = [];
+                        arrayInitializationElementsByHome.Add(
+                            initializedArrayHome, initializedElements);
+                    }
+                    if (selectedElementIndex
+                            != (ulong)initializedElements.Count
+                        || selectedElementIndex
+                            >= initializationSelection.ElementCount
+                        || body.HomeMap[initializedArrayHome * 8] != 3)
+                    {
+                        throw Invalid(
+                            "The F+S array element initializations are not complete and source-ordered.");
+                    }
+
+                    initializedElements.Add(new BoundConstant(
+                        initializationValue,
+                        initializationSelection.ElementType, default));
+                    if ((ulong)initializedElements.Count
+                        == initializationSelection.ElementCount)
+                    {
+                        var initializedArrayLayout
+                            = nativeFixedArrayTypes[
+                                NativeFixedArrayTypes.Index(
+                                    initializationSelection.ArrayType)];
+                        var initializedArrayVariable = variables.Count;
+                        localVariableByHome[initializedArrayHome]
+                            = initializedArrayVariable;
+                        variables.Add(new BoundVariable(
+                            $"__trrm_home_{initializedArrayHome}",
+                            initializationSelection.ArrayType,
+                            body.HomeMap[(initializedArrayHome * 8) + 1] != 0,
+                            default));
+                        statements.Add(new BoundLocal(
+                            initializedArrayVariable,
+                            new BoundNativeFixedArrayInitialization(
+                                new BoundNativeFixedArrayLayout(
+                                    initializationSelection.ArrayType,
+                                    initializedArrayLayout.ElementType,
+                                    initializedArrayLayout.ElementCount,
+                                    initializedArrayLayout.ElementStride,
+                                    initializedArrayLayout.ByteExtent,
+                                    initializedArrayLayout.Alignment,
+                                    initializedArrayLayout.RequiredAlignment),
+                                [.. initializedElements],
+                                default),
+                            default));
+                        _ = arrayInitializationElementsByHome.Remove(
+                            initializedArrayHome);
+                    }
                     _ = placeSelectionsByRegister.Remove(placeRegister);
                     break;
 
@@ -1370,6 +1558,7 @@ public static partial class TrRmExecutableCompiler
                             || selectedPlace.RecordIndex
                                 != previousPlaceInstruction.Index
                             || selectedPlace.AccessKind is not (1 or 2)
+                            || selectedPlace.IndexKind != 2
                             || selectedPlace.BaseHome >= body.HomeCount
                             || localVariableByHome[
                                 selectedPlace.BaseHome] < 0
@@ -1602,6 +1791,7 @@ public static partial class TrRmExecutableCompiler
 
         if (!sawCallSite || !sawReturn
             || placeSelectionsByRegister.Count != 0
+            || arrayInitializationElementsByHome.Count != 0
             || storageAddressesByHome.Keys.Any(home =>
                 !consumedStorageHomes.Contains(home)))
         {
@@ -1651,7 +1841,7 @@ public static partial class TrRmExecutableCompiler
         var baseHome = BinaryPrimitives.ReadUInt16LittleEndian(payload[6..]);
         var indexKind = payload[8];
         var targetRefKind = payload[9];
-        var indexHome = BinaryPrimitives.ReadUInt16LittleEndian(payload[10..]);
+        var indexIndex = BinaryPrimitives.ReadUInt16LittleEndian(payload[10..]);
         var layoutRow = BinaryPrimitives.ReadUInt32LittleEndian(payload[12..]);
         var referentTypeMapIndex
             = BinaryPrimitives.ReadUInt16LittleEndian(payload[16..]);
@@ -1659,7 +1849,10 @@ public static partial class TrRmExecutableCompiler
             || destinationKind != 1
             || selectedRegister != destinationRegister
             || baseKind != 2 || baseHome >= body.HomeCount
-            || indexKind != 2 || indexHome >= body.HomeCount
+            || indexKind is not (1 or 2)
+            || (indexKind == 1
+                ? indexIndex > 13
+                : indexIndex >= body.HomeCount)
             || targetRefKind != 3 || layoutRow == 0
             || layoutRow > (uint)fixedArrayLayouts.Count
             || payload[17] != 0
@@ -1693,19 +1886,29 @@ public static partial class TrRmExecutableCompiler
             throw Invalid("The F+S PlaceSelection base Home is invalid.");
         }
 
-        var indexHomeMap = body.HomeMap.Slice(indexHome * 8, 8);
-        var indexType = ReadForeignInvocationType(typeSpecs,
-            ReadForeignInvocationBodyTypeSpec(body,
-                BinaryPrimitives.ReadUInt16LittleEndian(indexHomeMap[2..])),
-            nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
-            structureTypeByTypeDef,
-            arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
         var arrayTypeIndex = NativeFixedArrayTypes.Index(arrayType);
-        if (indexHomeMap[0] is not (2 or 3)
-            || !NativeFixedArrayContract.IsIndexType(indexType)
-            || (uint)arrayTypeIndex >= (uint)nativeFixedArrayTypes.Length)
+        var indexHome = indexKind == 2 ? (int)indexIndex : -1;
+        var indexRegister = indexKind == 1 ? (int)indexIndex : -1;
+        if ((uint)arrayTypeIndex >= (uint)nativeFixedArrayTypes.Length)
         {
-            throw Invalid("The F+S PlaceSelection index or array type is invalid.");
+            throw Invalid("The F+S PlaceSelection array type is invalid.");
+        }
+
+        if (indexKind == 2)
+        {
+            var indexHomeMap = body.HomeMap.Slice(indexHome * 8, 8);
+            var indexType = ReadForeignInvocationType(typeSpecs,
+                ReadForeignInvocationBodyTypeSpec(body,
+                    BinaryPrimitives.ReadUInt16LittleEndian(indexHomeMap[2..])),
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef,
+                arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
+            if (indexHomeMap[0] is not (2 or 3)
+                || !NativeFixedArrayContract.IsIndexType(indexType))
+            {
+                throw Invalid(
+                    "The F+S PlaceSelection index Home is invalid.");
+            }
         }
 
         var arrayDefinition = nativeFixedArrayTypes[arrayTypeIndex];
@@ -1727,9 +1930,9 @@ public static partial class TrRmExecutableCompiler
         }
 
         return new NativeArrayPlaceSelectionFacts(recordIndex,
-            destinationRegister, accessKind, baseHome, indexHome,
-            fixedArrayLayout.ArrayTypeSpecRow, checked((int)layoutRow),
-            arrayType, elementType, elementCount);
+            destinationRegister, accessKind, baseHome, indexKind,
+            indexHome, indexRegister, fixedArrayLayout.ArrayTypeSpecRow,
+            checked((int)layoutRow), arrayType, elementType, elementCount);
     }
 
     private static bool TryGetContextualConstant(byte sourceRegister,

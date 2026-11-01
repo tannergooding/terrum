@@ -253,8 +253,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             function.Name == "Main").Body, Is.Not.Null);
     }
 
-    [Test]
-    public void StandardA2EmitsAndReconstructsInitializedArrayStorageAddress()
+    [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
+    [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false)]
+    [TestCase(2, "int32", "[0, -1]", PrimitiveType.Int32, true)]
+    public void StandardA2EmitsAndReconstructsInitializedArrayStorageAddress(
+        int elementCount, string elementType, string initializer,
+        PrimitiveType expectedElementType, bool hasAllBitsSetElement)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
@@ -264,19 +268,19 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             NativeCoreRegistration
                 = NativeCoreRegistrationTests.CreateRegistration(),
         };
-        var compilation = Compilation.Create(SyntaxTree.Parse("""
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
             [Terrum.Interop.NativeImport(
                 "example.dll",
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
             [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
             [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
             internal extern void Observe(
-                ptr<uint32> value,
+                ptr<{{elementType}}> value,
                 write ptr<int32> output);
 
             int32 Main() {
                 int32 zeroIndex = 0;
-                mut [uint32; 1] values = [0];
+                mut [{{elementType}}; {{elementCount}}] values = {{initializer}};
                 mut int32 output = 0;
                 unsafe {
                     var callback = &Observe;
@@ -320,24 +324,34 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var placeSelectionCount = 0;
         var semanticStoreCount = 0;
         var storageAddressCount = 0;
+        var initializerRegisters = new List<ushort>();
         for (var record = 0; record < body.RecordCount; record++)
         {
-            switch (body.GetRecord(record)[0])
+            var bodyRecord = body.GetRecord(record);
+            switch (bodyRecord[0])
             {
                 case 0x04:
                     placeSelectionCount++;
                     break;
                 case 0x05:
                     semanticStoreCount++;
+                    initializerRegisters.Add(
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            bodyRecord[10..]));
                     break;
                 case 0x0E:
                     storageAddressCount++;
                     break;
             }
         }
-        Assert.That(placeSelectionCount, Is.EqualTo(2));
-        Assert.That(semanticStoreCount, Is.EqualTo(1));
+        Assert.That(placeSelectionCount, Is.EqualTo(elementCount + 1));
+        Assert.That(semanticStoreCount, Is.EqualTo(elementCount));
         Assert.That(storageAddressCount, Is.EqualTo(2));
+        var expectedInitializerRegisters = hasAllBitsSetElement
+            ? new ushort[] { 14, 15 }
+            : Enumerable.Repeat((ushort)14, elementCount).ToArray();
+        Assert.That(initializerRegisters,
+            Is.EqualTo(expectedInitializerRegisters));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -361,12 +375,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             }), Is.True);
         Assert.That(arrayInitializations, Has.Count.EqualTo(1));
         Assert.That(arrayInitializations[0].Elements.Length,
-            Is.EqualTo(1));
+                Is.EqualTo(elementCount));
         Assert.That(storageAddresses, Has.Count.EqualTo(2));
         var arrayAddress = storageAddresses.Single(address =>
             NativeFixedArrayTypes.IsType(address.CarrierType));
-        Assert.That(arrayAddress.ElementType, Is.EqualTo(PrimitiveType.UInt32));
-        Assert.That(arrayAddress.ElementCount, Is.EqualTo(1));
+        Assert.That(arrayAddress.ElementType, Is.EqualTo(expectedElementType));
+        Assert.That(arrayAddress.ElementCount, Is.EqualTo((ulong)elementCount));
         Assert.That(arrayAddress.ElementStride, Is.EqualTo(4));
         Assert.That(arrayAddress.ByteExtent, Is.EqualTo(4));
         Assert.That(arrayAddress.Index, Is.TypeOf<BoundRead>());

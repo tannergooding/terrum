@@ -1009,13 +1009,14 @@ public static partial class TrRmExecutableCompiler
                     || !NativeFixedArrayContract.MatchesLayout(arrayLayout,
                         program)
                     || arrayInitialization.Layout != arrayLayout
-                    || arrayLayout.ElementCount != 1
-                    || arrayInitialization.Elements.Length != 1
-                    || arrayInitialization.Elements[0]
-                        is not BoundConstant initializerConstant
-                    || !TryGetContextualInitializationRegister(
-                        initializerConstant,
-                        arrayLayout.ElementType, out _))
+                    || arrayLayout.ElementCount == 0
+                    || (ulong)arrayInitialization.Elements.Length
+                        != arrayLayout.ElementCount
+                    || arrayInitialization.Elements.Any(element =>
+                        element is not BoundConstant initializerConstant
+                        || !TryGetContextualInitializationRegister(
+                            initializerConstant, arrayLayout.ElementType,
+                            out _)))
                 {
                     return false;
                 }
@@ -1135,7 +1136,7 @@ public static partial class TrRmExecutableCompiler
                 }
 
                 if (declaration.Initializer is BoundConstant constant
-                    && NativeFixedArrayContract.IsIndexType(variable.Type)
+                    && variable.Type == PrimitiveType.Int32
                     && constant.Bits.Low == 0 && constant.Bits.High == 0)
                 {
                     arrayInitializationIndexVariable = declaration.Variable;
@@ -1292,7 +1293,40 @@ public static partial class TrRmExecutableCompiler
 
         var entryState = new byte[8];
         entryState[0] = 0x01;
-        var records = new List<ReadOnlyMemory<byte>>
+        var statements = new List<BoundStatement>();
+        if (!AppendStatements(caller.Body, statements))
+        {
+            throw Unsupported("The F+S caller Body cannot be flattened.");
+        }
+
+        long recordCount = 3 + storageCall.StorageArguments.Length;
+        foreach (var statement in statements)
+        {
+            if (statement is BoundLocal
+                {
+                    Initializer: BoundNativeFixedArrayInitialization initialization,
+                })
+            {
+                recordCount += (long)initialization.Elements.Length * 2;
+            }
+        }
+
+        foreach (var storageArgument in storageCall.StorageArguments)
+        {
+            if (NativeFixedArrayTypes.IsType(
+                    storageArgument.Address.CarrierType))
+            {
+                recordCount++;
+            }
+        }
+        if (recordCount > (long)ushort.MaxValue + 1)
+        {
+            throw Unsupported(
+                "The A2 array initialization exceeds the Body record-index domain.");
+        }
+
+        var records = new List<ReadOnlyMemory<byte>>(
+            checked((int)recordCount))
         {
             entryState,
             TrRmRegisterBodyRecordWriter.EncodeNativeAddress(2,
@@ -1301,12 +1335,6 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(0x1100_0001)),
         };
         var code = new List<byte>();
-        var statements = new List<BoundStatement>();
-        if (!AppendStatements(caller.Body, statements))
-        {
-            throw Unsupported("The F+S caller Body cannot be flattened.");
-        }
-
         var storageArguments = storageCall.StorageArguments
             .ToDictionary(static argument => argument.ParameterOrdinal);
         foreach (var statement in statements)
@@ -1334,7 +1362,9 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (local.Initializer
                                 is not BoundNativeFixedArrayInitialization arrayInitialization
-                            || arrayInitialization.Elements.Length != 1
+                            || arrayInitialization.Elements.IsDefaultOrEmpty
+                            || (ulong)arrayInitialization.Elements.Length
+                                != arrayInitialization.Layout.ElementCount
                             || !fixedArrayLayoutRowByType.TryGetValue(
                                 NativeFixedArrayTypes.Index(
                                     caller.Variables[local.Variable].Type),
@@ -1343,7 +1373,7 @@ public static partial class TrRmExecutableCompiler
                                 argument.Address.Variable == local.Variable))
                         {
                             throw Unsupported(
-                                "The A2 Body supports one-element fixed-array initialization for an addressed local.");
+                                "The A2 Body array initializer is not a complete supported local.");
                         }
 
                         var indexHome = homeIndexByVariable[
@@ -1354,43 +1384,74 @@ public static partial class TrRmExecutableCompiler
                                 "The A2 array initializer has no zero-valued index Home.");
                         }
 
-                        var elementType = arrayInitialization.Layout.ElementType;
-                        if (arrayInitialization.Elements[0]
-                            is not BoundConstant initializerConstant
-                            || !TryGetContextualInitializationRegister(
-                                initializerConstant, elementType,
-                                out var initializerRegister))
+                        AppendHomeLoad(code, 0, indexHome);
+                        code.Add(0x10);
+                        code.Add(0x01);
+                        code.Add(0x33);
+                        code.Add(0x11);
+                        code.Add(0x20);
+                        code.Add(0x11);
+                        var elementType
+                            = arrayInitialization.Layout.ElementType;
+                        if ((uint)fixedArrayLayoutRow > 0xFF_FFFFu)
                         {
                             throw Unsupported(
-                                "The A2 array initializer requires an admitted contextual scalar value.");
+                                "The A2 array initializer has no representable layout row.");
                         }
 
-                        var initializationSelectionIndex
-                            = checked((ushort)records.Count);
-                        records.Add(
-                            TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
-                                3, 3, 1, 2, 0,
-                                checked((ushort)homeIndexByVariable[
-                                    local.Variable]),
-                                2, 3, checked((ushort)indexHome),
-                                checked((uint)fixedArrayLayoutRow),
-                                maps.GetTypeMapIndex(0x1100_0000u
-                                    | getSignatureTypeSpecRef(elementType)),
-                                schema));
-                        code.Add(0xD8);
-                        code.Add(0);
-                        code.Add((byte)initializationSelectionIndex);
-                        code.Add((byte)(initializationSelectionIndex >> 8));
+                        for (var elementIndex = 0;
+                            elementIndex < arrayInitialization.Elements.Length;
+                            elementIndex++)
+                        {
+                            if (arrayInitialization.Elements[elementIndex]
+                                    is not BoundConstant initializerConstant
+                                || !TryGetContextualInitializationRegister(
+                                    initializerConstant, elementType,
+                                    out var initializerRegister))
+                            {
+                                throw Unsupported(
+                                    "The A2 array initializer requires admitted contextual scalar values.");
+                            }
 
-                        var initializationStoreIndex
-                            = checked((ushort)records.Count);
-                        records.Add(
-                            TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
-                                1, 1, 1, 1, 0, initializerRegister));
-                        code.Add(0xD9);
-                        code.Add(0);
-                        code.Add((byte)initializationStoreIndex);
-                        code.Add((byte)(initializationStoreIndex >> 8));
+                            var initializationSelectionIndex
+                                = checked((ushort)records.Count);
+                            records.Add(
+                                TrRmRegisterBodyRecordWriter
+                                    .EncodePlaceSelection(3, 3, 1, 2, 2,
+                                        checked((ushort)homeIndexByVariable[
+                                            local.Variable]),
+                                        1, 3, 0,
+                                        checked((uint)
+                                            fixedArrayLayoutRow),
+                                        maps.GetTypeMapIndex(
+                                            0x1100_0000u
+                                                | getSignatureTypeSpecRef(
+                                                    elementType)),
+                                        schema));
+                            code.Add(0xD8);
+                            code.Add(2);
+                            code.Add((byte)initializationSelectionIndex);
+                            code.Add((byte)(initializationSelectionIndex
+                                >> 8));
+
+                            var initializationStoreIndex
+                                = checked((ushort)records.Count);
+                            records.Add(
+                                TrRmRegisterBodyRecordWriter
+                                    .EncodeSemanticStore(1, 1, 1, 1, 2,
+                                        initializerRegister));
+                            code.Add(0xD9);
+                            code.Add(0);
+                            code.Add((byte)initializationStoreIndex);
+                            code.Add((byte)(initializationStoreIndex >> 8));
+                            if (elementIndex + 1
+                                < arrayInitialization.Elements.Length)
+                            {
+                                code.Add(0x21);
+                                code.Add(0x10);
+                            }
+                        }
+
                         break;
                     }
 
@@ -1610,6 +1671,21 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0xD6);
         code.Add((byte)(0x10 | sourceRegister));
+        code.Add((byte)homeIndex);
+        code.Add((byte)(homeIndex >> 8));
+    }
+
+    private static void AppendHomeLoad(List<byte> code,
+        byte destinationRegister, int homeIndex)
+    {
+        if (destinationRegister > 13
+            || (uint)homeIndex > ushort.MaxValue)
+        {
+            throw Unsupported("The A2 array index Home is invalid.");
+        }
+
+        code.Add(0xD5);
+        code.Add(destinationRegister);
         code.Add((byte)homeIndex);
         code.Add((byte)(homeIndex >> 8));
     }

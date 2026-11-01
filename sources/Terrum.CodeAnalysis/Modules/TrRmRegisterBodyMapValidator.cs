@@ -1831,6 +1831,11 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (opcode == 0xD9)
+        {
+            return;
+        }
+
         if (opcode == 0x10)
         {
             var destination = operand & 0x0F;
