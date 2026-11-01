@@ -340,9 +340,11 @@ internal static class TrRmRegisterBodyMapValidator
 
             var home = GetHomeMapEntry(body, handler.BindingHomeIndex);
             if (home[0] != 3
-                || GetTypeMapToken(body,
-                    GetHomeTypeMapIndex(body, handler.BindingHomeIndex))
-                    != GetTypeMapToken(body, handler.CatchTypeMapIndex))
+                || !AreEquivalentTypeMapEntries(body,
+                    GetHomeTypeMapIndex(body, handler.BindingHomeIndex),
+                    handler.CatchTypeMapIndex, ownerModule, types, typeSpecs,
+                    genericParams, imports, constantValues,
+                    nativeFunctionPointerAnchors))
             {
                 throw InvalidMap();
             }
@@ -368,6 +370,39 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
         }
+    }
+
+    private static bool AreEquivalentTypeMapEntries(
+        TrRmRegisterBodyReader body, int leftTypeMapIndex,
+        int rightTypeMapIndex, int ownerModule,
+        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports,
+        ConstantSourceValueContext constantValues,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors)
+    {
+        var leftToken = GetTypeMapToken(body, leftTypeMapIndex);
+        var rightToken = GetTypeMapToken(body, rightTypeMapIndex);
+        if (leftToken == rightToken)
+        {
+            return true;
+        }
+
+        var leftKind = (byte)(leftToken >> 24);
+        if (leftKind is 0x11 or 0xF2 or 0xF3)
+        {
+            return MatchesTypeMapEntry(body, rightTypeMapIndex,
+                GetTypeMapTypeSpecRef(body, leftTypeMapIndex), ownerModule,
+                types, typeSpecs, genericParams, imports, constantValues,
+                nativeFunctionPointerAnchors);
+        }
+
+        var rightKind = (byte)(rightToken >> 24);
+        return rightKind is 0x11 or 0xF2 or 0xF3
+            && MatchesTypeMapEntry(body, leftTypeMapIndex,
+                GetTypeMapTypeSpecRef(body, rightTypeMapIndex), ownerModule,
+                types, typeSpecs, genericParams, imports, constantValues,
+                nativeFunctionPointerAnchors);
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,

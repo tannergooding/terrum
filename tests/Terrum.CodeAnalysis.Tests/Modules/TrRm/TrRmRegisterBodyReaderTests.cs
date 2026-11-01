@@ -204,6 +204,20 @@ public sealed class TrRmRegisterBodyReaderTests
     }
 
     [Test]
+    public void RegisterExceptionBindingHomeUsesSemanticTypeMapEquality()
+    {
+        // Core catch-role eligibility is checked by the separate anchor binder.
+        ValidateRegisterExceptionBodyMaps(
+            CreateRegisterExceptionBoundHomeBody(
+                0xF200_0001, 0x1100_0002),
+            1);
+        AssertInvalidRegisterExceptionBodyMaps(
+            CreateRegisterExceptionBoundHomeBody(
+                0xF200_0001, 0xF200_0008),
+            1);
+    }
+
+    [Test]
     public void ValidatesShortInstructionMapAndRecordIndexes()
     {
         var homeCounts = new uint[5];
@@ -1784,6 +1798,54 @@ public sealed class TrRmRegisterBodyReaderTests
                 new TrRmRegisterBodyBlock(checked((uint)handlerOffset), 2, 4),
             ],
             records, code,
+            schema: TrRmArtifactSchema.RegisterExceptionRegionsDraft);
+    }
+
+    private static byte[] CreateRegisterExceptionBoundHomeBody(
+        uint homeTypeMapToken, uint catchTypeMapToken)
+    {
+        var blockRegions = new byte[3 * sizeof(ushort)];
+        for (var block = 0; block < 3; block++)
+        {
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                blockRegions.AsSpan(block * sizeof(ushort)),
+                checked((ushort)block));
+        }
+
+        var directory = TrRmRegisterBodyRecordWriter
+            .EncodeExceptionDirectory(
+            [
+                new TrRmExceptionRegionRow(0, 0, 0, 0, 0, 0, 0),
+                new TrRmExceptionRegionRow(1, 0, 0, 1, 0, 0, 1),
+                new TrRmExceptionRegionRow(3, 0, 1, 2, 0, 0, 0),
+            ],
+            [new TrRmExceptionHandlerRow(1, 3, 1, 1, 0, 0, 0, 2, 0)],
+            blockRegions);
+        var handlerExit = TrRmRegisterBodyRecordWriter.EncodeRegionExit(
+            2, 0, 0, 0, 0, 0, [2, 1]);
+        var blockEntryState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
+        var records = new ReadOnlyMemory<byte>[]
+        {
+            directory,
+            blockEntryState,
+            blockEntryState,
+            blockEntryState,
+            handlerExit,
+        };
+        var typeMap = new byte[2 * sizeof(uint)];
+        BinaryPrimitives.WriteUInt32LittleEndian(typeMap, homeTypeMapToken);
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            typeMap.AsSpan(sizeof(uint)), catchTypeMapToken);
+        return TrRmRegisterBodyWriter.Encode(
+            new byte[] { 3, 0, 0, 0, 0, 0, 0, 0 }, typeMap,
+            ReadOnlyMemory<byte>.Empty, ReadOnlyMemory<byte>.Empty,
+            ReadOnlyMemory<byte>.Empty,
+            [
+                new TrRmRegisterBodyBlock(0, 2, 1),
+                new TrRmRegisterBodyBlock(2, 2, 2),
+                new TrRmRegisterBodyBlock(4, 2, 3),
+            ],
+            records, new byte[] { 0xB0, 1, 0xB5, 0, 0xB6, 4 },
             schema: TrRmArtifactSchema.RegisterExceptionRegionsDraft);
     }
 
