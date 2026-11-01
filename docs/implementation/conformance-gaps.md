@@ -445,20 +445,24 @@ one actual definition, 17-provider fan-in, self-edges and mutual cycles are
 covered by public API tests;
 provider Bodies are not merged or invoked. The checked plan revalidates the
 complete retained closure before lowering. The Debug fast build and combined
-NativeAddress/provider-CLI selection passed 140/140 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_31_54_net11.0.trx`,
-including deep-provider rejection, empty and non-first Modules, a non-first
-address target, 17-provider fan-in, UTF-16 ModuleRef identity and exact
-alternate ExportKey selection, compatible deep-body replacement, CLI JIT/AOT,
-PE import/export inspection, a self-edge DLL export invocation and sentinel
-output preservation. Native input/compiler hashes and results are recorded in
+NativeAddress/provider-CLI selection passed 142/142 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_08_45_39_net11.0.trx`,
+including deep-provider rejection, duplicate/empty/non-first Modules, caller
+buffer mutation after plan creation, duplicate mixed names, a non-first address
+target, 17-provider fan-in, UTF-16 identity and ordinal case/normalization
+checks, exact alternate ExportKey selection, compatible deep-body replacement,
+CLI JIT/AOT, PE import/export inspection, a self-edge DLL export invocation and
+sentinel output preservation. Native input/compiler hashes and results are
+recorded in
 `artifacts\\log\\compiler-adoption-f-provider-closure-native-qualification.log`.
 This remains provisional, not formal approval or full Standard conformance.
 Further evidence is still required for a multi-edge chain with every Module
-co-located and broader Module/Import/Body remapping, identity normalization
-boundaries, and row/map/work limits beyond the tested fan-in of 17. Same-name
-expanded lowering, general source production/re-emission of non-target Imports
-and broader schema compositions remain unsupported.
+co-located, broader Module/Import/Body permutation and re-encoding, Unicode
+normalization edge cases outside the exercised NFC/NFD identity pair and
+row/map/work limits beyond the tested fan-in of 17. Same-name expanded lowering,
+general source production/
+re-emission of non-target Imports and broader schema compositions remain
+unsupported.
 
 The original unapproved A1 fixed-array identity candidate was superseded for
 integrated nominal-array use by an independently drafted A2 Copy-evidence

@@ -4488,6 +4488,20 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     disconnectedArtifact),
             ]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providerInput,
+                leafInput,
+                emptyModuleInput,
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    emptyModuleInput.Artifact),
+            ]));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+                providerInput,
+                leafInput,
+                rootInput,
+            ]));
     }
 
     [Test]
@@ -4532,6 +4546,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(loaded.Functions.Single(static function =>
             function.Name == "Second").ModuleImport!.ProducerIdentity,
             Is.EqualTo("Second"));
+        var reorderedLoaded = TrRmExecutableCompiler.LoadStandard(rootInput,
+            rootIdentity, providers.Reverse().ToArray());
+        Assert.That(reorderedLoaded.Functions.Single(static function =>
+            function.Name == "First").ModuleImport!.ProducerIdentity,
+            Is.EqualTo("First"));
         var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
             rootInput, rootIdentity, providers,
             TrRmStandardNativeOperation.EmitExecutable,
@@ -4608,6 +4627,19 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(plan.CreateLoweringInputs(
             TrRmStandardNativeOperation.EmitExecutable).Bindings,
             Has.Length.EqualTo(1));
+        var compatibleProviderReplacement
+            = CreateMixedImportProviderArtifact(providerIdentity, "Owned",
+                "GetCurrentProcessId", "Leaf", "GetTickCount",
+                secondIdentity, "Leaf", core,
+                callerTargetMethodName: "Leaf");
+        Assert.That(compatibleProviderReplacement,
+            Is.Not.EqualTo(providerArtifact));
+        _ = TrRmExecutableCompiler.LoadStandard(rootInput, rootIdentity, [
+            new TrRmStandardArtifactInput(schemaIdentity,
+                compatibleProviderReplacement),
+            secondInput,
+            thirdInput,
+        ]);
         var compatibleReplacement = TrRmExecutableCompiler.LoadStandard(
             rootInput, rootIdentity, [
                 providerInput,
@@ -4722,6 +4754,35 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFProviderClosureRejectsDuplicateMixedMethodNames()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string providerIdentity = "Provider";
+        const string leafIdentity = "Leaf";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var providerArtifact = CreateMixedImportProviderArtifact(
+            providerIdentity, "Owned", "GetCurrentProcessId",
+            "Leaf", "GetTickCount", leafIdentity, "Leaf", core);
+        var duplicateNameArtifact = RenameMethodDef(providerArtifact,
+            "Leaf", "Owned");
+        var leafCompilation = CreateMultipleImportProviderCompilation(
+            "Leaf", "GetTickCount", core);
+        var leafArtifact = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    duplicateNameArtifact), providerIdentity, [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        leafArtifact),
+                ]));
+    }
+
+    [Test]
     public void StandardFProviderClosureSupportsFanInBeyondSixteenModules()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -4801,6 +4862,49 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFProviderPlanRetainsOwnedArtifactSnapshots()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "Root";
+        const string providerIdentity = "Owned";
+        const string leafIdentity = "Leaf";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var rootBytes = CreateRootMethodImportArtifact(rootIdentity,
+            "Owned", providerIdentity, "Owned", core);
+        var providerBytes = CreateMixedImportProviderArtifact(
+            providerIdentity, "Owned", "GetCurrentProcessId",
+            "Leaf", "GetCurrentProcessId", leafIdentity, "Leaf", core);
+        var leafCompilation = CreateMultipleImportProviderCompilation(
+            "Leaf", "GetCurrentProcessId", core);
+        var leafBytes = TrRmExecutableCompiler.EmitStandard(
+            leafCompilation.Program!, leafIdentity, schemaIdentity, 1);
+        var providers = new[]
+        {
+            new TrRmStandardArtifactInput(schemaIdentity, providerBytes),
+            new TrRmStandardArtifactInput(schemaIdentity, leafBytes),
+        };
+        var plan = TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+            new TrRmStandardArtifactInput(schemaIdentity, rootBytes),
+            rootIdentity, providers,
+            TrRmStandardNativeOperation.EmitExecutable,
+            NativeRuntimePolicy.FailFast);
+
+        Array.Fill(rootBytes, (byte)0xCC);
+        Array.Fill(providerBytes, (byte)0xCC);
+        Array.Fill(leafBytes, (byte)0xCC);
+        var (loweredProgram, bindings) = plan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable);
+        Assert.That(bindings.Select(static binding => binding.FunctionName),
+            Is.EquivalentTo(["Owned"]));
+        Assert.That(loweredProgram.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport, Is.Null);
+    }
+
+    [Test]
     public void StandardFProviderClosureUsesTheSelectedPublicExportKey()
     {
         const string schemaIdentity
@@ -4844,6 +4948,43 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmExecutableCompiler.LoadStandard(
                 new TrRmStandardArtifactInput(schemaIdentity,
                     caseMismatchRootArtifact), "CaseRoot", [providerInput]));
+
+        var normalizationRootArtifact = CreateRootMethodImportArtifact(
+            "NormalizationRoot", "Owned", providerIdentity, "Owned", core);
+        normalizationRootArtifact = ReencodeFirstModuleRefIdentity(
+            normalizationRootArtifact, "e\u0301", encoding: 2);
+        var normalizedProviderCompilation
+            = CreateMultipleImportProviderCompilation(
+                "Owned", "GetCurrentProcessId", core);
+        var normalizedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            normalizedProviderCompilation.Program!, "\u00E9",
+            schemaIdentity, 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    normalizationRootArtifact), "NormalizationRoot", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        normalizedProviderArtifact),
+                ]));
+
+        const string caseKeyProviderIdentity = "GetCurrentProcessId";
+        var caseKeyProviderCompilation
+            = CreateMultipleImportProviderCompilation(
+                "Owned", "GetCurrentProcessId", core);
+        var caseKeyProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            caseKeyProviderCompilation.Program!, caseKeyProviderIdentity,
+            schemaIdentity, 1);
+        var caseKeyProviderInput = new TrRmStandardArtifactInput(schemaIdentity,
+            AddMethodExportAlias(caseKeyProviderArtifact, "Owned",
+                "GetCurrentProcessId"));
+        var caseMismatchKeyArtifact = CreateRootMethodImportArtifact(
+            "CaseKeyRoot", "getcurrentprocessid",
+            caseKeyProviderIdentity, "getcurrentprocessid", core);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    caseMismatchKeyArtifact), "CaseKeyRoot",
+                [caseKeyProviderInput]));
     }
 
     [Test]
@@ -6057,14 +6198,77 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmArtifactSchema.ForeignInvocationDraft);
     }
 
+    private static byte[] RenameMethodDef(byte[] artifact,
+        string currentName, string newName)
+    {
+        var index = TrRmArtifactIndex.ForForeignInvocationDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationDraftAndGetExecutionTables(index);
+        Assert.That(index.TryGetSection(0x0002, out _, out var stringCount),
+            Is.True);
+        Assert.That(index.TryGetSection(0x0016, out var methodBytes,
+            out var methodCount), Is.True);
+        var newNameStringRow = FindStringRow(tables.Strings, stringCount,
+            newName);
+        var rows = new List<TrRmMethodDefRow>(methodCount);
+        var renamed = false;
+        for (var row = 1; row <= methodCount; row++)
+        {
+            var data = methodBytes.Slice((row - 1) * 28, 28);
+            var rowName = tables.Methods.GetName(row);
+            var replaceName = StringComparer.Ordinal.Equals(rowName,
+                currentName);
+            if (replaceName)
+            {
+                Assert.That(renamed, Is.False);
+                renamed = true;
+            }
+
+            rows.Add(new TrRmMethodDefRow(
+                checked((int)BinaryPrimitives.ReadUInt32LittleEndian(data)),
+                replaceName ? newNameStringRow : checked((int)
+                    BinaryPrimitives.ReadUInt32LittleEndian(data[4..])),
+                checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    data[8..])),
+                BinaryPrimitives.ReadUInt32LittleEndian(data[12..]),
+                checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    data[16..])),
+                checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    data[20..])),
+                checked((int)BinaryPrimitives.ReadUInt32LittleEndian(
+                    data[24..]))));
+        }
+
+        Assert.That(renamed, Is.True);
+        var renamedMethodBytes = TrRmMethodDefTableWriter.Encode(rows,
+            tables.Strings, tables.Modules, tables.TypeDefs,
+            tables.Signatures, tables.Contracts.Count, tables.Bodies.Count);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind == 0x0016
+                ? new TrRmSection(kind, flags, (uint)methodCount,
+                    renamedMethodBytes)
+                : new TrRmSection(kind, flags, (uint)recordCount,
+                    bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema.ForeignInvocationDraft);
+    }
+
     internal static byte[] CreateMixedImportProviderArtifact(
         string moduleIdentity, string ownedMethodName,
         string ownedNativeExport, string importedMethodName,
         string importedNativeExport, string producerIdentity,
-        string exportKey, CompilationReference core)
+        string exportKey, CompilationReference core,
+        string? callerTargetMethodName = null)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-contracts-1";
+        var targetMethodName = callerTargetMethodName ?? ownedMethodName;
         var compilation = Compilation.CreateLibrary(SyntaxTree.Parse($$"""
             [Terrum.Interop.NativeImport(
                 "kernel32.dll",
@@ -6080,7 +6284,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
             internal int32 ProviderBody() {
                 unsafe {
-                    var callback = &{{ownedMethodName}};
+                    var callback = &{{targetMethodName}};
                     return callback();
                 }
             }
