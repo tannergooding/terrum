@@ -409,6 +409,34 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             rejectedByA2 = true;
         }
         Assert.That(rejectedByA2, Is.True);
+
+        foreach (var defect in new[] {
+            "nonzero-source-index",
+            "nonzero-source-use",
+            "wrong-transition",
+            "nonzero-dependency",
+            "formal-present",
+            "nonzero-flags",
+            "nonzero-formal-ordinal",
+            "wrong-place-kind",
+            "wrong-home-access",
+        })
+        {
+            var malformed = RewriteA2EEmptyInitializationArtifact(artifact,
+                defect);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity, malformed),
+                    moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+        }
+
+        var doubleInitialization
+            = DuplicateA2EEmptyHomeInitialization(artifact);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    doubleInitialization),
+                moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
     }
 
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
@@ -3638,6 +3666,222 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             checked((uint)layoutRows.Length), fixedArrayLayoutBytes));
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] RewriteA2EEmptyInitializationArtifact(
+        byte[] artifact, string defect)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind != 0x0020)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
+                contractCount, schema);
+            var bodyBytes = bodyTable.GetRow(1).ToArray();
+            var modified = false;
+            for (var recordIndex = 0; recordIndex < body.RecordCount;
+                recordIndex++)
+            {
+                var record = body.GetRecord(recordIndex);
+                var isHomeAccessDefect = defect == "wrong-home-access"
+                    && record[0] == 0x04 && record[4] == 1;
+                var isNullaryStoreDefect = defect != "wrong-home-access"
+                    && record[0] == 0x05 && record[5] == 0;
+                if (!modified
+                    && (isHomeAccessDefect || isNullaryStoreDefect))
+                {
+                    var recordOffset = bodyBytes.AsSpan().IndexOf(record);
+                    if (recordOffset < 0)
+                    {
+                        throw new InvalidOperationException(
+                            "The A2E nullary store has no serialized record bytes.");
+                    }
+
+                    if (isHomeAccessDefect)
+                    {
+                        bodyBytes[recordOffset + 5] = 2;
+                    }
+                    else
+                    {
+                        switch (defect)
+                        {
+                            case "nonzero-source-index":
+                                bodyBytes[recordOffset + 10] = 1;
+                                break;
+                            case "nonzero-source-use":
+                                bodyBytes[recordOffset + 7] = 1;
+                                break;
+                            case "wrong-transition":
+                                bodyBytes[recordOffset + 6] = 2;
+                                break;
+                            case "nonzero-dependency":
+                                bodyBytes[recordOffset + 12] = 1;
+                                break;
+                            case "formal-present":
+                                bodyBytes[recordOffset + 16] = 1;
+                                break;
+                            case "nonzero-flags":
+                                bodyBytes[recordOffset + 17] = 1;
+                                break;
+                            case "nonzero-formal-ordinal":
+                                bodyBytes[recordOffset + 18] = 1;
+                                break;
+                            case "wrong-place-kind":
+                                bodyBytes[recordOffset + 4] = 2;
+                                break;
+                            default:
+                                throw new ArgumentOutOfRangeException(
+                                    nameof(defect));
+                        }
+                    }
+
+                    modified = true;
+                }
+            }
+
+            if (!modified)
+            {
+                throw new InvalidOperationException(
+                    "The A2E Body contains no nullary SemanticStore.");
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                TrRmVariableTableWriter.EncodeBodies([bodyBytes])));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] DuplicateA2EEmptyHomeInitialization(
+        byte[] artifact)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind != 0x0020)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
+                contractCount, schema);
+            var homeSelection = default(ReadOnlyMemory<byte>);
+            var nullaryStore = default(ReadOnlyMemory<byte>);
+            var records = new List<ReadOnlyMemory<byte>>(body.RecordCount + 2);
+            for (var recordIndex = 0; recordIndex < body.RecordCount;
+                recordIndex++)
+            {
+                var record = body.GetRecord(recordIndex);
+                records.Add(record.ToArray());
+                if (homeSelection.IsEmpty && record[0] == 0x04
+                    && record[4] == 1)
+                {
+                    homeSelection = record.ToArray();
+                }
+                else if (nullaryStore.IsEmpty && record[0] == 0x05
+                    && record[5] == 0)
+                {
+                    nullaryStore = record.ToArray();
+                }
+            }
+
+            if (body.BlockCount != 1 || homeSelection.IsEmpty
+                || nullaryStore.IsEmpty)
+            {
+                throw new InvalidOperationException(
+                    "The A2E Body cannot be extended with a second Home initialization.");
+            }
+
+            var selectionIndex = checked((ushort)records.Count);
+            records.Add(homeSelection);
+            var storeIndex = checked((ushort)records.Count);
+            records.Add(nullaryStore);
+            var originalCode = body.Code.ToArray();
+            var insertionOffset = -1;
+            var position = 0;
+            while (position < originalCode.Length)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        originalCode[position], schema);
+                if (position + instructionLength == originalCode.Length)
+                {
+                    insertionOffset = position;
+                    break;
+                }
+
+                position += instructionLength;
+            }
+
+            if (insertionOffset < 0)
+            {
+                throw new InvalidOperationException(
+                    "The A2E Body has no final instruction for insertion.");
+            }
+
+            var code = new byte[originalCode.Length + 8];
+            originalCode.AsSpan(0, insertionOffset).CopyTo(code);
+            code[insertionOffset] = 0xD8;
+            code[insertionOffset + 1] = 2;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                code.AsSpan(insertionOffset + 2), selectionIndex);
+            code[insertionOffset + 4] = 0xD9;
+            code[insertionOffset + 5] = 0;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                code.AsSpan(insertionOffset + 6), storeIndex);
+            originalCode.AsSpan(insertionOffset).CopyTo(
+                code.AsSpan(insertionOffset + 8));
+
+            var originalBlock = body.GetBlock(0);
+            TrRmRegisterBodyBlock[] blocks = [
+                new TrRmRegisterBodyBlock(0, checked((uint)code.Length),
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        originalBlock[8..])),
+            ];
+            var rewrittenBody = TrRmRegisterBodyWriter.Encode(
+                body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+                body.MethodMap.ToArray(), body.FieldMap.ToArray(),
+                body.ConstantMap.ToArray(), blocks, records, code,
+                contractCount, schema);
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                TrRmVariableTableWriter.EncodeBodies([rewrittenBody])));
+        }
+
         return TrRmArtifactWriter.Encode(sections, schema);
     }
 
