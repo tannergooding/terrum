@@ -4806,8 +4806,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 targetRefKind: 3, indexIndex: 1, targetRef: targetLayoutRow,
                 referentTypeMapIndex: 2, schema);
             byte[] code = registerIndex
-                ? [0xD5, 0x01, 0x01, 0, 0xD8, 0, 1, 0, 0xB7, 0]
-                : [0xD8, 0, 1, 0, 0xB7, 0];
+                ? [0xD5, 0x01, 0x01, 0, 0xD8, 0, 1, 0, 0xB5, 0]
+                : [0xD8, 0, 1, 0, 0xB5, 0];
             bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
                 default, default, default,
                 [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
@@ -5000,7 +5000,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 0x11, 0x01,
                 0xB0, 1,
                 0xD8, 0, 2, 0,
-                0xB7, 0,
+                0xB5, 0,
             ];
         }
         else if (loopPlaceSelection)
@@ -5041,7 +5041,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 0xB0, 1,
                 0xD8, 1, 9, 0,
                 0xEC, 0, 10, 0,
-                0xB7, 0,
+                0xB5, 0,
             ];
         }
         else if (branchJoinPlaceSelection)
@@ -5080,7 +5080,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                     0xB0, 3,
                     0xD8, 1, 7, 0,
                     0xEC, 0, 8, 0,
-                    0xB7, 0,
+                    0xB5, 0,
                 ]
                 : [
                     0x11, 0,
@@ -5091,7 +5091,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                     0xB0, 3,
                     0xD8, 1, 7, 0,
                     0xEC, 0, 8, 0,
-                    0xB7, 0,
+                    0xB5, 0,
                 ];
         }
         else if (crossBlockPlaceSelection)
@@ -5113,7 +5113,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 0xB0, 1,
                 0xD8, 1, 3, 0,
                 0xEC, 0, 4, 0,
-                0xB7, 0,
+                0xB5, 0,
             ];
         }
         else
@@ -5129,7 +5129,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 0xD8, 0, 1, 0,
                 0xD8, 1, 2, 0,
                 0xEC, 0, 3, 0,
-                0xB7, 0,
+                0xB5, 0,
             ];
         }
         var bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,

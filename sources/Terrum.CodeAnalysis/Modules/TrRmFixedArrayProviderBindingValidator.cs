@@ -115,7 +115,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
         TypeOrigin? RightFormalOwner = null,
         bool AllowInitQualifier = false, ulong Depth = 1);
 
-    private readonly ref struct ValidationContext
+    private ref struct ValidationContext
     {
         private readonly TrRmStructuralMetadataValidator.ValidatedExecutionTables
             _consumer;
@@ -130,6 +130,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
             bool IsInlineStorage)> _visitedTypePairs;
         private readonly HashSet<(int LeftArtifact, int LeftMethod,
             int RightArtifact, int RightMethod)> _activeAnchorPairs;
+        private TrRmStructuralMetadataValidator.ValidatedExecutionTables
+            _cachedProviderTables;
+        private int _cachedProviderArtifactIndex;
+        private bool _hasCachedProviderTables;
 
         internal ValidationContext(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables consumer,
@@ -147,6 +151,9 @@ internal static class TrRmFixedArrayProviderBindingValidator
             _visitedLocalTypes = [];
             _visitedTypePairs = [];
             _activeAnchorPairs = [];
+            _cachedProviderTables = default;
+            _cachedProviderArtifactIndex = -1;
+            _hasCachedProviderTables = false;
         }
 
         internal ImmutableArray<TrRmStandardTypeProviderBinding> Validate(
@@ -325,6 +332,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                             location.Depth);
                         break;
                     }
+
+                    // Resolve a formal only in its constructed owner/actual context.
+                    case 0x04:
+                        break;
 
                     case 0x05:
                     {
@@ -581,7 +592,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
         }
 
-        private bool TypeNamesMatch(
+        private readonly bool TypeNamesMatch(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
             int expectedType,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
@@ -603,7 +614,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
             return StringComparer.Ordinal.Equals(expectedName, actualName);
         }
 
-        private bool FieldNamesMatch(
+        private readonly bool FieldNamesMatch(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables expected,
             int expectedField,
             TrRmStructuralMetadataValidator.ValidatedExecutionTables actual,
@@ -1327,7 +1338,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
             return result;
         }
 
-        private TrRmStandardModuleSelection FindModule(string identity)
+        private readonly TrRmStandardModuleSelection FindModule(
+            string identity)
         {
             TrRmStandardModuleSelection? selected = null;
             foreach (var module in _modules)
@@ -1351,7 +1363,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
             return selected ?? throw InvalidBinding();
         }
 
-        private void AddTypePair(TypeOrigin expected, TypeOrigin actual,
+        private readonly void AddTypePair(TypeOrigin expected,
+            TypeOrigin actual,
             bool isInlineStorage, Queue<TypeOriginPair> pendingTypes,
             ulong depth = 1)
         {
@@ -1365,21 +1378,21 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
         }
 
-        private void PushLocation(Stack<TypeSpecLocation> pending,
+        private readonly void PushLocation(Stack<TypeSpecLocation> pending,
             TypeSpecLocation location)
         {
             _a3ResourceLedger?.ReserveWorkAtDepth(1, location.Depth);
             pending.Push(location);
         }
 
-        private void PushComparison(Stack<TypeSpecComparison> pending,
+        private readonly void PushComparison(Stack<TypeSpecComparison> pending,
             TypeSpecComparison comparison)
         {
             _a3ResourceLedger?.ReserveWorkAtDepth(1, comparison.Depth);
             pending.Push(comparison);
         }
 
-        private LayoutIdentity GetLayoutIdentity(
+        private readonly LayoutIdentity GetLayoutIdentity(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
             int layoutRow)
         {
@@ -1401,7 +1414,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 profile.RuleRevision, kind, flags, alignment, pack);
         }
 
-        private int GetWindowsLayout(
+        private readonly int GetWindowsLayout(
             TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
             int typeDefRow)
         {
@@ -1444,6 +1457,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 throw InvalidBinding();
             }
 
+            if (_hasCachedProviderTables
+                && _cachedProviderArtifactIndex == artifactIndex)
+            {
+                return _cachedProviderTables;
+            }
+
+            // Nested substitutions revisit immutable provider snapshots.
             var schema = GetFixedArraySchema(_schemaIdentities[artifactIndex]);
             var index = schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
@@ -1461,7 +1481,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 : TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyDraft(
                         _artifacts[artifactIndex]);
-            return schema
+            var tables = schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
@@ -1479,9 +1499,14 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 : TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
                         index, _a3ResourceLedger);
+            _cachedProviderTables = tables;
+            _cachedProviderArtifactIndex = artifactIndex;
+            _hasCachedProviderTables = true;
+            return tables;
         }
 
-        private bool IsFixedArraySchemaIdentity(string schemaIdentity)
+        private readonly bool IsFixedArraySchemaIdentity(
+            string schemaIdentity)
         {
             ConsumeWork(GetStringComparisonWork(schemaIdentity,
                 FixedArraySchemaIdentity));
@@ -1513,7 +1538,7 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 GenericFixedArraySchemaIdentity);
         }
 
-        private bool IsGenericFixedArraySchemaIdentity(
+        private readonly bool IsGenericFixedArraySchemaIdentity(
             string schemaIdentity)
         {
             ConsumeWork(GetStringComparisonWork(schemaIdentity,
@@ -1522,7 +1547,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 GenericFixedArraySchemaIdentity);
         }
 
-        private TrRmArtifactSchema GetFixedArraySchema(string schemaIdentity)
+        private readonly TrRmArtifactSchema GetFixedArraySchema(
+            string schemaIdentity)
         {
             ConsumeWork(GetStringComparisonWork(schemaIdentity,
                 GenericFixedArraySchemaIdentity));
@@ -1554,14 +1580,14 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 : throw InvalidBinding();
         }
 
-        private uint Read(ReadOnlySpan<byte> row, int offset)
+        private readonly uint Read(ReadOnlySpan<byte> row, int offset)
         {
             ConsumeWork(sizeof(uint) + 1);
             return BinaryPrimitives.ReadUInt32LittleEndian(row.Slice(offset,
                 sizeof(uint)));
         }
 
-        private void ConsumeWork(ulong units = 1)
+        private readonly void ConsumeWork(ulong units = 1)
             => _a3ResourceLedger?.ConsumeWork(units);
 
         private static ulong GetStringComparisonWork(string left,

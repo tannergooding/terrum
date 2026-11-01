@@ -588,6 +588,15 @@ recipe and every remaining table/body/provider state charge are still
 unfinished in the resource-ledger task. The latest focused A3/A2
 layout/provider/Body-map/CLI selection passed 114/114 with zero skips at
 `artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-10-31_06_08_37_net11.0.trx`.
+The nested constructed-provider checks now retain a one-entry validated
+provider-table cache within the binding request and defer generic formal
+storage origins to their constructed owner/actual comparison. The A2
+PlaceSelection/EC fixtures use the assigned B5 fail-fast terminator rather
+than B7 Unreachable, which requires the separate exception carrier. The full
+`TrRmFixedArrayLayoutTableTests` class now passes 122/122; the combined
+NativeAddress, fixed-array and selected provider-CLI selection passes 253/253
+with zero skips at
+`artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
 baseline; the normalized comparison to
 `artifacts\\log\\a3-layout-analyzer-check-final.log` has 353 unique diagnostic
