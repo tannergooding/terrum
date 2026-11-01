@@ -96,7 +96,10 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<TrRmStandardTypeProviderBinding> typeProviderBindings
             = default)
     {
-        var index = schema.UsesForeignInvocationStorageFixedArrays()
+        var index = a3LayoutResourceLedger is not null
+            ? new TrRmArtifactIndex(artifact, schema,
+                a3LayoutResourceLedger)
+            : schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex

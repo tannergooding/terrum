@@ -1465,7 +1465,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
 
             // Nested substitutions revisit immutable provider snapshots.
             var schema = GetFixedArraySchema(_schemaIdentities[artifactIndex]);
-            var index = schema
+            var index = _a3ResourceLedger is not null
+                ? new TrRmArtifactIndex(_artifacts[artifactIndex], schema,
+                    _a3ResourceLedger)
+                : schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(

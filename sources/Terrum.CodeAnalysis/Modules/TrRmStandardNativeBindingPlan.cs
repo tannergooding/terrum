@@ -294,14 +294,8 @@ internal sealed class TrRmStandardNativeBindingPlan
 
             var rootSchema = GetFixedArraySchema(rootSchemaIdentity);
             _a3LayoutResourceLedger?.ConsumeWork(2);
-            var rootIndex = rootSchema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-                ? TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
-                        _artifacts[0])
-                : TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayCopyDraft(
-                        _artifacts[0]);
+            var rootIndex = new TrRmArtifactIndex(_artifacts[0],
+                rootSchema, _a3LayoutResourceLedger);
             var rootTables = rootSchema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmStructuralMetadataValidator

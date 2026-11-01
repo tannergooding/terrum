@@ -146,7 +146,7 @@ public static partial class TrRmExecutableCompiler
             out var a3LayoutResourceLedger,
             coreExceptionIdentitySelections);
         var index = CreateForeignInvocationIndex(artifacts[0],
-            input.SchemaIdentity);
+            input.SchemaIdentity, a3LayoutResourceLedger);
         var tables = ValidateForeignInvocationArtifact(index,
             input.SchemaIdentity, a3LayoutResourceLedger);
         var moduleRow = FindModuleRow(tables.Modules, moduleIdentity);
@@ -300,7 +300,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         var index = CreateForeignInvocationIndex(artifacts[0],
-            schemaIdentities[0]);
+            schemaIdentities[0], a3LayoutResourceLedger);
         var tables = ValidateForeignInvocationArtifact(index,
             schemaIdentities[0], a3LayoutResourceLedger,
             createA3ResourceLedger: false);
@@ -581,7 +581,7 @@ public static partial class TrRmExecutableCompiler
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger)
     {
         var providerIndex = CreateForeignInvocationIndex(providerArtifact,
-            schemaIdentity);
+            schemaIdentity, a3LayoutResourceLedger);
         var provider = ValidateForeignInvocationArtifact(providerIndex,
             schemaIdentity, a3LayoutResourceLedger,
             createA3ResourceLedger: false);
@@ -1459,9 +1459,15 @@ public static partial class TrRmExecutableCompiler
         };
 
     private static TrRmArtifactIndex CreateForeignInvocationIndex(
-        byte[] artifact, string schemaIdentity)
+        byte[] artifact, string schemaIdentity,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var schema = GetForeignInvocationSchema(schemaIdentity);
+        if (resourceLedger is not null)
+        {
+            return new TrRmArtifactIndex(artifact, schema, resourceLedger);
+        }
+
         if (schema.UsesRegisterExceptionRegions())
         {
             return TrRmArtifactIndex.ForRegisterExceptionRegionsDraft(artifact);
@@ -1541,7 +1547,7 @@ public static partial class TrRmExecutableCompiler
         for (var index = 0; index < artifacts.Length; index++)
         {
             var artifactIndex = CreateForeignInvocationIndex(artifacts[index],
-                schemaIdentities[index]);
+                schemaIdentities[index], a3LayoutResourceLedger);
             var tables = ValidateForeignInvocationArtifact(artifactIndex,
                 schemaIdentities[index], a3LayoutResourceLedger,
                 createA3ResourceLedger: false);

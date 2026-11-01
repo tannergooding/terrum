@@ -632,6 +632,17 @@ root ledger before input snapshots, reserve selected input/schema/artifact
 state and copied bytes before allocation, and carry the same ledger through
 later validation. Oversized artifact bytes and an `int.MaxValue` provider-list
 count reject before touching the artifact span or indexing/allocating the list.
+`TrRmArtifactIndex` now receives that ledger before A3 header and directory
+preflight. It charges fixed-header and directory fields, Module feature ranges,
+Feature validation, zero-padding bytes, reference-slot reads, section lookups,
+and the state/work for deterministic out-of-order extent sorting. Standard
+loading, reference creation, provider binding, native-address reconstruction
+and retained-plan revalidation keep using the same ledger for reconstructed
+indexes. Exact/one-short constructor and lookup boundaries, padding-byte cost,
+out-of-order payloads and an oversized directory count are covered. The
+combined focused A3 index/layout/provider/TypeSpec/witness/text/CLI selection
+passed 243/243 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_10_42_26_net11.0.trx`.
 The bounded-expansion subtask is complete; the full deterministic
 field/action/payload recipe and remaining table/body/provider state charges
 are still unfinished. A broader `Modules.TrRm` selection later reported 2,378
@@ -648,9 +659,9 @@ with zero skips at
 `artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
 baseline; the normalized comparison in
-`artifacts\\log\\compiler-adoption-a3-snapshot-ledger-analyzers-final19.log`
-has 353 unique diagnostic identities on each side, with no additions or
-removals.
+`artifacts\\log\\compiler-adoption-a3-artifact-index-analyzers.log` has 352
+unique diagnostic identities versus the 353-identity baseline, with no
+additions and one removed diagnostic.
 
 Source production, source-free generic reconstruction and
 remapping/replacement, generic-array CLI JIT/AOT and supervised

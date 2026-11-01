@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Numerics;
 using Terrum.CodeAnalysis.Modules;
 using NUnit.Framework;
 
@@ -667,6 +668,85 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void A3IndexPreflightAndLookupsReserveExactWork()
+    {
+        var artifact = MinimalArtifact();
+        var schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
+        var measuredLedger = new TrRmA3LayoutResourceLedger();
+        var measuredIndex = new TrRmArtifactIndex(artifact, schema,
+            measuredLedger);
+        var indexWork = TrRmA3LayoutResourceLedger.WorkLimit
+            - measuredLedger.WorkRemaining;
+        Assert.That(measuredIndex.TryGetSection(0x0002, out _, out _), Is.True);
+        var totalWork = TrRmA3LayoutResourceLedger.WorkLimit
+            - measuredLedger.WorkRemaining;
+        var lookupWork = totalWork - indexWork;
+
+        var exactLedger = new TrRmA3LayoutResourceLedger();
+        exactLedger.ConsumeWork(TrRmA3LayoutResourceLedger.WorkLimit
+            - totalWork);
+        var exactIndex = new TrRmArtifactIndex(artifact, schema, exactLedger);
+        Assert.That(exactIndex.TryGetSection(0x0002, out _, out _), Is.True);
+        Assert.That(exactLedger.WorkRemaining, Is.Zero);
+
+        var oneShortLedger = new TrRmA3LayoutResourceLedger();
+        oneShortLedger.ConsumeWork(TrRmA3LayoutResourceLedger.WorkLimit
+            - indexWork + 1);
+        var exception = Assert.Throws<TrRmResourceLimitException>(() =>
+            _ = new TrRmArtifactIndex(artifact, schema, oneShortLedger));
+        Assert.That(exception!.Required,
+            Is.EqualTo(new BigInteger(TrRmA3LayoutResourceLedger.WorkLimit) + 1));
+
+        var oneShortLookupLedger = new TrRmA3LayoutResourceLedger();
+        oneShortLookupLedger.ConsumeWork(TrRmA3LayoutResourceLedger.WorkLimit
+            - indexWork - lookupWork + 1);
+        Assert.Throws<TrRmResourceLimitException>(() =>
+            TryGetA3Section(artifact, oneShortLookupLedger));
+    }
+
+    [Test]
+    public void A3IndexChargesEveryExaminedPaddingByte()
+    {
+        var original = MinimalArtifact();
+        var gap = new byte[132];
+        original.AsSpan(0, 112).CopyTo(gap);
+        original.AsSpan(112).CopyTo(gap.AsSpan(116));
+        Write(gap, 16, (uint)gap.Length);
+        Write(gap, 48 + 8, 116);
+
+        var originalLedger = new TrRmA3LayoutResourceLedger();
+        _ = new TrRmArtifactIndex(original,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            originalLedger);
+        var gapLedger = new TrRmA3LayoutResourceLedger();
+        _ = new TrRmArtifactIndex(gap,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            gapLedger);
+
+        var originalWork = TrRmA3LayoutResourceLedger.WorkLimit
+            - originalLedger.WorkRemaining;
+        var gapWork = TrRmA3LayoutResourceLedger.WorkLimit
+            - gapLedger.WorkRemaining;
+        Assert.That(gapWork - originalWork, Is.EqualTo(8));
+    }
+
+    [Test]
+    public void A3IndexRejectsOversizedDirectoryBeforeSlicingIt()
+    {
+        var artifact = MinimalArtifact();
+        Write(artifact, 12, 32791);
+        var ledger = new TrRmA3LayoutResourceLedger();
+
+        Assert.Throws<InvalidDataException>(() =>
+            _ = new TrRmArtifactIndex(artifact,
+                TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+                ledger));
+        Assert.That(TrRmA3LayoutResourceLedger.WorkLimit
+            - ledger.WorkRemaining, Is.GreaterThan(0));
+    }
+
+    [Test]
     public void AcceptsOutOfOrderSectionPayloads()
     {
         var artifact = TrRmArtifactWriter.Encode([
@@ -684,6 +764,31 @@ public sealed class TrRmArtifactIndexTests
         Assert.That(index.TryGetSection(0x8002, out var second, out _), Is.True);
         Assert.That(first[0], Is.EqualTo((byte)0x22));
         Assert.That(second[0], Is.EqualTo((byte)0x11));
+    }
+
+    [Test]
+    public void A3IndexAcceptsOutOfOrderPayloadsWithinItsLedger()
+    {
+        var artifact = TrRmArtifactWriter.Encode([
+            new TrRmSection(0x0001, 0, 1, new byte[48]),
+            new TrRmSection(0x8001, 1, 1, new byte[] { 0x11 }),
+            new TrRmSection(0x8002, 1, 1, new byte[] { 0x22 }),
+        ]);
+        var firstStart = BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(56));
+        var secondStart = BinaryPrimitives.ReadUInt32LittleEndian(artifact.AsSpan(72));
+        Write(artifact, 56, secondStart);
+        Write(artifact, 72, firstStart);
+
+        var ledger = new TrRmA3LayoutResourceLedger();
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            ledger);
+        Assert.That(index.TryGetSection(0x8001, out var first, out _), Is.True);
+        Assert.That(index.TryGetSection(0x8002, out var second, out _), Is.True);
+        Assert.That(first[0], Is.EqualTo((byte)0x22));
+        Assert.That(second[0], Is.EqualTo((byte)0x11));
+        Assert.That(ledger.WorkRemaining,
+            Is.LessThan(TrRmA3LayoutResourceLedger.WorkLimit));
     }
 
     [Test]
@@ -938,6 +1043,15 @@ public sealed class TrRmArtifactIndexTests
         Write(artifact, 64 + 44, 1);
         strings.CopyTo(artifact.AsSpan(112));
         return artifact;
+    }
+
+    private static bool TryGetA3Section(byte[] artifact,
+        TrRmA3LayoutResourceLedger resourceLedger)
+    {
+        var index = new TrRmArtifactIndex(artifact,
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            resourceLedger);
+        return index.TryGetSection(0x0002, out _, out _);
     }
 
     private static byte[] FeatureArtifact(uint featureFirst, uint moduleFeatureCount,

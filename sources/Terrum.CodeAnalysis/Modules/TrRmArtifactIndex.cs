@@ -107,6 +107,7 @@ public readonly ref struct TrRmArtifactIndex
     private readonly ReadOnlySpan<byte> _directory;
     private readonly int _entryCount;
     private readonly TrRmArtifactSchema _schema;
+    private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     public int SectionCount => _entryCount;
     internal TrRmArtifactSchema Schema => _schema;
@@ -117,7 +118,15 @@ public readonly ref struct TrRmArtifactIndex
     }
 
     internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact, TrRmArtifactSchema schema)
+        : this(artifact, schema, null)
     {
+    }
+
+    internal TrRmArtifactIndex(ReadOnlySpan<byte> artifact,
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        _resourceLedger = resourceLedger;
         if (schema is not (TrRmArtifactSchema.Standard or TrRmArtifactSchema.Development
             or TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             or TrRmArtifactSchema.CopyOriginDraft
@@ -131,34 +140,65 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.NominalEnumsDraft
             or TrRmArtifactSchema.RootPinRuntimeDraft
             or TrRmArtifactSchema.GeneralPredicateGraphsDraft
-            or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
-            || artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
-            || ReadU16(artifact, 4) != 1 || ReadU16(artifact, 6) != 0
-            || ReadU32(artifact, 8) != 32 || ReadU32(artifact, 16) != artifact.Length
-            || ReadU32(artifact, 20) != 32)
+            or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw InvalidArtifact();
         }
 
+        if (resourceLedger is null)
+        {
+            if (artifact.Length < 32 || !artifact[..4].SequenceEqual("TRRM"u8)
+                || ReadU16(artifact, 4) != 1 || ReadU16(artifact, 6) != 0
+                || ReadU32(artifact, 8) != 32
+                || ReadU32(artifact, 16) != artifact.Length
+                || ReadU32(artifact, 20) != 32)
+            {
+                throw InvalidArtifact();
+            }
+        }
+        else
+        {
+            ValidateA3HeaderFields(artifact, resourceLedger);
+        }
+
         for (var offset = 24; offset < 32; offset++)
         {
+            ConsumeWork(2);
             if (artifact[offset] != 0)
             {
                 throw InvalidArtifact();
             }
         }
 
-        var entryCount = ReadU32(artifact, 12);
+        uint entryCount;
+        if (resourceLedger is null)
+        {
+            entryCount = ReadU32(artifact, 12);
+        }
+        else
+        {
+            entryCount = ReadU32AndCharge(artifact, 12);
+            ConsumeWork();
+            if (entryCount is 0 or > 32790)
+            {
+                throw InvalidArtifact();
+            }
+        }
+
+        ConsumeWork(2);
         var directoryEnd = 32L + (entryCount * 16L);
-        if (entryCount is 0 or > 32790 || directoryEnd > artifact.Length)
+        ConsumeWork();
+        if (directoryEnd > artifact.Length)
         {
             throw InvalidArtifact();
         }
 
+        ConsumeWork(2);
         _artifact = artifact;
         _directory = artifact.Slice(32, (int)directoryEnd - 32);
         _entryCount = (int)entryCount;
         _schema = schema;
+        ConsumeWork(0x5E + 1);
         Span<uint> sectionCounts = stackalloc uint[0x5E + 1];
         sectionCounts.Clear();
         var previousKind = 0;
@@ -168,60 +208,137 @@ public readonly ref struct TrRmArtifactIndex
         var moduleFound = false;
         for (var entry = 0; entry < _entryCount; entry++)
         {
+            ConsumeWork();
             var kind = Kind(entry);
-            var flags = ReadU16(_directory, (entry * 16) + 2);
-            var count = ReadU32(_directory, (entry * 16) + 4);
-            var start = ReadU32(_directory, (entry * 16) + 8);
-            var length = ReadU32(_directory, (entry * 16) + 12);
-            if (kind <= previousKind || count is 0 or > 0xFF_FFFF || length == 0
-                || start < directoryEnd || (long)start + length > artifact.Length)
+            var flags = ReadU16AndCharge(_directory, (entry * 16) + 2);
+            var count = ReadU32AndCharge(_directory, (entry * 16) + 4);
+            var start = ReadU32AndCharge(_directory, (entry * 16) + 8);
+            var length = ReadU32AndCharge(_directory, (entry * 16) + 12);
+            ConsumeWork();
+            if (kind <= previousKind)
+            {
+                throw InvalidArtifact();
+            }
+
+            ConsumeWork();
+            if (count is 0 or > 0xFF_FFFF)
+            {
+                throw InvalidArtifact();
+            }
+
+            ConsumeWork();
+            if (length == 0)
+            {
+                throw InvalidArtifact();
+            }
+
+            ConsumeWork();
+            if (start < directoryEnd)
+            {
+                throw InvalidArtifact();
+            }
+
+            ConsumeWork();
+            var extentEnd = (long)start + length;
+            ConsumeWork();
+            if (extentEnd > artifact.Length)
             {
                 throw InvalidArtifact();
             }
 
             previousKind = kind;
-            if (entry != 0 && start < previousStart)
+            if (entry != 0)
             {
-                rangesOrdered = false;
+                ConsumeWork();
+                if (start < previousStart)
+                {
+                    rangesOrdered = false;
+                }
             }
+
             previousStart = start;
+            ConsumeWork();
             if (kind == 0x0001)
             {
                 moduleFound = true;
             }
 
+            ConsumeWork();
             var stride = FixedStride(kind, schema);
-            if ((kind < 0x8000 && stride == -1)
-                || (kind < 0x8000 && flags != (kind == 0x7F00 ? 2 : 0))
-                || (kind >= 0x8000 && flags is not (1 or 2 or 3))
-                || (stride > 0 && length != (long)count * stride)
-                || (kind == 0x0002 && (start & 3) != 0))
+            ConsumeWork();
+            if (kind < 0x8000 && stride == -1)
             {
                 throw new InvalidDataException(
                     $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
             }
 
+            ConsumeWork();
+            if (kind < 0x8000 && flags != (kind == 0x7F00 ? 2 : 0))
+            {
+                throw new InvalidDataException(
+                    $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
+            }
+
+            ConsumeWork();
+            if (kind >= 0x8000 && flags is not (1 or 2 or 3))
+            {
+                throw new InvalidDataException(
+                    $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
+            }
+
+            ConsumeWork();
+            if (stride > 0)
+            {
+                ConsumeWork();
+                var expectedLength = (long)count * stride;
+                ConsumeWork();
+                if (length != expectedLength)
+                {
+                    throw new InvalidDataException(
+                        $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
+                }
+            }
+
+            ConsumeWork();
+            if (kind == 0x0002 && (start & 3) != 0)
+            {
+                throw new InvalidDataException(
+                    $"Invalid TRRM section 0x{kind:X4} for {schema} profile.");
+            }
+
+            ConsumeWork();
             if (kind <= 0x005E)
             {
+                ConsumeWork();
                 sectionCounts[kind] = count;
             }
         }
 
+        ConsumeWork();
         if (!moduleFound)
         {
             throw InvalidArtifact();
         }
 
+        ConsumeWork();
         var featureCount = (int)sectionCounts[0x0004];
         if (featureCount != 0)
         {
-            if (!TryGetSection(0x0004, out var featureBytes, out var actualFeatureCount)
-                || actualFeatureCount != featureCount)
+            if (!TryGetSection(0x0004, out var featureBytes,
+                    out var actualFeatureCount))
             {
                 throw InvalidArtifact();
             }
 
-            _ = new TrRmFeatureTableReader(featureBytes, featureCount, schema);
+            ConsumeWork();
+            if (actualFeatureCount != featureCount)
+            {
+                throw InvalidArtifact();
+            }
+
+            ConsumeWork();
+            _ = new TrRmFeatureTableReader(featureBytes, featureCount, schema,
+                resourceLedger);
         }
 
         if (!TryGetSection(0x0001, out var moduleBytes, out var moduleCount))
@@ -231,9 +348,11 @@ public readonly ref struct TrRmArtifactIndex
 
         for (var module = 0; module < moduleCount; module++)
         {
+            ConsumeWork();
+            ConsumeWork();
             var offset = module * 48;
-            var featureFirst = ReadU32(moduleBytes, offset + 24);
-            var moduleFeatureCount = ReadU32(moduleBytes, offset + 28);
+            var featureFirst = ReadU32AndCharge(moduleBytes, offset + 24);
+            var moduleFeatureCount = ReadU32AndCharge(moduleBytes, offset + 28);
             if (!ValidFeatureRange(featureFirst, moduleFeatureCount, featureCount))
             {
                 throw InvalidArtifact();
@@ -245,40 +364,57 @@ public readonly ref struct TrRmArtifactIndex
         {
             for (var entry = 0; entry < _entryCount; entry++)
             {
-                var start = ReadU32(_directory, (entry * 16) + 8);
-                var length = ReadU32(_directory, (entry * 16) + 12);
+                ConsumeWork();
+                var start = ReadU32AndCharge(_directory, (entry * 16) + 8);
+                var length = ReadU32AndCharge(_directory, (entry * 16) + 12);
+                ConsumeWork();
                 if (start < cursor)
                 {
                     throw InvalidArtifact();
                 }
 
-                if (artifact.Slice(cursor, (int)start - cursor).IndexOfAnyExcept((byte)0) >= 0)
+                if (HasNonzeroPadding(artifact, cursor, (int)start))
                 {
                     throw InvalidArtifact();
                 }
 
-                cursor = (int)(start + length);
+                ConsumeWork();
+                cursor = (int)((long)start + length);
             }
         }
         else
         {
+            ConsumeWork(checked(1UL + ((ulong)_entryCount * (1UL + (2UL * sizeof(uint))))));
             var extents = new (uint Start, uint End)[_entryCount];
             for (var entry = 0; entry < _entryCount; entry++)
             {
-                var start = ReadU32(_directory, (entry * 16) + 8);
-                var length = ReadU32(_directory, (entry * 16) + 12);
-                extents[entry] = (start, start + length);
+                ConsumeWork();
+                var start = ReadU32AndCharge(_directory, (entry * 16) + 8);
+                var length = ReadU32AndCharge(_directory, (entry * 16) + 12);
+                ConsumeWork();
+                extents[entry] = (start, checked(start + length));
             }
 
-            Array.Sort(extents, static (left, right) => left.Start.CompareTo(right.Start));
+            if (resourceLedger is null)
+            {
+                Array.Sort(extents,
+                    static (left, right) => left.Start.CompareTo(right.Start));
+            }
+            else
+            {
+                SortExtents(extents, resourceLedger);
+            }
+
             foreach (var (start, end) in extents)
             {
+                ConsumeWork();
+                ConsumeWork();
                 if (start < cursor)
                 {
                     throw InvalidArtifact();
                 }
 
-                if (artifact.Slice(cursor, (int)start - cursor).IndexOfAnyExcept((byte)0) >= 0)
+                if (HasNonzeroPadding(artifact, cursor, (int)start))
                 {
                     throw InvalidArtifact();
                 }
@@ -287,6 +423,7 @@ public readonly ref struct TrRmArtifactIndex
             }
         }
 
+        ConsumeWork();
         if (cursor != artifact.Length)
         {
             throw InvalidArtifact();
@@ -294,11 +431,12 @@ public readonly ref struct TrRmArtifactIndex
 
         for (var entry = 0; entry < _entryCount; entry++)
         {
-            if (ReadU16(_directory, (entry * 16) + 2) == 2)
+            ConsumeWork();
+            if (ReadU16AndCharge(_directory, (entry * 16) + 2) == 2)
             {
-                var start = ReadU32(_directory, (entry * 16) + 8);
-                var length = ReadU32(_directory, (entry * 16) + 12);
-                var count = ReadU32(_directory, (entry * 16) + 4);
+                var start = ReadU32AndCharge(_directory, (entry * 16) + 8);
+                var length = ReadU32AndCharge(_directory, (entry * 16) + 12);
+                var count = ReadU32AndCharge(_directory, (entry * 16) + 4);
                 ValidateSlots(artifact.Slice((int)start, (int)length), Kind(entry),
                     count, sectionCounts, schema);
             }
@@ -368,11 +506,21 @@ public readonly ref struct TrRmArtifactIndex
     {
         var low = 0;
         var high = _entryCount;
-        while (low < high)
+        while (true)
         {
-            var middle = low + ((high - low) / 2);
-            if (Kind(middle) < kind)
+            ConsumeWork();
+            if (low >= high)
             {
+                break;
+            }
+
+            ConsumeWork(3);
+            var middle = low + ((high - low) / 2);
+            var middleKind = Kind(middle);
+            ConsumeWork();
+            if (middleKind < kind)
+            {
+                ConsumeWork();
                 low = middle + 1;
             }
             else
@@ -381,13 +529,24 @@ public readonly ref struct TrRmArtifactIndex
             }
         }
 
-        if (low < _entryCount && Kind(low) == kind)
+        ConsumeWork();
+        if (low < _entryCount)
         {
-            var start = ReadU32(_directory, (low * 16) + 8);
-            var length = ReadU32(_directory, (low * 16) + 12);
-            section = _artifact.Slice((int)start, (int)length);
-            recordCount = (int)ReadU32(_directory, (low * 16) + 4);
-            return true;
+            var foundKind = Kind(low);
+            ConsumeWork();
+            if (foundKind == kind)
+            {
+                ConsumeWork();
+                var start = ReadU32AndCharge(_directory, (low * 16) + 8);
+                var length = ReadU32AndCharge(_directory, (low * 16) + 12);
+                ConsumeWork();
+                section = _artifact.Slice((int)start, (int)length);
+                ConsumeWork();
+                recordCount = checked((int)ReadU32AndCharge(_directory,
+                    (low * 16) + 4));
+                ConsumeWork();
+                return true;
+            }
         }
 
         section = default;
@@ -398,68 +557,179 @@ public readonly ref struct TrRmArtifactIndex
     public void GetSection(int entry, out ushort kind, out ushort flags,
         out ReadOnlySpan<byte> section, out int recordCount)
     {
+        ConsumeWork();
         if (entry < 0 || entry >= _entryCount)
         {
             throw InvalidArtifact();
         }
 
+        ConsumeWork();
         var directory = entry * 16;
         kind = (ushort)Kind(entry);
-        flags = ReadU16(_directory, directory + 2);
-        recordCount = (int)ReadU32(_directory, directory + 4);
-        var start = (int)ReadU32(_directory, directory + 8);
-        var length = (int)ReadU32(_directory, directory + 12);
+        flags = ReadU16AndCharge(_directory, directory + 2);
+        recordCount = checked((int)ReadU32AndCharge(_directory, directory + 4));
+        var start = checked((int)ReadU32AndCharge(_directory, directory + 8));
+        var length = checked((int)ReadU32AndCharge(_directory, directory + 12));
+        ConsumeWork();
         section = _artifact.Slice(start, length);
+        ConsumeWork();
     }
 
     private int Kind(int entry)
-        => ReadU16(_directory, entry * 16);
+        => ReadU16AndCharge(_directory, entry * 16);
 
-    private void ValidateSlots(ReadOnlySpan<byte> section, int kind, uint recordCount,
-        ReadOnlySpan<uint> sectionCounts, TrRmArtifactSchema schema)
+    private void ValidateSlots(ReadOnlySpan<byte> section, int kind,
+        uint recordCount, ReadOnlySpan<uint> sectionCounts,
+        TrRmArtifactSchema schema)
     {
+        var resourceLedger = _resourceLedger;
+        resourceLedger?.ConsumeWork();
         if (section.Length < 4)
         {
             throw InvalidArtifact();
         }
 
-        var slotCount = ReadU32(section, 0);
+        var slotCount = ReadU32AndCharge(section, 0);
+        resourceLedger?.ConsumeWork(2);
         var preludeEnd = 4L + (slotCount * 16L);
-        if (preludeEnd > section.Length
-            || (kind == 0x7F00 && preludeEnd + (recordCount * 16L) != section.Length))
+        resourceLedger?.ConsumeWork();
+        if (preludeEnd > section.Length)
         {
             throw InvalidArtifact();
         }
 
-        for (var slot = 0; slot < slotCount; slot++)
+        resourceLedger?.ConsumeWork();
+        if (kind == 0x7F00)
         {
-            var offset = 4 + ((int)slot * 16);
-            var targetKind = ReadU16(section, offset);
-            var selector = ReadU16(section, offset + 2);
-            var row = ReadU32(section, offset + 4);
-            var block = ReadU32(section, offset + 8);
-            var ordinal = ReadU32(section, offset + 12);
-            var reserved = ReadU16(section, offset + 10);
-            if (row is 0 or > 0xFF_FFFF || reserved != 0 || selector > 1
-                || (selector == 0 && (block != 0 || ordinal != 0
-                    || !IsReferenceSlotTableKind(targetKind, schema)
-                    || FixedStride(targetKind, schema) == -1
-                    || sectionCounts[targetKind] == 0
-                    || row > sectionCounts[targetKind]))
-                || (selector == 1 && (!schema.IsDevelopmentProfile()
-                    ? targetKind != 0 || sectionCounts[0x0020] == 0
-                        || row > sectionCounts[0x0020]
-                    : targetKind != 0x0020 || sectionCounts[0x0020] == 0
-                        || row > sectionCounts[0x0020] || block == 0))
-                || (kind == 0x7F00 && (!schema.IsDevelopmentProfile()
-                    ? !((selector == 0 && targetKind == 0x001F)
-                        || (selector == 1 && targetKind == 0))
-                    : !((selector == 0 && targetKind == 0x001F)
-                        || (selector == 1 && targetKind == 0x0020)))))
+            resourceLedger?.ConsumeWork(2);
+            var end = preludeEnd + (recordCount * 16L);
+            resourceLedger?.ConsumeWork();
+            if (end != section.Length)
             {
                 throw InvalidArtifact();
             }
         }
+
+        for (var slot = 0; slot < slotCount; slot++)
+        {
+            resourceLedger?.ConsumeWork();
+            resourceLedger?.ConsumeWork(2);
+            var offset = 4 + ((int)slot * 16);
+            var targetKind = ReadU16AndCharge(section, offset);
+            var selector = ReadU16AndCharge(section, offset + 2);
+            var row = ReadU32AndCharge(section, offset + 4);
+            var block = ReadU32AndCharge(section, offset + 8);
+            var ordinal = ReadU32AndCharge(section, offset + 12);
+            var reserved = ReadU16AndCharge(section, offset + 10);
+            if (!IsValidSlot(targetKind, selector, row, block, ordinal,
+                    reserved, kind, sectionCounts, schema))
+            {
+                throw InvalidArtifact();
+            }
+        }
+    }
+
+    private bool IsValidSlot(ushort targetKind, ushort selector, uint row,
+        uint block, uint ordinal, ushort reserved, int kind,
+        ReadOnlySpan<uint> sectionCounts, TrRmArtifactSchema schema)
+    {
+        ConsumeWork();
+        if (row is 0 or > 0xFF_FFFF)
+        {
+            return false;
+        }
+
+        ConsumeWork();
+        if (reserved != 0)
+        {
+            return false;
+        }
+
+        ConsumeWork();
+        if (selector > 1)
+        {
+            return false;
+        }
+
+        if (selector == 0)
+        {
+            ConsumeWork();
+            if (block != 0 || ordinal != 0)
+            {
+                return false;
+            }
+
+            ConsumeWork();
+            if (!IsReferenceSlotTableKind(targetKind, schema))
+            {
+                return false;
+            }
+
+            ConsumeWork();
+            if (FixedStride(targetKind, schema) == -1)
+            {
+                return false;
+            }
+
+            ConsumeWork();
+            if (sectionCounts[targetKind] == 0)
+            {
+                return false;
+            }
+
+            ConsumeWork();
+            if (row > sectionCounts[targetKind])
+            {
+                return false;
+            }
+        }
+        else
+        {
+            var requiredTargetKind = schema.IsDevelopmentProfile()
+                ? (ushort)0x0020
+                : (ushort)0;
+            ConsumeWork();
+            if (targetKind != requiredTargetKind)
+            {
+                return false;
+            }
+
+            ConsumeWork();
+            if (sectionCounts[0x0020] == 0)
+            {
+                return false;
+            }
+
+            ConsumeWork();
+            if (row > sectionCounts[0x0020])
+            {
+                return false;
+            }
+
+            if (schema.IsDevelopmentProfile())
+            {
+                ConsumeWork();
+                if (block == 0)
+                {
+                    return false;
+                }
+            }
+        }
+
+        ConsumeWork();
+        if (kind == 0x7F00)
+        {
+            var requiredTargetKind = selector == 0
+                ? (ushort)0x001F
+                : schema.IsDevelopmentProfile() ? (ushort)0x0020 : (ushort)0;
+            ConsumeWork();
+            if (targetKind != requiredTargetKind)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static bool IsReferenceSlotTableKind(int kind, TrRmArtifactSchema schema)
@@ -568,17 +838,218 @@ public readonly ref struct TrRmArtifactIndex
         };
     }
 
-    private static bool ValidFeatureRange(uint first, uint count, int featureCount)
+    private bool ValidFeatureRange(uint first, uint count, int featureCount)
     {
-        if (first == 0 && count == 0)
+        ConsumeWork();
+        if (first == 0)
         {
-            return true;
+            ConsumeWork();
+            return count == 0;
         }
 
-        return first != 0 && count != 0
-            && first <= 0xFF_FFFF && count <= 0xFF_FFFF
-            && ((ulong)first + count - 1) <= 0xFF_FFFF
-            && ((ulong)first + count) <= ((ulong)featureCount + 1);
+        ConsumeWork();
+        if (count == 0)
+        {
+            return false;
+        }
+
+        ConsumeWork();
+        if (first > 0xFF_FFFF)
+        {
+            return false;
+        }
+
+        ConsumeWork();
+        if (count > 0xFF_FFFF)
+        {
+            return false;
+        }
+
+        ConsumeWork();
+        var last = (ulong)first + count - 1;
+        ConsumeWork();
+        if (last > 0xFF_FFFF)
+        {
+            return false;
+        }
+
+        ConsumeWork();
+        var end = (ulong)first + count;
+        ConsumeWork();
+        return end <= ((ulong)featureCount + 1);
+    }
+
+    private static void ValidateA3HeaderFields(ReadOnlySpan<byte> artifact,
+        TrRmA3LayoutResourceLedger resourceLedger)
+    {
+        resourceLedger.ConsumeWork();
+        if (artifact.Length < 32)
+        {
+            throw InvalidArtifact();
+        }
+
+        var magic = "TRRM"u8;
+        for (var index = 0; index < magic.Length; index++)
+        {
+            resourceLedger.ConsumeWork(2);
+            if (artifact[index] != magic[index])
+            {
+                throw InvalidArtifact();
+            }
+        }
+
+        resourceLedger.ConsumeWork(3);
+        var majorVersion = ReadU16(artifact, 4);
+        resourceLedger.ConsumeWork();
+        if (majorVersion != 1)
+        {
+            throw InvalidArtifact();
+        }
+
+        resourceLedger.ConsumeWork(3);
+        var minorVersion = ReadU16(artifact, 6);
+        resourceLedger.ConsumeWork();
+        if (minorVersion != 0)
+        {
+            throw InvalidArtifact();
+        }
+
+        resourceLedger.ConsumeWork(5);
+        var headerSize = ReadU32(artifact, 8);
+        resourceLedger.ConsumeWork();
+        if (headerSize != 32)
+        {
+            throw InvalidArtifact();
+        }
+
+        resourceLedger.ConsumeWork(5);
+        var totalLength = ReadU32(artifact, 16);
+        resourceLedger.ConsumeWork();
+        if (totalLength != artifact.Length)
+        {
+            throw InvalidArtifact();
+        }
+
+        resourceLedger.ConsumeWork(5);
+        var directoryOffset = ReadU32(artifact, 20);
+        resourceLedger.ConsumeWork();
+        if (directoryOffset != 32)
+        {
+            throw InvalidArtifact();
+        }
+    }
+
+    private bool HasNonzeroPadding(ReadOnlySpan<byte> artifact, int start,
+        int end)
+    {
+        if (_resourceLedger is null)
+        {
+            return artifact.Slice(start, end - start).IndexOfAnyExcept((byte)0) >= 0;
+        }
+
+        for (var offset = start; offset < end; offset++)
+        {
+            ConsumeWork(2);
+            if (artifact[offset] != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void SortExtents((uint Start, uint End)[] extents,
+        TrRmA3LayoutResourceLedger resourceLedger)
+    {
+        var entryCount = extents.Length;
+        resourceLedger.ConsumeWork(checked(
+            1UL + ((ulong)entryCount * (1UL + (sizeof(uint) * 2UL)))));
+        var scratch = new (uint Start, uint End)[entryCount];
+        var source = extents;
+        var destination = scratch;
+        var width = 1;
+        while (width < entryCount)
+        {
+            for (var start = 0; start < entryCount;)
+            {
+                resourceLedger.ConsumeWork(3);
+                var middle = Math.Min(start + width, entryCount);
+                var end = Math.Min(start + (2 * width), entryCount);
+                var left = start;
+                var right = middle;
+                var output = start;
+                while (true)
+                {
+                    resourceLedger.ConsumeWork();
+                    if (left >= middle)
+                    {
+                        break;
+                    }
+
+                    resourceLedger.ConsumeWork();
+                    if (right >= end)
+                    {
+                        break;
+                    }
+
+                    resourceLedger.ConsumeWork(3);
+                    if (source[left].Start <= source[right].Start)
+                    {
+                        resourceLedger.ConsumeWork(1 + (sizeof(uint) * 2));
+                        destination[output++] = source[left++];
+                    }
+                    else
+                    {
+                        resourceLedger.ConsumeWork(1 + (sizeof(uint) * 2));
+                        destination[output++] = source[right++];
+                    }
+                }
+
+                while (left < middle)
+                {
+                    resourceLedger.ConsumeWork(1 + (sizeof(uint) * 2));
+                    destination[output++] = source[left++];
+                }
+
+                while (right < end)
+                {
+                    resourceLedger.ConsumeWork(1 + (sizeof(uint) * 2));
+                    destination[output++] = source[right++];
+                }
+
+                resourceLedger.ConsumeWork(2);
+                start = checked(start + (2 * width));
+            }
+
+            (source, destination) = (destination, source);
+            resourceLedger.ConsumeWork(2);
+            width = width > entryCount / 2 ? entryCount : width * 2;
+        }
+
+        if (!ReferenceEquals(source, extents))
+        {
+            for (var index = 0; index < entryCount; index++)
+            {
+                resourceLedger.ConsumeWork(1 + (sizeof(uint) * 2));
+                extents[index] = source[index];
+            }
+        }
+    }
+
+    private void ConsumeWork(ulong units = 1)
+        => _resourceLedger?.ConsumeWork(units);
+
+    private ushort ReadU16AndCharge(ReadOnlySpan<byte> bytes, int offset)
+    {
+        ConsumeWork(sizeof(ushort) + 1);
+        return ReadU16(bytes, offset);
+    }
+
+    private uint ReadU32AndCharge(ReadOnlySpan<byte> bytes, int offset)
+    {
+        ConsumeWork(sizeof(uint) + 1);
+        return ReadU32(bytes, offset);
     }
 
     private static ushort ReadU16(ReadOnlySpan<byte> bytes, int offset)
