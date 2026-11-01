@@ -17,6 +17,34 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmForeignInvocationAddressEmitterTests
 {
+    private static void AssertHomeFirstUseTypeMap(
+        TrRmRegisterBodyReader body)
+    {
+        var firstTypeMapIndexByToken
+            = new Dictionary<uint, ushort>(body.TypeCount);
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            var typeMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(home[2..]);
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint),
+                    sizeof(uint)));
+            if (!firstTypeMapIndexByToken.TryGetValue(token,
+                    out var firstTypeMapIndex))
+            {
+                firstTypeMapIndex
+                    = checked((ushort)firstTypeMapIndexByToken.Count);
+                firstTypeMapIndexByToken.Add(token, firstTypeMapIndex);
+            }
+
+            Assert.That(typeMapIndex, Is.EqualTo(firstTypeMapIndex));
+        }
+
+        Assert.That(firstTypeMapIndexByToken.Count,
+            Is.EqualTo(body.TypeCount));
+    }
+
     [Test]
     public void ExplicitNativeImportConventionProducesAnInferredAddress()
     {
@@ -182,6 +210,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(caller), tables.Contracts.Count);
+        AssertHomeFirstUseTypeMap(body);
         var hasStorageAddressRecord = false;
         for (var record = 0; record < body.RecordCount; record++)
         {
@@ -930,28 +959,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         Assert.That(body.MapMask, Is.EqualTo((byte)0x07));
         Assert.That(body.HomeMap.Length, Is.EqualTo(56));
-        var firstTypeMapIndexByToken
-            = new Dictionary<uint, ushort>(body.TypeCount);
-        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
-        {
-            var home = body.HomeMap.Slice(homeIndex * 8, 8);
-            var typeMapIndex
-                = BinaryPrimitives.ReadUInt16LittleEndian(home[2..]);
-            var token = BinaryPrimitives.ReadUInt32LittleEndian(
-                body.TypeMap.Slice(typeMapIndex * sizeof(uint),
-                    sizeof(uint)));
-            if (!firstTypeMapIndexByToken.TryGetValue(token,
-                    out var firstTypeMapIndex))
-            {
-                firstTypeMapIndex
-                    = checked((ushort)firstTypeMapIndexByToken.Count);
-                firstTypeMapIndexByToken.Add(token, firstTypeMapIndex);
-            }
-
-            Assert.That(typeMapIndex, Is.EqualTo(firstTypeMapIndex));
-        }
-        Assert.That(firstTypeMapIndexByToken.Count,
-            Is.EqualTo(body.TypeCount));
+        AssertHomeFirstUseTypeMap(body);
 
         var targetHomeTypeMapIndex
             = BinaryPrimitives.ReadUInt16LittleEndian(
