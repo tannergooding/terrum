@@ -282,7 +282,8 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.ScalarFrozenValuesDraft
                     or TrRmArtifactSchema.NominalEnumsDraft
                     or TrRmArtifactSchema.RootPinRuntimeDraft
-                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft)
+                    or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                    or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
                 || methodDefRow <= 0 || methodDefRow > Methods.Count)
             {
                 throw InvalidMetadata();
@@ -298,7 +299,8 @@ public static class TrRmStructuralMetadataValidator
             TrRmRegisterBodyMapValidator.Validate(body,
                 methodDefRow, Methods.GetOwnerModule(methodDefRow), Features,
                 Modules, TypeDefs, EnumDefs, TypeSpecs, GenericParams, Methods, Signatures,
-                Parameters, Fields, FieldPaths, ConstantSources, FrozenValueNodes,
+                Parameters, Fields, FieldPaths, InterfaceWitnesses, ConstantSources,
+                FrozenValueNodes,
                 Blobs, Contracts, Imports, NativeFunctionPointerAnchors,
                 StandardNativeImports, ModuleRefs, Layouts, FixedArrayLayouts,
                 TargetProfiles);

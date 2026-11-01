@@ -230,6 +230,7 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmMethodDefTableReader methods, TrRmMethodSigTableReader signatures,
         TrRmParamTableReader parameters,
         TrRmFieldDefTableReader fields, TrRmFieldPathTableReader fieldPaths,
+        TrRmInterfaceWitnessTableReader interfaceWitnesses,
         TrRmConstantSourceTableReader constantSources,
         TrRmFrozenValueNodeTableReader frozenValueNodes,
         TrRmBlobTableReader blobs,
@@ -242,6 +243,15 @@ internal static class TrRmRegisterBodyMapValidator
         TrRmTargetProfileTableReader targetProfiles)
     {
         ConsumeWork(body);
+        if (body.HasExceptionDirectory
+            && !TrRmFeatureManifestValidator.Requires(features, modules,
+                ownerModule,
+                TrRmFeatureTableReader.RegisterExceptionRegionsFeatureId,
+                body.Schema))
+        {
+            throw InvalidMap();
+        }
+
         if (body.HasRootPinOperations
             && !TrRmFeatureManifestValidator.Requires(features, modules,
                 ownerModule, TrRmFeatureTableReader.RootPinRuntimeFeatureId,
@@ -264,6 +274,10 @@ internal static class TrRmRegisterBodyMapValidator
         ConsumeWork(body);
         ValidateTypeMap(body, ownerModule, types, typeSpecs, genericParams,
             methods, imports, moduleRefs, constantValues, visitedTypeSpecRows);
+        ConsumeWork(body);
+        ValidateExceptionDirectoryBindings(body, ownerModule, types, typeSpecs,
+            genericParams, imports, constantValues, nativeFunctionPointerAnchors,
+            interfaceWitnesses);
         ConsumeWork(body);
         ValidateMethodMap(body, ownerModule, methods, signatures, parameters,
             types, typeSpecs, genericParams, imports, moduleRefs, constantValues,
@@ -296,6 +310,63 @@ internal static class TrRmRegisterBodyMapValidator
         ConsumeWork(body);
         ValidateFixedArrayPlaceSelections(body, ownerModule, features,
             modules, typeSpecs, constantValues);
+    }
+
+    private static void ValidateExceptionDirectoryBindings(
+        TrRmRegisterBodyReader body, int ownerModule,
+        TrRmTypeDefTableReader types, TrRmTypeSpecTableReader typeSpecs,
+        TrRmGenericParamTableReader genericParams,
+        TrRmImportTableReader imports,
+        ConstantSourceValueContext constantValues,
+        TrRmNativeFunctionPointerAnchorTableReader nativeFunctionPointerAnchors,
+        TrRmInterfaceWitnessTableReader interfaceWitnesses)
+    {
+        if (!body.HasExceptionDirectory)
+        {
+            return;
+        }
+
+        var directory = body.ExceptionDirectory;
+        for (var handlerIndex = 0;
+            handlerIndex < directory.HandlerCount; handlerIndex++)
+        {
+            ConsumeWork(body);
+            var handler = directory.GetHandler(handlerIndex);
+            if (handler.HasBinding == 0)
+            {
+                continue;
+            }
+
+            var home = GetHomeMapEntry(body, handler.BindingHomeIndex);
+            if (home[0] != 3
+                || GetTypeMapToken(body,
+                    GetHomeTypeMapIndex(body, handler.BindingHomeIndex))
+                    != GetTypeMapToken(body, handler.CatchTypeMapIndex))
+            {
+                throw InvalidMap();
+            }
+        }
+
+        for (var handlerIndex = 0;
+            handlerIndex < directory.HandlerCount; handlerIndex++)
+        {
+            ConsumeWork(body);
+            var handler = directory.GetHandler(handlerIndex);
+            if (handler.CatchKind != 1)
+            {
+                continue;
+            }
+
+            var witnessRow = checked((int)handler.ExceptionWitnessRow);
+            if (witnessRow > interfaceWitnesses.Count
+                || !MatchesTypeMapEntry(body, handler.CatchTypeMapIndex,
+                    interfaceWitnesses.GetImplementingTypeSpecRef(witnessRow),
+                    ownerModule, types, typeSpecs, genericParams, imports,
+                    constantValues, nativeFunctionPointerAnchors))
+            {
+                throw InvalidMap();
+            }
+        }
     }
 
     private static void ValidateHomeMap(TrRmRegisterBodyReader body, int methodDefRow,

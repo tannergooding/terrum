@@ -110,7 +110,7 @@ public sealed class TrRmRegisterBodyReaderTests
         AssertInvalid(CreateBodyWithRecords(edgeRecords, code: [0xB3, 1, 0x00]));
 
         _ = new TrRmRegisterBodyReader(CreateBody(0, code: [0xB5, 0]));
-        _ = new TrRmRegisterBodyReader(CreateBody(0, code: [0xB7, 0]));
+        AssertInvalid(CreateBody(0, code: [0xB7, 0]));
         AssertInvalid(CreateBody(0, code: [0xB5, 1]));
         AssertInvalid(CreateBody(0, code: [0xB7, 1]));
 
@@ -145,7 +145,7 @@ public sealed class TrRmRegisterBodyReaderTests
             default, default, default,
             [new TrRmRegisterBodyBlock(0, 6, 0)],
             records,
-            new byte[] { 0xD8, 0, 1, 0, 0xB7, 0 }, schema: schema);
+            new byte[] { 0xD8, 0, 1, 0, 0xB5, 0 }, schema: schema);
         var body = new TrRmRegisterBodyReader(bodyBytes, schema: schema);
 
         Assert.That(body.GetRecord(1)[0], Is.EqualTo(0x04));
@@ -156,20 +156,18 @@ public sealed class TrRmRegisterBodyReaderTests
             TrRmRegisterBodyWriter.Encode(homeMap, typeMap, default, default,
                 default, [new TrRmRegisterBodyBlock(0, 6, 0)],
                 records,
-                new byte[] { 0xD8, 0, 1, 0, 0xB7, 0 },
+                new byte[] { 0xD8, 0, 1, 0, 0xB5, 0 },
                 schema: TrRmArtifactSchema.ForeignInvocationStorageAddressDraft));
     }
 
     [Test]
-    public void BindsShortAndLongThrowInstructionsToThrowRecords()
+    public void RejectsThrowWithoutExceptionRegionSchema()
     {
         var blockState = new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 };
         var throwRecord = new byte[] { 9, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 0 };
         var records = new[] { blockState, throwRecord };
-        _ = new TrRmRegisterBodyReader(
-            CreateBodyWithRecords(records, code: [0xB4, 1]));
-        _ = new TrRmRegisterBodyReader(
-            CreateBodyWithRecords(records, code: [0xE8, 0, 1, 0]));
+        AssertInvalid(CreateBodyWithRecords(records, code: [0xB4, 1]));
+        AssertInvalid(CreateBodyWithRecords(records, code: [0xE8, 0, 1, 0]));
 
         var edge = new byte[] { 6, 0, 0, 0, 0, 0, 0, 0 };
         AssertInvalid(CreateBodyWithRecords(

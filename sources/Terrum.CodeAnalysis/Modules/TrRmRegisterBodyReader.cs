@@ -23,6 +23,7 @@ internal readonly ref struct TrRmRegisterBodyReader
     private readonly int _recordCount;
     private readonly int _contractCount;
     private readonly TrRmArtifactSchema _schema;
+    private readonly TrRmExceptionDirectoryReader _exceptionDirectory;
     private readonly TrRmA3LayoutResourceLedger? _resourceLedger;
 
     internal TrRmRegisterBodyReader(ReadOnlySpan<byte> body, int contractCount = 0,
@@ -51,7 +52,8 @@ internal readonly ref struct TrRmRegisterBodyReader
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
-                or TrRmArtifactSchema.GeneralPredicateGraphsDraft))
+                or TrRmArtifactSchema.GeneralPredicateGraphsDraft
+                or TrRmArtifactSchema.RegisterExceptionRegionsDraft))
         {
             throw InvalidBody();
         }
@@ -59,6 +61,7 @@ internal readonly ref struct TrRmRegisterBodyReader
         MapMask = body[2];
         _contractCount = contractCount;
         _schema = schema;
+        _exceptionDirectory = default;
         _resourceLedger = resourceLedger;
         var position = 5;
         var homeCount = ReadMapCount(body, ref position, MapMask, 0);
@@ -70,7 +73,8 @@ internal readonly ref struct TrRmRegisterBodyReader
         _recordCount = ReadCount(body, ref position);
         CodeByteLength = ReadCount(body, ref position);
         if (BlockCount is < 1 or > 65_536
-            || _recordCount is < 1 or > 65_536
+            || _recordCount < (schema.UsesRegisterExceptionRegions() ? 2 : 1)
+            || _recordCount > 65_536
             || CodeByteLength == 0)
         {
             throw InvalidBody();
@@ -136,11 +140,31 @@ internal readonly ref struct TrRmRegisterBodyReader
 
         _recordData = body.Slice(recordDataStart, (int)previousOffset);
         _code = body.Slice(codeStart, CodeByteLength);
+        if (schema.UsesRegisterExceptionRegions())
+        {
+            if (GetRecord(0)[0] != 0x0F)
+            {
+                throw InvalidBody();
+            }
+
+            _exceptionDirectory = new TrRmExceptionDirectoryReader(
+                GetRecord(0), BlockCount, HomeCount, TypeCount, resourceLedger);
+            for (var record = 1; record < _recordCount; record++)
+            {
+                resourceLedger?.ConsumeWork();
+                if (GetRecord(record)[0] == 0x0F)
+                {
+                    throw InvalidBody();
+                }
+            }
+        }
+
         for (var record = 0; record < _recordCount; record++)
         {
             resourceLedger?.ConsumeWork();
             ValidateRecord(GetRecord(record));
         }
+        ValidateExceptionDirectoryRecords();
         ValidateBlocks();
     }
 
@@ -155,6 +179,10 @@ internal readonly ref struct TrRmRegisterBodyReader
     internal int BlockCount { get; }
     internal int RecordCount => _recordCount;
     internal int CodeByteLength { get; }
+    internal bool HasExceptionDirectory
+        => _schema.UsesRegisterExceptionRegions();
+    internal TrRmExceptionDirectoryReader ExceptionDirectory
+        => _exceptionDirectory;
     internal bool HasRootPinOperations
     {
         get
@@ -236,7 +264,8 @@ internal readonly ref struct TrRmRegisterBodyReader
                 throw InvalidBody();
             }
 
-            ValidateInstructions(_code.Slice((int)codeOffset, (int)codeLength));
+            ValidateInstructions(_code.Slice((int)codeOffset, (int)codeLength),
+                blockIndex);
             codeCursor += codeLength;
         }
 
@@ -244,9 +273,11 @@ internal readonly ref struct TrRmRegisterBodyReader
         {
             throw InvalidBody();
         }
+
+        ValidateDispatchEntryStates();
     }
 
-    private void ValidateInstructions(ReadOnlySpan<byte> block)
+    private void ValidateInstructions(ReadOnlySpan<byte> block, int blockIndex)
     {
         var position = 0;
         var lastOpcode = -1;
@@ -254,7 +285,8 @@ internal readonly ref struct TrRmRegisterBodyReader
         {
             _resourceLedger?.ConsumeWork(2);
             var opcode = block[position];
-            if (opcode is 0xB6 or 0xEA)
+            if ((opcode is 0xB6 or 0xEA)
+                && !_schema.UsesRegisterExceptionRegions())
             {
                 throw InvalidBody();
             }
@@ -267,8 +299,14 @@ internal readonly ref struct TrRmRegisterBodyReader
             }
 
             _resourceLedger?.ConsumeWork();
-            ValidateInstructionReferences(opcode,
-                block.Slice(position, instructionLength));
+            var instruction = block.Slice(position, instructionLength);
+            ValidateInstructionReferences(opcode, instruction, blockIndex);
+            if (_schema.UsesRegisterExceptionRegions()
+                && (opcode is 0x17 or 0x18 or 0xB8 or 0xEB)
+                && _exceptionDirectory.GetBlockRegion(blockIndex) != 0)
+            {
+                throw InvalidBody();
+            }
             position += instructionLength;
             if (IsDefiniteTerminator(opcode) && position != block.Length)
             {
@@ -284,19 +322,22 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
-    private void ValidateInstructionReferences(byte opcode, ReadOnlySpan<byte> instruction)
+    private void ValidateInstructionReferences(byte opcode,
+        ReadOnlySpan<byte> instruction, int blockIndex)
     {
         if (instruction.Length == 4)
         {
             ValidateLongControlSelector(opcode, instruction[1]);
             ValidateLongRegisterFamilyPayload(opcode, instruction);
             ValidateLongInstructionReferences(opcode, instruction);
+            ValidateExceptionControlTransfer(opcode, instruction, blockIndex);
             return;
         }
 
         if (opcode is >= 0xA0 and <= 0xAF)
         {
             ValidateRecordReference(instruction[1] >> 4, 0x06);
+            ValidateExceptionControlTransfer(opcode, instruction, blockIndex);
             return;
         }
 
@@ -379,11 +420,28 @@ internal readonly ref struct TrRmRegisterBodyReader
                 ValidateRecordReference(instruction[1], 0x08);
                 break;
             case 0xB4:
+                if (!_schema.UsesRegisterExceptionRegions())
+                {
+                    throw InvalidBody();
+                }
                 ValidateRecordReference(instruction[1], 0x09);
                 break;
+            case 0xB6:
+                if (!_schema.UsesRegisterExceptionRegions())
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(instruction[1], 0x0A);
+                break;
             case 0xB5:
-            case 0xB7:
                 if (instruction[1] != 0)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 0xB7:
+                if (!_schema.UsesRegisterExceptionRegions()
+                    || instruction[1] != 0)
                 {
                     throw InvalidBody();
                 }
@@ -396,6 +454,7 @@ internal readonly ref struct TrRmRegisterBodyReader
                 break;
         }
 
+        ValidateExceptionControlTransfer(opcode, instruction, blockIndex);
         ValidateShortRegisterRoles(opcode, x, y);
     }
 
@@ -626,11 +685,18 @@ internal readonly ref struct TrRmRegisterBodyReader
                 ValidateRecordReference(reference, 0x08);
                 break;
             case 0xE8:
-                if (control != 0)
+                if (!_schema.UsesRegisterExceptionRegions() || control != 0)
                 {
                     throw InvalidBody();
                 }
                 ValidateRecordReference(reference, 0x09);
+                break;
+            case 0xEA:
+                if (!_schema.UsesRegisterExceptionRegions() || control != 0)
+                {
+                    throw InvalidBody();
+                }
+                ValidateRecordReference(reference, 0x0A);
                 break;
             case 0xE9:
                 if (!_schema.UsesForeignInvocationContracts()
@@ -931,8 +997,9 @@ internal readonly ref struct TrRmRegisterBodyReader
 
     private void ValidateRecord(ReadOnlySpan<byte> record)
     {
-        var maximumRecordKind = _schema.UsesForeignInvocationStorageAddresses()
-            ? 0x0E : 0x0D;
+        var maximumRecordKind = _schema.UsesRegisterExceptionRegions()
+            ? 0x0F
+            : _schema.UsesForeignInvocationStorageAddresses() ? 0x0E : 0x0D;
         if (record.Length < RecordHeaderSize || record[0] is < 0x01
             || record[0] > maximumRecordKind
             || record[1] != 0 || ReadUInt16(record, 2) != 0)
@@ -1046,6 +1113,14 @@ internal readonly ref struct TrRmRegisterBodyReader
                 {
                     throw InvalidBody();
                 }
+                if (_schema.UsesRegisterExceptionRegions()
+                    && (payload[0] == 3
+                        || (payload[0] == 2
+                            && ReadUInt16(payload, 4)
+                                >= _exceptionDirectory.RegionCount)))
+                {
+                    throw InvalidBody();
+                }
                 if (payload[0] == 2
                     ? payload[1] != 0 || ReadUInt16(payload, 2) != 0
                     : payload[1] is not (1 or 2)
@@ -1083,6 +1158,12 @@ internal readonly ref struct TrRmRegisterBodyReader
                     throw InvalidBody();
                 }
                 ValidateStorageAddress(payload);
+                break;
+            case 0x0F:
+                if (!_schema.UsesRegisterExceptionRegions())
+                {
+                    throw InvalidBody();
+                }
                 break;
         }
     }
@@ -1353,8 +1434,312 @@ internal readonly ref struct TrRmRegisterBodyReader
         }
     }
 
+    private void ValidateExceptionControlTransfer(byte opcode,
+        ReadOnlySpan<byte> instruction, int blockIndex)
+    {
+        if (!_schema.UsesRegisterExceptionRegions())
+        {
+            return;
+        }
+
+        switch (opcode)
+        {
+            case >= 0xA0 and <= 0xAF:
+            case 0xB1:
+                ValidateConditionalEdgeTargets(instruction[1] >> 4,
+                    blockIndex);
+                break;
+            case 0xB0:
+                ValidateOrdinaryBranch(blockIndex, instruction[1]);
+                break;
+            case 0xB2:
+                ValidateSwitchTargets(instruction[1], blockIndex);
+                break;
+            case 0xB4:
+                ValidateThrowContext(instruction[1], blockIndex);
+                break;
+            case 0xB6:
+                ValidateRegionExitContext(instruction[1], blockIndex);
+                break;
+            case 0xE3:
+                ValidateOrdinaryBranch(blockIndex,
+                    ReadUInt16(instruction, 2));
+                break;
+            case 0xE4:
+            case 0xE5:
+                ValidateConditionalEdgeTargets(
+                    ReadUInt16(instruction, 2), blockIndex);
+                break;
+            case 0xE6:
+                ValidateSwitchTargets(ReadUInt16(instruction, 2), blockIndex);
+                break;
+            case 0xE8:
+                ValidateThrowContext(ReadUInt16(instruction, 2), blockIndex);
+                break;
+            case 0xEA:
+                ValidateRegionExitContext(ReadUInt16(instruction, 2), blockIndex);
+                break;
+        }
+    }
+
+    private void ValidateConditionalEdgeTargets(int recordIndex,
+        int sourceBlock)
+    {
+        ValidateRecordReference(recordIndex, 0x06);
+        var payload = GetRecord(recordIndex)[RecordHeaderSize..];
+        ValidateOrdinaryBranch(sourceBlock, ReadUInt16(payload, 0));
+        ValidateOrdinaryBranch(sourceBlock, ReadUInt16(payload, 2));
+    }
+
+    private void ValidateSwitchTargets(int recordIndex, int sourceBlock)
+    {
+        ValidateRecordReference(recordIndex, 0x07);
+        var payload = GetRecord(recordIndex)[RecordHeaderSize..];
+        ValidateOrdinaryBranch(sourceBlock, ReadUInt16(payload, 6));
+        var caseCount = ReadUInt32(payload, 8);
+        for (var item = 0; item < caseCount; item++)
+        {
+            _resourceLedger?.ConsumeWork();
+            ValidateOrdinaryBranch(sourceBlock,
+                ReadUInt16(payload, 14 + (item * 4)));
+        }
+    }
+
+    private void ValidateOrdinaryBranch(int sourceBlock, int targetBlock)
+    {
+        var directory = _exceptionDirectory;
+        var sourceRegionIndex = directory.GetBlockRegion(sourceBlock);
+        var targetRegionIndex = directory.GetBlockRegion(targetBlock);
+        var targetRegion = directory.GetRegion(targetRegionIndex);
+        if ((targetRegion.Kind is 2 or 3 or 4)
+            && targetRegion.EntryBlock == targetBlock)
+        {
+            throw InvalidBody();
+        }
+
+        if (sourceRegionIndex == targetRegionIndex)
+        {
+            return;
+        }
+
+        if (targetRegion.Kind != 1
+            || targetRegion.ParentRegionIndex != sourceRegionIndex
+            || targetRegion.EntryBlock != targetBlock)
+        {
+            throw InvalidBody();
+        }
+    }
+
+    private void ValidateThrowContext(int recordIndex, int blockIndex)
+    {
+        ValidateRecordReference(recordIndex, 0x09);
+        var payload = GetRecord(recordIndex)[RecordHeaderSize..];
+        if (payload[0] != 2)
+        {
+            return;
+        }
+
+        var handlerRegionIndex = ReadUInt16(payload, 4);
+        var handlerRegion = _exceptionDirectory.GetRegion(handlerRegionIndex);
+        if (handlerRegion.Kind != 3)
+        {
+            throw InvalidBody();
+        }
+
+        var currentRegionIndex = _exceptionDirectory.GetBlockRegion(blockIndex);
+        while (true)
+        {
+            if (currentRegionIndex == handlerRegionIndex)
+            {
+                return;
+            }
+
+            if (currentRegionIndex == 0)
+            {
+                throw InvalidBody();
+            }
+
+            currentRegionIndex = _exceptionDirectory
+                .GetRegion(currentRegionIndex).ParentRegionIndex;
+        }
+    }
+
+    private void ValidateRegionExitContext(int recordIndex, int blockIndex)
+    {
+        ValidateRecordReference(recordIndex, 0x0A);
+        var payload = GetRecord(recordIndex)[RecordHeaderSize..];
+        var exitKind = payload[0];
+        var currentRegionIndex = _exceptionDirectory.GetBlockRegion(blockIndex);
+        var currentRegion = _exceptionDirectory.GetRegion(currentRegionIndex);
+        var regionCount = ReadUInt32(payload, 8);
+
+        if (exitKind == 1)
+        {
+            var targetBlock = ReadUInt16(payload, 2);
+            var targetOwner = _exceptionDirectory.GetBlockRegion(targetBlock);
+            var targetEntryStateRecord = ReadUInt16(GetBlock(targetBlock), 8);
+            if (ReadUInt32(GetRecord(targetEntryStateRecord),
+                    RecordHeaderSize) != 0)
+            {
+                throw InvalidBody();
+            }
+
+            var pathIndex = 0;
+            var regionIndex = currentRegionIndex;
+            while (regionIndex != targetOwner)
+            {
+                if (regionIndex == 0 || pathIndex >= regionCount)
+                {
+                    throw InvalidBody();
+                }
+
+                var region = _exceptionDirectory.GetRegion(regionIndex);
+                if (region.Kind is 2 or 4
+                    || ReadUInt16(payload, 12 + (pathIndex * sizeof(ushort)))
+                        != regionIndex)
+                {
+                    throw InvalidBody();
+                }
+
+                pathIndex++;
+                regionIndex = region.ParentRegionIndex;
+            }
+
+            if (pathIndex != regionCount)
+            {
+                throw InvalidBody();
+            }
+
+            return;
+        }
+
+        switch (exitKind)
+        {
+            case 2:
+                if (currentRegion.Kind != 3
+                    || _exceptionDirectory.GetRegion(
+                        currentRegion.ParentRegionIndex).Kind != 1
+                    || ReadUInt16(payload, 12) != currentRegionIndex
+                    || ReadUInt16(payload, 14)
+                        != currentRegion.ParentRegionIndex)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 3:
+                if (currentRegion.Kind != 2
+                    || ReadUInt16(payload, 12) != currentRegionIndex)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            case 4:
+                if (currentRegion.Kind != 4
+                    || ReadUInt16(payload, 12) != currentRegionIndex)
+                {
+                    throw InvalidBody();
+                }
+                break;
+            default:
+                throw InvalidBody();
+        }
+    }
+
+    private void ValidateDispatchEntryStates()
+    {
+        if (!_schema.UsesRegisterExceptionRegions())
+        {
+            return;
+        }
+
+        for (var regionIndex = 1;
+            regionIndex < _exceptionDirectory.RegionCount; regionIndex++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var region = _exceptionDirectory.GetRegion(regionIndex);
+            if (region.Kind is not (2 or 3 or 4))
+            {
+                continue;
+            }
+
+            var block = GetBlock(region.EntryBlock);
+            var entryState = GetRecord(ReadUInt16(block, 8));
+            if (ReadUInt32(entryState, RecordHeaderSize) != 0)
+            {
+                throw InvalidBody();
+            }
+        }
+    }
+
     private void ValidateRegionExit(ReadOnlySpan<byte> payload)
     {
+        if (_schema.UsesRegisterExceptionRegions())
+        {
+            if (payload.Length < 12 || payload[1] > 1)
+            {
+                throw InvalidBody();
+            }
+
+            var exitKind = payload[0];
+            var hasTarget = payload[1];
+            var targetBlock = ReadUInt16(payload, 2);
+            var valueKind = payload[4];
+            var valueUse = payload[5];
+            var valueIndex = ReadUInt16(payload, 6);
+            var exceptionRegionCount = ReadUInt32(payload, 8);
+            if (12L + (exceptionRegionCount * sizeof(ushort)) != payload.Length
+                || (hasTarget == 0 && targetBlock != 0)
+                || (hasTarget == 1 && targetBlock >= BlockCount))
+            {
+                throw InvalidBody();
+            }
+
+            switch (exitKind)
+            {
+                case 1:
+                    if (hasTarget != 1 || valueKind != 0 || valueUse != 0
+                        || valueIndex != 0
+                        || exceptionRegionCount is 0 or > 65_535)
+                    {
+                        throw InvalidBody();
+                    }
+                    break;
+                case 2:
+                case 4:
+                    if (hasTarget != 0 || valueKind != 0 || valueUse != 0
+                        || valueIndex != 0
+                        || (exitKind == 2
+                            ? exceptionRegionCount != 2
+                            : exceptionRegionCount != 1))
+                    {
+                        throw InvalidBody();
+                    }
+                    break;
+                case 3:
+                    if (hasTarget != 0 || valueKind is not (1 or 2)
+                        || valueUse != 1 || exceptionRegionCount != 1
+                        || (valueKind == 1
+                            ? valueIndex > 13 : valueIndex >= HomeCount))
+                    {
+                        throw InvalidBody();
+                    }
+                    break;
+                default:
+                    throw InvalidBody();
+            }
+
+            for (var index = 0; index < exceptionRegionCount; index++)
+            {
+                _resourceLedger?.ConsumeWork();
+                var region = ReadUInt16(payload, 12 + (index * sizeof(ushort)));
+                if (region == 0 || region >= _exceptionDirectory.RegionCount)
+                {
+                    throw InvalidBody();
+                }
+            }
+            return;
+        }
+
         if (payload.Length < 8 || payload[1] > 1
             || (payload[1] == 0 && ReadUInt16(payload, 2) != 0)
             || (payload[1] == 1 && ReadUInt16(payload, 2) >= BlockCount))
@@ -1366,6 +1751,40 @@ internal readonly ref struct TrRmRegisterBodyReader
         if (8L + regionCount * 2L != payload.Length)
         {
             throw InvalidBody();
+        }
+    }
+
+    private void ValidateExceptionDirectoryRecords()
+    {
+        if (!_schema.UsesRegisterExceptionRegions())
+        {
+            return;
+        }
+
+        var seenRegions = new int[_exceptionDirectory.RegionCount];
+        for (var recordIndex = 1; recordIndex < _recordCount; recordIndex++)
+        {
+            _resourceLedger?.ConsumeWork();
+            var record = GetRecord(recordIndex);
+            if (record[0] != 0x0A)
+            {
+                continue;
+            }
+
+            var payload = record[RecordHeaderSize..];
+            var regionCount = ReadUInt32(payload, 8);
+            for (var index = 0; index < regionCount; index++)
+            {
+                _resourceLedger?.ConsumeWork();
+                var region = ReadUInt16(payload,
+                    12 + (index * sizeof(ushort)));
+                if (seenRegions[region] == recordIndex)
+                {
+                    throw InvalidBody();
+                }
+
+                seenRegions[region] = recordIndex;
+            }
         }
     }
 
