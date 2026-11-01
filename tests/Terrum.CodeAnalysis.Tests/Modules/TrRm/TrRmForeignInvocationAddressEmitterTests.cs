@@ -4817,6 +4817,30 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmStandardNativeOperation.EmitExecutable).Bindings.Select(
                 static binding => binding.FunctionName),
             Is.EqualTo(["Owned"]));
+
+        var reorderedModuleArtifact =
+            CombinePopulatedNativeAddressModules(
+                CombinePopulatedNativeAddressModules(
+                    CombinePopulatedNativeAddressModules(secondArtifact,
+                        rootArtifact),
+                    thirdArtifact),
+                providerArtifact);
+        var reorderedModuleInput = new TrRmStandardArtifactInput(
+            schemaIdentity, reorderedModuleArtifact);
+        var reorderedModuleLoaded = TrRmExecutableCompiler.LoadStandard(
+            reorderedModuleInput, rootIdentity, []);
+        Assert.That(reorderedModuleLoaded.Functions.Single(
+            static function => function.Name == "Owned").ModuleImport!
+            .ProducerIdentity, Is.EqualTo(providerIdentity));
+        var reorderedModulePlan =
+            TrRmExecutableCompiler.LoadStandardNativeBindingPlan(
+                reorderedModuleInput, rootIdentity, [],
+                TrRmStandardNativeOperation.EmitExecutable,
+                NativeRuntimePolicy.FailFast);
+        Assert.That(reorderedModulePlan.CreateLoweringInputs(
+            TrRmStandardNativeOperation.EmitExecutable).Bindings.Select(
+                static binding => binding.FunctionName),
+            Is.EqualTo(["Owned"]));
     }
 
     [Test]

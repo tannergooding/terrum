@@ -461,18 +461,19 @@ Body. This preserves typed pointer formals introduced by an uncalled imported
 declaration in a mixed owned/imported Module. A deep-provider regression
 preserves `NativeParameter` extent `0xffffffff` and rejects a provider with an
 incompatible extent. A four-Module acyclic Root→P→Q→R chain now also loads from
-one artifact with Root last, and its selected reference and checked lowering
-plan retain the correct root-only view. The final Debug fast build and combined
-NativeAddress/provider-CLI selection passed 146/146 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_15_08_net11.0.trx`.
+one artifact with Root last. A second ordering Q,Root,R,P re-encodes the
+ModuleRef, Import, MethodDef, TypeSpec and Body-map references and preserves
+the selected root and checked lowering plan. The final Debug fast build and
+combined NativeAddress/provider-CLI selection passed 146/146 with zero skips
+at `artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_25_12_net11.0.trx`.
 The normal analyzer build remains at its existing baseline: 709 errors and
 353 normalized identities, with zero additions/removals against
 `artifacts\\log\\compiler-adoption-final-debug-analyzers.log`; output:
-`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final9.log`.
+`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final10.log`.
 This remains provisional, not formal approval or full Standard conformance.
-Further evidence is still required for broader Module/Import/Body permutation
-and re-encoding, Unicode identity cases beyond the exercised NFC/NFD pair and
-row/map/work limits beyond the tested fan-in of 17. Same-name expanded lowering,
+Further evidence is still required for additional Module/Import/Body
+permutation and re-encoding cases, Unicode identity cases beyond the exercised
+NFC/NFD pair and row/map/work limits beyond the tested fan-in of 17. Same-name expanded lowering,
 general source production/
 re-emission of non-target Imports and broader schema compositions remain
 unsupported.
