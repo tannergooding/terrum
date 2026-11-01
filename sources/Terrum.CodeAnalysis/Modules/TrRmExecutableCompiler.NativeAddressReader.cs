@@ -29,6 +29,9 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct NativeAddressRegisterConstant(
         PrimitiveType Type, uint Bits);
 
+    private readonly record struct NativeAddressPendingComparison(
+        int Destination, BoundRead Left, BoundRead Right);
+
     private sealed record NativeAddressConditionalReadState(
         bool[] LocalInitializedByHome,
         Dictionary<int, NativeStorageAddressFacts> StorageAddressesByHome,
@@ -1160,6 +1163,11 @@ public static partial class TrRmExecutableCompiler
                     instructions.Add((instruction[0], instruction[1], 0));
                     break;
 
+                case 0x40:
+                case 0x41:
+                    instructions.Add((instruction[0], instruction[1], 0));
+                    break;
+
                 case 0xD5:
                     if ((instruction[1] & 0xF0) != 0)
                     {
@@ -1404,6 +1412,7 @@ public static partial class TrRmExecutableCompiler
         var sawCallSite = false;
         var sawReturn = false;
         var instructionOrdinal = 0;
+        NativeAddressPendingComparison? pendingComparison = null;
 
         NativeAddressConditionalReadState CaptureConditionalState()
         {
@@ -1588,6 +1597,13 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var instruction in instructions)
         {
+            if (pendingComparison is not null
+                && instruction.Opcode != 0x41)
+            {
+                throw Invalid(
+                    "The F+S comparison result is not immediately tested.");
+            }
+
             switch (instruction.Opcode)
             {
                 case 0xFC:
@@ -1761,6 +1777,64 @@ public static partial class TrRmExecutableCompiler
 
                     registerExpressions[longLoadDestination] = new BoundRead(
                         longLoadVariable, longLoadType, default);
+                    break;
+
+                case 0x40:
+                    var comparisonOperand
+                        = checked((byte)instruction.Index);
+                    var comparisonDestination = comparisonOperand & 0x0F;
+                    var comparisonRight = comparisonOperand >> 4;
+                    if (comparisonDestination >= 14
+                        || comparisonRight >= 14
+                        || !registerExpressions.TryGetValue(
+                            comparisonDestination, out var comparisonLeftValue)
+                        || comparisonLeftValue is not BoundRead comparisonLeft
+                        || !registerExpressions.TryGetValue(comparisonRight,
+                            out var comparisonRightValue)
+                        || comparisonRightValue is not BoundRead comparisonRightRead
+                        || comparisonLeft.Type != comparisonRightRead.Type
+                        || comparisonLeft.Type == PrimitiveType.Bool
+                        || !DirectNativeImportContract.IsScalar(
+                            comparisonLeft.Type))
+                    {
+                        throw Invalid(
+                            "The F+S comparison has unsupported scalar operands.");
+                    }
+
+                    _ = registerConstants.Remove(comparisonDestination);
+                    _ = registerExpressions.Remove(comparisonDestination);
+                    pendingComparison = new NativeAddressPendingComparison(
+                        comparisonDestination, comparisonLeft,
+                        comparisonRightRead);
+                    break;
+
+                case 0x41:
+                    var predicateOperand
+                        = checked((byte)instruction.Index);
+                    var predicateDestination = predicateOperand & 0x0F;
+                    var predicateMask = predicateOperand >> 4;
+                    if (pendingComparison is not { } comparison
+                        || comparison.Destination != predicateDestination)
+                    {
+                        throw Invalid(
+                            "The F+S predicate has no matching comparison.");
+                    }
+
+                    var comparisonOperator = predicateMask switch {
+                        1 => TokenKind.Less,
+                        2 => TokenKind.EqualsEquals,
+                        3 => TokenKind.LessEquals,
+                        4 => TokenKind.Greater,
+                        6 => TokenKind.GreaterEquals,
+                        13 => TokenKind.BangEquals,
+                        _ => throw Unsupported(
+                            "The F+S predicate mask has no admitted source comparison."),
+                    };
+                    _ = registerConstants.Remove(predicateDestination);
+                    registerExpressions[predicateDestination] = new BoundBinary(
+                        comparisonOperator, comparison.Left, comparison.Right,
+                        PrimitiveType.Bool, default);
+                    pendingComparison = null;
                     break;
 
                 case 0x24:
@@ -2576,6 +2650,11 @@ public static partial class TrRmExecutableCompiler
             }
 
             instructionOrdinal++;
+        }
+
+        if (pendingComparison is not null)
+        {
+            throw Invalid("The F+S comparison has no predicate test.");
         }
 
         if (!sawCallSite || !sawReturn || conditionalFrames.Count != 0

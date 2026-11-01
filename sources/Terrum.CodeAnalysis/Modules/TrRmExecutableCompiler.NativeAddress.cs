@@ -1583,6 +1583,26 @@ public static partial class TrRmExecutableCompiler
                     conditionalEdgeCount++;
                     return appendTrue() && appendFalse();
 
+                case BoundBinary comparison
+                    when IsSupportedNativeUnitConditionalComparison(
+                        comparison):
+                    if (comparison.Left is not BoundRead leftRead
+                        || comparison.Right is not BoundRead rightRead
+                        || (uint)leftRead.Variable
+                            >= (uint)function.Variables.Length
+                        || (uint)rightRead.Variable
+                            >= (uint)function.Variables.Length
+                        || (leftRead.Variable >= function.ParameterCount
+                            && !localVariables.Contains(leftRead.Variable))
+                        || (rightRead.Variable >= function.ParameterCount
+                            && !localVariables.Contains(rightRead.Variable)))
+                    {
+                        return false;
+                    }
+
+                    conditionalEdgeCount++;
+                    return appendTrue() && appendFalse();
+
                 case BoundUnary {
                     Operator: TokenKind.Bang,
                     Type: PrimitiveType.Bool,
@@ -2066,6 +2086,8 @@ public static partial class TrRmExecutableCompiler
                 Right: var right,
             } => IsSupportedNativeUnitConditionalCondition(left)
                 && IsSupportedNativeUnitConditionalCondition(right),
+            BoundBinary comparison =>
+                IsSupportedNativeUnitConditionalComparison(comparison),
             BoundConditional {
                 Type: PrimitiveType.Bool,
                 Condition: var nestedCondition,
@@ -2077,6 +2099,19 @@ public static partial class TrRmExecutableCompiler
             _ => false,
         };
     }
+
+    private static bool IsSupportedNativeUnitConditionalComparison(
+        BoundBinary comparison)
+        => comparison.Type == PrimitiveType.Bool
+            && comparison.Left.Type == comparison.Right.Type
+            && comparison.Left.Type != PrimitiveType.Bool
+            && DirectNativeImportContract.IsScalar(comparison.Left.Type)
+            && comparison.Left is BoundRead
+            && comparison.Right is BoundRead
+            && comparison.Operator is TokenKind.EqualsEquals
+                or TokenKind.BangEquals or TokenKind.Less
+                or TokenKind.LessEquals or TokenKind.Greater
+                or TokenKind.GreaterEquals;
 
     private static bool TryGetNativeAddressKnownBoolean(
         BoundExpression expression, out bool value)
@@ -2813,9 +2848,34 @@ public static partial class TrRmExecutableCompiler
                     AppendHomeLoad(code, 0, conditionResultHome);
                     break;
 
+                case BoundBinary comparison
+                    when IsSupportedNativeUnitConditionalComparison(
+                        comparison)
+                        && comparison.Left is BoundRead leftRead
+                        && comparison.Right is BoundRead rightRead:
+                    var predicateMask = comparison.Operator switch {
+                        TokenKind.EqualsEquals => 2,
+                        TokenKind.BangEquals => 13,
+                        TokenKind.Less => 1,
+                        TokenKind.LessEquals => 3,
+                        TokenKind.Greater => 4,
+                        TokenKind.GreaterEquals => 6,
+                        _ => throw Unsupported(
+                            "The A2EU comparison predicate has no assigned mask."),
+                    };
+                    AppendHomeLoad(code, 0,
+                        GetCallerHome(leftRead.Variable));
+                    AppendHomeLoad(code, 1,
+                        GetCallerHome(rightRead.Variable));
+                    code.Add(0x40);
+                    code.Add(0x10);
+                    code.Add(0x41);
+                    code.Add(checked((byte)(predicateMask << 4)));
+                    break;
+
                 default:
                     throw Unsupported(
-                        "A2EU conditional control flow requires a Boolean Home, constant or direct call.");
+                        "A2EU conditional control flow requires an admitted Boolean condition or scalar comparison.");
             }
         }
 

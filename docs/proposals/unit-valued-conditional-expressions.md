@@ -139,19 +139,23 @@ multi-block `E4`/`ConditionalEdge` branches with `E3` joins using assigned
 records, and performs the Unit stores only after the selected-arm effects
 complete. Condition support now includes Boolean Home reads, direct Boolean
 NativeImport results, constant selection, logical-not, short-circuit `&&`/`||`,
-and nested Boolean conditional expressions in both expression and statement
-conditions. Right-side calls and checks stay on reached paths. The focused
-A2EU producer/reader/JIT/AOT selection passed 34/34 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-conditional-if-statement.trx`. Scalar comparisons
-and other Boolean forms remain outside this Body profile. The corresponding
+nested Boolean conditional expressions, and non-Boolean scalar Home-read
+comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41`
+instructions. Right-side calls and checks stay on reached paths. The focused
+A2EU producer/reader/JIT/AOT selection passed 43/43 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-scalar-comparison-conditions\\a2eu-scalar-comparison-conditions.trx`.
+Boolean equality, non-source predicate masks, and comparisons with effectful
+call operands remain outside this Body profile. The corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 artifact. The active Body regression covers nested arms, checked
 int32/uint32 division/remainder captures, a checked fixed-array-address
 argument, and rejection of an invalid condition register. This establishes
 Body encoding/reconstruction and selected-provider Body-row remapping,
-including compatible and incompatible replacement checks, but not A2EU native
-runtime qualification. These are source/test observations, not checks run by
+including compatible and incompatible replacement checks. Separate
+supervised source-free JIT/AOT cases exercise Boolean and scalar-comparison
+conditions under FailFast; CheckedExceptions and general cleanup/failure
+transport remain open. These are source/test observations, not checks run by
 proposal authoring.
 
 Allocate no conditional record, opcode, wire ID, Feature or schema successor.

@@ -91,17 +91,20 @@ multi-block `E4`/`ConditionalEdge` branches and `E3` joins. Source-free loading
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 Body, including nested checked scalar and storage-address arguments. Its
 condition subset now includes Boolean Home reads, direct Boolean NativeImport
-results, constant selection, logical-not, short-circuit `&&`/`||`, and nested
-Boolean conditional expressions in expression and statement conditions.
+results, constant selection, logical-not, short-circuit `&&`/`||`, nested
+Boolean conditional expressions, and non-Boolean scalar Home-read comparisons
+(`==`, `!=`, `<`, `<=`, `>`, `>=`) using assigned `0x40`/`0x41` instructions.
 Right-side calls and checks stay on reached paths. The focused A2EU
-producer/reader/JIT/AOT selection passed 34/34 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-conditional-if-statement.trx`. Scalar comparisons
-and other Boolean forms remain unsupported. A co-located selected-provider
+producer/reader/JIT/AOT selection passed 43/43 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-scalar-comparison-conditions\\a2eu-scalar-comparison-conditions.trx`.
+Boolean equality, non-source predicate masks, and comparisons with effectful
+call operands remain unsupported. A co-located selected-provider
 regression shifts the
 conditional caller to Body row 2, remaps its maps, preserves body-local
 branches/records, and checks compatible and incompatible provider replacement.
-Supervised A2EU JIT/AOT runtime qualification remains open; other effectful
-expressions and cleanup/loan transport are incomplete.
+Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast;
+CheckedExceptions, effectful comparison operands, and cleanup/loan transport
+remain incomplete.
 The bounded F route runs/builds direct NativeImport executables and emits
 direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected

@@ -1670,6 +1670,22 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
     }
 
+    [Test]
+    public void StandardA2EURejectsMismatchedComparisonPredicateRegister()
+    {
+        const string moduleIdentity
+            = "a2eu-unit-conditional-comparison-malformed";
+        var input = CreateStandardA2EUConditionalRuntimeInput(true,
+            moduleIdentity, false, "markedError > clearError");
+        var malformed = RewriteA2EUComparisonDestinationArtifact(
+            input.Artifact.ToArray(), 1);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(input.SchemaIdentity,
+                    malformed),
+                moduleIdentity, []));
+    }
+
     [TestCase(true, false, "choose", false)]
     [TestCase(false, false, "choose", false)]
     [TestCase(true, true, "choose", false)]
@@ -1685,6 +1701,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         "true || IsProcessorFeaturePresent(markedError / clearError)", false)]
     [TestCase(false, false,
         "false && IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(true, false, "markedError != clearError", false)]
+    [TestCase(true, false, "markedError == clearError", false)]
+    [TestCase(true, false, "markedError < clearError", false)]
+    [TestCase(true, false, "markedError <= clearError", false)]
+    [TestCase(true, false, "markedError > clearError", false)]
+    [TestCase(true, false, "markedError >= clearError", false)]
     [TestCase(true, false,
         "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
     public void StandardA2EUConditionalJitExecutesOnlyTheSelectedNativeArm(
@@ -1727,6 +1749,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             "false" or "false && IsProcessorFeaturePresent(markedError / clearError)" => false,
             "choose || IsProcessorFeaturePresent(markedError / clearError)" => true,
             "choose && IsProcessorFeaturePresent(markedError / clearError)" => false,
+            "markedError != clearError" or "markedError > clearError"
+                or "markedError >= clearError" => true,
+            "markedError == clearError" or "markedError < clearError"
+                or "markedError <= clearError" => false,
             _ => throw new InvalidOperationException(
                 "The A2EU test condition has no expected normal result."),
         };
@@ -1754,6 +1780,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         "false && IsProcessorFeaturePresent(markedError / clearError)", false)]
     [TestCase(false, false,
         "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
+    [TestCase(true, false, "markedError > clearError", false)]
+    [TestCase(true, false, "markedError <= clearError", false)]
     public async Task StandardA2EUConditionalAotExecutesOnlyTheSelectedNativeArm(
         bool choose, bool failFalseArm, string conditionExpression,
         bool useIfStatement)
@@ -1818,6 +1846,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "false" or "false && IsProcessorFeaturePresent(markedError / clearError)" => false,
                 "choose || IsProcessorFeaturePresent(markedError / clearError)" => true,
                 "choose && IsProcessorFeaturePresent(markedError / clearError)" => false,
+                "markedError > clearError" => true,
+                "markedError <= clearError" => false,
                 _ => throw new InvalidOperationException(
                     "The A2EU test condition has no expected normal result."),
             };
@@ -1955,14 +1985,22 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             [Terrum.Interop.NativeImport(
                 "MODULE",
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern uint32 ReadProcessId();
+
+            [Terrum.Interop.NativeImport(
+                "MODULE",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
             [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
             internal extern void Observe(write ptr<int32> output);
 
             int32 Main() {
-                bool choose = true;
+                uint32 zero = 0;
                 mut int32 output = 0;
                 unsafe {
-                    choose ? RecordFirst() : RecordSecond();
+                    uint32 processId = ReadProcessId();
+                    processId > zero
+                        ? RecordFirst()
+                        : RecordSecond();
                     var callback = &Observe;
                     callback(&output);
                 }
@@ -6064,6 +6102,76 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         throw new InvalidOperationException(
             "The A2EU artifact has no Body table.");
+    }
+
+    private static byte[] RewriteA2EUComparisonDestinationArtifact(
+        byte[] artifact, byte destinationRegister)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            _ = flags;
+            if (kind != 0x0020)
+            {
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var bodyBytes = bodyTable.GetRow(1);
+            var body = new TrRmRegisterBodyReader(bodyBytes, contractCount,
+                schema);
+            var sectionOffset = artifact.AsSpan().IndexOf(section);
+            var bodyOffset = section.IndexOf(bodyBytes);
+            if (sectionOffset < 0 || bodyOffset < 0)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU comparison Body has no serialized range.");
+            }
+
+            for (var blockIndex = 0; blockIndex < body.BlockCount;
+                blockIndex++)
+            {
+                var code = body.GetBlockCode(blockIndex);
+                var codeOffset = bodyBytes.IndexOf(code);
+                if (codeOffset < 0)
+                {
+                    throw new InvalidOperationException(
+                        "The A2EU comparison Body has no serialized code range.");
+                }
+
+                for (var position = 0; position < code.Length;)
+                {
+                    var instructionLength
+                        = TrRmRegisterBodyReader.InstructionLength(
+                            code[position], schema);
+                    if (code[position] == 0x41)
+                    {
+                        var malformed = (byte[])artifact.Clone();
+                        var operandOffset = sectionOffset + bodyOffset
+                            + codeOffset + position + 1;
+                        malformed[operandOffset] = (byte)(
+                            (malformed[operandOffset] & 0xF0)
+                            | (destinationRegister & 0x0F));
+                        return malformed;
+                    }
+
+                    position += instructionLength;
+                }
+            }
+        }
+
+        throw new InvalidOperationException(
+            "The A2EU Body contains no comparison predicate.");
     }
 
     internal static byte[] RewriteStorageAddressArtifact(byte[] artifact,
