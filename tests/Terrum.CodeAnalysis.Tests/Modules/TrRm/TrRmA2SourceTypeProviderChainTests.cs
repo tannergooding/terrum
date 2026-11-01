@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -456,6 +457,625 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                     new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
                 ],
                 ["ConsumerKey"]));
+    }
+
+    [Test]
+    public void StandardA2SourceReferenceRebindsPermutedTypeAndArrayRows()
+    {
+        static byte[] CreateProvider(bool reordered)
+        {
+            var source = reordered
+                ? """
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Element {
+                        public int32 Value;
+                        public int32 Size;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct ContainerB {
+                        public [Element; 3] Values;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct ContainerA {
+                        public [Element; 2] Values;
+                    }
+                    """
+                : """
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct Element {
+                        public int32 Value;
+                        public int32 Size;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct ContainerA {
+                        public [Element; 2] Values;
+                    }
+                    [Blittable] [Layout(LayoutKind.Sequential)]
+                    public struct ContainerB {
+                        public [Element; 3] Values;
+                    }
+                    """;
+            var compilation = Compilation.CreateLibrary(
+                SyntaxTree.Parse(source));
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, "Provider", SchemaIdentity, 1,
+                [
+                    new TrRmSourceTypeExport("", "Element", "ElementKey"),
+                    new TrRmSourceTypeExport("", "ContainerA",
+                        "ContainerAKey"),
+                    new TrRmSourceTypeExport("", "ContainerB",
+                        "ContainerBKey"),
+                ]);
+        }
+
+        static (int TypeDefRow, int FieldDefRow, int TypeSpecRow,
+            int ElementTypeSpecRow, int LayoutRow, int FixedArrayLayoutRow)
+            GetContainerARows(byte[] artifact)
+        {
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(
+                            artifact));
+            Assert.That(tables.Exports.TryGetDefinitionForKey(1,
+                "ContainerAKey", out var definition), Is.True);
+            var typeDefRow = checked((int)(definition & 0x00FF_FFFF));
+            var (fieldDefRow, _) = tables.TypeDefs.GetFieldRange(typeDefRow);
+            var layoutRow = tables.Layouts.GetLayoutForProfile(typeDefRow, 1);
+            var typeSpecRef = tables.Fields.GetTypeSpecRef(fieldDefRow);
+            var typeSpecRow = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef).Row;
+            Assert.That(tables.TypeSpecs.TryGetFixedInlineArray(typeSpecRef,
+                out var elementTypeSpecRef, out _), Is.True);
+            var elementTypeSpecRow
+                = tables.TypeSpecs.GetTypeSpecRef(elementTypeSpecRef).Row;
+            var fixedArrayLayoutRow = tables.FixedArrayLayouts.FindRow(1,
+                typeSpecRef, 1);
+            return (typeDefRow, fieldDefRow, typeSpecRow,
+                elementTypeSpecRow, layoutRow, fixedArrayLayoutRow);
+        }
+
+        static int FindStringRow(TrRmStringTableReader strings, string value)
+        {
+            for (var row = 1; row <= strings.Count; row++)
+            {
+                if (StringComparer.Ordinal.Equals(
+                        strings.DecodeNamespace(row), value))
+                {
+                    return row;
+                }
+            }
+
+            throw new InvalidDataException(
+                "The source fixture is missing a required String row.");
+        }
+
+        static byte[] ReplaceSections(byte[] artifact,
+            params (ushort Kind, byte[] Bytes)[] replacements)
+        {
+            var replacementBytesByKind
+                = new Dictionary<ushort, byte[]>(replacements.Length);
+            foreach (var (kind, bytes) in replacements)
+            {
+                replacementBytesByKind.Add(kind, bytes);
+            }
+
+            var artifactIndex
+                = TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+            var sections = new List<TrRmSection>(
+                artifactIndex.SectionCount);
+            for (var sectionIndex = 0;
+                sectionIndex < artifactIndex.SectionCount; sectionIndex++)
+            {
+                artifactIndex.GetSection(sectionIndex, out var kind,
+                    out var flags, out var section, out var recordCount);
+                var bytes = replacementBytesByKind.TryGetValue(kind,
+                    out var replacementBytes)
+                    ? replacementBytes : section.ToArray();
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), bytes));
+            }
+
+            return TrRmArtifactWriter.Encode(sections,
+                TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyDraft);
+        }
+
+        static byte[] PermuteFieldDefOwnerBlocks(byte[] artifact)
+        {
+            var artifactIndex
+                = TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    artifactIndex);
+            var fieldOrder = new List<int>(tables.Fields.Count);
+            for (var typeDefRow = tables.TypeDefs.Count;
+                typeDefRow > 0; typeDefRow--)
+            {
+                var (first, end)
+                    = tables.TypeDefs.GetFieldRange(typeDefRow);
+                for (var fieldRow = first; fieldRow < end; fieldRow++)
+                {
+                    fieldOrder.Add(fieldRow);
+                }
+            }
+
+            if (fieldOrder.Count != tables.Fields.Count)
+            {
+                throw new InvalidDataException(
+                    "The source fixture has incomplete FieldDef ownership.");
+            }
+
+            var newFieldRowByOld = new int[tables.Fields.Count + 1];
+            var fieldRows = new TrRmFieldDefRow[fieldOrder.Count];
+            for (var index = 0; index < fieldOrder.Count; index++)
+            {
+                var oldFieldRow = fieldOrder[index];
+                var newFieldRow = index + 1;
+                newFieldRowByOld[oldFieldRow] = newFieldRow;
+                fieldRows[index] = new TrRmFieldDefRow(
+                    tables.Fields.GetOwnerTypeDef(oldFieldRow),
+                    FindStringRow(tables.Strings,
+                        tables.Fields.GetName(oldFieldRow)),
+                    tables.Fields.GetTypeSpecRef(oldFieldRow),
+                    tables.Fields.GetFlags(oldFieldRow));
+            }
+
+            var typeDefRows = new TrRmTypeDefRow[tables.TypeDefs.Count];
+            for (var typeDefRow = 1;
+                typeDefRow <= tables.TypeDefs.Count; typeDefRow++)
+            {
+                var (oldFirst, oldEnd)
+                    = tables.TypeDefs.GetFieldRange(typeDefRow);
+                var (genericFirst, genericCount)
+                    = tables.TypeDefs.GetGenericRange(typeDefRow);
+                var (layoutFirst, layoutCount)
+                    = tables.TypeDefs.GetLayoutRange(typeDefRow);
+                var (contractFirst, contractCount)
+                    = tables.TypeDefs.GetContractRange(typeDefRow);
+                typeDefRows[typeDefRow - 1] = new TrRmTypeDefRow(
+                    FindStringRow(tables.Strings,
+                        tables.TypeDefs.GetNamespace(typeDefRow)),
+                    FindStringRow(tables.Strings,
+                        tables.TypeDefs.GetName(typeDefRow)),
+                    tables.TypeDefs.GetFlags(typeDefRow),
+                    oldFirst == 0 ? 0 : newFieldRowByOld[oldFirst],
+                    oldEnd - oldFirst, genericFirst, genericCount,
+                    layoutFirst, layoutCount, contractFirst, contractCount);
+            }
+
+            var typeDefBytes = TrRmTypeDefTableWriter.Encode(typeDefRows,
+                tables.Strings, tables.Modules, fieldRows.Length, 0,
+                tables.Layouts.Count, tables.TypeDefs.ContractCount,
+                TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyDraft);
+            var typeDefs = new TrRmTypeDefTableReader(typeDefBytes,
+                typeDefRows.Length, tables.Strings, tables.Modules,
+                fieldRows.Length, 0, tables.Layouts.Count,
+                tables.TypeDefs.ContractCount,
+                TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyDraft);
+            var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows,
+                tables.Strings, typeDefs, tables.TypeSpecs);
+            var fields = new TrRmFieldDefTableReader(fieldBytes,
+                fieldRows.Length, tables.Strings, typeDefs, tables.TypeSpecs);
+            var layoutFieldRows = new TrRmLayoutFieldRow[
+                tables.LayoutFields.Count];
+            for (var row = 1; row <= layoutFieldRows.Length; row++)
+            {
+                var fieldDefRow = tables.LayoutFields.GetFieldDef(row);
+                layoutFieldRows[row - 1] = new TrRmLayoutFieldRow(
+                    tables.LayoutFields.GetOwnerLayout(row),
+                    tables.LayoutFields.GetOrdinal(row),
+                    newFieldRowByOld[fieldDefRow]);
+            }
+
+            var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
+                layoutFieldRows, tables.Layouts, typeDefs, fields);
+            return ReplaceSections(artifact,
+                (0x0013, typeDefBytes), (0x0014, fieldBytes),
+                (0x0023, layoutFieldBytes));
+        }
+
+        static byte[] ReverseLayoutVariants(byte[] artifact)
+        {
+            var artifactIndex
+                = TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    artifactIndex);
+            var oldLayoutByNew = new int[tables.Layouts.Count + 1];
+            for (var typeDefRow = 1;
+                typeDefRow <= tables.TypeDefs.Count; typeDefRow++)
+            {
+                var (first, count)
+                    = tables.TypeDefs.GetLayoutRange(typeDefRow);
+                for (var offset = 0; offset < count; offset++)
+                {
+                    oldLayoutByNew[first + count - offset - 1] = first + offset;
+                }
+            }
+
+            var layoutRows = new TrRmLayoutRow[tables.Layouts.Count];
+            var layoutFieldRows = new List<TrRmLayoutFieldRow>(
+                tables.LayoutFields.Count);
+            for (var newLayoutRow = 1;
+                newLayoutRow <= layoutRows.Length; newLayoutRow++)
+            {
+                var oldLayoutRow = oldLayoutByNew[newLayoutRow];
+                var (oldFieldFirst, fieldCount)
+                    = tables.Layouts.GetLayoutFieldRange(oldLayoutRow);
+                var newFieldFirst = layoutFieldRows.Count + 1;
+                for (var ordinal = 0; ordinal < fieldCount; ordinal++)
+                {
+                    var fieldDefRow
+                        = tables.LayoutFields.GetFieldDef(
+                            oldFieldFirst + ordinal);
+                    layoutFieldRows.Add(new TrRmLayoutFieldRow(
+                        newLayoutRow, ordinal, fieldDefRow));
+                }
+
+                layoutRows[newLayoutRow - 1] = new TrRmLayoutRow(
+                    tables.Layouts.GetOwnerTypeDef(oldLayoutRow),
+                    tables.Layouts.GetTargetProfileRef(oldLayoutRow),
+                    tables.Layouts.GetLayoutKind(oldLayoutRow),
+                    tables.Layouts.GetFlags(oldLayoutRow),
+                    tables.Layouts.GetAlignment(oldLayoutRow),
+                    tables.Layouts.GetPack(oldLayoutRow), newFieldFirst,
+                    fieldCount);
+            }
+
+            var layoutBytes = TrRmLayoutTableWriter.Encode(layoutRows,
+                tables.TypeDefs, tables.TargetProfiles, layoutFieldRows.Count);
+            var layouts = new TrRmLayoutTableReader(layoutBytes,
+                layoutRows.Length, tables.TypeDefs, tables.TargetProfiles,
+                layoutFieldRows.Count);
+            var layoutFieldBytes = TrRmLayoutFieldTableWriter.Encode(
+                layoutFieldRows, layouts, tables.TypeDefs, tables.Fields);
+            return ReplaceSections(artifact, (0x0015, layoutBytes),
+                (0x0023, layoutFieldBytes));
+        }
+
+        static uint RemapTypeSpecRef(TrRmTypeSpecTableReader typeSpecs,
+            int[] newRowByOld, uint typeSpecRef)
+        {
+            var reference = typeSpecs.GetTypeSpecRef(typeSpecRef);
+            return reference.IsRow
+                ? checked((uint)newRowByOld[reference.Row])
+                : typeSpecRef;
+        }
+
+        static byte[] ReverseTypeSpecRows(byte[] artifact)
+        {
+            var artifactIndex
+                = TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    artifactIndex);
+            var typeSpecCount = tables.TypeSpecs.Count;
+            var newRowByOld = new int[typeSpecCount + 1];
+            var oldRowByNew = new int[typeSpecCount + 1];
+            var leafRows = new List<int>(typeSpecCount);
+            var dependentRows = new List<int>(typeSpecCount);
+            for (var oldRow = 1; oldRow <= typeSpecCount; oldRow++)
+            {
+                var form = tables.TypeSpecs.GetRow(oldRow)[0];
+                if (form is 0x01 or 0x02 or 0x03 or 0x04 or 0x0D)
+                {
+                    leafRows.Add(oldRow);
+                }
+                else
+                {
+                    dependentRows.Add(oldRow);
+                }
+            }
+
+            leafRows.Reverse();
+            var newRow = 0;
+            foreach (var oldRow in leafRows)
+            {
+                newRow++;
+                newRowByOld[oldRow] = newRow;
+                oldRowByNew[newRow] = oldRow;
+            }
+            foreach (var oldRow in dependentRows)
+            {
+                newRow++;
+                newRowByOld[oldRow] = newRow;
+                oldRowByNew[newRow] = oldRow;
+            }
+
+            var typeSpecRows = new ReadOnlyMemory<byte>[typeSpecCount];
+            for (var newTypeSpecRow = 1;
+                newTypeSpecRow <= typeSpecCount; newTypeSpecRow++)
+            {
+                var oldRow = oldRowByNew[newTypeSpecRow];
+                var row = tables.TypeSpecs.GetRow(oldRow);
+                if (tables.TypeSpecs.TryGetFixedInlineArray((uint)oldRow,
+                        out var elementTypeSpecRef, out var elementCount))
+                {
+                    typeSpecRows[newTypeSpecRow - 1]
+                        = TrRmTypeSpecTableWriter.FixedInlineArray(
+                            RemapTypeSpecRef(tables.TypeSpecs, newRowByOld,
+                                elementTypeSpecRef), elementCount);
+                }
+                else if (row[0] is >= 0x06 and <= 0x0B)
+                {
+                    var innerTypeSpecRef
+                        = BinaryPrimitives.ReadUInt32LittleEndian(
+                            row.Slice(2, sizeof(uint)));
+                    typeSpecRows[newTypeSpecRow - 1]
+                        = TrRmTypeSpecTableWriter.Wrapped(row[0],
+                            RemapTypeSpecRef(tables.TypeSpecs, newRowByOld,
+                                innerTypeSpecRef), row[1]);
+                }
+                else if (row[0] == 0x0C)
+                {
+                    var argumentTypeSpecRef
+                        = BinaryPrimitives.ReadUInt32LittleEndian(
+                            row.Slice(3, sizeof(uint)));
+                    typeSpecRows[newTypeSpecRow - 1]
+                        = TrRmTypeSpecTableWriter.IndexedFamily(row[2],
+                            RemapTypeSpecRef(tables.TypeSpecs, newRowByOld,
+                                argumentTypeSpecRef), row[1]);
+                }
+                else if (row[0] == 0x05)
+                {
+                    throw new NotSupportedException(
+                        "This A2 row-permutation fixture does not admit constructed TypeSpecs.");
+                }
+                else
+                {
+                    typeSpecRows[newTypeSpecRow - 1] = row.ToArray();
+                }
+            }
+
+            var typeSpecBytes = TrRmTypeSpecTableWriter.Encode(typeSpecRows,
+                tables.TypeDefs.Count, tables.Imports.Count, 0, 0,
+                TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyDraft);
+            var typeSpecs = new TrRmTypeSpecTableReader(typeSpecBytes,
+                typeSpecRows.Length, tables.TypeDefs.Count,
+                tables.Imports.Count, 0, 0, TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyDraft);
+            var fieldRows = new TrRmFieldDefRow[tables.Fields.Count];
+            for (var fieldRow = 1; fieldRow <= fieldRows.Length; fieldRow++)
+            {
+                fieldRows[fieldRow - 1] = new TrRmFieldDefRow(
+                    tables.Fields.GetOwnerTypeDef(fieldRow),
+                    FindStringRow(tables.Strings,
+                        tables.Fields.GetName(fieldRow)),
+                    RemapTypeSpecRef(tables.TypeSpecs, newRowByOld,
+                        tables.Fields.GetTypeSpecRef(fieldRow)),
+                    tables.Fields.GetFlags(fieldRow));
+            }
+
+            var fieldBytes = TrRmFieldDefTableWriter.Encode(fieldRows,
+                tables.Strings, tables.TypeDefs, typeSpecs);
+            var fixedArrayRows = new TrRmFixedArrayLayoutRow[
+                tables.FixedArrayLayouts.Count];
+            for (var row = 1; row <= fixedArrayRows.Length; row++)
+            {
+                var layout = tables.FixedArrayLayouts.GetRow(row);
+                fixedArrayRows[row - 1] = layout with {
+                    ArrayTypeSpecRow
+                        = newRowByOld[layout.ArrayTypeSpecRow],
+                };
+            }
+
+            var fixedArrayBytes
+                = TrRmFixedArrayLayoutTableWriter.Encode(fixedArrayRows,
+                    typeSpecs, tables.TargetProfiles, tables.Features,
+                    tables.Modules, TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyDraft);
+            return ReplaceSections(artifact, (0x0011, typeSpecBytes),
+                (0x0012, fixedArrayBytes), (0x0014, fieldBytes));
+        }
+
+        static byte[] ReverseFixedArrayLayoutRows(byte[] artifact)
+        {
+            var artifactIndex
+                = TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+            var tables = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    artifactIndex);
+            var reversedRows
+                = new TrRmFixedArrayLayoutRow[
+                    tables.FixedArrayLayouts.Count];
+            for (var index = 0; index < reversedRows.Length; index++)
+            {
+                reversedRows[index] = tables.FixedArrayLayouts.GetRow(
+                    reversedRows.Length - index);
+            }
+
+            var fixedArrayLayoutBytes
+                = TrRmFixedArrayLayoutTableWriter.Encode(reversedRows,
+                    tables.TypeSpecs, tables.TargetProfiles, tables.Features,
+                    tables.Modules, TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyDraft);
+            return ReplaceSections(artifact, (0x0012, fixedArrayLayoutBytes));
+        }
+
+        var originalProvider = CreateProvider(reordered: false);
+        var replacementProvider = CreateProvider(reordered: true);
+        var fieldPermutedProvider
+            = PermuteFieldDefOwnerBlocks(originalProvider);
+        var layoutPermutedProvider = ReverseLayoutVariants(originalProvider);
+        var typeSpecPermutedProvider = ReverseTypeSpecRows(originalProvider);
+        var arrayPermutedProvider
+            = ReverseFixedArrayLayoutRows(originalProvider);
+        var originalRows = GetContainerARows(originalProvider);
+        var replacementRows = GetContainerARows(replacementProvider);
+        var fieldPermutedRows = GetContainerARows(fieldPermutedProvider);
+        var layoutPermutedRows = GetContainerARows(layoutPermutedProvider);
+        var typeSpecPermutedRows = GetContainerARows(
+            typeSpecPermutedProvider);
+        var arrayPermutedRows = GetContainerARows(arrayPermutedProvider);
+        Assert.That(replacementRows.TypeDefRow,
+            Is.Not.EqualTo(originalRows.TypeDefRow));
+        Assert.That(replacementRows.FieldDefRow,
+            Is.Not.EqualTo(originalRows.FieldDefRow));
+        Assert.That(replacementRows.TypeSpecRow,
+            Is.Not.EqualTo(originalRows.TypeSpecRow));
+        Assert.That(replacementRows.ElementTypeSpecRow,
+            Is.EqualTo(originalRows.ElementTypeSpecRow));
+        Assert.That(replacementRows.LayoutRow,
+            Is.Not.EqualTo(originalRows.LayoutRow));
+        Assert.That(replacementRows.FixedArrayLayoutRow,
+            Is.Not.EqualTo(originalRows.FixedArrayLayoutRow));
+        Assert.That(fieldPermutedRows.TypeDefRow,
+            Is.EqualTo(originalRows.TypeDefRow));
+        Assert.That(fieldPermutedRows.FieldDefRow,
+            Is.Not.EqualTo(originalRows.FieldDefRow));
+        Assert.That(fieldPermutedRows.TypeSpecRow,
+            Is.EqualTo(originalRows.TypeSpecRow));
+        Assert.That(fieldPermutedRows.ElementTypeSpecRow,
+            Is.EqualTo(originalRows.ElementTypeSpecRow));
+        Assert.That(fieldPermutedRows.LayoutRow,
+            Is.EqualTo(originalRows.LayoutRow));
+        Assert.That(fieldPermutedRows.FixedArrayLayoutRow,
+            Is.EqualTo(originalRows.FixedArrayLayoutRow));
+        Assert.That(layoutPermutedRows.TypeDefRow,
+            Is.EqualTo(originalRows.TypeDefRow));
+        Assert.That(layoutPermutedRows.FieldDefRow,
+            Is.EqualTo(originalRows.FieldDefRow));
+        Assert.That(layoutPermutedRows.TypeSpecRow,
+            Is.EqualTo(originalRows.TypeSpecRow));
+        Assert.That(layoutPermutedRows.ElementTypeSpecRow,
+            Is.EqualTo(originalRows.ElementTypeSpecRow));
+        Assert.That(layoutPermutedRows.LayoutRow,
+            Is.Not.EqualTo(originalRows.LayoutRow));
+        Assert.That(layoutPermutedRows.FixedArrayLayoutRow,
+            Is.EqualTo(originalRows.FixedArrayLayoutRow));
+        Assert.That(typeSpecPermutedRows.TypeDefRow,
+            Is.EqualTo(originalRows.TypeDefRow));
+        Assert.That(typeSpecPermutedRows.FieldDefRow,
+            Is.EqualTo(originalRows.FieldDefRow));
+        Assert.That(typeSpecPermutedRows.TypeSpecRow,
+            Is.EqualTo(originalRows.TypeSpecRow));
+        Assert.That(typeSpecPermutedRows.ElementTypeSpecRow,
+            Is.Not.EqualTo(originalRows.ElementTypeSpecRow));
+        Assert.That(typeSpecPermutedRows.LayoutRow,
+            Is.EqualTo(originalRows.LayoutRow));
+        Assert.That(typeSpecPermutedRows.FixedArrayLayoutRow,
+            Is.EqualTo(originalRows.FixedArrayLayoutRow));
+        Assert.That(arrayPermutedRows.TypeDefRow,
+            Is.EqualTo(originalRows.TypeDefRow));
+        Assert.That(arrayPermutedRows.FieldDefRow,
+            Is.EqualTo(originalRows.FieldDefRow));
+        Assert.That(arrayPermutedRows.TypeSpecRow,
+            Is.EqualTo(originalRows.TypeSpecRow));
+        Assert.That(arrayPermutedRows.ElementTypeSpecRow,
+            Is.EqualTo(originalRows.ElementTypeSpecRow));
+        Assert.That(arrayPermutedRows.LayoutRow,
+            Is.EqualTo(originalRows.LayoutRow));
+        Assert.That(arrayPermutedRows.FixedArrayLayoutRow,
+            Is.Not.EqualTo(originalRows.FixedArrayLayoutRow));
+
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(SchemaIdentity, originalProvider),
+            "Provider", [], ["ContainerAKey"]);
+        var consumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable] [Layout(LayoutKind.Sequential)]
+            public struct Consumer {
+                public ContainerA Value;
+                public [ContainerA; 2] Values;
+            }
+            """), providerReference);
+        Assert.That(consumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, consumer.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumer.Program!, "Consumer", SchemaIdentity, 1,
+            [new TrRmSourceTypeExport("", "Consumer", "ConsumerKey")]);
+
+        var originalReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "Consumer",
+                [new TrRmStandardArtifactInput(SchemaIdentity,
+                    originalProvider)],
+                ["ConsumerKey"]);
+        var replacementReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    consumerArtifact),
+                "Consumer",
+                [new TrRmStandardArtifactInput(SchemaIdentity,
+                    replacementProvider)],
+                ["ConsumerKey"]);
+        Assert.That(originalReference.Structures.Any(static structure
+            => structure.Name == "ContainerA"), Is.True);
+        foreach (var providerArtifact in new[] {
+            fieldPermutedProvider,
+            layoutPermutedProvider,
+            typeSpecPermutedProvider,
+            arrayPermutedProvider,
+        })
+        {
+            var permutedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        consumerArtifact),
+                    "Consumer",
+                    [new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact)],
+                    ["ConsumerKey"]);
+            Assert.That(permutedReference.Structures.Any(static structure
+                => structure.Name == "ContainerA"), Is.True);
+            var loadedPermutedConsumer
+                = TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        consumerArtifact),
+                    "Consumer",
+                    [new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact)]);
+            Assert.That(NativeFixedArrayContract.MatchesProgram(
+                loadedPermutedConsumer), Is.True);
+            var reemittedPermutedConsumer
+                = TrRmExecutableCompiler.EmitStandard(
+                    loadedPermutedConsumer, "Consumer", SchemaIdentity, 1);
+            var reemittedPermutedReference
+                = TrRmExecutableCompiler.CreateStandardReference(
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        reemittedPermutedConsumer),
+                    "Consumer",
+                    [new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact)],
+                    ["ConsumerKey"]);
+            Assert.That(reemittedPermutedReference.NativeFixedArrayTypes,
+                Is.EqualTo(loadedPermutedConsumer.NativeFixedArrayTypes));
+        }
+        Assert.That(replacementReference.Structures.Single(
+            static structure => structure.Name == "ContainerA")
+            .StandardTypeOrigin!.DefinitionId,
+            Is.EqualTo(0x1300_0000u
+                | checked((uint)replacementRows.TypeDefRow)));
+        var loadedConsumer = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(SchemaIdentity, consumerArtifact),
+            "Consumer",
+            [new TrRmStandardArtifactInput(SchemaIdentity,
+                replacementProvider)]);
+        Assert.That(NativeFixedArrayContract.MatchesProgram(loadedConsumer),
+            Is.True);
+        var reemittedConsumer = TrRmExecutableCompiler.EmitStandard(
+            loadedConsumer, "Consumer", SchemaIdentity, 1);
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    reemittedConsumer),
+                "Consumer",
+                [new TrRmStandardArtifactInput(SchemaIdentity,
+                    replacementProvider)],
+                ["ConsumerKey"]);
+        Assert.That(reemittedReference.NativeFixedArrayTypes,
+            Is.EqualTo(loadedConsumer.NativeFixedArrayTypes));
     }
 
     private static byte[] CreateRootArtifact(bool duplicatePairAlias = false,

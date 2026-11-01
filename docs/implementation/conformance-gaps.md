@@ -500,9 +500,16 @@ triples for the same expected TypeDef retain each ExportKey and Import
 expectation; they bind only when all keys resolve to the same actual provider
 TypeDef, while duplicate triples and split aliases reject. Distinct expected
 views now remain separate expected stubs while their established alias keys are
-cross-linked to the same actual provider definition. Origin replacement/
-remapping across arbitrary row/context permutations, canonical row
-re-encoding, source-free Bodies, CLI and runtime remain open. Type-only source
+cross-linked to the same actual provider definition. Type-only structural
+re-encoding now rebinds against compatible providers whose TypeDef/FieldDef/
+TypeSpec/Layout/LayoutField/FixedArrayLayout rows move. Independent regressions
+reorder FieldDef owner blocks, Layout variants, FixedArrayLayout rows and
+topologically valid TypeSpec leaf rows with their child references, then
+exercise CreateStandardReference and LoadStandard/EmitStandard/rebind. The
+combined A2 provider/reference/layout selection passed 165/165 with zero skips
+at `artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-10-31_17_37_24_net11.0.trx`.
+PlaceSelection/TypeMap/Body remapping and source-free Body execution remain
+open. Type-only source
 consumers now re-emit origin-backed TypeDef stubs, ModuleRefs, Imports,
 imported TypeSpec uses and fixed-array recipes without losing them when no
 local ExportKey map is supplied. Explicit local exports preserve the same
