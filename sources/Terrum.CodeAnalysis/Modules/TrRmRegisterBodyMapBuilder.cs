@@ -25,25 +25,32 @@ internal sealed record TrRmRegisterBodyMaps(
 internal static class TrRmRegisterBodyMapBuilder
 {
     internal static TrRmRegisterBodyMaps Create(IEnumerable<uint> typeTokens,
-        IEnumerable<uint> methodTokens)
+        IEnumerable<uint> methodTokens,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         ArgumentNullException.ThrowIfNull(typeTokens);
         ArgumentNullException.ThrowIfNull(methodTokens);
-        var typeSet = Collect(typeTokens, nameof(typeTokens));
-        var methodSet = Collect(methodTokens, nameof(methodTokens));
-        var typeMap = Encode(typeSet, out var typeMapIndices);
-        var methodMap = Encode(methodSet, out var methodMapIndices);
+        var typeSet = Collect(typeTokens, nameof(typeTokens), resourceLedger);
+        var methodSet = Collect(methodTokens, nameof(methodTokens),
+            resourceLedger);
+        var typeMap = Encode(typeSet, out var typeMapIndices,
+            resourceLedger);
+        var methodMap = Encode(methodSet, out var methodMapIndices,
+            resourceLedger);
         return new TrRmRegisterBodyMaps(typeMap, methodMap,
             typeMapIndices, methodMapIndices);
     }
 
     private static ImmutableArray<uint> Collect(IEnumerable<uint> tokens,
-        string parameterName)
+        string parameterName,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork(2);
         var result = ImmutableArray.CreateBuilder<uint>();
         var seen = ImmutableHashSet.CreateBuilder<uint>();
         foreach (var token in tokens)
         {
+            resourceLedger?.ConsumeWork();
             if (seen.Contains(token))
             {
                 continue;
@@ -53,27 +60,38 @@ internal static class TrRmRegisterBodyMapBuilder
                 throw new ArgumentOutOfRangeException(parameterName);
             }
 
+            resourceLedger?.ConsumeWork(2);
             _ = seen.Add(token);
             result.Add(token);
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL
+            + (ulong)result.Count
+            + ((ulong)result.Count * sizeof(uint))));
         return result.ToImmutable();
     }
 
     private static byte[] Encode(IReadOnlyList<uint> tokens,
-        out ImmutableDictionary<uint, ushort> indexes)
+        out ImmutableDictionary<uint, ushort> indexes,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
+        resourceLedger?.ConsumeWork(checked(1UL
+            + ((ulong)tokens.Count * sizeof(uint))));
         var bytes = new byte[tokens.Count * sizeof(uint)];
+        resourceLedger?.ConsumeWork();
         var indexBuilder = ImmutableDictionary.CreateBuilder<uint, ushort>();
         var index = 0;
         foreach (var token in tokens)
         {
+            resourceLedger?.ConsumeWork(2);
             BinaryPrimitives.WriteUInt32LittleEndian(
                 bytes.AsSpan(index * sizeof(uint)), token);
             indexBuilder.Add(token, checked((ushort)index));
             index++;
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL + (ulong)tokens.Count
+            + ((ulong)tokens.Count * (sizeof(uint) + sizeof(ushort)))));
         indexes = indexBuilder.ToImmutable();
         return bytes;
     }

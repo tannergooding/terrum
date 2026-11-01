@@ -152,7 +152,8 @@ internal static class TrRmRegisterBodyRecordWriter
         byte accessKind, byte destinationKind, byte baseKind,
         ushort destinationIndex, ushort baseIndex, byte indexKind,
         byte targetRefKind, ushort indexIndex, uint targetRef,
-        ushort referentTypeMapIndex, TrRmArtifactSchema schema)
+        ushort referentTypeMapIndex, TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (targetKind is < 1 or > 4 || accessKind is < 1 or > 5
             || destinationKind > 2 || baseKind > 2 || indexKind > 2
@@ -169,6 +170,7 @@ internal static class TrRmRegisterBodyRecordWriter
             throw new ArgumentOutOfRangeException(nameof(targetKind));
         }
 
+        resourceLedger?.ConsumeWork(1 + 24UL);
         var result = new byte[24];
         result[0] = 0x04;
         result[RecordHeaderSize] = targetKind;
@@ -187,7 +189,8 @@ internal static class TrRmRegisterBodyRecordWriter
 
     internal static byte[] EncodeStorageAddress(byte sourceKind,
         byte resultKind, ushort sourceIndex, ushort resultIndex,
-        ushort pointerTypeMapIndex, uint requiredElementCount)
+        ushort pointerTypeMapIndex, uint requiredElementCount,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (sourceKind is not (1 or 2)
             || (sourceKind == 1 && sourceIndex > 13)
@@ -201,6 +204,7 @@ internal static class TrRmRegisterBodyRecordWriter
             throw new ArgumentOutOfRangeException(nameof(sourceKind));
         }
 
+        resourceLedger?.ConsumeWork(1 + 16UL);
         var result = new byte[16];
         result[0] = 0x0E;
         result[RecordHeaderSize] = sourceKind;
@@ -253,13 +257,15 @@ internal static class TrRmRegisterBodyRecordWriter
     }
 
     internal static byte[] EncodeConditionalEdge(ushort trueBlock,
-        ushort falseBlock)
+        ushort falseBlock,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (trueBlock == falseBlock)
         {
             throw new ArgumentOutOfRangeException(nameof(falseBlock));
         }
 
+        resourceLedger?.ConsumeWork(1 + 8UL);
         var result = new byte[8];
         result[0] = 0x06;
         Write(result, RecordHeaderSize, trueBlock);

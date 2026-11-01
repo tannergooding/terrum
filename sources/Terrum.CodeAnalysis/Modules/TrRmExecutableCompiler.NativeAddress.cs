@@ -85,13 +85,17 @@ public static partial class TrRmExecutableCompiler
         BoundNativeFunctionAddress? address = null;
         for (var index = 0; index < program.Functions.Length; index++)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             var function = program.Functions[index];
+            ReserveA3Collection(a3LayoutResourceLedger, 0);
             var addresses = new List<BoundNativeFunctionAddress>();
             if (!BoundTreeTraversal.VisitExpressions(function.Body,
                 expression =>
                 {
+                    a3LayoutResourceLedger?.ConsumeWork();
                     if (expression is BoundNativeFunctionAddress nativeAddress)
                     {
+                        a3LayoutResourceLedger?.ConsumeWork();
                         addresses.Add(nativeAddress);
                     }
                 }))
@@ -202,6 +206,7 @@ public static partial class TrRmExecutableCompiler
         if (schema.UsesForeignInvocationStorageAddresses()
             && TryGetNativeAddressStorageCall(program, caller,
                 selectedAddress, signature, schema,
+                a3LayoutResourceLedger,
                 out var storageAddressCall)
             && storageAddressCall is not null)
         {
@@ -214,7 +219,8 @@ public static partial class TrRmExecutableCompiler
         else
         {
             indirectCall = TryGetNativeAddressCall(
-                caller, selectedAddress, signature, out callHomeIndex,
+                caller, selectedAddress, signature,
+                a3LayoutResourceLedger, out callHomeIndex,
                 out callResultHomeIndex);
         }
         var emitsIndirectCall = indirectCall is not null;
@@ -224,7 +230,8 @@ public static partial class TrRmExecutableCompiler
                 "The discarded NativeAddress profile requires a parameterless caller.");
         }
 
-        if (!emitsIndirectCall && !IsAddressOnlyVoidBody(caller, selectedAddress))
+        if (!emitsIndirectCall && !IsAddressOnlyVoidBody(caller,
+                selectedAddress, a3LayoutResourceLedger))
         {
             throw Unsupported(
                 "The caller Body is outside the discarded-address or unit indirect-call profile.");
@@ -233,16 +240,23 @@ public static partial class TrRmExecutableCompiler
         var targetMethodRow = targetIndex + 1;
         var callerMethodRow = callerIndex + 1;
         var anchorMethodRow = program.Functions.Length + 1;
-        var typeSpecRows = new List<ReadOnlyMemory<byte>>
+        ReserveA3Collection(a3LayoutResourceLedger, 1);
+        ReserveA3Buffer(a3LayoutResourceLedger, 7);
+        var typeSpecRows = new List<ReadOnlyMemory<byte>>(1)
         {
             TrRmTypeSpecTableWriter.NativeFunctionPointer(
                 (byte)signature.CallingConvention, checked((uint)anchorMethodRow)),
         };
         var signatureTypeSpecRefs = new Dictionary<PrimitiveType, uint>();
+        a3LayoutResourceLedger?.ConsumeWork();
         var fixedArrayTypeSpecRefs = new Dictionary<int, uint>();
+        ReserveA3Buffer(a3LayoutResourceLedger,
+            program.NativeFixedArrayTypes.Length);
         var fixedArrayTypeStates
             = new byte[program.NativeFixedArrayTypes.Length];
+        a3LayoutResourceLedger?.ConsumeWork();
         var fixedArrayLayoutRows = new List<TrRmFixedArrayLayoutRow>();
+        a3LayoutResourceLedger?.ConsumeWork();
         var fixedArrayLayoutRowByType = new Dictionary<int, int>();
         uint GetFixedArrayTypeSpecRef(int arrayIndex)
         {
@@ -302,9 +316,16 @@ public static partial class TrRmExecutableCompiler
                     NativeFixedArrayTypes.Index(type));
             }
 
+            a3LayoutResourceLedger?.ConsumeWork();
+            if (signatureTypeSpecRefs.TryGetValue(type, out var typeSpecRef))
+            {
+                return typeSpecRef;
+            }
+
             byte[] typeSpecBytes;
             if (NativePointerTypes.IsType(type))
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 if (!NativePointerTypeContract.IsValidType(type,
                         program.NativePointerTypes))
                 {
@@ -323,6 +344,7 @@ public static partial class TrRmExecutableCompiler
                         $"The NativeAddress producer does not support pointer pointee {pointer.PointeeType}.");
                 }
 
+                a3LayoutResourceLedger?.ConsumeWork(5);
                 typeSpecBytes = TrRmTypeSpecTableWriter.InlineFamily(0x8C,
                     s_codes[pointeeIndex], pointer.IsWritable ? (byte)1 : (byte)0);
             }
@@ -335,74 +357,125 @@ public static partial class TrRmExecutableCompiler
                         $"The NativeAddress producer does not support signature type {type}.");
                 }
 
+                a3LayoutResourceLedger?.ConsumeWork(4);
                 typeSpecBytes
                     = TrRmTypeSpecTableWriter.Builtin(s_codes[scalarIndex]);
             }
 
-            if (!signatureTypeSpecRefs.TryGetValue(type, out var typeSpecRef))
-            {
-                typeSpecRef = checked((uint)typeSpecRows.Count + 1);
-                typeSpecRows.Add(new ReadOnlyMemory<byte>(typeSpecBytes));
-                signatureTypeSpecRefs.Add(type, typeSpecRef);
-            }
-
+            typeSpecRef = checked((uint)typeSpecRows.Count + 1);
+            a3LayoutResourceLedger?.ConsumeWork(3);
+            typeSpecRows.Add(new ReadOnlyMemory<byte>(typeSpecBytes));
+            signatureTypeSpecRefs.Add(type, typeSpecRef);
             return typeSpecRef;
         }
 
-        var callerParameterTypeSpecRefs = caller.Variables
-            .Take(caller.ParameterCount)
-            .Select(static variable => variable.Type)
-            .Select(GetSignatureTypeSpecRef).ToArray();
-        var callerLocalTypeSpecRefs = caller.Variables
-            .Skip(caller.ParameterCount)
-            .Select(variable => NativeFunctionPointerTypes.IsType(variable.Type)
-                ? 0u : GetSignatureTypeSpecRef(variable.Type))
-            .ToArray();
+        ReserveA3Array(a3LayoutResourceLedger, caller.ParameterCount,
+            sizeof(uint));
+        var callerParameterTypeSpecRefs = new uint[caller.ParameterCount];
+        for (var ordinal = 0; ordinal < callerParameterTypeSpecRefs.Length;
+            ordinal++)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            callerParameterTypeSpecRefs[ordinal]
+                = GetSignatureTypeSpecRef(caller.Variables[ordinal].Type);
+        }
+
+        var callerLocalCount = caller.Variables.Length - caller.ParameterCount;
+        ReserveA3Array(a3LayoutResourceLedger, callerLocalCount,
+            sizeof(uint));
+        var callerLocalTypeSpecRefs = new uint[callerLocalCount];
+        for (var ordinal = 0; ordinal < callerLocalTypeSpecRefs.Length;
+            ordinal++)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            var type = caller.Variables[caller.ParameterCount + ordinal].Type;
+            callerLocalTypeSpecRefs[ordinal]
+                = NativeFunctionPointerTypes.IsType(type)
+                    ? 0u : GetSignatureTypeSpecRef(type);
+        }
+
+        ReserveA3Array(a3LayoutResourceLedger, signature.ParameterTypes.Length,
+            sizeof(uint));
         var targetParameterTypeSpecRefs
-            = signature.ParameterTypes.Select(GetSignatureTypeSpecRef).ToArray();
+            = new uint[signature.ParameterTypes.Length];
+        for (var ordinal = 0; ordinal < targetParameterTypeSpecRefs.Length;
+            ordinal++)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
+            targetParameterTypeSpecRefs[ordinal]
+                = GetSignatureTypeSpecRef(signature.ParameterTypes[ordinal]);
+        }
+
+        ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
+            sizeof(int));
         var functionSignatureRows = new int[program.Functions.Length];
+        ReserveA3Collection(a3LayoutResourceLedger,
+            program.Functions.Length + 1);
         var signatureRows = new List<TrRmMethodSigRow>(
             program.Functions.Length + 1);
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
         var parameterRows = new List<TrRmParamRow>();
         for (var functionIndex = 0;
             functionIndex < program.Functions.Length;
             functionIndex++)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             var function = program.Functions[functionIndex];
             var signatureRow = signatureRows.Count + 1;
             functionSignatureRows[functionIndex] = signatureRow;
-            var parameterTypes = function.Variables
-                .Take(function.ParameterCount)
-                .Select(static variable => variable.Type)
-                .Select(GetSignatureTypeSpecRef).ToArray();
+            ReserveA3Array(a3LayoutResourceLedger, function.ParameterCount,
+                sizeof(uint));
+            var parameterTypes = new uint[function.ParameterCount];
+            for (var ordinal = 0; ordinal < parameterTypes.Length; ordinal++)
+            {
+                a3LayoutResourceLedger?.ConsumeWork();
+                parameterTypes[ordinal] = GetSignatureTypeSpecRef(
+                    function.Variables[ordinal].Type);
+            }
             var parameterFirst = parameterTypes.Length == 0
                 ? 0 : parameterRows.Count + 1;
             for (var ordinal = 0; ordinal < parameterTypes.Length; ordinal++)
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 parameterRows.Add(new TrRmParamRow(signatureRow, ordinal,
                     parameterTypes[ordinal], 0));
             }
 
+            a3LayoutResourceLedger?.ConsumeWork();
             signatureRows.Add(new TrRmMethodSigRow(
                 GetSignatureTypeSpecRef(function.ReturnType), 0,
                 parameterFirst, parameterTypes.Length, 0, 0));
         }
 
         var anchorSignatureRow = functionSignatureRows[targetIndex];
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
         var featureRows = new List<TrRmFeatureRow>();
         if (fixedArrayLayoutRows.Count != 0)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             featureRows.Add(TrRmFeatureRow.RootlessNativeValues);
         }
+        a3LayoutResourceLedger?.ConsumeWork();
         featureRows.Add(new TrRmFeatureRow(4, 1));
-        if (program.Functions.Any(static function =>
-                function.DirectNativeImport is DirectNativeImport nativeImport
-                && !nativeImport.Parameters.IsEmpty))
+        var hasNativeImportParameters = false;
+        foreach (var function in program.Functions)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
+            if (function.DirectNativeImport is DirectNativeImport nativeImport
+                && !nativeImport.Parameters.IsEmpty)
+            {
+                hasNativeImportParameters = true;
+                break;
+            }
+        }
+        if (hasNativeImportParameters)
+        {
+            a3LayoutResourceLedger?.ConsumeWork();
             featureRows.Add(TrRmFeatureRow.ForeignInvocationContractsCandidate);
         }
         if (fixedArrayLayoutRows.Count != 0)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             featureRows.Add(
                 TrRmFeatureRow.FixedInlineArrayStorageCandidate);
         }
@@ -412,23 +485,35 @@ public static partial class TrRmExecutableCompiler
         var featureReader = new TrRmFeatureTableReader(featureBytes,
             featureRows.Count, schema, a3LayoutResourceLedger);
 
-        var stringRows = new List<(string Text, int Encoding)> { ("", 0) };
-        var stringIndexes = new Dictionary<(string Text, int Encoding), int>
-        {
-            [("", 0)] = 1,
-        };
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
+        var stringRows = new List<(string Text, int Encoding)>();
+        AddA3Staged(stringRows, ("", 0), a3LayoutResourceLedger);
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
+        var stringIndexes = new Dictionary<(string Text, int Encoding), int>();
+        AddA3Staged(stringIndexes, ("", 0), 1,
+            a3LayoutResourceLedger);
         var moduleNameRow = AddString(moduleIdentity, 1);
+        ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
+            sizeof(int));
         var methodNameRows = new int[program.Functions.Length];
         for (var index = 0; index < program.Functions.Length; index++)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             methodNameRows[index] = AddString(program.Functions[index].Name, 1);
         }
-        var anchorNameRow = AddString(CreateAnchorName(program.Functions), 1);
+        var anchorNameRow = AddString(
+            CreateAnchorName(program.Functions, a3LayoutResourceLedger), 1);
+        ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
+            sizeof(int));
         var nativeImportLibraryNameRows = new int[program.Functions.Length];
+        ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
+            sizeof(int));
         var nativeImportEntryNameRows = new int[program.Functions.Length];
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
         var nativeImportFunctionIndices = new List<int>();
         for (var index = 0; index < program.Functions.Length; index++)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             if (program.Functions[index].DirectNativeImport
                 is not DirectNativeImport nativeImport)
             {
@@ -439,7 +524,8 @@ public static partial class TrRmExecutableCompiler
                 = AddString(nativeImport.LibraryName, 0);
             nativeImportEntryNameRows[index]
                 = AddString(nativeImport.ExportName, 0);
-            nativeImportFunctionIndices.Add(index);
+            AddA3Staged(nativeImportFunctionIndices, index,
+                a3LayoutResourceLedger);
         }
 
         var providerIdentityRow = moduleImport is null
@@ -453,20 +539,27 @@ public static partial class TrRmExecutableCompiler
         var strings = new TrRmStringTableReader(stringsBytes, stringRows.Count,
             a3LayoutResourceLedger);
 
-        var moduleRefRows = new List<TrRmModuleRefRow>(
-            moduleImport is null ? 0 : 1);
+        var moduleRefCapacity = moduleImport is null ? 0 : 1;
+        ReserveA3Collection(a3LayoutResourceLedger, moduleRefCapacity);
+        var moduleRefRows = new List<TrRmModuleRefRow>(moduleRefCapacity);
         if (moduleImport is not null)
         {
-            moduleRefRows.Add(new TrRmModuleRefRow(providerIdentityRow,
-                moduleImport.TargetRequirement, moduleImport.RuntimePolicy));
+            AddA3Staged(moduleRefRows,
+                new TrRmModuleRefRow(providerIdentityRow,
+                    moduleImport.TargetRequirement, moduleImport.RuntimePolicy),
+                a3LayoutResourceLedger);
         }
 
         var entryMethodRow = program.EntryPoint < 0
             ? 0 : program.EntryPoint + 1;
-        var moduleBytes = TrRmModuleTableWriter.Encode([
+        ReserveA3Array(a3LayoutResourceLedger, 1, 11 * sizeof(uint));
+        var moduleRows = new[]
+        {
             new TrRmModuleRow(moduleNameRow, 1, 0, entryMethodRow, 1, 1, 1, 1,
                 1, featureRows.Count, 1),
-        ], strings, moduleRefRows.Count, 0,
+        };
+        var moduleBytes = TrRmModuleTableWriter.Encode(moduleRows,
+            strings, moduleRefRows.Count, 0,
             program.Functions.Length + 1, 0, featureRows.Count,
             a3LayoutResourceLedger);
         var modules = new TrRmModuleTableReader(moduleBytes, 1, strings,
@@ -504,21 +597,37 @@ public static partial class TrRmExecutableCompiler
             : new TrRmParamTableReader(paramBytes, parameterRows.Count,
                 signatures, typeSpecs, schema, a3LayoutResourceLedger);
         var anchorOwner = 0x1600_0000u | (uint)anchorMethodRow;
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
         var contractRows = new List<TrRmContractRow>();
+        ReserveA3Buffer(a3LayoutResourceLedger, sizeof(uint));
         var contractPayload = new byte[sizeof(uint)];
         BinaryPrimitives.WriteUInt32LittleEndian(contractPayload, 4);
+        ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
+            sizeof(int));
         var importContractFirstByFunction
             = new int[program.Functions.Length];
+        ReserveA3Array(a3LayoutResourceLedger, program.Functions.Length,
+            sizeof(int));
         var importContractCountByFunction
             = new int[program.Functions.Length];
+        ReserveA3SortWork(a3LayoutResourceLedger,
+            import.Parameters.Length);
+        ReserveA3Array(a3LayoutResourceLedger, import.Parameters.Length);
         var selectedNativeParameters = import.Parameters
             .OrderBy(static parameter => parameter.ParameterIndex).ToArray();
+        ReserveA3Collection(a3LayoutResourceLedger,
+            selectedNativeParameters.Length);
         var selectedNativeParameterPayloads
             = new List<byte[]>(selectedNativeParameters.Length);
         foreach (var functionIndex in nativeImportFunctionIndices)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             var nativeImport = program.Functions[functionIndex]
                 .DirectNativeImport!;
+            ReserveA3SortWork(a3LayoutResourceLedger,
+                nativeImport.Parameters.Length);
+            ReserveA3Array(a3LayoutResourceLedger,
+                nativeImport.Parameters.Length);
             var nativeParameters = nativeImport.Parameters
                 .OrderBy(static parameter => parameter.ParameterIndex)
                 .ToArray();
@@ -526,16 +635,19 @@ public static partial class TrRmExecutableCompiler
                 | checked((uint)(functionIndex + 1));
             importContractFirstByFunction[functionIndex]
                 = contractRows.Count + 1;
-            contractRows.Add(new TrRmContractRow(owner, 1,
-                contractPayload));
+            AddA3Staged(contractRows,
+                new TrRmContractRow(owner, 1, contractPayload),
+                a3LayoutResourceLedger);
             foreach (var parameter in nativeParameters)
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 if (parameter.Retention != NativeParameterRetention.NoEscape)
                 {
                     throw Unsupported(
                         "The NativeAddress producer requires NoEscape NativeParameter contracts.");
                 }
 
+                ReserveA3Buffer(a3LayoutResourceLedger, 12);
                 var payload = new byte[12];
                 BinaryPrimitives.WriteUInt32LittleEndian(payload,
                     checked((uint)parameter.ParameterIndex));
@@ -544,10 +656,13 @@ public static partial class TrRmExecutableCompiler
                 payload[6] = parameter.Extent == 0 ? (byte)0 : (byte)1;
                 BinaryPrimitives.WriteUInt32LittleEndian(payload.AsSpan(8),
                     parameter.Extent);
-                contractRows.Add(new TrRmContractRow(owner, 0x0E, payload));
+                AddA3Staged(contractRows,
+                    new TrRmContractRow(owner, 0x0E, payload),
+                    a3LayoutResourceLedger);
                 if (functionIndex == targetIndex)
                 {
-                    selectedNativeParameterPayloads.Add(payload);
+                    AddA3Staged(selectedNativeParameterPayloads, payload,
+                        a3LayoutResourceLedger);
                 }
             }
 
@@ -559,45 +674,61 @@ public static partial class TrRmExecutableCompiler
             ? 0 : contractRows.Count + 1;
         foreach (var payload in selectedNativeParameterPayloads)
         {
-            contractRows.Add(new TrRmContractRow(anchorOwner, 0x0E, payload));
+            AddA3Staged(contractRows,
+                new TrRmContractRow(anchorOwner, 0x0E, payload),
+                a3LayoutResourceLedger);
         }
 
         var typeDefs = new TrRmTypeDefTableReader([], 0, strings, modules,
             0, 0, 0, contractRows.Count, schema,
             a3LayoutResourceLedger);
+        ReserveA3Collection(a3LayoutResourceLedger,
+            program.Functions.Length + 1);
         var methodRows = new List<TrRmMethodDefRow>(program.Functions.Length + 1);
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
         var exportRows = new List<TrRmExportRow>();
         for (var index = 0; index < program.Functions.Length; index++)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             var function = program.Functions[index];
             var methodRow = index + 1;
             var visibility = function.IsPrivate ? 0u : function.IsInternal ? 1u : 2u;
             var isCaller = index == callerIndex;
-            methodRows.Add(new TrRmMethodDefRow(0, methodNameRows[index],
-                functionSignatureRows[index], visibility,
-                importContractFirstByFunction[index],
-                importContractCountByFunction[index],
-                isCaller ? 1 : 0));
+            AddA3Staged(methodRows,
+                new TrRmMethodDefRow(0, methodNameRows[index],
+                    functionSignatureRows[index], visibility,
+                    importContractFirstByFunction[index],
+                    importContractCountByFunction[index],
+                    isCaller ? 1 : 0),
+                a3LayoutResourceLedger);
             if (visibility == 2 && function.ModuleImport is null)
             {
-                exportRows.Add(new TrRmExportRow(
-                    0x1600_0000u | (uint)methodRow, methodNameRows[index]));
+                AddA3Staged(exportRows,
+                    new TrRmExportRow(
+                        0x1600_0000u | (uint)methodRow,
+                        methodNameRows[index]),
+                    a3LayoutResourceLedger);
             }
         }
-        methodRows.Add(new TrRmMethodDefRow(0, anchorNameRow,
-            anchorSignatureRow, 0, anchorContractFirst,
-            selectedNativeParameters.Length, 0));
+        AddA3Staged(methodRows,
+            new TrRmMethodDefRow(0, anchorNameRow, anchorSignatureRow, 0,
+                anchorContractFirst, selectedNativeParameters.Length, 0),
+            a3LayoutResourceLedger);
         var methodBytes = TrRmMethodDefTableWriter.Encode(methodRows, strings,
             modules, typeDefs, signatures, contractRows.Count, 1,
             a3LayoutResourceLedger);
         var methods = new TrRmMethodDefTableReader(methodBytes,
             methodRows.Count, strings, modules, typeDefs, signatures,
             contractRows.Count, 1, a3LayoutResourceLedger);
-        var importRows = new List<TrRmImportRow>(moduleImport is null ? 0 : 1);
+        var importRowCapacity = moduleImport is null ? 0 : 1;
+        ReserveA3Collection(a3LayoutResourceLedger, importRowCapacity);
+        var importRows = new List<TrRmImportRow>(importRowCapacity);
         if (moduleImport is not null)
         {
-            importRows.Add(new TrRmImportRow(1, providerExportKeyRow,
-                0x1600_0000u | (uint)targetMethodRow));
+            AddA3Staged(importRows,
+                new TrRmImportRow(1, providerExportKeyRow,
+                    0x1600_0000u | (uint)targetMethodRow),
+                a3LayoutResourceLedger);
         }
 
         var importBytes = importRows.Count == 0
@@ -635,33 +766,40 @@ public static partial class TrRmExecutableCompiler
                 a3LayoutResourceLedger);
         var layouts = new TrRmLayoutTableReader([], 0, typeDefs,
             targetProfiles, 0, a3LayoutResourceLedger);
+        ReserveA3Collection(a3LayoutResourceLedger,
+            nativeImportFunctionIndices.Count);
         var nativeImportRows = new List<TrRmNativeImportRow>(
             nativeImportFunctionIndices.Count);
         foreach (var functionIndex in nativeImportFunctionIndices)
         {
+            a3LayoutResourceLedger?.ConsumeWork();
             var nativeImport = program.Functions[functionIndex]
                 .DirectNativeImport!;
-            nativeImportRows.Add(new TrRmNativeImportRow(1,
-                (byte)nativeImport.ResolutionMode,
-                (byte)nativeImport.ResolutionPolicy,
-                (byte)nativeImport.CallingConvention, functionIndex + 1,
-                nativeImportLibraryNameRows[functionIndex],
-                nativeImportEntryNameRows[functionIndex]));
+            AddA3Staged(nativeImportRows,
+                new TrRmNativeImportRow(1,
+                    (byte)nativeImport.ResolutionMode,
+                    (byte)nativeImport.ResolutionPolicy,
+                    (byte)nativeImport.CallingConvention, functionIndex + 1,
+                    nativeImportLibraryNameRows[functionIndex],
+                    nativeImportEntryNameRows[functionIndex]),
+                a3LayoutResourceLedger);
         }
 
         var nativeImportBytes = TrRmNativeImportTableWriter.Encode(
             nativeImportRows, strings, methods, default, typeDefs, imports, modules,
             signatures, parameters, typeSpecs, contracts, layouts,
             a3LayoutResourceLedger);
-        var stagedCalls = new List<BoundCall>(
-            indirectCall?.Arguments.Length ?? 0);
+        var stagedCallCapacity = indirectCall?.Arguments.Length ?? 0;
+        ReserveA3Collection(a3LayoutResourceLedger, stagedCallCapacity);
+        var stagedCalls = new List<BoundCall>(stagedCallCapacity);
         if (indirectCall is not null)
         {
             foreach (var argument in indirectCall.Arguments)
             {
                 if (argument is BoundCall stagedCall)
                 {
-                    stagedCalls.Add(stagedCall);
+                    AddA3Staged(stagedCalls, stagedCall,
+                        a3LayoutResourceLedger);
                 }
             }
         }
@@ -672,16 +810,28 @@ public static partial class TrRmExecutableCompiler
             ? 0u
             : CreateStandardBodyTypeMapToken(
                 GetSignatureTypeSpecRef(signature.ReturnType));
-        var unitCallStorageArgumentCount = storageCall is null
-            ? 0
-            : storageCall.UnitInitializerCalls.Sum(static call =>
-                call.Call.Arguments.Count(static argument =>
-                    argument is BoundNativeStorageAddress));
+        var unitCallStorageArgumentCount = 0;
+        if (storageCall is not null)
+        {
+            foreach (var unitCall in storageCall.UnitInitializerCalls)
+            {
+                a3LayoutResourceLedger?.ConsumeWork();
+                foreach (var argument in unitCall.Call.Arguments)
+                {
+                    a3LayoutResourceLedger?.ConsumeWork();
+                    if (argument is BoundNativeStorageAddress)
+                    {
+                        unitCallStorageArgumentCount++;
+                    }
+                }
+            }
+        }
         var unitCallTemporaryHomes = storageCall is null
             ? []
             : GetNativeAddressUnitCallHomes(storageCall.UnitInitializerCalls,
                 storageCall.ConditionCaptures,
-                callerLocalTypeSpecRefs.Length);
+                callerLocalTypeSpecRefs.Length,
+                a3LayoutResourceLedger);
         var typeMapTokenCapacity = storageCall is null
             ? 1 + (callResultHomeIndex >= 0 ? 1 : 0)
                 + stagedResultHomeCount + callerParameterTypeSpecRefs.Length
@@ -690,24 +840,30 @@ public static partial class TrRmExecutableCompiler
                 + unitCallStorageArgumentCount
                 + storageCall.StorageArguments.Length
                 + callerParameterTypeSpecRefs.Length;
+        ReserveA3Collection(a3LayoutResourceLedger, typeMapTokenCapacity);
         var typeMapTokens = new List<uint>(typeMapTokenCapacity);
         if (storageCall is null)
         {
-            typeMapTokens.Add(0x1100_0001);
+            AddA3Staged(typeMapTokens, 0x1100_0001u,
+                a3LayoutResourceLedger);
             if (callResultHomeIndex >= 0)
             {
-                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
-                    GetSignatureTypeSpecRef(caller.ReturnType)));
+                AddA3Staged(typeMapTokens,
+                    CreateStandardBodyTypeMapToken(
+                        GetSignatureTypeSpecRef(caller.ReturnType)),
+                    a3LayoutResourceLedger);
             }
             if (stagedResultHomeCount > 0)
             {
-                typeMapTokens.Add(stagedResultTypeMapToken);
+                AddA3Staged(typeMapTokens, stagedResultTypeMapToken,
+                    a3LayoutResourceLedger);
             }
 
             foreach (var typeSpecRef in callerParameterTypeSpecRefs)
             {
-                typeMapTokens.Add(
-                    CreateStandardBodyTypeMapToken(typeSpecRef));
+                AddA3Staged(typeMapTokens,
+                    CreateStandardBodyTypeMapToken(typeSpecRef),
+                    a3LayoutResourceLedger);
             }
         }
         else
@@ -715,18 +871,23 @@ public static partial class TrRmExecutableCompiler
             for (var localOrdinal = 0;
                 localOrdinal < callerLocalTypeSpecRefs.Length; localOrdinal++)
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 var variable = caller.Variables[
                     caller.ParameterCount + localOrdinal];
-                typeMapTokens.Add(NativeFunctionPointerTypes.IsType(variable.Type)
-                    ? 0x1100_0001u
-                    : CreateStandardBodyTypeMapToken(
-                        callerLocalTypeSpecRefs[localOrdinal]));
+                AddA3Staged(typeMapTokens,
+                    NativeFunctionPointerTypes.IsType(variable.Type)
+                        ? 0x1100_0001u
+                        : CreateStandardBodyTypeMapToken(
+                            callerLocalTypeSpecRefs[localOrdinal]),
+                    a3LayoutResourceLedger);
             }
 
             foreach (var temporaryHome in unitCallTemporaryHomes)
             {
-                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
-                    GetSignatureTypeSpecRef(temporaryHome.Type)));
+                AddA3Staged(typeMapTokens,
+                    CreateStandardBodyTypeMapToken(
+                        GetSignatureTypeSpecRef(temporaryHome.Type)),
+                    a3LayoutResourceLedger);
             }
 
             foreach (var unitCall in storageCall.UnitInitializerCalls)
@@ -735,6 +896,7 @@ public static partial class TrRmExecutableCompiler
                     argumentIndex < unitCall.Call.Arguments.Length;
                     argumentIndex++)
                 {
+                    a3LayoutResourceLedger?.ConsumeWork();
                     if (unitCall.Call.Arguments[argumentIndex]
                         is not BoundNativeStorageAddress)
                     {
@@ -743,29 +905,35 @@ public static partial class TrRmExecutableCompiler
 
                     var parameterIndex = GetBoundCallParameterIndex(
                         unitCall.Call, argumentIndex);
-                    typeMapTokens.Add(CreateStandardBodyTypeMapToken(
-                        GetSignatureTypeSpecRef(
-                            unitCall.Signature.ParameterTypes[
-                                parameterIndex])));
+                    AddA3Staged(typeMapTokens,
+                        CreateStandardBodyTypeMapToken(
+                            GetSignatureTypeSpecRef(
+                                unitCall.Signature.ParameterTypes[
+                                    parameterIndex])),
+                        a3LayoutResourceLedger);
                 }
             }
 
             foreach (var storageArgument in storageCall.StorageArguments)
             {
-                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
-                    GetSignatureTypeSpecRef(signature.ParameterTypes[
-                        storageArgument.ParameterOrdinal])));
+                AddA3Staged(typeMapTokens,
+                    CreateStandardBodyTypeMapToken(
+                        GetSignatureTypeSpecRef(signature.ParameterTypes[
+                            storageArgument.ParameterOrdinal])),
+                    a3LayoutResourceLedger);
             }
 
             foreach (var typeSpecRef in callerParameterTypeSpecRefs)
             {
-                typeMapTokens.Add(
-                    CreateStandardBodyTypeMapToken(typeSpecRef));
+                AddA3Staged(typeMapTokens,
+                    CreateStandardBodyTypeMapToken(typeSpecRef),
+                    a3LayoutResourceLedger);
             }
 
             for (var localOrdinal = 0;
                 localOrdinal < callerLocalTypeSpecRefs.Length; localOrdinal++)
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 var variable = caller.Variables[
                     caller.ParameterCount + localOrdinal];
                 if (!NativeFixedArrayTypes.IsType(variable.Type))
@@ -780,24 +948,34 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
-                    GetSignatureTypeSpecRef(arrayType.ElementType)));
+                AddA3Staged(typeMapTokens,
+                    CreateStandardBodyTypeMapToken(
+                        GetSignatureTypeSpecRef(arrayType.ElementType)),
+                    a3LayoutResourceLedger);
             }
         }
 
         var targetMethodMapToken = moduleImport is null
             ? 0x1600_0000u | (uint)targetMethodRow
             : 0x1C00_0001u;
-        var methodMapTokens = new List<uint>();
-        var methodMapTokenSet = new HashSet<uint>();
+        ReserveA3Collection(a3LayoutResourceLedger, 0);
+        var methodMapCapacity = storageCall is null
+            ? 1 : checked(storageCall.UnitInitializerCalls.Length + 1);
+        ReserveA3Collection(a3LayoutResourceLedger, methodMapCapacity);
+        var methodMapTokens = new List<uint>(methodMapCapacity);
+        ReserveA3Collection(a3LayoutResourceLedger, methodMapCapacity);
+        var methodMapTokenSet = new HashSet<uint>(methodMapCapacity);
         if (storageCall is null)
         {
-            methodMapTokens.Add(targetMethodMapToken);
+            AddA3Staged(methodMapTokens, targetMethodMapToken,
+                a3LayoutResourceLedger);
         }
         else
         {
+            ReserveA3Collection(a3LayoutResourceLedger, 0);
             var callerStatements = new List<BoundStatement>();
-            if (!AppendStatements(caller.Body, callerStatements))
+            if (!AppendStatements(caller.Body, callerStatements,
+                    a3LayoutResourceLedger))
             {
                 throw Unsupported(
                     "The F+S caller Body cannot be flattened for its MethodMap.");
@@ -805,8 +983,10 @@ public static partial class TrRmExecutableCompiler
 
             void AddCallMethodMapTokens(BoundCall call)
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 foreach (var argument in call.Arguments)
                 {
+                    a3LayoutResourceLedger?.ConsumeWork();
                     if (argument is BoundCall nestedCall)
                     {
                         AddCallMethodMapTokens(nestedCall);
@@ -815,20 +995,26 @@ public static partial class TrRmExecutableCompiler
 
                 var methodToken = 0x1600_0000u
                     | checked((uint)(call.Function + 1));
-                if (methodMapTokenSet.Add(methodToken))
+                if (AddA3Staged(methodMapTokenSet, methodToken,
+                        a3LayoutResourceLedger))
                 {
-                    methodMapTokens.Add(methodToken);
+                    AddA3Staged(methodMapTokens, methodToken,
+                        a3LayoutResourceLedger);
                 }
             }
 
             foreach (var statement in callerStatements)
             {
+                a3LayoutResourceLedger?.ConsumeWork();
                 if (statement is BoundLocal
                     { Initializer: BoundNativeFunctionAddress })
                 {
-                    if (methodMapTokenSet.Add(targetMethodMapToken))
+                    if (AddA3Staged(methodMapTokenSet,
+                            targetMethodMapToken,
+                            a3LayoutResourceLedger))
                     {
-                        methodMapTokens.Add(targetMethodMapToken);
+                        AddA3Staged(methodMapTokens, targetMethodMapToken,
+                            a3LayoutResourceLedger);
                     }
                 }
             }
@@ -840,17 +1026,19 @@ public static partial class TrRmExecutableCompiler
         }
 
         var maps = TrRmRegisterBodyMapBuilder.Create(typeMapTokens,
-            methodMapTokens);
+            methodMapTokens, a3LayoutResourceLedger);
         byte[] body;
         if (storageCall is not null)
         {
             body = EncodeForeignInvocationStorageAddressBody(caller,
                 program, storageCall, signature, maps, targetMethodMapToken,
                 contractRows.Count, GetSignatureTypeSpecRef,
-                fixedArrayLayoutRowByType, schema);
+                fixedArrayLayoutRowByType, schema,
+                a3LayoutResourceLedger);
         }
         else
         {
+        ReserveA3Buffer(a3LayoutResourceLedger, 8);
         var entryState = new byte[8];
         entryState[0] = 0x01;
         var nativeAddress = TrRmRegisterBodyRecordWriter.EncodeNativeAddress(
@@ -861,12 +1049,18 @@ public static partial class TrRmExecutableCompiler
             a3LayoutResourceLedger);
         var callLocalHomeCount = stagedResultHomeStart
             + stagedResultHomeCount;
+        var homeMapLength = emitsIndirectCall
+            ? checked((callerParameterTypeSpecRefs.Length
+                + callLocalHomeCount) * 8)
+            : 0;
+        ReserveA3Buffer(a3LayoutResourceLedger, homeMapLength);
         var homeMap = emitsIndirectCall
-            ? new byte[(callerParameterTypeSpecRefs.Length
-                + callLocalHomeCount) * 8]
+            ? new byte[homeMapLength]
             : [];
+        var callInputCapacity = indirectCall?.Arguments.Length ?? 0;
+        ReserveA3Collection(a3LayoutResourceLedger, callInputCapacity);
         var callInputs = new List<TrRmRegisterBodyCallInput>(
-            indirectCall?.Arguments.Length ?? 0);
+            callInputCapacity);
         if (emitsIndirectCall)
         {
             homeMap[0] = 0x03;
@@ -917,16 +1111,21 @@ public static partial class TrRmExecutableCompiler
             {
                 if (argument is BoundRead read)
                 {
-                    callInputs.Add(new TrRmRegisterBodyCallInput(2, 1,
-                        checked((ushort)(read.Variable + callLocalHomeCount))));
+                    AddA3Staged(callInputs,
+                        new TrRmRegisterBodyCallInput(2, 1,
+                            checked((ushort)(read.Variable
+                                + callLocalHomeCount))),
+                        a3LayoutResourceLedger);
                 }
                 else if (argument is BoundCall)
                 {
-                    callInputs.Add(stagedArgumentCallOrdinal < stagedCalls.Count - 1
-                        ? new TrRmRegisterBodyCallInput(2, 1,
-                            checked((ushort)(stagedResultHomeStart
-                                + stagedArgumentCallOrdinal)))
-                        : new TrRmRegisterBodyCallInput(1, 1, 0));
+                    AddA3Staged(callInputs,
+                        stagedArgumentCallOrdinal < stagedCalls.Count - 1
+                            ? new TrRmRegisterBodyCallInput(2, 1,
+                                checked((ushort)(stagedResultHomeStart
+                                    + stagedArgumentCallOrdinal)))
+                            : new TrRmRegisterBodyCallInput(1, 1, 0),
+                        a3LayoutResourceLedger);
                     stagedArgumentCallOrdinal++;
                 }
                 else
@@ -936,12 +1135,16 @@ public static partial class TrRmExecutableCompiler
                 }
             }
         }
-        var records = new List<ReadOnlyMemory<byte>>
-        {
-            entryState,
-            nativeAddress,
-        };
-        var code = new List<byte> { 0xE9, 0, 1, 0 };
+        var recordCapacity = 2 + (emitsIndirectCall
+            ? stagedCalls.Count + 1 : 0);
+        ReserveA3Collection(a3LayoutResourceLedger, recordCapacity);
+        var records = new List<ReadOnlyMemory<byte>>(recordCapacity);
+        AddA3Staged(records, entryState, a3LayoutResourceLedger);
+        AddA3Staged(records, nativeAddress, a3LayoutResourceLedger);
+        var codeCapacity = checked(6 + (emitsIndirectCall
+            ? 4 * (stagedCalls.Count + 1) : 0));
+        ReserveA3Buffer(a3LayoutResourceLedger, codeCapacity);
+        var code = new List<byte>(codeCapacity) { 0xE9, 0, 1, 0 };
         var returnsCallResult = indirectCall is not null
             && indirectCall.Type != PrimitiveType.Void;
         if (emitsIndirectCall)
@@ -951,26 +1154,35 @@ public static partial class TrRmExecutableCompiler
                 stagedInstructionOrdinal++)
             {
                 var stagedCall = stagedCalls[stagedInstructionOrdinal];
+                ReserveA3Collection(a3LayoutResourceLedger,
+                    stagedCall.Arguments.Length);
                 var stagedInputs = new List<TrRmRegisterBodyCallInput>(
                     stagedCall.Arguments.Length);
                 foreach (var argument in stagedCall.Arguments)
                 {
+                    a3LayoutResourceLedger?.ConsumeWork();
                     var read = (BoundRead)argument;
-                    stagedInputs.Add(new TrRmRegisterBodyCallInput(2, 1,
-                        checked((ushort)(read.Variable + callLocalHomeCount))));
+                    AddA3Staged(stagedInputs,
+                        new TrRmRegisterBodyCallInput(2, 1,
+                            checked((ushort)(read.Variable
+                                + callLocalHomeCount))),
+                        a3LayoutResourceLedger);
                 }
 
                 var stagedCallIndex = checked((ushort)records.Count);
                 var isFinalStagedCall
                     = stagedInstructionOrdinal == stagedCalls.Count - 1;
-                records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                    1, isFinalStagedCall ? (byte)1 : (byte)2,
-                    maps.GetMethodMapIndex(targetMethodMapToken),
-                    isFinalStagedCall ? (ushort)0
-                        : checked((ushort)(stagedResultHomeStart
-                            + stagedInstructionOrdinal)),
-                    stagedInputs, [], a3LayoutResourceLedger));
-                AppendCallSiteInstruction(code, stagedCallIndex);
+                AddA3Staged(records,
+                    TrRmRegisterBodyRecordWriter.EncodeCallSite(
+                        1, isFinalStagedCall ? (byte)1 : (byte)2,
+                        maps.GetMethodMapIndex(targetMethodMapToken),
+                        isFinalStagedCall ? (ushort)0
+                            : checked((ushort)(stagedResultHomeStart
+                                + stagedInstructionOrdinal)),
+                        stagedInputs, [], a3LayoutResourceLedger),
+                    a3LayoutResourceLedger);
+                AppendCallSiteInstruction(code, stagedCallIndex,
+                    a3LayoutResourceLedger);
             }
 
             var callResultKind = !returnsCallResult ? (byte)0
@@ -978,20 +1190,25 @@ public static partial class TrRmExecutableCompiler
             var callResultIndex = callResultHomeIndex >= 0
                 ? checked((ushort)callResultHomeIndex) : (ushort)0;
             var callSiteIndex = checked((ushort)records.Count);
-            records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
-                3, callResultKind, checked((ushort)callHomeIndex),
-                callResultIndex, callInputs, [],
-                a3LayoutResourceLedger));
-            AppendCallSiteInstruction(code, callSiteIndex);
+            AddA3Staged(records,
+                TrRmRegisterBodyRecordWriter.EncodeCallSite(
+                    3, callResultKind, checked((ushort)callHomeIndex),
+                    callResultIndex, callInputs, [],
+                    a3LayoutResourceLedger),
+                a3LayoutResourceLedger);
+            AppendCallSiteInstruction(code, callSiteIndex,
+                a3LayoutResourceLedger);
         }
 
         if (returnsCallResult && callResultHomeIndex >= 0)
         {
+            a3LayoutResourceLedger?.ConsumeWork(2);
             code.Add(0xB8);
             code.Add(checked((byte)callResultHomeIndex));
         }
         else
         {
+            a3LayoutResourceLedger?.ConsumeWork(2);
             code.Add(returnsCallResult ? (byte)0x17 : (byte)0x18);
             code.Add(0);
         }
@@ -999,6 +1216,8 @@ public static partial class TrRmExecutableCompiler
             (ulong)code.Count + 1UL));
         var codeBytes = code.ToArray();
         a3LayoutResourceLedger?.ConsumeWork(2);
+        ReserveA3Array(a3LayoutResourceLedger, 1,
+            3 * sizeof(uint));
         var bodyBlocks = new[]
         {
             new TrRmRegisterBodyBlock(0, (uint)codeBytes.Length, 0),
@@ -1009,38 +1228,52 @@ public static partial class TrRmExecutableCompiler
             records, codeBytes, contractRows.Count,
             schema, a3LayoutResourceLedger);
         }
-        var sections = new List<TrRmSection>
-        {
-            new(0x0001, 0, 1, moduleBytes),
-            new(0x0002, 0, (uint)stringRows.Count, stringsBytes),
-            new(0x0004, 0, (uint)featureRows.Count, featureBytes),
-            new(0x0011, 0, (uint)typeSpecRows.Count, typeSpecBytes),
-            new(0x0016, 0, (uint)methodRows.Count, methodBytes),
-            new(0x0017, 0, (uint)signatureRows.Count, signatureBytes),
-            new(0x001B, 0, (uint)contractRows.Count, contractBytes),
-        };
+        ReserveA3Collection(a3LayoutResourceLedger, 15);
+        var sections = new List<TrRmSection>(15);
+        AddA3Staged(sections, new TrRmSection(0x0001, 0, 1, moduleBytes),
+            a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x0002, 0,
+            (uint)stringRows.Count, stringsBytes), a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x0004, 0,
+            (uint)featureRows.Count, featureBytes), a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x0011, 0,
+            (uint)typeSpecRows.Count, typeSpecBytes),
+            a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x0016, 0,
+            (uint)methodRows.Count, methodBytes), a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x0017, 0,
+            (uint)signatureRows.Count, signatureBytes),
+            a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x001B, 0,
+            (uint)contractRows.Count, contractBytes),
+            a3LayoutResourceLedger);
         if (moduleRefRows.Count != 0)
         {
-            sections.Add(new TrRmSection(0x0010, 0,
-                (uint)moduleRefRows.Count, moduleRefBytes));
+            AddA3Staged(sections, new TrRmSection(0x0010, 0,
+                (uint)moduleRefRows.Count, moduleRefBytes),
+                a3LayoutResourceLedger);
         }
         if (parameterRows.Count != 0)
         {
-            sections.Add(new TrRmSection(0x0018, 0,
-                (uint)parameterRows.Count, paramBytes));
+            AddA3Staged(sections, new TrRmSection(0x0018, 0,
+                (uint)parameterRows.Count, paramBytes),
+                a3LayoutResourceLedger);
         }
         if (importRows.Count != 0)
         {
-            sections.Add(new TrRmSection(0x001C, 0,
-                (uint)importRows.Count, importBytes));
+            AddA3Staged(sections, new TrRmSection(0x001C, 0,
+                (uint)importRows.Count, importBytes),
+                a3LayoutResourceLedger);
         }
         if (exportRows.Count != 0)
         {
-            sections.Add(new TrRmSection(0x001D, 0, (uint)exportRows.Count,
-                TrRmExportTableWriter.Encode(exportRows, strings, typeDefs,
-                    methods, default, imports, default, default, default,
-                    featureReader, modules,
-                    schema, resourceLedger: a3LayoutResourceLedger)));
+            AddA3Staged(sections,
+                new TrRmSection(0x001D, 0, (uint)exportRows.Count,
+                    TrRmExportTableWriter.Encode(exportRows, strings,
+                        typeDefs, methods, default, imports, default, default,
+                        default, featureReader, modules, schema,
+                        resourceLedger: a3LayoutResourceLedger)),
+                a3LayoutResourceLedger);
         }
         if (fixedArrayLayoutRows.Count != 0)
         {
@@ -1048,20 +1281,26 @@ public static partial class TrRmExecutableCompiler
                 = TrRmFixedArrayLayoutTableWriter.Encode(
                     fixedArrayLayoutRows, typeSpecs, targetProfiles,
                     featureReader, modules, schema);
-            sections.Add(new TrRmSection(0x0012, 0,
-                (uint)fixedArrayLayoutRows.Count, fixedArrayLayoutBytes));
-            sections.Add(new TrRmSection(0x0048, 0, 1,
-                targetProfileBytes));
+            AddA3Staged(sections, new TrRmSection(0x0012, 0,
+                (uint)fixedArrayLayoutRows.Count, fixedArrayLayoutBytes),
+                a3LayoutResourceLedger);
+            AddA3Staged(sections,
+                new TrRmSection(0x0048, 0, 1, targetProfileBytes),
+                a3LayoutResourceLedger);
         }
-        a3LayoutResourceLedger?.ConsumeWork(2);
+        ReserveA3Array(a3LayoutResourceLedger, 1);
         var bodyRows = new ReadOnlyMemory<byte>[] { body };
-        sections.Add(new TrRmSection(0x0020, 0, 1,
+        a3LayoutResourceLedger?.ConsumeWork(2);
+        AddA3Staged(sections, new TrRmSection(0x0020, 0, 1,
             a3LayoutResourceLedger is null
                 ? TrRmVariableTableWriter.EncodeBodies(bodyRows)
                 : TrRmVariableTableWriter.EncodeBodies(bodyRows,
-                    a3LayoutResourceLedger)));
-        sections.Add(new TrRmSection(0x0021, 0,
-            (uint)nativeImportRows.Count, nativeImportBytes));
+                    a3LayoutResourceLedger)), a3LayoutResourceLedger);
+        AddA3Staged(sections, new TrRmSection(0x0021, 0,
+            (uint)nativeImportRows.Count, nativeImportBytes),
+            a3LayoutResourceLedger);
+        a3LayoutResourceLedger?.ConsumeWork(checked(
+            (ulong)sections.Count * (ulong)sections.Count));
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
 
@@ -1120,14 +1359,16 @@ public static partial class TrRmExecutableCompiler
         int AddString(string text, int encoding)
         {
             var key = (text, encoding);
+            a3LayoutResourceLedger?.ConsumeWork();
             if (stringIndexes.TryGetValue(key, out var row))
             {
                 return row;
             }
 
             row = stringRows.Count + 1;
-            stringIndexes.Add(key, row);
-            stringRows.Add(key);
+            AddA3Staged(stringIndexes, key, row,
+                a3LayoutResourceLedger);
+            AddA3Staged(stringRows, key, a3LayoutResourceLedger);
             return row;
         }
     }
@@ -1157,13 +1398,17 @@ public static partial class TrRmExecutableCompiler
         GetNativeAddressUnitCallHomes(
             ImmutableArray<NativeAddressUnitInitializerCall> calls,
             ImmutableArray<NativeAddressUnitConditionCapture> captures,
-            int localCount)
+            int localCount,
+            TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        ReserveA3Collection(resourceLedger, 0);
         var homesByIndex = new SortedDictionary<int, PrimitiveType>();
         foreach (var call in calls)
         {
+            resourceLedger?.ConsumeWork();
             if (call.ResultHome >= localCount
-                && !homesByIndex.TryAdd(call.ResultHome, call.Call.Type))
+                && !TryAddA3Staged(homesByIndex, call.ResultHome,
+                    call.Call.Type, resourceLedger))
             {
                 throw Unsupported(
                     "The A2EU direct-call result Home is reused.");
@@ -1173,10 +1418,12 @@ public static partial class TrRmExecutableCompiler
                 argumentIndex < call.ArgumentCaptureHomes.Length;
                 argumentIndex++)
             {
+                resourceLedger?.ConsumeWork();
                 var home = call.ArgumentCaptureHomes[argumentIndex];
                 if (home >= localCount
-                    && !homesByIndex.TryAdd(home,
-                        call.Call.Arguments[argumentIndex].Type))
+                    && !TryAddA3Staged(homesByIndex, home,
+                        call.Call.Arguments[argumentIndex].Type,
+                        resourceLedger))
                 {
                     throw Unsupported(
                         "The A2EU argument capture Home is reused.");
@@ -1186,20 +1433,24 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var capture in captures)
         {
+            resourceLedger?.ConsumeWork();
             if (capture.Home >= localCount
-                && !homesByIndex.TryAdd(capture.Home,
-                    capture.Condition.Left.Type))
+                && !TryAddA3Staged(homesByIndex, capture.Home,
+                    capture.Condition.Left.Type, resourceLedger))
             {
                 throw Unsupported(
                     "The A2EU condition capture Home is reused.");
             }
         }
 
+        ReserveA3Array(resourceLedger, homesByIndex.Count,
+            sizeof(int) + sizeof(PrimitiveType));
         var result = ImmutableArray.CreateBuilder<NativeAddressUnitCallHome>(
             homesByIndex.Count);
         var expectedHome = localCount;
         foreach (var entry in homesByIndex)
         {
+            resourceLedger?.ConsumeWork();
             if (entry.Key != expectedHome++)
             {
                 throw Unsupported(
@@ -1209,6 +1460,9 @@ public static partial class TrRmExecutableCompiler
             result.Add(new NativeAddressUnitCallHome(entry.Key, entry.Value));
         }
 
+        resourceLedger?.ConsumeWork(checked(1UL
+            + ((ulong)result.Count
+                * (sizeof(int) + sizeof(PrimitiveType)))));
         return result.MoveToImmutable();
     }
 
@@ -1216,11 +1470,13 @@ public static partial class TrRmExecutableCompiler
         BoundFunction function, BoundNativeFunctionAddress address,
         NativeFunctionPointerSignatureDefinition signature,
         TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger,
         out NativeAddressStorageCallPlan? plan)
     {
         plan = null;
+        ReserveA3Collection(resourceLedger, 0);
         var statements = new List<BoundStatement>();
-        if (!AppendStatements(function.Body, statements)
+        if (!AppendStatements(function.Body, statements, resourceLedger)
             || statements.Count < 4
             || statements[^1] is not BoundReturn
                 { Value: BoundRead returnRead }
@@ -1230,6 +1486,7 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        ReserveA3Array(resourceLedger, statements.Count);
         var callStatements = statements
             .Select((statement, index) => (statement, index))
             .Where(static item => item.statement is BoundExpressionStatement
@@ -1250,6 +1507,7 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        ReserveA3Array(resourceLedger, statements.Count);
         var targetLocals = statements
             .Select(static statement => statement as BoundLocal)
             .Where(static local => local is not null
@@ -1269,17 +1527,20 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        ReserveA3Array(resourceLedger, callStatements[0].index);
         var topLevelLocalDeclarations = statements
             .Take(callStatements[0].index)
             .OfType<BoundLocal>()
             .ToArray();
+        ReserveA3Collection(resourceLedger, 0);
         var localDeclarations = new List<BoundLocal>();
         void CollectLocalDeclarations(BoundStatement statement)
         {
+            resourceLedger?.ConsumeWork();
             switch (statement)
             {
                 case BoundLocal local:
-                    localDeclarations.Add(local);
+                    AddA3Staged(localDeclarations, local, resourceLedger);
                     break;
 
                 case BoundBlock block:
@@ -1322,12 +1583,14 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        ReserveA3Collection(resourceLedger, 0);
         var localVariables = new HashSet<int>();
         foreach (var declaration in localDeclarations)
         {
             if (declaration.Variable < function.ParameterCount
                 || declaration.Variable >= function.Variables.Length
-                || !localVariables.Add(declaration.Variable))
+                || !AddA3Staged(localVariables, declaration.Variable,
+                    resourceLedger))
             {
                 return false;
             }
@@ -1417,10 +1680,12 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        ReserveA3Collection(resourceLedger, 0);
         var storageArguments = ImmutableArray.CreateBuilder<
             NativeAddressStorageArgument>();
         for (var ordinal = 0; ordinal < call.Arguments.Length; ordinal++)
         {
+            resourceLedger?.ConsumeWork();
             var argument = call.Arguments[ordinal];
             if (argument is BoundNativeStorageAddress storageAddress)
             {
@@ -1476,6 +1741,7 @@ public static partial class TrRmExecutableCompiler
                     return false;
                 }
 
+                resourceLedger?.ConsumeWork();
                 storageArguments.Add(new NativeAddressStorageArgument(
                     ordinal, storageAddress));
             }
@@ -1498,8 +1764,10 @@ public static partial class TrRmExecutableCompiler
             return false;
         }
 
+        ReserveA3Collection(resourceLedger, 0);
         var unitInitializerCalls
             = ImmutableArray.CreateBuilder<NativeAddressUnitInitializerCall>();
+        ReserveA3Collection(resourceLedger, 0);
         var conditionCaptures
             = ImmutableArray.CreateBuilder<NativeAddressUnitConditionCapture>();
         var nextUnitCallResultHome
@@ -1508,12 +1776,17 @@ public static partial class TrRmExecutableCompiler
         bool AddUnitInitializerCall(BoundCall unitCall,
             int initializerArrayVariable, int resultVariable)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            ReserveA3Array(resourceLedger, unitCall.Arguments.Length,
+                sizeof(int));
             var argumentCaptureHomes = new int[unitCall.Arguments.Length];
             Array.Fill(argumentCaptureHomes, -1);
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
             {
+                resourceLedger?.ConsumeWork();
                 var argument = unitCall.Arguments[argumentIndex];
                 if (argument is BoundRead read
                     && read.Type != PrimitiveType.Void
@@ -1582,6 +1855,9 @@ public static partial class TrRmExecutableCompiler
                 return false;
             }
 
+            ReserveA3Array(resourceLedger, argumentCaptureHomes.Length,
+                sizeof(int));
+            resourceLedger?.ConsumeWork();
             unitInitializerCalls.Add(new NativeAddressUnitInitializerCall(
                 unitCall, unitCallSignature, resultHome,
                 [.. argumentCaptureHomes]));
@@ -1591,6 +1867,8 @@ public static partial class TrRmExecutableCompiler
         bool AddUnitInitializerExpression(BoundExpression expression,
             int initializerArrayVariable)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             return expression switch {
                 BoundCall unitCall => unitCall.Type == PrimitiveType.Void
                     && AddUnitInitializerCall(unitCall,
@@ -1619,6 +1897,8 @@ public static partial class TrRmExecutableCompiler
         bool AddUnitConditionalControlFlow(BoundExpression condition,
             Func<bool> appendTrue, Func<bool> appendFalse)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             if (!IsSupportedNativeUnitConditionalCondition(condition))
             {
                 return false;
@@ -1676,6 +1956,7 @@ public static partial class TrRmExecutableCompiler
                     if (comparison.Left is BoundRead
                         && comparison.Right is BoundCall)
                     {
+                        resourceLedger?.ConsumeWork();
                         conditionCaptures.Add(
                             new NativeAddressUnitConditionCapture(
                                 comparison, nextUnitCallResultHome++));
@@ -1740,11 +2021,14 @@ public static partial class TrRmExecutableCompiler
 
         bool AddUnitInitializerStatement(BoundStatement statement)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             switch (statement)
             {
             case BoundBlock block when block.RetiredManagedLocals.IsEmpty:
                 foreach (var nested in block.Statements)
                 {
+                    resourceLedger?.ConsumeWork();
                     if (!AddUnitInitializerStatement(nested))
                     {
                         return false;
@@ -1764,6 +2048,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     foreach (var element in initialization.Elements)
                     {
+                        resourceLedger?.ConsumeWork();
                         if (element is BoundCall initializerCall
                             && !AddUnitInitializerCall(initializerCall,
                                 local.Variable, -1))
@@ -2429,31 +2714,51 @@ public static partial class TrRmExecutableCompiler
         TrRmRegisterBodyMaps maps, uint targetMethodMapToken,
         int contractCount, Func<PrimitiveType, uint> getSignatureTypeSpecRef,
         Dictionary<int, int> fixedArrayLayoutRowByType,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var localCount = caller.Variables.Length - caller.ParameterCount;
         var unitCallTemporaryHomes = GetNativeAddressUnitCallHomes(
             storageCall.UnitInitializerCalls, storageCall.ConditionCaptures,
-            localCount);
+            localCount, resourceLedger);
         var unitCallResultHomeEnd
             = localCount + unitCallTemporaryHomes.Length;
+        var storageArgumentCount = 0;
+        foreach (var unitCall in storageCall.UnitInitializerCalls)
+        {
+            resourceLedger?.ConsumeWork();
+            foreach (var argument in unitCall.Call.Arguments)
+            {
+                resourceLedger?.ConsumeWork();
+                if (argument is BoundNativeStorageAddress)
+                {
+                    storageArgumentCount++;
+                }
+            }
+        }
+
+        ReserveA3Collection(resourceLedger, storageArgumentCount);
         var unitCallStorageHomeByArgument
-            = new Dictionary<(int CallIndex, int ArgumentIndex), int>();
+            = new Dictionary<(int CallIndex, int ArgumentIndex), int>(
+                storageArgumentCount);
         var nextStorageHome = unitCallResultHomeEnd;
         for (var callIndex = 0;
             callIndex < storageCall.UnitInitializerCalls.Length;
             callIndex++)
         {
+            resourceLedger?.ConsumeWork();
             var unitCall = storageCall.UnitInitializerCalls[callIndex].Call;
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
             {
+                resourceLedger?.ConsumeWork();
                 if (unitCall.Arguments[argumentIndex]
                     is BoundNativeStorageAddress)
                 {
-                    unitCallStorageHomeByArgument.Add(
-                        (callIndex, argumentIndex), nextStorageHome++);
+                    AddA3Staged(unitCallStorageHomeByArgument,
+                        (callIndex, argumentIndex), nextStorageHome++,
+                        resourceLedger);
                 }
             }
         }
@@ -2468,9 +2773,13 @@ public static partial class TrRmExecutableCompiler
                 "The F+S Body has too many Homes for its local and storage-address results.");
         }
 
+        ReserveA3Array(resourceLedger, caller.Variables.Length,
+            sizeof(int));
         var homeIndexByVariable = new int[caller.Variables.Length];
         Array.Fill(homeIndexByVariable, -1);
-        var homeMap = new byte[homeCount * 8];
+        var homeMapLength = checked(homeCount * 8);
+        ReserveA3Buffer(resourceLedger, homeMapLength);
+        var homeMap = new byte[homeMapLength];
         for (var localOrdinal = 0; localOrdinal < localCount; localOrdinal++)
         {
             var variableIndex = caller.ParameterCount + localOrdinal;
@@ -2500,13 +2809,17 @@ public static partial class TrRmExecutableCompiler
                     getSignatureTypeSpecRef(temporaryHome.Type))));
         }
 
-        var storageHomeByParameter = new Dictionary<int, int>();
+        ReserveA3Collection(resourceLedger,
+            storageCall.StorageArguments.Length);
+        var storageHomeByParameter = new Dictionary<int, int>(
+            storageCall.StorageArguments.Length);
         for (var index = 0;
             index < storageCall.StorageArguments.Length; index++)
         {
             var storageArgument = storageCall.StorageArguments[index];
             var home = storageResultHomeStart + index;
-            storageHomeByParameter.Add(storageArgument.ParameterOrdinal, home);
+            AddA3Staged(storageHomeByParameter,
+                storageArgument.ParameterOrdinal, home, resourceLedger);
             var offset = home * 8;
             homeMap[offset] = 3;
             BinaryPrimitives.WriteUInt16LittleEndian(
@@ -2566,10 +2879,12 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("The F+S target pointer has no local Home.");
         }
 
+        ReserveA3Buffer(resourceLedger, 8);
         var entryState = new byte[8];
         entryState[0] = 0x01;
+        ReserveA3Collection(resourceLedger, 0);
         var statements = new List<BoundStatement>();
-        if (!AppendStatements(caller.Body, statements))
+        if (!AppendStatements(caller.Body, statements, resourceLedger))
         {
             throw Unsupported("The F+S caller Body cannot be flattened.");
         }
@@ -2579,8 +2894,10 @@ public static partial class TrRmExecutableCompiler
             + storageCall.UnitInitializerCalls.Length;
         foreach (var unitCall in storageCall.UnitInitializerCalls)
         {
+            resourceLedger?.ConsumeWork();
             foreach (var argument in unitCall.Call.Arguments)
             {
+                resourceLedger?.ConsumeWork();
                 if (argument is not BoundNativeStorageAddress address)
                 {
                     continue;
@@ -2595,6 +2912,7 @@ public static partial class TrRmExecutableCompiler
         }
         foreach (var statement in statements)
         {
+            resourceLedger?.ConsumeWork();
             if (statement is BoundLocal
                 {
                     Initializer: BoundNativeFixedArrayInitialization initialization,
@@ -2607,6 +2925,7 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var storageArgument in storageCall.StorageArguments)
         {
+            resourceLedger?.ConsumeWork();
             if (NativeFixedArrayTypes.IsType(
                     storageArgument.Address.CarrierType))
             {
@@ -2619,17 +2938,20 @@ public static partial class TrRmExecutableCompiler
                 "The A2 array initialization exceeds the Body record-index domain.");
         }
 
-        var records = new List<ReadOnlyMemory<byte>>(
-            checked((int)recordCount))
-        {
-            entryState,
+        ReserveA3Collection(resourceLedger, checked((int)recordCount));
+        var records = new TrRmA3StagedList<ReadOnlyMemory<byte>>(
+            resourceLedger, checked((int)recordCount));
+        records.Add(entryState);
+        records.Add(
             TrRmRegisterBodyRecordWriter.EncodeNativeAddress(2,
                 checked((ushort)targetHome),
                 maps.GetMethodMapIndex(targetMethodMapToken),
-                maps.GetTypeMapIndex(0x1100_0001)),
-        };
-        var code = new List<byte>();
-        var blocks = new List<TrRmRegisterBodyBlock>();
+                maps.GetTypeMapIndex(0x1100_0001), resourceLedger));
+        ReserveA3Collection(resourceLedger, 0);
+        var code = new TrRmA3StagedList<byte>(resourceLedger);
+        ReserveA3Collection(resourceLedger, 0);
+        var blocks = new TrRmA3StagedList<TrRmRegisterBodyBlock>(
+            resourceLedger);
         var currentBlockStart = 0;
         void EndCurrentBlock()
         {
@@ -2685,17 +3007,37 @@ public static partial class TrRmExecutableCompiler
             AppendHomeStore(code, 0, destinationHome);
         }
 
-        var storageArguments = storageCall.StorageArguments
-            .ToDictionary(static argument => argument.ParameterOrdinal);
-        var unitCallPlanIndexesByCall = new Dictionary<BoundCall, Queue<int>>(
-            ReferenceEqualityComparer.Instance);
+        ReserveA3Collection(resourceLedger,
+            storageCall.StorageArguments.Length);
+        var storageArguments
+            = new Dictionary<int, NativeAddressStorageArgument>(
+                storageCall.StorageArguments.Length);
+        foreach (var storageArgument in storageCall.StorageArguments)
+        {
+            resourceLedger?.ConsumeWork();
+            AddA3Staged(storageArguments,
+                storageArgument.ParameterOrdinal, storageArgument,
+                resourceLedger);
+        }
+
+        ReserveA3Collection(resourceLedger,
+            storageCall.UnitInitializerCalls.Length);
+        var unitCallPlanIndexesByCall
+            = new Dictionary<BoundCall, Queue<int>>(
+                storageCall.UnitInitializerCalls.Length,
+                ReferenceEqualityComparer.Instance);
+        ReserveA3Collection(resourceLedger,
+            storageCall.ConditionCaptures.Length);
         var conditionCaptureHomeByExpression
             = new Dictionary<BoundBinary, int>(
+                storageCall.ConditionCaptures.Length,
                 ReferenceEqualityComparer.Instance);
         foreach (var conditionCapture in storageCall.ConditionCaptures)
         {
-            if (!conditionCaptureHomeByExpression.TryAdd(
-                    conditionCapture.Condition, conditionCapture.Home))
+            resourceLedger?.ConsumeWork();
+            if (!TryAddA3Staged(conditionCaptureHomeByExpression,
+                    conditionCapture.Condition, conditionCapture.Home,
+                    resourceLedger))
             {
                 throw Unsupported(
                     "The A2EU condition capture is duplicated.");
@@ -2706,22 +3048,30 @@ public static partial class TrRmExecutableCompiler
             callIndex < storageCall.UnitInitializerCalls.Length;
             callIndex++)
         {
+            resourceLedger?.ConsumeWork();
             var unitCallPlan = storageCall.UnitInitializerCalls[callIndex];
             if (!unitCallPlanIndexesByCall.TryGetValue(unitCallPlan.Call,
                     out var callPlanIndexes))
             {
+                ReserveA3Collection(resourceLedger, 0);
                 callPlanIndexes = new Queue<int>();
-                unitCallPlanIndexesByCall.Add(unitCallPlan.Call,
-                    callPlanIndexes);
+                AddA3Staged(unitCallPlanIndexesByCall, unitCallPlan.Call,
+                    callPlanIndexes, resourceLedger);
             }
 
+            resourceLedger?.ConsumeWork();
             callPlanIndexes.Enqueue(callIndex);
         }
 
-        var emittedUnitCallPlans = new HashSet<int>();
+        ReserveA3Collection(resourceLedger,
+            storageCall.UnitInitializerCalls.Length);
+        var emittedUnitCallPlans = new HashSet<int>(
+            storageCall.UnitInitializerCalls.Length);
 
         int AppendUnitInitializerCall(BoundCall unitCall)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             if (!unitCallPlanIndexesByCall.TryGetValue(unitCall,
                     out var callPlanIndexes)
                 || !callPlanIndexes.TryDequeue(out var currentCallIndex))
@@ -2730,7 +3080,8 @@ public static partial class TrRmExecutableCompiler
                     "The A2EU unit-call expression has no captured plan.");
             }
 
-            _ = emittedUnitCallPlans.Add(currentCallIndex);
+            _ = AddA3Staged(emittedUnitCallPlans, currentCallIndex,
+                resourceLedger);
 
             var unitCallPlan
                 = storageCall.UnitInitializerCalls[currentCallIndex];
@@ -2741,26 +3092,35 @@ public static partial class TrRmExecutableCompiler
             }
 
             var unitSignature = unitCallPlan.Signature;
-            var argumentIndexByParameter = new int[
-                unitSignature.ParameterTypes.Length];
+            ReserveA3Array(resourceLedger,
+                unitSignature.ParameterTypes.Length, sizeof(int));
+            var argumentIndexByParameter
+                = new int[unitSignature.ParameterTypes.Length];
             Array.Fill(argumentIndexByParameter, -1);
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
             {
+                resourceLedger?.ConsumeWork();
                 var parameterIndex = GetBoundCallParameterIndex(
                     unitCall, argumentIndex);
                 argumentIndexByParameter[parameterIndex] = argumentIndex;
             }
 
+            ReserveA3Array(resourceLedger,
+                unitSignature.ParameterTypes.Length,
+                (2 * sizeof(byte)) + sizeof(ushort));
             var callInputs = new TrRmRegisterBodyCallInput[
                 unitSignature.ParameterTypes.Length];
+            ReserveA3Array(resourceLedger, unitCall.Arguments.Length,
+                sizeof(int));
             var nestedCallResultHomes = new int[unitCall.Arguments.Length];
             Array.Fill(nestedCallResultHomes, -1);
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
             {
+                resourceLedger?.ConsumeWork();
                 var argument = unitCall.Arguments[argumentIndex];
                 if (argument is BoundCall nestedCall)
                 {
@@ -2856,7 +3216,7 @@ public static partial class TrRmExecutableCompiler
                                 CreateStandardBodyTypeMapToken(
                                     getSignatureTypeSpecRef(
                                         storageAddress.ElementType))),
-                            schema));
+                            schema, resourceLedger));
                     code.Add(0xD8);
                     code.Add(0);
                     code.Add((byte)placeSelectionIndex);
@@ -2883,7 +3243,7 @@ public static partial class TrRmExecutableCompiler
                             getSignatureTypeSpecRef(
                                 unitSignature.ParameterTypes[
                                     parameterIndex]))),
-                        requiredElementCount));
+                        requiredElementCount, resourceLedger));
                 code.Add(0xEC);
                 code.Add(0);
                 code.Add((byte)storageRecordIndex);
@@ -3005,13 +3365,15 @@ public static partial class TrRmExecutableCompiler
                 1, resultKind, unitCallMethodMapIndex,
                 unitCallPlan.ResultHome < 0 ? (ushort)0
                     : checked((ushort)unitCallPlan.ResultHome), callInputs,
-                []));
+                [], resourceLedger));
             AppendCallSiteInstruction(code, callSiteIndex);
             return unitCallPlan.ResultHome;
         }
 
         void AppendUnitInitializerCondition(BoundExpression condition)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             switch (condition)
             {
                 case BoundRead read:
@@ -3120,6 +3482,8 @@ public static partial class TrRmExecutableCompiler
         void AppendConditionalControlFlow(BoundExpression condition,
             Action appendTrue, Action appendFalse)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             if (TryGetNativeAddressKnownBoolean(condition, out var selected))
             {
                 (selected ? appendTrue : appendFalse)();
@@ -3193,7 +3557,8 @@ public static partial class TrRmExecutableCompiler
 
             var conditionalEdgeIndex = checked((ushort)records.Count);
             var conditionalEdge
-                = TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(0, 1);
+                = TrRmRegisterBodyRecordWriter.EncodeConditionalEdge(0, 1,
+                    resourceLedger);
             records.Add(conditionalEdge);
             code.Add(0xE4);
             code.Add(0);
@@ -3234,6 +3599,8 @@ public static partial class TrRmExecutableCompiler
 
         void AppendUnitInitializerExpression(BoundExpression expression)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             switch (expression)
             {
                 case BoundCall unitCall
@@ -3275,6 +3642,8 @@ public static partial class TrRmExecutableCompiler
 
         void AppendUnitInitializerLocal(BoundLocal local)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             var homeIndex = homeIndexByVariable[local.Variable];
             if (homeIndex < 0
                 || local.Variable == storageCall.TargetVariable
@@ -3332,11 +3701,14 @@ public static partial class TrRmExecutableCompiler
 
         void AppendUnitInitializerStatement(BoundStatement statement)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             switch (statement)
             {
                 case BoundBlock block when block.RetiredManagedLocals.IsEmpty:
                     foreach (var nested in block.Statements)
                     {
+                        resourceLedger?.ConsumeWork();
                         AppendUnitInitializerStatement(nested);
                     }
                     return;
@@ -3368,6 +3740,8 @@ public static partial class TrRmExecutableCompiler
 
         void AppendUnitInitializerIf(BoundIf branch)
         {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
             if (!IsSupportedNativeUnitConditionalCondition(
                     branch.Condition))
             {
@@ -3684,11 +4058,15 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundExpressionStatement
                     { Expression: BoundIndirectCall call }:
-                    var callInputs = new List<TrRmRegisterBodyCallInput>(
+                    ReserveA3Collection(resourceLedger,
                         call.Arguments.Length);
+                    var callInputs
+                        = new TrRmA3StagedList<TrRmRegisterBodyCallInput>(
+                            resourceLedger, call.Arguments.Length);
                     for (var ordinal = 0; ordinal < call.Arguments.Length;
                         ordinal++)
                     {
+                        resourceLedger?.ConsumeWork();
                         switch (call.Arguments[ordinal])
                         {
                             case BoundNativeStorageAddress storageAddress:
@@ -3797,7 +4175,8 @@ public static partial class TrRmExecutableCompiler
                                                         getSignatureTypeSpecRef(
                                                         signature.ParameterTypes[
                                                                 ordinal]))),
-                                            requiredElementCount));
+                                            requiredElementCount,
+                                            resourceLedger));
                                 code.Add(0xEC);
                                 code.Add(0);
                                 code.Add((byte)storageRecordIndex);
@@ -3831,7 +4210,7 @@ public static partial class TrRmExecutableCompiler
                     var callSiteIndex = checked((ushort)records.Count);
                     records.Add(TrRmRegisterBodyRecordWriter.EncodeCallSite(
                         3, callResultKind, checked((ushort)targetHome), 0,
-                        callInputs, []));
+                        callInputs, [], resourceLedger));
                     AppendCallSiteInstruction(code, callSiteIndex);
                     break;
 
@@ -3868,15 +4247,17 @@ public static partial class TrRmExecutableCompiler
         }
 
         EndCurrentBlock();
+        ReserveA3Buffer(resourceLedger, code.Count);
         var codeBytes = code.ToArray();
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
             maps.MethodMap, default, default,
             blocks,
             records, codeBytes, contractCount,
-            schema);
+            schema, resourceLedger);
     }
 
-    private static void AppendHomeStore(List<byte> code, byte sourceRegister,
+    private static void AppendHomeStore(TrRmA3StagedList<byte> code,
+        byte sourceRegister,
         int homeIndex)
     {
         if (sourceRegister > 15 || (uint)homeIndex > ushort.MaxValue)
@@ -3897,7 +4278,7 @@ public static partial class TrRmExecutableCompiler
         code.Add((byte)(homeIndex >> 8));
     }
 
-    private static void AppendHomeLoad(List<byte> code,
+    private static void AppendHomeLoad(TrRmA3StagedList<byte> code,
         byte destinationRegister, int homeIndex)
     {
         if (destinationRegister > 13
@@ -3913,10 +4294,12 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsAddressOnlyVoidBody(BoundFunction function,
-        BoundNativeFunctionAddress address)
+        BoundNativeFunctionAddress address,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        ReserveA3Collection(resourceLedger, 0);
         var statements = new List<BoundStatement>();
-        if (!AppendStatements(function.Body, statements)
+        if (!AppendStatements(function.Body, statements, resourceLedger)
             || statements.Count != 2
             || statements[1] is not BoundReturn { Value: null })
         {
@@ -3952,6 +4335,7 @@ public static partial class TrRmExecutableCompiler
         var isRead = false;
         return BoundTreeTraversal.VisitExpressions(function.Body, expression =>
         {
+            resourceLedger?.ConsumeWork();
             if (expression is BoundRead read && read.Variable == discard.Variable)
             {
                 isRead = true;
@@ -3961,13 +4345,15 @@ public static partial class TrRmExecutableCompiler
 
     private static BoundIndirectCall? TryGetNativeAddressCall(
         BoundFunction function, BoundNativeFunctionAddress address,
-        NativeFunctionPointerSignatureDefinition signature, out int homeIndex,
+        NativeFunctionPointerSignatureDefinition signature,
+        TrRmA3LayoutResourceLedger? resourceLedger, out int homeIndex,
         out int resultHomeIndex)
     {
         homeIndex = -1;
         resultHomeIndex = -1;
+        ReserveA3Collection(resourceLedger, 0);
         var statements = new List<BoundStatement>();
-        if (!AppendStatements(function.Body, statements)
+        if (!AppendStatements(function.Body, statements, resourceLedger)
             || statements.Count is not (2 or 3)
             || statements[0] is not BoundLocal
                 { Initializer: BoundNativeFunctionAddress localAddress } local
@@ -4067,6 +4453,7 @@ public static partial class TrRmExecutableCompiler
 
         for (var ordinal = 0; ordinal < function.ParameterCount; ordinal++)
         {
+            resourceLedger?.ConsumeWork();
             var formal = function.Variables[ordinal];
             if (formal.Type == PrimitiveType.Void
                 || (!NativePointerTypes.IsType(formal.Type)
@@ -4080,6 +4467,7 @@ public static partial class TrRmExecutableCompiler
                 return null;
             }
 
+            resourceLedger?.ConsumeWork();
             if (call.Arguments[ordinal] is BoundRead argument)
             {
                 if ((uint)argument.Variable >= (uint)function.ParameterCount
@@ -4092,7 +4480,8 @@ public static partial class TrRmExecutableCompiler
             {
                 if (stagedCall.Type != signature.ParameterTypes[ordinal]
                     || !IsSupportedNativeAddressStagedCall(stagedCall,
-                        address.Function, function, signature))
+                        address.Function, function, signature,
+                        resourceLedger))
                 {
                     return null;
                 }
@@ -4109,7 +4498,8 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsSupportedNativeAddressStagedCall(BoundCall call,
         int targetFunction, BoundFunction caller,
-        NativeFunctionPointerSignatureDefinition signature)
+        NativeFunctionPointerSignatureDefinition signature,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         if (call.Function != targetFunction || !call.IsUnsafeAuthorized
             || call.Type != signature.ReturnType
@@ -4122,6 +4512,7 @@ public static partial class TrRmExecutableCompiler
 
         for (var ordinal = 0; ordinal < call.Arguments.Length; ordinal++)
         {
+            resourceLedger?.ConsumeWork();
             var formal = caller.Variables[ordinal];
             if (call.Arguments[ordinal] is not BoundRead argument
                 || (uint)argument.Variable >= (uint)caller.ParameterCount
@@ -4136,8 +4527,10 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool AppendStatements(BoundBlock block,
-        List<BoundStatement> statements)
+        List<BoundStatement> statements,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        using var frame = resourceLedger?.EnterFrame();
         if (!block.RetiredManagedLocals.IsEmpty)
         {
             return false;
@@ -4145,22 +4538,24 @@ public static partial class TrRmExecutableCompiler
 
         foreach (var statement in block.Statements)
         {
+            resourceLedger?.ConsumeWork();
             switch (statement)
             {
                 case BoundBlock nested:
-                    if (!AppendStatements(nested, statements))
+                    if (!AppendStatements(nested, statements, resourceLedger))
                     {
                         return false;
                     }
                     break;
                 case BoundUnsafe unsafeBlock:
-                    if (!AppendStatements(unsafeBlock.Body, statements))
+                    if (!AppendStatements(unsafeBlock.Body, statements,
+                            resourceLedger))
                     {
                         return false;
                     }
                     break;
                 default:
-                    statements.Add(statement);
+                    AddA3Staged(statements, statement, resourceLedger);
                     break;
             }
         }
@@ -4169,7 +4564,18 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static void AppendCallSiteInstruction(List<byte> code,
-        ushort recordIndex)
+        ushort recordIndex,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
+    {
+        resourceLedger?.ConsumeWork(4);
+        code.Add(0xE0);
+        code.Add(0);
+        code.Add((byte)recordIndex);
+        code.Add((byte)(recordIndex >> 8));
+    }
+
+    private static void AppendCallSiteInstruction(
+        TrRmA3StagedList<byte> code, ushort recordIndex)
     {
         code.Add(0xE0);
         code.Add(0);
@@ -4177,17 +4583,124 @@ public static partial class TrRmExecutableCompiler
         code.Add((byte)(recordIndex >> 8));
     }
 
-    private static string CreateAnchorName(ImmutableArray<BoundFunction> functions)
+    private static string CreateAnchorName(
+        ImmutableArray<BoundFunction> functions,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        ReserveA3Collection(resourceLedger, functions.Length);
         var names = functions.Select(static function => function.Name)
             .ToHashSet(StringComparer.Ordinal);
         for (var index = 1; ; index++)
         {
-            var name = $"__trrm_fnptr_anchor_{index}";
+            resourceLedger?.ConsumeWork();
+            const string prefix = "__trrm_fnptr_anchor_";
+            var digitCount = 1;
+            for (var value = index; value >= 10; value /= 10)
+            {
+                digitCount++;
+            }
+
+            resourceLedger?.ConsumeWork(checked(
+                (ulong)(prefix.Length + digitCount)));
+            var name = $"{prefix}{index}";
             if (!names.Contains(name))
             {
                 return name;
             }
+        }
+    }
+
+    private static void ReserveA3Collection(
+        TrRmA3LayoutResourceLedger? resourceLedger, int capacity)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(capacity);
+        resourceLedger?.ConsumeWork(checked(1UL + (ulong)capacity));
+    }
+
+    private static void ReserveA3Array(
+        TrRmA3LayoutResourceLedger? resourceLedger, int count,
+        int bytesPerElement = 0)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        ArgumentOutOfRangeException.ThrowIfNegative(bytesPerElement);
+        resourceLedger?.ConsumeWork(checked(1UL + (ulong)count
+            + ((ulong)count * (ulong)bytesPerElement)));
+    }
+
+    private static void ReserveA3Buffer(
+        TrRmA3LayoutResourceLedger? resourceLedger, int length)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        resourceLedger?.ConsumeWork(checked(1UL + (ulong)length));
+    }
+
+    private static void ReserveA3SortWork(
+        TrRmA3LayoutResourceLedger? resourceLedger, int count)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(count);
+        if (count < 2)
+        {
+            return;
+        }
+
+        var levels = 0;
+        for (var value = count - 1; value > 0; value >>= 1)
+        {
+            levels++;
+        }
+
+        resourceLedger?.ConsumeWork(checked((ulong)count * (ulong)levels));
+    }
+
+    private static void AddA3Staged<T>(List<T> rows, T row,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork();
+        rows.Add(row);
+    }
+
+    private static void AddA3Staged<TKey, TValue>(
+        Dictionary<TKey, TValue> rows, TKey key, TValue value,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+        where TKey : notnull
+    {
+        resourceLedger?.ConsumeWork(2);
+        rows.Add(key, value);
+    }
+
+    private static bool AddA3Staged<T>(HashSet<T> values, T value,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        resourceLedger?.ConsumeWork();
+        return values.Add(value);
+    }
+
+    private static bool TryAddA3Staged<TKey, TValue>(
+        Dictionary<TKey, TValue> values, TKey key, TValue value,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+        where TKey : notnull
+    {
+        resourceLedger?.ConsumeWork(2);
+        return values.TryAdd(key, value);
+    }
+
+    private static bool TryAddA3Staged<TKey, TValue>(
+        SortedDictionary<TKey, TValue> values, TKey key, TValue value,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+        where TKey : notnull
+    {
+        resourceLedger?.ConsumeWork(2);
+        return values.TryAdd(key, value);
+    }
+
+    private sealed class TrRmA3StagedList<T>(
+        TrRmA3LayoutResourceLedger? resourceLedger, int capacity = 0)
+        : List<T>(capacity)
+    {
+        public new void Add(T item)
+        {
+            resourceLedger?.ConsumeWork();
+            base.Add(item);
         }
     }
 }

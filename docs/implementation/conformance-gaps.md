@@ -665,12 +665,22 @@ consumer/provider/table/Body and producer writer/emitter selection passed
 `artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_11_19_07_net11.0.trx`. Its
 section/Body encoders now reserve output bytes and row state before allocating
 their encoded buffers; the final frame separately reserves its output bytes.
-The next producer-metering gap is earlier in `NativeAddress`: row/list/
-dictionary staging, Body entry-state/map buffers and code-list storage are
-created before their A3 charges. NativeAddress record encoders and writer
-validation already share the root ledger. The NativeAddress emitter's
-fixed-array TypeSpec path currently accepts only A2/A2E/A2EU, so A3 source
-array production remains a separate unsupported gap.
+The NativeAddress producer now charges its source scan, TypeSpec/signature/
+parameter staging, strings and indexes, Module/contract/method/import/export/
+NativeImport rows, Body maps/records/code, and section descriptors before
+staging or allocation. `TrRmRegisterBodyMapBuilder` uses the same root ledger
+for token collection, deduplication, index maps and encoded map bytes; storage-
+address analysis and Body emission preserve that ledger through their nested
+builders and record writers. Exact and one-short work-boundary checks cover
+both the simple NativeAddress and storage-address producer paths. Their
+focused emitter/Body-writer selection passed 157/157 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_12_13_16_net11.0.trx`.
+The normal analyzer-enabled build remains baseline-red; comparison against
+the saved pre-staging A3 producer-section output retained 351/351 unique
+diagnostic identities, with no additions/removals and no diagnostics in the
+touched files. The NativeAddress emitter's fixed-array TypeSpec path still
+accepts only A2/A2E/A2EU, so A3 source array production remains unfinished and
+must account for its TypeSpec/Layout/Body state before allocation.
 A broader `Modules.TrRm` selection later reported 2,378
 passes but was aborted when the test host crashed; it is incomplete evidence,
 not a passing suite.

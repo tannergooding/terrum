@@ -174,6 +174,51 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void A3StorageAddressProducerUsesOneRootLedgerForStaging()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+        const string moduleIdentity = "native-storage-address-a3";
+        var sourceArtifact = CreateStorageAddressArtifact(moduleIdentity,
+            schemaIdentity);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, sourceArtifact),
+            moduleIdentity, []);
+        var publicArtifact = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1);
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                publicArtifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                index);
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        Assert.That(body.GetRecord(2)[0], Is.EqualTo(0x0E));
+
+        TrRmA3ResourceLedgerTestHelper.AssertExactWork(ledger =>
+        {
+            var artifact = TrRmExecutableCompiler
+                .EmitForeignInvocationDraftNativeAddressLibrary(loaded,
+                    moduleIdentity,
+                    TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayGenericCopyDraft,
+                    a3LayoutResourceLedger: ledger);
+            Assert.That(artifact, Is.EqualTo(publicArtifact));
+        });
+    }
+
+    [Test]
     public void StorageAddressSchemaSelectionPreservesForeignInvocationLoading()
     {
         const string schemaIdentity
