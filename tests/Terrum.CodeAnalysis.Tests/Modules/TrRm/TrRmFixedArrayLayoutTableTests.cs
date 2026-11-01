@@ -1493,6 +1493,32 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void A3DepthAggregationDoesNotWrap()
+    {
+        var ledger = new TrRmA3LayoutResourceLedger();
+        using var outerFrame = ledger.EnterFrame();
+        using var innerFrame = ledger.EnterFrame();
+        var workRemaining = ledger.WorkRemaining;
+        var maximum = new System.Numerics.BigInteger(ulong.MaxValue);
+
+        var contextException = Assert.Throws<TrRmResourceLimitException>(
+            () => ledger.EnterDepthContext(ulong.MaxValue));
+        Assert.That(contextException!.Required, Is.EqualTo(maximum + 1));
+        Assert.That(ledger.WorkRemaining, Is.EqualTo(workRemaining));
+
+        var relativeException = Assert.Throws<TrRmResourceLimitException>(
+            () => ledger.CheckDepthFromCurrent(ulong.MaxValue));
+        Assert.That(relativeException!.Required, Is.EqualTo(maximum + 2));
+        Assert.That(ledger.WorkRemaining, Is.EqualTo(workRemaining));
+
+        var reservationException = Assert.Throws<TrRmResourceLimitException>(
+            () => ledger.ReserveWorkAtDepth(1, ulong.MaxValue));
+        Assert.That(reservationException!.Required,
+            Is.EqualTo(maximum + 2));
+        Assert.That(ledger.WorkRemaining, Is.EqualTo(workRemaining));
+    }
+
+    [Test]
     public void A3AdmissionClassifierRequiresAnExactMarkedException()
     {
         var exception = new InvalidDataException(

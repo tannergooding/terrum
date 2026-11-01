@@ -620,12 +620,19 @@ status/code checks and retained-output preservation; A2 still reports
 loading, TypeSpec/Feature/Body validation, fixed-array table decoding, layout,
 A3/A2 selected-provider checks and binding-plan revalidation. Inclusive
 work/depth reservation, iterative child-state insertion, provider depth
-context and constructed-identity payload charges are covered. The bounded
-expansion subtask is complete; the full deterministic field/action/payload
-recipe and every remaining table/body/provider state charge are still
-unfinished in the resource-ledger task. The latest focused A3/A2
-layout/provider/Body-map/CLI selection passed 114/114 with zero skips at
-`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-10-31_06_08_37_net11.0.trx`.
+context and constructed-identity payload charges are covered. A3 aggregate
+depth sums now use nonwrapping `BigInteger` arithmetic before comparing against
+the 128-frame limit; nested frames plus `ulong.MaxValue` through
+`EnterDepthContext`, `CheckDepthFromCurrent` and `ReserveWorkAtDepth` reject with
+the exact required depth without consuming work. The focused A3 layout,
+TypeSpec, witness/text and CLI resource selection passed 181/181 with zero
+skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_10_00_20_net11.0.trx`.
+The bounded-expansion subtask is complete; the full deterministic
+field/action/payload recipe and remaining table/body/provider state charges
+are still unfinished. A broader `Modules.TrRm` selection later reported 2,378
+passes but was aborted when the test host crashed; it is incomplete evidence,
+not a passing suite.
 The nested constructed-provider checks now retain a one-entry validated
 provider-table cache within the binding request and defer generic formal
 storage origins to their constructed owner/actual comparison. The A2
@@ -636,9 +643,10 @@ NativeAddress, fixed-array and selected provider-CLI selection passes 253/253
 with zero skips at
 `artifacts\\tst\\Debug\\compiler-adoption-integrated-final3\\compiler-adoption-integrated-final3.trx`.
 The latest normal Debug analyzer/style build still fails on the repository
-baseline; the normalized comparison to
-`artifacts\\log\\a3-layout-analyzer-check-final.log` has 353 unique diagnostic
-identities on each side, with no additions or removals.
+baseline; the normalized comparison in
+`artifacts\\log\\compiler-adoption-a3-depth-overflow-analyzers-final14.log`
+has 353 unique diagnostic identities on each side, with no additions or
+removals.
 
 Source production, source-free generic reconstruction and
 remapping/replacement, generic-array CLI JIT/AOT and supervised

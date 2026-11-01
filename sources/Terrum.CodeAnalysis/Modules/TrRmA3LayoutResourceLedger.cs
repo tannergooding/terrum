@@ -241,7 +241,7 @@ internal sealed class TrRmA3LayoutResourceLedger
     {
         var requiredWork = _work + units;
         EnsureWork(requiredWork);
-        CheckDepth(_depthContext + _depth + requiredDepth);
+        CheckDepth(new BigInteger(_depthContext) + _depth + requiredDepth);
         _work = requiredWork;
     }
 
@@ -250,13 +250,13 @@ internal sealed class TrRmA3LayoutResourceLedger
         var requiredWork = _work + 1;
         EnsureWork(requiredWork);
         var requiredDepth = _depth + 1;
-        CheckDepth(_depthContext + requiredDepth);
+        CheckDepth(new BigInteger(_depthContext) + requiredDepth);
         _work = requiredWork;
         _depth = requiredDepth;
         return new FrameLease(this);
     }
 
-    internal void CheckDepth(ulong requiredDepth)
+    internal void CheckDepth(BigInteger requiredDepth)
     {
         if (requiredDepth > DepthLimit)
         {
@@ -268,7 +268,8 @@ internal sealed class TrRmA3LayoutResourceLedger
     }
 
     internal void CheckDepthFromCurrent(ulong relativeDepth)
-        => CheckDepth(_depthContext + _depth + relativeDepth);
+        => CheckDepth(new BigInteger(_depthContext) + _depth
+            + relativeDepth);
 
     internal DepthContextLease EnterDepthContext(ulong logicalDepth)
     {
@@ -277,7 +278,7 @@ internal sealed class TrRmA3LayoutResourceLedger
 
         var previousDepthContext = _depthContext;
         var nextDepthContext = logicalDepth - 1;
-        CheckDepth(nextDepthContext + _depth);
+        CheckDepth(new BigInteger(nextDepthContext) + _depth);
         _depthContext = nextDepthContext;
         return new DepthContextLease(this, previousDepthContext);
     }
