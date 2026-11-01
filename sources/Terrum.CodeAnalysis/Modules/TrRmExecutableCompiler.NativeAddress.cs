@@ -1524,43 +1524,101 @@ public static partial class TrRmExecutableCompiler
         bool AddUnitInitializerExpression(BoundExpression expression,
             int initializerArrayVariable)
         {
-            switch (expression)
-            {
-                case BoundCall unitCall:
-                    return unitCall.Type == PrimitiveType.Void
-                        && AddUnitInitializerCall(unitCall,
-                            initializerArrayVariable, -1);
-
-                case BoundConstant { Type: PrimitiveType.Void, Bits.Low: 0, Bits.High: 0 }:
-                    return true;
-
-                case BoundConditional conditional
+            return expression switch {
+                BoundCall unitCall => unitCall.Type == PrimitiveType.Void
+                    && AddUnitInitializerCall(unitCall,
+                        initializerArrayVariable, -1),
+                BoundConstant {
+                    Type: PrimitiveType.Void,
+                    Bits.Low: 0,
+                    Bits.High: 0,
+                } => true,
+                BoundConditional conditional
                     when conditional.Type == PrimitiveType.Void
                         && IsSupportedNativeUnitConditionalCondition(
-                            conditional.Condition):
-                    if (conditional.Condition is BoundRead conditionRead
-                        && (uint)conditionRead.Variable
+                            conditional.Condition) =>
+                    AddUnitConditionalControlFlow(
+                        conditional.Condition,
+                        () => AddUnitInitializerExpression(
+                            conditional.WhenTrue,
+                            initializerArrayVariable),
+                        () => AddUnitInitializerExpression(
+                            conditional.WhenFalse,
+                            initializerArrayVariable)),
+                _ => false,
+            };
+        }
+
+        bool AddUnitConditionalControlFlow(BoundExpression condition,
+            Func<bool> appendTrue, Func<bool> appendFalse)
+        {
+            if (!IsSupportedNativeUnitConditionalCondition(condition))
+            {
+                return false;
+            }
+
+            if (TryGetNativeAddressKnownBoolean(condition, out var selected))
+            {
+                return selected ? appendTrue() : appendFalse();
+            }
+
+            switch (condition)
+            {
+                case BoundRead read
+                    when (uint)read.Variable
                             < (uint)function.Variables.Length
-                        && conditionRead.Type == PrimitiveType.Bool
-                        && (conditionRead.Variable < function.ParameterCount
-                            || localVariables.Contains(
-                                conditionRead.Variable)))
-                    {
-                    }
-                    else if (conditional.Condition is BoundCall conditionCall
-                        && AddUnitInitializerCall(conditionCall, -1, -1))
-                    {
-                    }
-                    else
+                        && read.Type == PrimitiveType.Bool
+                        && (read.Variable < function.ParameterCount
+                            || localVariables.Contains(read.Variable)):
+                    conditionalEdgeCount++;
+                    return appendTrue() && appendFalse();
+
+                case BoundCall conditionCall
+                    when conditionCall.Type == PrimitiveType.Bool:
+                    if (!AddUnitInitializerCall(conditionCall, -1, -1))
                     {
                         return false;
                     }
 
                     conditionalEdgeCount++;
-                    return AddUnitInitializerExpression(conditional.WhenTrue,
-                            initializerArrayVariable)
-                        && AddUnitInitializerExpression(conditional.WhenFalse,
-                            initializerArrayVariable);
+                    return appendTrue() && appendFalse();
+
+                case BoundUnary {
+                    Operator: TokenKind.Bang,
+                    Type: PrimitiveType.Bool,
+                    Operand: var operand,
+                }:
+                    return AddUnitConditionalControlFlow(operand,
+                        appendFalse, appendTrue);
+
+                case BoundBinary {
+                    Operator: TokenKind.AmpersandAmpersand
+                        or TokenKind.PipePipe,
+                    Type: PrimitiveType.Bool,
+                    Left: var left,
+                    Right: var right,
+                }:
+                    return condition is BoundBinary {
+                        Operator: TokenKind.AmpersandAmpersand,
+                    }
+                        ? AddUnitConditionalControlFlow(left,
+                            () => AddUnitConditionalControlFlow(right,
+                                appendTrue, appendFalse), appendFalse)
+                        : AddUnitConditionalControlFlow(left, appendTrue,
+                            () => AddUnitConditionalControlFlow(right,
+                                appendTrue, appendFalse));
+
+                case BoundConditional {
+                    Type: PrimitiveType.Bool,
+                    Condition: var nestedCondition,
+                    WhenTrue: var whenTrue,
+                    WhenFalse: var whenFalse,
+                }:
+                    return AddUnitConditionalControlFlow(nestedCondition,
+                        () => AddUnitConditionalControlFlow(whenTrue,
+                            appendTrue, appendFalse),
+                        () => AddUnitConditionalControlFlow(whenFalse,
+                            appendTrue, appendFalse));
 
                 default:
                     return false;
@@ -1619,33 +1677,9 @@ public static partial class TrRmExecutableCompiler
                 return AddUnitInitializerExpression(conditional, -1);
 
             case BoundIf branch:
-                if (!IsSupportedNativeUnitConditionalCondition(
-                        branch.Condition))
-                {
-                    return false;
-                }
-
-                if (branch.Condition is BoundRead conditionRead
-                    && ((uint)conditionRead.Variable
-                            >= (uint)function.Variables.Length
-                        || conditionRead.Type != PrimitiveType.Bool
-                        || (conditionRead.Variable
-                                >= function.ParameterCount
-                            && !localVariables.Contains(
-                                conditionRead.Variable))))
-                {
-                    return false;
-                }
-
-                if (branch.Condition is BoundCall conditionCall
-                    && !AddUnitInitializerCall(conditionCall, -1, -1))
-                {
-                    return false;
-                }
-
-                conditionalEdgeCount++;
-                return AddUnitInitializerStatement(branch.Then)
-                    && (branch.Else is null
+                return AddUnitConditionalControlFlow(branch.Condition,
+                    () => AddUnitInitializerStatement(branch.Then),
+                    () => branch.Else is null
                         || AddUnitInitializerStatement(branch.Else));
 
             default:
@@ -1966,25 +2000,154 @@ public static partial class TrRmExecutableCompiler
 
     private static bool IsSupportedNativeUnitConditionalExpression(
         BoundExpression expression)
-        => expression switch {
-            BoundConstant { Type: PrimitiveType.Void, Bits.Low: 0, Bits.High: 0 }
-                => true,
-            BoundCall { Type: PrimitiveType.Void } => true,
-            BoundConditional {
+    {
+        switch (expression)
+        {
+            case BoundConstant {
+                Type: PrimitiveType.Void,
+                Bits.Low: 0,
+                Bits.High: 0,
+            }:
+            case BoundCall { Type: PrimitiveType.Void }:
+                return true;
+
+            case BoundConditional {
                 Type: PrimitiveType.Void,
                 Condition: var condition,
                 WhenTrue: var whenTrue,
                 WhenFalse: var whenFalse,
-            } => IsSupportedNativeUnitConditionalCondition(condition)
-                && IsSupportedNativeUnitConditionalExpression(whenTrue)
-                && IsSupportedNativeUnitConditionalExpression(whenFalse),
-            _ => false,
-        };
+            }:
+                if (!IsSupportedNativeUnitConditionalCondition(condition))
+                {
+                    return false;
+                }
+
+                if (TryGetNativeAddressKnownBoolean(condition,
+                        out var selected))
+                {
+                    return IsSupportedNativeUnitConditionalExpression(
+                        selected ? whenTrue : whenFalse);
+                }
+
+                return IsSupportedNativeUnitConditionalExpression(whenTrue)
+                    && IsSupportedNativeUnitConditionalExpression(whenFalse);
+
+            default:
+                return false;
+        }
+    }
 
     private static bool IsSupportedNativeUnitConditionalCondition(
         BoundExpression condition)
-        => condition.Type == PrimitiveType.Bool
-            && condition is BoundRead or BoundCall;
+    {
+        if (condition.Type != PrimitiveType.Bool)
+        {
+            return false;
+        }
+
+        if (TryGetNativeAddressKnownBoolean(condition, out _))
+        {
+            return true;
+        }
+
+        return condition switch {
+            BoundRead { Type: PrimitiveType.Bool } => true,
+            BoundCall { Type: PrimitiveType.Bool } => true,
+            BoundUnary {
+                Operator: TokenKind.Bang,
+                Type: PrimitiveType.Bool,
+                Operand: var operand,
+            } => IsSupportedNativeUnitConditionalCondition(operand),
+            BoundBinary {
+                Operator: TokenKind.AmpersandAmpersand
+                    or TokenKind.PipePipe,
+                Type: PrimitiveType.Bool,
+                Left: var left,
+                Right: var right,
+            } => IsSupportedNativeUnitConditionalCondition(left)
+                && IsSupportedNativeUnitConditionalCondition(right),
+            BoundConditional {
+                Type: PrimitiveType.Bool,
+                Condition: var nestedCondition,
+                WhenTrue: var whenTrue,
+                WhenFalse: var whenFalse,
+            } => IsSupportedNativeUnitConditionalCondition(nestedCondition)
+                && IsSupportedNativeUnitConditionalCondition(whenTrue)
+                && IsSupportedNativeUnitConditionalCondition(whenFalse),
+            _ => false,
+        };
+    }
+
+    private static bool TryGetNativeAddressKnownBoolean(
+        BoundExpression expression, out bool value)
+    {
+        switch (expression)
+        {
+            case BoundConstant {
+                Type: PrimitiveType.Bool,
+            } constant:
+                value = constant.Bits.Low != 0;
+                return true;
+
+            case BoundUnary {
+                Operator: TokenKind.Bang,
+                Type: PrimitiveType.Bool,
+                Operand: var operand,
+            } when TryGetNativeAddressKnownBoolean(operand,
+                out var operandValue):
+                value = !operandValue;
+                return true;
+
+            case BoundBinary {
+                Operator: TokenKind.AmpersandAmpersand,
+                Type: PrimitiveType.Bool,
+                Left: var left,
+                Right: var right,
+            } when TryGetNativeAddressKnownBoolean(left, out var andLeft):
+                if (!andLeft)
+                {
+                    value = false;
+                    return true;
+                }
+                if (TryGetNativeAddressKnownBoolean(right, out var andRight))
+                {
+                    value = andRight;
+                    return true;
+                }
+                break;
+
+            case BoundBinary {
+                Operator: TokenKind.PipePipe,
+                Type: PrimitiveType.Bool,
+                Left: var left,
+                Right: var right,
+            } when TryGetNativeAddressKnownBoolean(left, out var orLeft):
+                if (orLeft)
+                {
+                    value = true;
+                    return true;
+                }
+                if (TryGetNativeAddressKnownBoolean(right, out var orRight))
+                {
+                    value = orRight;
+                    return true;
+                }
+                break;
+
+            case BoundConditional {
+                Type: PrimitiveType.Bool,
+                Condition: var condition,
+                WhenTrue: var whenTrue,
+                WhenFalse: var whenFalse,
+            } when TryGetNativeAddressKnownBoolean(condition,
+                out var selected):
+                return TryGetNativeAddressKnownBoolean(
+                    selected ? whenTrue : whenFalse, out value);
+        }
+
+        value = false;
+        return false;
+    }
 
     private static bool TryGetContextualInitializationRegister(
         BoundConstant constant, PrimitiveType type,
@@ -2319,38 +2482,37 @@ public static partial class TrRmExecutableCompiler
 
         var storageArguments = storageCall.StorageArguments
             .ToDictionary(static argument => argument.ParameterOrdinal);
-        var unitCallPlanIndexByCall = new Dictionary<BoundCall, int>(
-            ReferenceEqualityComparer.Instance);
-        var unitCallResultHomeByCall = new Dictionary<BoundCall, int>(
+        var unitCallPlanIndexesByCall = new Dictionary<BoundCall, Queue<int>>(
             ReferenceEqualityComparer.Instance);
         for (var callIndex = 0;
             callIndex < storageCall.UnitInitializerCalls.Length;
             callIndex++)
         {
             var unitCallPlan = storageCall.UnitInitializerCalls[callIndex];
-            if (!unitCallPlanIndexByCall.TryAdd(unitCallPlan.Call, callIndex))
+            if (!unitCallPlanIndexesByCall.TryGetValue(unitCallPlan.Call,
+                    out var callPlanIndexes))
             {
-                throw Unsupported(
-                    "The A2EU unit-call expression graph reuses a call node.");
+                callPlanIndexes = new Queue<int>();
+                unitCallPlanIndexesByCall.Add(unitCallPlan.Call,
+                    callPlanIndexes);
             }
 
-            if (unitCallPlan.ResultHome >= 0)
-            {
-                unitCallResultHomeByCall.Add(unitCallPlan.Call,
-                    unitCallPlan.ResultHome);
-            }
+            callPlanIndexes.Enqueue(callIndex);
         }
 
-        var unitCallIndex = 0;
+        var emittedUnitCallPlans = new HashSet<int>();
 
-        void AppendUnitInitializerCall(BoundCall unitCall)
+        int AppendUnitInitializerCall(BoundCall unitCall)
         {
-            if (!unitCallPlanIndexByCall.TryGetValue(unitCall,
-                    out var currentCallIndex))
+            if (!unitCallPlanIndexesByCall.TryGetValue(unitCall,
+                    out var callPlanIndexes)
+                || !callPlanIndexes.TryDequeue(out var currentCallIndex))
             {
                 throw Unsupported(
                     "The A2EU unit-call expression has no captured plan.");
             }
+
+            _ = emittedUnitCallPlans.Add(currentCallIndex);
 
             var unitCallPlan
                 = storageCall.UnitInitializerCalls[currentCallIndex];
@@ -2375,6 +2537,8 @@ public static partial class TrRmExecutableCompiler
 
             var callInputs = new TrRmRegisterBodyCallInput[
                 unitSignature.ParameterTypes.Length];
+            var nestedCallResultHomes = new int[unitCall.Arguments.Length];
+            Array.Fill(nestedCallResultHomes, -1);
             for (var argumentIndex = 0;
                 argumentIndex < unitCall.Arguments.Length;
                 argumentIndex++)
@@ -2382,7 +2546,8 @@ public static partial class TrRmExecutableCompiler
                 var argument = unitCall.Arguments[argumentIndex];
                 if (argument is BoundCall nestedCall)
                 {
-                    AppendUnitInitializerCall(nestedCall);
+                    nestedCallResultHomes[argumentIndex]
+                        = AppendUnitInitializerCall(nestedCall);
                     continue;
                 }
 
@@ -2594,8 +2759,8 @@ public static partial class TrRmExecutableCompiler
                                 = new TrRmRegisterBodyCallInput(0, 0, 0);
                         }
                         else if (nestedCall.Type == parameterType
-                            && unitCallResultHomeByCall.TryGetValue(
-                                nestedCall, out var nestedResultHome))
+                            && nestedCallResultHomes[argumentIndex]
+                                is var nestedResultHome and >= 0)
                         {
                             callInputs[parameterIndex]
                                 = new TrRmRegisterBodyCallInput(2, 1,
@@ -2614,12 +2779,6 @@ public static partial class TrRmExecutableCompiler
                 }
             }
 
-            if (unitCallIndex != currentCallIndex)
-            {
-                throw Unsupported(
-                    "The A2EU call arguments are not captured in source order.");
-            }
-
             var resultKind = unitCallPlan.ResultHome < 0 ? (byte)0 : (byte)2;
             var unitCallMethodMapIndex = maps.GetMethodMapIndex(
                 0x1600_0000u | checked((uint)(unitCall.Function + 1)));
@@ -2630,7 +2789,7 @@ public static partial class TrRmExecutableCompiler
                     : checked((ushort)unitCallPlan.ResultHome), callInputs,
                 []));
             AppendCallSiteInstruction(code, callSiteIndex);
-            unitCallIndex++;
+            return unitCallPlan.ResultHome;
         }
 
         void AppendUnitInitializerCondition(BoundExpression condition)
@@ -2643,9 +2802,9 @@ public static partial class TrRmExecutableCompiler
                     break;
 
                 case BoundCall conditionCall:
-                    AppendUnitInitializerCall(conditionCall);
-                    if (!unitCallResultHomeByCall.TryGetValue(conditionCall,
-                            out var conditionResultHome))
+                    var conditionResultHome
+                        = AppendUnitInitializerCall(conditionCall);
+                    if (conditionResultHome < 0)
                     {
                         throw Unsupported(
                             "An A2EU branch condition call has no result Home.");
@@ -2663,6 +2822,61 @@ public static partial class TrRmExecutableCompiler
         void AppendConditionalControlFlow(BoundExpression condition,
             Action appendTrue, Action appendFalse)
         {
+            if (TryGetNativeAddressKnownBoolean(condition, out var selected))
+            {
+                (selected ? appendTrue : appendFalse)();
+                return;
+            }
+
+            switch (condition)
+            {
+                case BoundUnary {
+                    Operator: TokenKind.Bang,
+                    Type: PrimitiveType.Bool,
+                    Operand: var operand,
+                }:
+                    AppendConditionalControlFlow(operand,
+                        appendFalse, appendTrue);
+                    return;
+
+                case BoundBinary {
+                    Operator: TokenKind.AmpersandAmpersand,
+                    Type: PrimitiveType.Bool,
+                    Left: var left,
+                    Right: var right,
+                }:
+                    AppendConditionalControlFlow(left,
+                        () => AppendConditionalControlFlow(right,
+                            appendTrue, appendFalse),
+                        appendFalse);
+                    return;
+
+                case BoundBinary {
+                    Operator: TokenKind.PipePipe,
+                    Type: PrimitiveType.Bool,
+                    Left: var left,
+                    Right: var right,
+                }:
+                    AppendConditionalControlFlow(left,
+                        appendTrue,
+                        () => AppendConditionalControlFlow(right,
+                            appendTrue, appendFalse));
+                    return;
+
+                case BoundConditional {
+                    Type: PrimitiveType.Bool,
+                    Condition: var nestedCondition,
+                    WhenTrue: var whenTrue,
+                    WhenFalse: var whenFalse,
+                }:
+                    AppendConditionalControlFlow(nestedCondition,
+                        () => AppendConditionalControlFlow(whenTrue,
+                            appendTrue, appendFalse),
+                        () => AppendConditionalControlFlow(whenFalse,
+                            appendTrue, appendFalse));
+                    return;
+            }
+
             AppendUnitInitializerCondition(condition);
             if (records.Count > ushort.MaxValue)
             {
@@ -2717,7 +2931,7 @@ public static partial class TrRmExecutableCompiler
             {
                 case BoundCall unitCall
                     when unitCall.Type == PrimitiveType.Void:
-                    AppendUnitInitializerCall(unitCall);
+                    _ = AppendUnitInitializerCall(unitCall);
                     return;
 
                 case BoundConstant {
@@ -2731,6 +2945,14 @@ public static partial class TrRmExecutableCompiler
                     when conditional.Type == PrimitiveType.Void
                         && IsSupportedNativeUnitConditionalCondition(
                             conditional.Condition):
+                    if (TryGetNativeAddressKnownBoolean(
+                            conditional.Condition, out var selected))
+                    {
+                        AppendUnitInitializerExpression(selected
+                            ? conditional.WhenTrue : conditional.WhenFalse);
+                        return;
+                    }
+
                     AppendConditionalControlFlow(conditional.Condition,
                         () => AppendUnitInitializerExpression(
                             conditional.WhenTrue),
@@ -2758,7 +2980,7 @@ public static partial class TrRmExecutableCompiler
 
             if (local.Initializer is BoundCall localCall)
             {
-                AppendUnitInitializerCall(localCall);
+                _ = AppendUnitInitializerCall(localCall);
                 return;
             }
 
@@ -2819,7 +3041,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundExpressionStatement
                     { Expression: BoundCall call }
                     when call.Type == PrimitiveType.Void:
-                    AppendUnitInitializerCall(call);
+                    _ = AppendUnitInitializerCall(call);
                     return;
 
                 case BoundExpressionStatement
@@ -2844,6 +3066,20 @@ public static partial class TrRmExecutableCompiler
             {
                 throw Unsupported(
                     "A conditional A2EU branch requires an admitted Boolean condition.");
+            }
+
+            if (TryGetNativeAddressKnownBoolean(branch.Condition,
+                    out var selected))
+            {
+                if (selected)
+                {
+                    AppendUnitInitializerStatement(branch.Then);
+                }
+                else if (branch.Else is not null)
+                {
+                    AppendUnitInitializerStatement(branch.Else);
+                }
+                return;
             }
 
             AppendConditionalControlFlow(branch.Condition,
@@ -2954,7 +3190,7 @@ public static partial class TrRmExecutableCompiler
                         {
                             if (initializer is BoundCall unitInitializerCall)
                             {
-                                AppendUnitInitializerCall(
+                                _ = AppendUnitInitializerCall(
                                     unitInitializerCall);
                             }
                             else if (initializer is BoundConditional
@@ -3081,7 +3317,7 @@ public static partial class TrRmExecutableCompiler
 
                     if (local.Initializer is BoundCall localCall)
                     {
-                        AppendUnitInitializerCall(localCall);
+                        _ = AppendUnitInitializerCall(localCall);
                         break;
                     }
 
@@ -3127,7 +3363,7 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundExpressionStatement
                     { Expression: BoundCall unitCall }:
-                    AppendUnitInitializerCall(unitCall);
+                    _ = AppendUnitInitializerCall(unitCall);
                     break;
 
                 case BoundIf branch:
@@ -3317,7 +3553,8 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        if (unitCallIndex != storageCall.UnitInitializerCalls.Length)
+        if (emittedUnitCallPlans.Count
+            != storageCall.UnitInitializerCalls.Length)
         {
             throw Unsupported(
                 "The A2EU unit-call plan does not match the encoded arrays.");

@@ -1670,36 +1670,99 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
     }
 
-    [TestCase(true, false)]
-    [TestCase(false, false)]
-    [TestCase(true, true)]
+    [TestCase(true, false, "choose", false)]
+    [TestCase(false, false, "choose", false)]
+    [TestCase(true, true, "choose", false)]
+    [TestCase(true, false,
+        "choose || IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(false, false,
+        "choose && IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(true, false, "!choose", false)]
+    [TestCase(true, false, "choose ? false : true", false)]
+    [TestCase(true, false, "true", false)]
+    [TestCase(false, false, "false", false)]
+    [TestCase(true, false,
+        "true || IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(false, false,
+        "false && IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(true, false,
+        "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
     public void StandardA2EUConditionalJitExecutesOnlyTheSelectedNativeArm(
-        bool choose, bool failFalseArm)
+        bool choose, bool failFalseArm, string conditionExpression,
+        bool useIfStatement)
     {
         const string moduleIdentity = "a2eu-unit-conditional-jit";
         AssertA2EUWindowsX64();
         var input = CreateStandardA2EUConditionalRuntimeInput(choose,
-            moduleIdentity, failFalseArm);
+            moduleIdentity, failFalseArm, conditionExpression,
+            useIfStatement);
         var loaded = TrRmExecutableCompiler.LoadStandard(input,
             moduleIdentity, []);
+        if (conditionExpression is
+            "choose || IsProcessorFeaturePresent(markedError / clearError)"
+            or "choose && IsProcessorFeaturePresent(markedError / clearError)")
+        {
+            var main = loaded.Functions.Single(static function =>
+                function.Name == "Main");
+            var conditionalBlocks = new List<BoundIf>();
+            Assert.That(BoundTreeTraversal.VisitStatements(main.Body,
+                statement =>
+                {
+                    if (statement is BoundIf conditional)
+                    {
+                        conditionalBlocks.Add(conditional);
+                    }
+                }), Is.True);
+            Assert.That(conditionalBlocks, Has.Count.GreaterThanOrEqualTo(2));
+        }
+
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, input.SchemaIdentity, 1);
+        Assert.That(reemitted, Is.EqualTo(input.Artifact.ToArray()));
         var result = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
+        var conditionValue = conditionExpression switch {
+            "choose" => choose,
+            "!choose" or "choose ? false : true" => !choose,
+            "true" or "true || IsProcessorFeaturePresent(markedError / clearError)" => true,
+            "false" or "false && IsProcessorFeaturePresent(markedError / clearError)" => false,
+            "choose || IsProcessorFeaturePresent(markedError / clearError)" => true,
+            "choose && IsProcessorFeaturePresent(markedError / clearError)" => false,
+            _ => throw new InvalidOperationException(
+                "The A2EU test condition has no expected normal result."),
+        };
         TestContext.WriteLine(
-            $"A2EU source-free JIT: choose={choose}; failFalseArm={failFalseArm}; policy=FailFast; expected={(choose ? 0 : Environment.ProcessId)}; actual={result}.");
+            $"A2EU source-free JIT: choose={choose}; failFalseArm={failFalseArm}; useIfStatement={useIfStatement}; condition={conditionExpression}; policy=FailFast; expected={(conditionValue ? 0 : Environment.ProcessId)}; actual={result}.");
         Assert.That(result,
-            Is.EqualTo(choose ? 0 : Environment.ProcessId));
+            Is.EqualTo(conditionValue ? 0 : Environment.ProcessId));
     }
 
-    [TestCase(true, false)]
-    [TestCase(false, false)]
-    [TestCase(true, true)]
-    [TestCase(false, true)]
+    [TestCase(true, false, "choose", false)]
+    [TestCase(false, false, "choose", false)]
+    [TestCase(true, true, "choose", false)]
+    [TestCase(false, true, "choose", false)]
+    [TestCase(true, false,
+        "choose || IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(false, false,
+        "choose || IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(false, false,
+        "choose && IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(true, false,
+        "choose && IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(true, false,
+        "true || IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(false, false,
+        "false && IsProcessorFeaturePresent(markedError / clearError)", false)]
+    [TestCase(false, false,
+        "choose || IsProcessorFeaturePresent(markedError / clearError)", true)]
     public async Task StandardA2EUConditionalAotExecutesOnlyTheSelectedNativeArm(
-        bool choose, bool failFalseArm)
+        bool choose, bool failFalseArm, string conditionExpression,
+        bool useIfStatement)
     {
         const string moduleIdentity = "a2eu-unit-conditional-aot";
         AssertA2EUWindowsX64();
         var input = CreateStandardA2EUConditionalRuntimeInput(choose,
-            moduleIdentity, failFalseArm);
+            moduleIdentity, failFalseArm, conditionExpression,
+            useIfStatement);
         var image = NativeModuleCompiler.EmitStandardExecutable(input,
             moduleIdentity, [], NativeRuntimePolicy.FailFast);
         var imagePath = Path.Combine(Path.GetTempPath(),
@@ -1740,11 +1803,30 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
             var output = await stdout.ConfigureAwait(true);
             var error = await stderr.ConfigureAwait(true);
-            var expected = failFalseArm && !choose
+            var conditionCallIsSelected
+                = conditionExpression switch {
+                    "choose || IsProcessorFeaturePresent(markedError / clearError)"
+                        => !choose,
+                    "choose && IsProcessorFeaturePresent(markedError / clearError)"
+                        => choose,
+                    _ => false,
+                };
+            var conditionValue = conditionExpression switch {
+                "choose" => choose,
+                "!choose" or "choose ? false : true" => !choose,
+                "true" or "true || IsProcessorFeaturePresent(markedError / clearError)" => true,
+                "false" or "false && IsProcessorFeaturePresent(markedError / clearError)" => false,
+                "choose || IsProcessorFeaturePresent(markedError / clearError)" => true,
+                "choose && IsProcessorFeaturePresent(markedError / clearError)" => false,
+                _ => throw new InvalidOperationException(
+                    "The A2EU test condition has no expected normal result."),
+            };
+            var expected = conditionCallIsSelected
+                    || failFalseArm && !conditionValue
                 ? unchecked((int)0xE0540002)
-                : choose ? 0 : processId;
+                : conditionValue ? 0 : processId;
             TestContext.WriteLine(
-                $"A2EU source-free AOT: choose={choose}; failFalseArm={failFalseArm}; policy=FailFast; pid={processId}; expected={expected}; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+                $"A2EU source-free AOT: choose={choose}; failFalseArm={failFalseArm}; useIfStatement={useIfStatement}; condition={conditionExpression}; policy=FailFast; pid={processId}; expected={expected}; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
             Assert.That(process.ExitCode, Is.EqualTo(expected));
@@ -1769,7 +1851,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
     private static TrRmStandardArtifactInput
         CreateStandardA2EUConditionalRuntimeInput(bool choose,
-            string moduleIdentity, bool failFalseArm)
+            string moduleIdentity, bool failFalseArm,
+            string conditionExpression = "choose",
+            bool useIfStatement = false)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
@@ -1778,7 +1862,19 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             NativeCoreRegistration
                 = NativeCoreRegistrationTests.CreateRegistration(),
         };
+        var falseAction = failFalseArm
+            ? "SetLastError(markedError / clearError)"
+            : "SetLastError(markedError)";
+        var conditional = useIfStatement
+            ? $"if ({conditionExpression}) {{ SetLastError(clearError); }} "
+                + $"else {{ {falseAction}; }}"
+            : $"({conditionExpression}) ? SetLastError(clearError) : {falseAction};";
         var source = $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern bool IsProcessorFeaturePresent(uint32 feature);
+
             [Terrum.Interop.NativeImport(
                 "kernel32.dll",
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
@@ -1810,11 +1906,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     bool choose = {{choose.ToString().ToLowerInvariant()}};
                     uint32 clearError = 0;
                     uint32 markedError = GetCurrentProcessId();
-                    choose
-                        ? SetLastError(clearError)
-                        : {{(failFalseArm
-                            ? "SetLastError(markedError / clearError)"
-                            : "SetLastError(markedError)")}};
+                    {{conditional}}
                     int32 observedError = GetLastError();
                     uint64 byteCount = 0;
                     var callback = &IsBadReadPtr;

@@ -125,17 +125,25 @@ completion, or permission to initialize early; None is not a unit store source.
 
 The source-level both-arm behavior is exercised by
 [`UnitConditionalExecutesOnlyItsSelectedArm`](../../tests/Terrum.CodeAnalysis.Tests/Semantics/ConditionalExpressionTests.cs).
-It does not establish A2EU runtime behavior; explicit and inferred Unit local
-declarations remain unimplemented.
+Explicit and inferred Unit locals are now implemented across hosted and
+standalone source paths, including vacant/live state, reads, assignments,
+lifetime ends and Unit-call results. The focused API/CLI/native-PE/JIT
+selection passed both runtime policies; its result is recorded in
+[`cli-protocol.md`](../implementation/cli-protocol.md). This does not establish
+A2EU Body/runtime support, which remains a separate gate.
 
 Current [array Body production](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs),
 including `IsSupportedNativeFixedArrayInitialization`, now provisionally
 admits nested Unit-valued `BoundConditional` initializers. It emits
 multi-block `E4`/`ConditionalEdge` branches with `E3` joins using assigned
 records, and performs the Unit stores only after the selected-arm effects
-complete. The supported condition forms are typed Boolean Home reads and
-direct Boolean NativeImport results; condition constants and other Boolean
-expression forms remain outside this Body profile. The corresponding
+complete. Condition support now includes Boolean Home reads, direct Boolean
+NativeImport results, constant selection, logical-not, short-circuit `&&`/`||`,
+and nested Boolean conditional expressions. Right-side calls and checks stay
+on reached paths. The focused A2EU producer/reader/JIT/AOT selection passed
+32/32 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-conditional-boolean-forms-final3.trx`. Scalar
+comparisons and other Boolean forms remain outside this Body profile. The corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 artifact. The active Body regression covers nested arms, checked
