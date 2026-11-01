@@ -36,6 +36,12 @@ public sealed partial class CliTests
     [TestCase("mut int32 x = 0; @const: for (; x < 2; x++) { do { continue const; } while (false); } require x == 2;",0)]
     [TestCase("do { return ((())); } while (true);",0)]
     [TestCase("return; require false;",0)]
+    [TestCase("void token = (); token; return;",0)]
+    [TestCase("var token = (); token; return;",0)]
+    [TestCase("mut void token = (); token = (); token; return;",0)]
+    [TestCase("init void token; require !(token is init); token = (); token; require token is init; token = _; require !(token is init); return;",0)]
+    [TestCase("init var token; token = (); token; token = _; require !(token is init); return;",0)]
+    [TestCase("init void token; if (true) { token = (); } if (token is init) { token; } else { require false; } return;",0)]
     public async Task NativeVoidMatchesHostedScannerPeAndJitAsync(string body, int expected)
     {
         var root = RepositoryRoot();
@@ -47,11 +53,13 @@ public sealed partial class CliTests
             var source = Encoding.UTF8.GetBytes($"void Main() {{ {body} }}");
             foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
             {
+                var projection = await ReadFrontendComponentProjectionAsync(source, policy);
+                Assert.That(projection.GetProperty("valid").GetBoolean(), Is.True);
+                Assert.That(projection.GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
                 var (exit, output, error) = await RunAsync(source, "frontend-build",
                     TerrumProjectPaths.SourceDirectory(root), "-", "-o", native, "--runtime", policy, "--json");
                 Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
-                using var document = JsonDocument.Parse(output);
-                Assert.That(document.RootElement.GetProperty("result").GetProperty("projectionVersion").GetInt32(), Is.EqualTo(87));
+                AssertFrontendBuildFallback(output, "frontend-build", true);
                 var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
                     "-", "-o", hosted, "--runtime", policy, "--json");
                 Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
@@ -76,6 +84,95 @@ public sealed partial class CliTests
             File.Delete(scanner);
         }
     }
+
+    [Test]
+    public async Task NativeVoidAcceptsUnitExpressionBodyAcrossFrontendsAsync()
+    {
+        var root = RepositoryRoot();
+        var source = Encoding.UTF8.GetBytes("void Main() => ();");
+        var native = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.scanner.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var projection = await ReadFrontendComponentProjectionAsync(source, policy);
+                Assert.That(projection.GetProperty("valid").GetBoolean(), Is.True);
+                var (exit, output, error) = await RunAsync(source, "frontend-build",
+                    TerrumProjectPaths.SourceDirectory(root), "-", "-o", native, "--runtime", policy, "--json");
+                Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
+                AssertFrontendBuildFallback(output, "frontend-build", true);
+                var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
+                    "-", "-o", hosted, "--runtime", policy, "--json");
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component",
+                    TerrumProjectPaths.SourceDirectory(root), "-", "-o", scanner,
+                    "--runtime", policy, "--json");
+                Assert.That(scanExit == 0, Is.True, $"{scanOutput}{scanError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(scanner), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await ExecuteNativeImageAsync(native), Is.Zero);
+                var (runExit, runOutput, runError) = await RunAsync(source, "frontend-run",
+                    TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", policy, "--json");
+                Assert.That(runExit, Is.Zero, $"{runOutput}{runError}");
+                var (jitExit, jitOutput, jitError) = await RunAsync(source, "jit", "-",
+                    "--runtime", policy, "--json");
+                Assert.That(jitExit, Is.Zero, $"{jitOutput}{jitError}");
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(native).ConfigureAwait(true);
+            File.Delete(hosted);
+            File.Delete(scanner);
+        }
+    }
+
+    [Test]
+    public async Task NativeVoidCallsCanInitializeUnitLocalsAcrossFrontendsAsync()
+    {
+        var root = RepositoryRoot();
+        var source = Encoding.UTF8.GetBytes(
+            "void Notify() {} int32 Main() { void explicitToken = Notify(); explicitToken; "
+            + "var inferredToken = Notify(); inferredToken; return 42; }");
+        var native = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.native.exe");
+        var hosted = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.hosted.exe");
+        var scanner = CreateTestArtifactPath($"void-{Guid.NewGuid():N}.scanner.exe");
+        try
+        {
+            foreach (var policy in new[] { "fail-fast", "checked-exceptions" })
+            {
+                var (exit, output, error) = await RunAsync(source, "frontend-build",
+                    TerrumProjectPaths.SourceDirectory(root), "-", "-o", native, "--runtime", policy, "--json");
+                Assert.That(exit == 0, Is.True, $"{policy}: {output}{error}");
+                AssertFrontendBuildFallback(output, "frontend-build", true);
+                var (hostExit, hostOutput, hostError) = await RunAsync(source, "build",
+                    "-", "-o", hosted, "--runtime", policy, "--json");
+                Assert.That(hostExit == 0, Is.True, $"{hostOutput}{hostError}");
+                var (scanExit, scanOutput, scanError) = await RunAsync(source, "build-component",
+                    TerrumProjectPaths.SourceDirectory(root), "-", "-o", scanner,
+                    "--runtime", policy, "--json");
+                Assert.That(scanExit == 0, Is.True, $"{scanOutput}{scanError}");
+                Assert.That(await File.ReadAllBytesAsync(native), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await File.ReadAllBytesAsync(scanner), Is.EqualTo(await File.ReadAllBytesAsync(hosted)));
+                Assert.That(await ExecuteNativeImageAsync(native), Is.EqualTo(42));
+                var (runExit, runOutput, runError) = await RunAsync(source, "frontend-run",
+                    TerrumProjectPaths.SourceDirectory(root), "-", "--runtime", policy, "--json");
+                Assert.That(runExit, Is.EqualTo(42), $"{runOutput}{runError}");
+                var (jitExit, jitOutput, jitError) = await RunAsync(source, "jit", "-",
+                    "--runtime", policy, "--json");
+                Assert.That(jitExit, Is.EqualTo(42), $"{jitOutput}{jitError}");
+            }
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(native).ConfigureAwait(true);
+            File.Delete(hosted);
+            File.Delete(scanner);
+        }
+    }
+
     [TestCase("void Main() { return 1; }")]
     [TestCase("void Main() { return int32(1); }")]
     [TestCase("void Main() { return true; }")]
@@ -83,11 +180,11 @@ public sealed partial class CliTests
     [TestCase("void Main() { return (1); }")]
     [TestCase("void Main() { return Missing(); }")]
     [TestCase("void Main() { return () + (); }")]
-    [TestCase("void Main() => ();")]
-    [TestCase("void Main() { _ = (); }")]
     [TestCase("void Main() { require (); }")]
-    [TestCase("void Main() { void x = (); }")]
-    [TestCase("void Main() { var x = (); }")]
+    [TestCase("void Main() { void x = int32(1); }")]
+    [TestCase("void Main() { init void x; x; }")]
+    [TestCase("void Main() { init var x; }")]
+    [TestCase("void Main() { void x = (); x = _; x = (); }")]
     [TestCase("void Main(void x) {}")]
     [TestCase("void Main(int32 x) {}")]
     [TestCase("void Other() {}")]

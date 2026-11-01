@@ -7,7 +7,9 @@ namespace Terrum.CodeAnalysis;
 // words 392..647. Each node uses eight words: opcode, type, span start/length,
 // child/parameter, right child, and magnitude low/high.
 // Words 298/299 count statements/locals; 300..331 hold eight local declarations
-// (type, flags, name start/length); flag 8 marks a switch selector local.
+// (type, flags, name start/length); type 0 is void and -1 is an unresolved
+// inferred initialization type, which is invalid at publication. Flag 8 marks
+// a switch selector local.
 // Words 332..391 hold twelve ordered statements
 // (kind, slot, root, span start/length). Header flags in word 2 are public,
 // NoThrow, DoesNotReturn, and caller-unsafe; words 16/17 hold out/init-ref masks

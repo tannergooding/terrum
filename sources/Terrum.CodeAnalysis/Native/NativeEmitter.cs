@@ -5402,6 +5402,11 @@ internal sealed partial class PeCompiler
     }
     private void StoreValue(int offset, PrimitiveType type)
     {
+        if (type == PrimitiveType.Void)
+        {
+            return;
+        }
+
         if (_normalBacking && IsNormalBackingHandle(type))
         {
             StoreNormalBackingHandle(offset);
@@ -5429,6 +5434,11 @@ internal sealed partial class PeCompiler
     }
     private void LoadValue(int offset, PrimitiveType type)
     {
+        if (type == PrimitiveType.Void)
+        {
+            return;
+        }
+
         if (IsIndirect(type))
         {
             _code.Address(offset);

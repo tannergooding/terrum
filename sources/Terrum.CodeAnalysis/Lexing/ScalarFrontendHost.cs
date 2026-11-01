@@ -218,6 +218,7 @@ public static partial class ScalarFrontendHost
         ScalarFrontendResult ReadTree()
         {
             var voidArrow = words[5] == 0 && words[41] == 1;
+            var voidDiscardBody = voidArrow && words[39] == -1;
             if (!AllZero(context is null
                     ? allowInitRefArguments ? 18 : 17
                     : 23, 34)
@@ -237,7 +238,7 @@ public static partial class ScalarFrontendHost
                 || !AllZero(OverflowNodeBankEnd, wordCount)
                 || words[298] is < 0 or > 12
                 || words[299] is < 0 or > 8
-                || words[41] != 0 && (voidArrow ? words[298] != 1
+                || words[41] != 0 && (voidDiscardBody ? words[298] != 1
                     : words[298] != 0 || words[299] != 0)
                 || !AllZero(300 + words[299] * 4, 332)
                 || !AllZero(332 + words[298] * 5, OverflowNodeWordOffset))
@@ -251,7 +252,9 @@ public static partial class ScalarFrontendHost
                 var flags = words[offset + 1];
                 var local = new ScalarFrontendLocal(words[offset], (flags & 1) != 0,
                     Span(offset + 2)) { IsInitialization = (flags & 2) != 0, IsConstant = (flags & 4) != 0 };
-                if (!ScalarType(local.Type) || flags is not (0 or 1 or 2 or 4 or 8)
+                if (!ScalarType(local.Type) && local.Type != 0
+                    || flags is not (0 or 1 or 2 or 3 or 4 or 8)
+                    || local.Type == 0 && flags == 8
                     || !ValidSpan(local.Name, nonempty: true))
                 {
                     throw InvalidResult();
@@ -267,7 +270,7 @@ public static partial class ScalarFrontendHost
                 var statement = new ScalarFrontendStatement(words[offset], words[offset + 1],
                     words[offset + 2], Span(offset + 3));
                 var kind = StatementKind(statement.Kind);
-                if (voidArrow && kind is not (15 or 21))
+                if (voidDiscardBody && kind is not (15 or 21))
                 {
                     throw InvalidResult();
                 }
@@ -410,6 +413,8 @@ public static partial class ScalarFrontendHost
                 var initOutput = node.Operation is 107 or 108;
                 var leaf = node.Operation is 0 or 3 or 20 or 21 || output;
                 if ((!ScalarType(node.Type)
+                        && !(node.Type == 0
+                            && node.Operation is 0 or 3 or 46 or 110)
                         && !(context is null && words[5] == 0 && call && node.Type == 0)
                         && !(context is not null && node.Operation == 105 && node.Type == 0))
                     || !ValidSpan(node.Span, nonempty: true)
@@ -418,8 +423,6 @@ public static partial class ScalarFrontendHost
                     || (node.Operation == 102 && context is not null)
                     || (node.Operation == 109 && node.Type != BooleanTypeCode)
                     || (call && (node.Type != (callee?.ReturnType ?? words[5])
-                        || callee is { ReturnType: 0 }
-                            && !orderedStatements.Any(entry => entry.Kind == 37 && entry.Root == i)
                         || node.High != callCount
                         || (callCount == 0 && (node.Left != -1 || node.Right != -1 || node.Low != -1))
                         || (callCount > 0 && (node.Left < 0 || node.Left >= i))
@@ -683,7 +686,7 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
-                if (voidArrow)
+                if (voidDiscardBody)
                 {
                     TakeStatements(orderedStatements.Length, 0, -1);
                     if (activeLocals != declaredLocals.Length)
@@ -1257,7 +1260,8 @@ public static partial class ScalarFrontendHost
                             || at >= tokens.Length
                             || (!local.IsMutable && tokens[at].Kind == TokenKind.MutKeyword)
                             || (tokens[at].Kind != TokenKind.VarKeyword
-                                && tokens[at].Kind != TokenKind.Identifier)
+                                && tokens[at].Kind != TokenKind.Identifier
+                                && !(local.Type == 0 && tokens[at].Kind == TokenKind.VoidKeyword))
                             || !Take(tokens[at].Kind))
                         {
                             throw InvalidResult();
@@ -1275,7 +1279,9 @@ public static partial class ScalarFrontendHost
                             || tree[entry.Root].Type != local.Type
                             || entry.Kind == 27 && tree[entry.Root].Operation is not (3 or 20 or 21)
                             || entry.Kind == 28 && (tree[entry.Root].Operation is 3 or 20 or 21)
-                            || inferred && (intrinsicTypes[entry.Root] == 0 || hasUncontextualShift)
+                            || inferred && ((intrinsicTypes[entry.Root] == 0
+                                && !(local.Type == 0 && IsUnitValueRoot(entry.Root)))
+                                || hasUncontextualShift)
                             || !TakeTree(entry.Root)
                             || entry.Slot != count + activeLocals + 1
                             || clause == 0 && !Take(TokenKind.Semicolon))
@@ -1296,7 +1302,10 @@ public static partial class ScalarFrontendHost
                         var inferred = entry.Kind == 26;
                         if (!local.IsInitialization || local.IsMutable
                             || !Take(TokenKind.Identifier) || tokens[at - 1].Text != "init"
-                            || !Take(inferred ? TokenKind.VarKeyword : TokenKind.Identifier)
+                            || local.IsMutable && !Take(TokenKind.MutKeyword)
+                            || !Take(inferred ? TokenKind.VarKeyword
+                                : local.Type == 0 ? TokenKind.VoidKeyword
+                                    : TokenKind.Identifier)
                             || !inferred && !MatchesScalarType(tokens[at - 1], local.Type, aliases)
                             || !Take(TokenKind.Identifier) || tokens[at - 1].Span != local.Name
                             || clause == 0 && !Take(TokenKind.Semicolon))
@@ -1319,6 +1328,7 @@ public static partial class ScalarFrontendHost
                             || !Take(TokenKind.Equals)
                             || tree[entry.Root].Type != local.Type
                             || intrinsicTypes[entry.Root] == 0
+                                && !(local.Type == 0 && IsUnitValueRoot(entry.Root))
                             || IsUncontextualShiftRoot(tree, intrinsicTypes, entry.Root)
                             || !TakeTree(entry.Root) || !Take(TokenKind.Semicolon))
                         {
@@ -1531,7 +1541,7 @@ public static partial class ScalarFrontendHost
                     }
                     else if (entry.Kind == 37)
                     {
-                        if (tree[entry.Root].Operation is not (102 or 105)
+                        if (!IsUnitValueRoot(entry.Root)
                             || !TakeTree(entry.Root)
                             || clause == 0 && !Take(TokenKind.Semicolon))
                         {
@@ -1567,6 +1577,49 @@ public static partial class ScalarFrontendHost
                 {
                     throw InvalidResult();
                 }
+            }
+
+            bool IsUnitValueRoot(int root)
+            {
+                if ((uint)root >= (uint)tree.Length || tree[root].Type != 0)
+                {
+                    return false;
+                }
+                while (tree[root].Operation is 46 or 110)
+                {
+                    root = tree[root].Left;
+                    if ((uint)root >= (uint)tree.Length
+                        || tree[root].Type != 0)
+                    {
+                        return false;
+                    }
+                }
+
+                var node = tree[root];
+                return node.Operation switch {
+                    0 => node.Left > count
+                        && node.Left <= count + declaredLocals.Length
+                        && declaredLocals[node.Left - count - 1].Type == 0,
+                    3 => IsUnitLiteralSpan(node.Span),
+                    102 or 105 => true,
+                    _ => false,
+                };
+            }
+
+            bool IsUnitLiteralSpan(TextSpan span)
+            {
+                for (var index = 0; index + 1 < tokens.Length; index++)
+                {
+                    if (tokens[index].Span.Start == span.Start
+                        && tokens[index].Kind == TokenKind.OpenParen
+                        && tokens[index + 1].Kind == TokenKind.CloseParen
+                        && tokens[index + 1].Span.End == span.End)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
 
             bool TakeTree(int index, int parseDepth = 0)
@@ -1803,7 +1856,15 @@ public static partial class ScalarFrontendHost
                 }
                 else if (node.Operation == 3)
                 {
-                    if (node.Type is 7 or 8
+                    if (node.Type == 0)
+                    {
+                        if (!Take(TokenKind.OpenParen)
+                            || !Take(TokenKind.CloseParen))
+                        {
+                            return false;
+                        }
+                    }
+                    else if (node.Type is 7 or 8
                         && at + 6 < tokens.Length
                         && tokens[at].Kind == TokenKind.Identifier
                         && MatchesPrimitiveScalarType(tokens[at], node.Type)

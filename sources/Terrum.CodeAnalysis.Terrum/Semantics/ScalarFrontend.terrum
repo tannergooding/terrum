@@ -1928,6 +1928,10 @@ mut class ScalarFrontendState
     private mut bool ParseTreeClauseStatement(bool semicolon, Span<Token> tokenView)
     {
         require TryGetToken(tokenView, _at, init var first);
+        if (IsVoidTypeToken(first))
+        {
+            return ParseTreeDeclaration(first, semicolon, tokenView);
+        }
         if (first.Kind == 81)
         {
             if (!semicolon)
@@ -1953,7 +1957,7 @@ mut class ScalarFrontendState
                 FailAt(2, first.Range);
                 return false;
             }
-            if (lifetimeType < 1 || lifetimeType > 6)
+            if (lifetimeType < 0 || lifetimeType > 6)
             {
                 FailAt(2, first.Range);
                 return false;
@@ -1984,6 +1988,22 @@ mut class ScalarFrontendState
             }
             return AddTreeStatement(37, 0, call, first.Range.Start, TreeStatementEnd(tokenView), tokenView);
         }
+        if (semicolon && first.Kind == 2
+            && TryGetToken(tokenView, _at + 1, init var unitEnd)
+            && unitEnd.Kind == 52
+            && TryResolveParameter(first, init var unitSlot, init var unitType)
+            && unitSlot > _parameterCount && unitType == 0)
+        {
+            _at = _at + 1;
+            if (!AddTreeNode(0, 0, first.Range.Start, first.Range.End,
+                    unitSlot, -1, 0, 0, init var unitRead, tokenView)
+                || !Take(52, init var unitSemicolon, tokenView))
+            {
+                return false;
+            }
+            return AddTreeStatement(37, 0, unitRead,
+                first.Range.Start, TreeStatementEnd(tokenView), tokenView);
+        }
         if (first.Kind == 2
             && TryGetToken(tokenView, _at + 1, init var equals)
             && (equals.Kind == 64 || equals.Kind >= 91 && equals.Kind <= 101))
@@ -2005,29 +2025,34 @@ mut class ScalarFrontendState
                 return false;
             }
             _at = _at + 2;
-            if (type == 0 && equals.Kind != 64)
+            if (type <= 0 && equals.Kind != 64)
             {
                 FailAt(2, first.Range);
                 return false;
             }
-            mut int32 rightType = type;
+            mut int32 rightType = type < 0 ? 0 : type;
             if (equals.Kind >= 99) { rightType = 1; }
             mut int32 valueType = rightType;
             if (!ParseTreeExpression(rightType, 1, 0, init var value, tokenView))
             {
                 return false;
             }
-            if (type == 0)
+            if (type < 0)
             {
                 type = TreeWord(value, 1);
-                if (type < 1 || type > 8)
+                if (type < 0 || type > 8
+                    || type == 0 && !IsUnitTreeValue(value, tokenView))
                 {
                     return FailTreeType(value);
                 }
                 Host.Frontend[300 + (slot - _parameterCount - 1) * 4] = type;
                 valueType = type;
             }
-            if (!ResolveTreeLiteral(value, valueType, false, tokenView)
+            if (type == 0 && !IsUnitTreeValue(value, tokenView))
+            {
+                return FailTreeType(value);
+            }
+            if (type != 0 && !ResolveTreeLiteral(value, valueType, false, tokenView)
                 || semicolon && !Take(52, init var end, tokenView))
             {
                 return false;
@@ -2084,6 +2109,15 @@ mut class ScalarFrontendState
                 int32 slot = TreeWord(UngroupTree(update), 4);
                 return AddTreeStatement(9, slot, root, first.Range.Start, TreeStatementEnd(tokenView), tokenView);
             }
+            if (semicolon && TreeWord(update, 1) == 0)
+            {
+                if (!Take(52, init var unitExpressionEnd, tokenView))
+                {
+                    return false;
+                }
+                return AddTreeStatement(37, 0, update,
+                    first.Range.Start, TreeStatementEnd(tokenView), tokenView);
+            }
             int32 operation = TreeWord(update, 0);
             if ((operation != 86 && operation != 87)
                 || semicolon && !Take(52, init var endUpdate, tokenView))
@@ -2111,6 +2145,12 @@ mut class ScalarFrontendState
         {
             initialization = true;
             _at = _at + 1;
+            if (TryGetToken(tokenView, _at, init var initModifier)
+                && initModifier.Kind == 13)
+            {
+                mutable = true;
+                _at = _at + 1;
+            }
         }
         else if (first.Kind == 13)
         {
@@ -2119,7 +2159,17 @@ mut class ScalarFrontendState
         }
         require TryGetToken(tokenView, _at, init var declaredType);
         mut int32 type = 0;
-        if (constant && declaredType.Kind == 12)
+        if (IsVoidTypeToken(declaredType))
+        {
+            if (constant)
+            {
+                FailAt(2, declaredType.Range);
+                return false;
+            }
+            type = 0;
+            _at = _at + 1;
+        }
+        else if (constant && declaredType.Kind == 12)
         {
             FailAt(2, declaredType.Range);
             return false;
@@ -2127,10 +2177,12 @@ mut class ScalarFrontendState
         else if (initialization && declaredType.Kind == 12)
         {
             inferredInitialization = true;
+            type = -1;
             _at = _at + 1;
         }
         else if (!initialization && declaredType.Kind == 12)
         {
+            type = -1;
             _at = _at + 1;
         }
         else if (declaredType.Kind != 2)
@@ -2171,7 +2223,8 @@ mut class ScalarFrontendState
             }
         }
         return initialization
-            ? ParseTreeVacantLocal(first, name, type, inferredInitialization, semicolon, tokenView)
+            ? ParseTreeVacantLocal(first, name, type, mutable,
+                inferredInitialization, semicolon, tokenView)
             : ParseTreeLocalInitializer(first, name, type, mutable, constant, semicolon, tokenView);
     }
 
@@ -2192,6 +2245,16 @@ mut class ScalarFrontendState
             && Host.Source[at + 2] == char16(105) && Host.Source[at + 3] == char16(116);
     }
 
+    private bool IsVoidTypeToken(Token token)
+    {
+        int32 at = token.Range.Start;
+        return token.Kind == 11 || token.Range.Length == 4
+            && Host.Source[at] == char16(118)
+            && Host.Source[at + 1] == char16(111)
+            && Host.Source[at + 2] == char16(105)
+            && Host.Source[at + 3] == char16(100);
+    }
+
     private bool IsEnsureKeyword(Token token)
     {
         int32 at = token.Range.Start;
@@ -2208,7 +2271,7 @@ mut class ScalarFrontendState
     }
 
     private mut bool ParseTreeVacantLocal(Token first, Token name, int32 type,
-        bool inferred, bool semicolon, Span<Token> tokenView)
+        bool mutable, bool inferred, bool semicolon, Span<Token> tokenView)
     {
         if (_localCount >= 8)
         {
@@ -2222,7 +2285,7 @@ mut class ScalarFrontendState
         int32 index = _localCount;
         int32 offset = 300 + index * 4;
         Host.Frontend[offset] = type;
-        Host.Frontend[offset + 1] = 2;
+        Host.Frontend[offset + 1] = mutable ? 3 : 2;
         Host.Frontend[offset + 2] = name.Range.Start;
         Host.Frontend[offset + 3] = name.Range.Length;
         _localCount = index + 1;
@@ -2237,6 +2300,52 @@ mut class ScalarFrontendState
             first.Range.Start, TreeStatementEnd(tokenView), tokenView);
     }
 
+    private bool IsUnitTreeValue(int32 root, Span<Token> tokenView)
+    {
+        mut int32 current = root;
+        int32 nodeCount = Host.Frontend[37];
+        if (current < 0 || current >= nodeCount || TreeWord(current, 1) != 0)
+        {
+            return false;
+        }
+        while (TreeWord(current, 0) == 46 || TreeWord(current, 0) == 110)
+        {
+            current = TreeWord(current, 4);
+            if (current < 0 || current >= nodeCount || TreeWord(current, 1) != 0)
+            {
+                return false;
+            }
+        }
+
+        int32 operation = TreeWord(current, 0);
+        if (operation == 0 || operation == 102 || operation == 105)
+        {
+            return true;
+        }
+        if (operation != 3)
+        {
+            return false;
+        }
+
+        int32 start = TreeWord(current, 2);
+        int32 end = start + TreeWord(current, 3);
+        for (mut int32 index = 0; index + 1 < GetTokenCount(); index = index + 1)
+        {
+            if (!TryGetToken(tokenView, index, init var opening))
+            {
+                return false;
+            }
+            if (opening.Range.Start != start)
+            {
+                continue;
+            }
+            return opening.Kind == 46
+                && TryGetToken(tokenView, index + 1, init var closing)
+                && closing.Kind == 47 && closing.Range.End == end;
+        }
+        return false;
+    }
+
     private mut bool ParseTreeLocalInitializer(Token first, Token name, int32 expected,
         bool mutable, bool constant, bool semicolon, Span<Token> tokenView)
     {
@@ -2245,17 +2354,20 @@ mut class ScalarFrontendState
             FailAt(1, name.Range);
             return false;
         }
+        bool inferType = expected < 0 || first.Kind == 81;
         if (!Take(64, init var assignment, tokenView)
-            || !ParseTreeExpression(expected, 1, 0, init var initializer, tokenView))
+            || !ParseTreeExpression(inferType ? 0 : expected, 1, 0,
+                init var initializer, tokenView))
         {
             return false;
         }
-        int32 type = expected == 0 ? TreeWord(initializer, 1) : expected;
-        if (type == 0)
+        int32 type = inferType ? TreeWord(initializer, 1) : expected;
+        if (type < 0 || type > 8
+            || type == 0 && !IsUnitTreeValue(initializer, tokenView))
         {
             return FailTreeType(initializer);
         }
-        if (!ResolveTreeLiteral(initializer, type, false, tokenView)
+        if (type != 0 && !ResolveTreeLiteral(initializer, type, false, tokenView)
             || semicolon && !Take(52, init var endDeclaration, tokenView))
         {
             return false;
@@ -2370,8 +2482,12 @@ mut class ScalarFrontendState
                 if (!ParseTreeTerminatedStatement(next, tokenView)) { return false; }
             }
             else if (next.Kind == 81 || next.Kind == 12 || next.Kind == 13
+                || IsVoidTypeToken(next)
                 || next.Kind == 2 && TryGetToken(tokenView, _at + 1, init var following)
-                    && (following.Kind == 2 || following.Kind == 46))
+                    && (following.Kind == 2 || following.Kind == 12
+                        || following.Kind == 13 || following.Kind == 46
+                        || following.Kind == 52
+                        || IsVoidTypeToken(following)))
             {
                 if (!ParseTreeStatement(tokenView)) { return false; }
             }
@@ -4090,6 +4206,13 @@ mut class ScalarFrontendState
         }
         if (token.Kind == 46)
         {
+            if (TryGetToken(tokenView, _at + 1, init var emptyClose)
+                && emptyClose.Kind == 47)
+            {
+                _at = _at + 2;
+                return AddTreeNode(3, 0, token.Range.Start, emptyClose.Range.End,
+                    -1, -1, 0, 0, init node, tokenView);
+            }
             _at = _at + 1;
             if (!ParseTreeExpression(expected, 1, depth + 1, init var inner, tokenView)
                 || !Take(47, init var close, tokenView))
@@ -4178,7 +4301,7 @@ mut class ScalarFrontendState
             {
                 return false;
             }
-            if (type == 0)
+            if (type < 0 || type == 0 && parameter <= _parameterCount)
             {
                 FailAt(2, token.Range);
                 return false;
@@ -4442,7 +4565,9 @@ mut class ScalarFrontendState
         {
             return false;
         }
-        if (!ResolveTreeLiteral(expression, type, false, tokenView))
+        if (type == 0
+            ? !IsUnitTreeValue(expression, tokenView)
+            : !ResolveTreeLiteral(expression, type, false, tokenView))
         {
             FailTreeType(expression);
             return false;
@@ -4478,7 +4603,9 @@ mut class ScalarFrontendState
                 _at = _at + 1;
                 if (ParseTreeExpression(returnType, 1, 0, init var root, tokenView))
                 {
-                    if (!ResolveTreeLiteral(root, returnType, false, tokenView))
+                    if (returnType == 0
+                        ? !IsUnitTreeValue(root, tokenView)
+                        : !ResolveTreeLiteral(root, returnType, false, tokenView))
                     {
                         require SourceRange.TryCreate(TreeWord(root, 2),
                             TreeWord(root, 3), init var mismatch);
@@ -4493,7 +4620,8 @@ mut class ScalarFrontendState
                 require TryGetToken(tokenView, _at, init var firstStatement);
                 mut Token next = firstStatement;
                 while ((next.Kind == 12 || next.Kind == 13
-                    || next.Kind == 2 || next.Kind == 18 || next.Kind == 16)
+                    || next.Kind == 2 || next.Kind == 18 || next.Kind == 16
+                    || IsVoidTypeToken(next))
                     && _error == 0)
                 {
                     if (next.Kind == 16)
@@ -4581,7 +4709,7 @@ mut class ScalarFrontendState
         {
             for (mut int32 local = 0; local < _localCount; local = local + 1)
             {
-                if (Host.Frontend[300 + local * 4] == 0)
+                if (Host.Frontend[300 + local * 4] < 0)
                 {
                     require SourceRange.TryCreate(Host.Frontend[302 + local * 4],
                         Host.Frontend[303 + local * 4], init var unresolved);

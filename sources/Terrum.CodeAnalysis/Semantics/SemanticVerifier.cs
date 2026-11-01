@@ -662,7 +662,9 @@ public static partial class SemanticVerifier
                             ? variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsMutable != (variable.Type == PrimitiveType.MutableInt32BufferView)
                                 || variable.IsOut || function.IsExternal
-                            : !ValidType(variable.Type, allowVoid: false, program)
+                            : !ValidType(variable.Type,
+                                    allowVoid: variableIndex >= function.ParameterCount
+                                        + (function.IsConstructor ? 1 : 0), program)
                                 || (BoundGenericNominalTypeTypes.IsType(variable.Type)
                                     && !function.IsExternal)))
                     {
@@ -3012,7 +3014,7 @@ public static partial class SemanticVerifier
                     || (!initialized[end.Variable] && !initialized.HasPartialValue(end.Variable))
                     || (function.Variables[end.Variable].Type is not (PrimitiveType.ReadonlyInt32BufferView
                         or PrimitiveType.MutableInt32BufferView)
-                        && !ValidType(function.Variables[end.Variable].Type, allowVoid: false, program)))
+                        && !ValidType(function.Variables[end.Variable].Type, allowVoid: true, program)))
                 {
                     throw Invalid(end.Span);
                 }
@@ -6676,6 +6678,7 @@ public static partial class SemanticVerifier
             allowVoid: expression is BoundCall or BoundIndirectCall
                 or BoundUnsafeExpression { Type: PrimitiveType.Void }
                 or BoundConstant { Type: PrimitiveType.Void }
+                or BoundRead { Type: PrimitiveType.Void }
                 or BoundConditional { Type: PrimitiveType.Void }
                 or BoundNativeFixedArrayElement { Type: PrimitiveType.Void }
                 or BoundNativeFixedArrayPathElement { Type: PrimitiveType.Void }

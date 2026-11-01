@@ -6274,7 +6274,7 @@ internal sealed partial class Binder
                     }
                     return new BoundExpressionStatement(fixedArrayInitializer, node.Span);
                 }
-                var declaredType = typeElement is SyntaxNode typeNode ? BindType(typeNode, allowVoid: false) : (PrimitiveType?)null;
+                var declaredType = typeElement is SyntaxNode typeNode ? BindType(typeNode, allowVoid: true) : (PrimitiveType?)null;
                 if (declaredType is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                 {
                     return BindViewScope(name, isMutable, initializerNode, node.Span, declaredType.Value);
@@ -6286,11 +6286,6 @@ internal sealed partial class Binder
                         PrimitiveType.ReadonlyInt32BufferView);
                 }
                 var initializer = BindExpression(initializerNode, declaredType);
-
-                if (declaredType is null && initializer.Type == PrimitiveType.Void)
-                {
-                    Report("TRM3005", "Cannot infer a variable's type from a void expression.", initializerNode.Span);
-                }
 
                 // Locals enter scope only after their initializer, including in nested blocks.
                 var slot = AddVariable(name.Name, declaredType ?? initializer.Type, isMutable, name.Span);
@@ -6305,7 +6300,7 @@ internal sealed partial class Binder
                 var typeElement = node.Children[typeIndex];
                 var name = ((SyntaxTokenElement)node.Children[typeIndex + 1]).Token;
                 var inferred = typeElement is SyntaxTokenElement;
-                var type = inferred ? PrimitiveType.Void : BindType((SyntaxNode)typeElement, allowVoid: false);
+                var type = inferred ? PrimitiveType.Void : BindType((SyntaxNode)typeElement, allowVoid: true);
                 if (type is PrimitiveType.ReadonlyInt32BufferView or PrimitiveType.MutableInt32BufferView)
                 {
                     Report("TRM3023", "Native buffer views require an initialized lexical owner loan.", node.Span);
@@ -6545,7 +6540,7 @@ internal sealed partial class Binder
 
                 var unresolved = _unresolvedVacantLocals.Contains(slot);
                 var value = BindExpression(valueNode, unresolved ? null : _variables[slot].Type);
-                if (unresolved && value.Type != PrimitiveType.Void)
+                if (unresolved)
                 {
                     _variables[slot] = _variables[slot] with { Type = value.Type };
                     _ = _unresolvedVacantLocals.Remove(slot);

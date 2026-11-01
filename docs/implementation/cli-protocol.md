@@ -80,8 +80,12 @@ call, preserving the dynamic index Home through source-free reconstruction.
 These checks establish encoded ordering and re-emission, not runtime failure
 behavior. Provisional source support admits exact Unit/Unit conditional
 expressions in return and expression-statement contexts; both selected arms
-pass native JIT under both runtime policies. Explicit/inferred Unit locals
-remain unsupported, and the proposal remains unapproved. The Standard A2EU
+pass native JIT under both runtime policies. Explicit/inferred Unit locals now
+preserve zero-data initialization, liveness, reads, assignments and lifetime
+ends in hosted and standalone source paths. Focused regressions cover
+Unit-call initialization, expression-bodied Unit returns, both runtime
+policies, JIT and native PE execution. The conditional proposal remains
+unapproved. The Standard A2EU
 Body path now encodes nested Unit-valued array-initializer conditionals as
 multi-block `E4`/`ConditionalEdge` branches and `E3` joins. Source-free loading
 reconstructs structured `BoundIf` control flow and canonically re-emits the
