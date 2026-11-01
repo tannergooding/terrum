@@ -460,17 +460,18 @@ pointer-type table after reconstructing all direct NativeImports and the caller
 Body. This preserves typed pointer formals introduced by an uncalled imported
 declaration in a mixed owned/imported Module. A deep-provider regression
 preserves `NativeParameter` extent `0xffffffff` and rejects a provider with an
-incompatible extent. The final Debug fast build and combined
+incompatible extent. A four-Module acyclic Root→P→Q→R chain now also loads from
+one artifact with Root last, and its selected reference and checked lowering
+plan retain the correct root-only view. The final Debug fast build and combined
 NativeAddress/provider-CLI selection passed 146/146 with zero skips at
-`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_04_56_net11.0.trx`.
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_15_08_net11.0.trx`.
 The normal analyzer build remains at its existing baseline: 709 errors and
 353 normalized identities, with zero additions/removals against
 `artifacts\\log\\compiler-adoption-final-debug-analyzers.log`; output:
-`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final8.log`.
+`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final9.log`.
 This remains provisional, not formal approval or full Standard conformance.
-Further evidence is still required for a transitive acyclic chain with every
-Module co-located, broader Module/Import/Body permutation and re-encoding, Unicode
-normalization edge cases outside the exercised NFC/NFD identity pair and
+Further evidence is still required for broader Module/Import/Body permutation
+and re-encoding, Unicode identity cases beyond the exercised NFC/NFD pair and
 row/map/work limits beyond the tested fan-in of 17. Same-name expanded lowering,
 general source production/
 re-emission of non-target Imports and broader schema compositions remain
