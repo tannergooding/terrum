@@ -28,6 +28,31 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         var rootArtifact = CreateRootArtifact();
         var providerArtifact = CreateProviderArtifact();
         var leafArtifact = CreateLeafProviderArtifact();
+        var loadedProvider = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(SchemaIdentity, providerArtifact),
+            "Provider",
+            [new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact)]);
+        var retainedProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            loadedProvider, "Provider", SchemaIdentity, 1);
+        var retainedAliasReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+                "Root",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        retainedProviderArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+                ],
+                ["ContainerKey"]);
+        var retainedPair = retainedAliasReference.Structures.Single(
+            static structure => structure.Name == "Pair");
+        Assert.That(retainedPair.StandardTypeOrigin!.ExportKeys,
+            Is.EquivalentTo(new[] { "PairKey", "PairAlias" }));
+        Assert.That(retainedPair.StandardTypeOrigin.Expectations.Any(
+            static expectation
+                => expectation.UsingModule.ModuleIdentity == "Provider"
+                    && expectation.ExportKey == "ProviderLeafKey"), Is.True);
+
         var reference = TrRmExecutableCompiler.CreateStandardReference(
             new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
             "Root",
@@ -173,6 +198,24 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         Assert.That(unexportedConsumerProgram.Structures,
             Has.Length.EqualTo(4));
         Assert.That(unexportedConsumerProgram.NativeFixedArrayTypes,
+            Has.Length.EqualTo(1));
+        var reemittedUnexportedConsumer
+            = TrRmExecutableCompiler.EmitStandard(
+                unexportedConsumerProgram, "Consumer", SchemaIdentity, 1);
+        var reloadedUnexportedConsumer
+            = TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(SchemaIdentity,
+                    reemittedUnexportedConsumer),
+                "Consumer",
+                [
+                    new TrRmStandardArtifactInput(SchemaIdentity, rootArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity,
+                        providerArtifact),
+                    new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+                ]);
+        Assert.That(reloadedUnexportedConsumer.Structures,
+            Has.Length.EqualTo(4));
+        Assert.That(reloadedUnexportedConsumer.NativeFixedArrayTypes,
             Has.Length.EqualTo(1));
 
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(

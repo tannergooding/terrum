@@ -202,10 +202,13 @@ public static partial class TrRmExecutableCompiler
 
         if (tables.Imports.Count == 0 && tables.ModuleRefs.Count == 0)
         {
-            return LoadForeignInvocationDraftNativeAddressLibrary(
+            var loadedProgram = LoadForeignInvocationDraftNativeAddressLibrary(
                 artifacts[0], rootModuleRow, null, verifySemantics,
                 schema: GetForeignInvocationSchema(schemaIdentities[0]),
                 a3LayoutResourceLedger: a3LayoutResourceLedger);
+            return RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
+                schemaIdentities, tables, rootModuleRow,
+                typeProviderBindings);
         }
 
         var boundTypeImports = typeProviderBindings
@@ -256,11 +259,14 @@ public static partial class TrRmExecutableCompiler
 
         if (methodImportRow == 0)
         {
-            return LoadForeignInvocationDraftNativeAddressLibrary(
+            var loadedProgram = LoadForeignInvocationDraftNativeAddressLibrary(
                 artifacts[0], rootModuleRow, null, verifySemantics,
                 schema: GetForeignInvocationSchema(schemaIdentities[0]),
                 a3LayoutResourceLedger: a3LayoutResourceLedger,
                 typeProviderBindings: typeProviderBindings);
+            return RetainLoadedA2SourceTypeFacts(loadedProgram, artifacts,
+                schemaIdentities, tables, rootModuleRow,
+                typeProviderBindings);
         }
 
         var expectedDefinition = tables.Imports

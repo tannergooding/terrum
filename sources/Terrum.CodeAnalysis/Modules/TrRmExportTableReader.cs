@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 
 namespace Terrum.CodeAnalysis.Modules;
@@ -13,6 +14,7 @@ public readonly ref struct TrRmExportTableReader
 {
     private const int RowSize = 8;
     private readonly HashSet<uint> _exportedDefinitions;
+    private readonly Dictionary<(int Module, string Key), uint> _definitionsByKey;
 
     /// <summary>Validates exported local definitions, visibility and key uniqueness.</summary>
     /// <param name="section">The borrowed 8-byte Export rows.</param>
@@ -68,6 +70,8 @@ public readonly ref struct TrRmExportTableReader
 
         var keys = new HashSet<(int Module, string Key)>(recordCount);
         _exportedDefinitions = new HashSet<uint>(recordCount);
+        _definitionsByKey = new Dictionary<(int Module, string Key), uint>(
+            recordCount);
         for (var row = 0; row < recordCount; row++)
         {
             var data = section.Slice(row * RowSize, RowSize);
@@ -109,6 +113,7 @@ public readonly ref struct TrRmExportTableReader
             }
 
             _ = _exportedDefinitions.Add(definition);
+            _definitionsByKey.Add((module, text), definition);
         }
     }
 
@@ -118,6 +123,77 @@ public readonly ref struct TrRmExportTableReader
     public bool HasExportForMethod(int methodDefRow)
         => methodDefRow > 0
             && _exportedDefinitions.Contains(0x1600_0000u | (uint)methodDefRow);
+
+    internal bool TryGetDefinitionForKey(int moduleRow, string key,
+        out uint definition)
+    {
+        if (_definitionsByKey is not null
+            && _definitionsByKey.TryGetValue((moduleRow, key), out definition))
+        {
+            return true;
+        }
+
+        definition = 0;
+        return false;
+    }
+
+    internal bool TryGetExportKeyForDefinition(int moduleRow,
+        uint definition, out string key)
+    {
+        if (_definitionsByKey is null)
+        {
+            key = string.Empty;
+            return false;
+        }
+
+        string? selectedKey = null;
+        foreach (var entry in _definitionsByKey)
+        {
+            if (entry.Key.Module != moduleRow || entry.Value != definition)
+            {
+                continue;
+            }
+
+            if (selectedKey is not null)
+            {
+                key = string.Empty;
+                return false;
+            }
+
+            selectedKey = entry.Key.Key;
+        }
+
+        key = selectedKey ?? string.Empty;
+        return selectedKey is not null;
+    }
+
+    internal ImmutableArray<(uint Definition, string ExportKey)>
+        GetExportsForModule(int moduleRow)
+    {
+        if (_definitionsByKey is null)
+        {
+            return [];
+        }
+
+        var exports = ImmutableArray.CreateBuilder<
+            (uint Definition, string ExportKey)>();
+        foreach (var entry in _definitionsByKey)
+        {
+            if (entry.Key.Module == moduleRow)
+            {
+                exports.Add((entry.Value, entry.Key.Key));
+            }
+        }
+
+        exports.Sort(static (left, right) =>
+        {
+            var result = left.Definition.CompareTo(right.Definition);
+            return result != 0 ? result
+                : StringComparer.Ordinal.Compare(left.ExportKey,
+                    right.ExportKey);
+        });
+        return exports.ToImmutable();
+    }
 
     private static uint Read(ReadOnlySpan<byte> data, int offset)
         => BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(offset, sizeof(uint)));

@@ -504,10 +504,13 @@ re-encoding, source-free Bodies, CLI and runtime remain open. Type-only source
 consumers now re-emit origin-backed TypeDef stubs, ModuleRefs, Imports,
 imported TypeSpec uses and fixed-array recipes without losing them when no
 local ExportKey map is supplied. Explicit local exports preserve the same
-imports; provider-owned alias keys survive two consumer re-projection
-generations; compatible provider TypeDef relocation succeeds; changed imported
-declarations, split alias replacements and incompatible layouts reject. The
-writer checks retained declaration, fixed-array and pointer-table snapshots;
+imports. Loading and re-emitting a type-only provider retains its local
+ExportKey aliases, unpublished declarations and imported origin graph; a
+replacement export map is rejected. Provider-owned alias keys survive two
+consumer re-projection generations; compatible provider TypeDef relocation
+succeeds; changed imported declarations, split alias replacements and
+incompatible layouts reject. The writer checks retained declaration,
+fixed-array and pointer-table snapshots;
 local TypeDef and Import TypeSpec forms compare after resolving to the same
 actual TypeDef origin. The combined A2 provider/reference/layout selection
 passed 164/164 with zero

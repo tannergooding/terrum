@@ -479,6 +479,11 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
         get; init;
     } = [];
 
+    internal ImmutableArray<BoundSourceTypePublication> SourceTypePublications
+    {
+        get; init;
+    }
+
     internal ImmutableArray<BoundEnumDefinition> EnumDefinitions { get; init; } = [];
 
     internal NativeCoreRegistrationSet? NativeCoreRegistration { get; init; }
@@ -530,6 +535,12 @@ public sealed record BoundProgram(ImmutableArray<BoundFunction> Functions, int E
 
 internal sealed record BoundSourceTypeDeclaration(int StructureIndex,
     string Namespace, string Name, BoundStruct DeclarationSnapshot);
+
+/// <summary>A loaded local A2 TypeDef and its retained ExportKey aliases; no keys means unpublished.</summary>
+internal sealed record BoundSourceTypePublication(int StructureIndex,
+    ImmutableArray<string> ExportKeys, BoundStruct DeclarationSnapshot,
+    ImmutableArray<BoundNativeFixedArrayType> ExpectedFixedArrayTypes,
+    ImmutableArray<NativePointerTypeDefinition> ExpectedNativePointerTypes);
 
 internal readonly record struct BoundSourceTypeFeature(
     uint FeatureId, uint RuleRevision);

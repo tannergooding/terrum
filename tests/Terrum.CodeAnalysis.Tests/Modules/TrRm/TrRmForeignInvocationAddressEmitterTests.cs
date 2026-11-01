@@ -307,11 +307,13 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             [Blittable] [Layout(LayoutKind.Sequential)]
             public struct Container {
                 public [Element; 2] Values;
+                public ptr<Element> Pointer;
             }
             """));
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = compilation.Program!;
+        Assert.That(program.NativePointerTypes, Has.Length.EqualTo(1));
         _ = Assert.Throws<NotSupportedException>(() =>
             TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
                 schemaIdentity, 1,
@@ -338,6 +340,27 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, []);
         Assert.That(loaded.Structures, Has.Length.EqualTo(2));
         Assert.That(NativeFixedArrayContract.MatchesProgram(loaded), Is.True);
+        Assert.That(loaded.NativePointerTypes, Is.EqualTo(program.NativePointerTypes));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1);
+        var reloaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+            moduleIdentity, []);
+        Assert.That(reloaded.NativePointerTypes,
+            Is.EqualTo(loaded.NativePointerTypes));
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity, reemitted),
+                moduleIdentity, [], ["unused-key"]));
+        var stalePointerProgram = loaded with {
+            NativePointerTypes = loaded.NativePointerTypes.SetItem(0,
+                loaded.NativePointerTypes[0] with {
+                    PointeeType = PrimitiveType.Int32,
+                }),
+        };
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(stalePointerProgram,
+                moduleIdentity, schemaIdentity, 1));
     }
 
     [Test]
@@ -373,6 +396,22 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, [], ["container-key"]);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             artifact);
+        var loadedProvider = TrRmExecutableCompiler.LoadStandard(
+            providerInput, moduleIdentity, []);
+        var reemittedProvider = TrRmExecutableCompiler.EmitStandard(
+            loadedProvider, moduleIdentity, schemaIdentity, 1);
+        var reemittedReference
+            = TrRmExecutableCompiler.CreateStandardReference(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reemittedProvider),
+                moduleIdentity, [], ["container-key"]);
+        Assert.That(reemittedReference.Structures.Any(static structure
+            => structure.Name == "Element"), Is.True);
+        _ = Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.EmitStandard(loadedProvider,
+                moduleIdentity, schemaIdentity, 1,
+                [new TrRmSourceTypeExport("", "Container",
+                    "replacement-container-key")]));
 
         Assert.That(reference.Structures, Has.Length.EqualTo(2));
         Assert.That(reference.Structures.Any(static structure

@@ -28,7 +28,6 @@ public static partial class TrRmExecutableCompiler
             || program.Structures.IsEmpty             || !program.Classes.IsEmpty
             || !program.Buffers.IsEmpty
             || !program.NativeFunctionPointerSignatures.IsEmpty
-            || !program.NativePointerTypes.IsEmpty
             || !program.CheckedReferenceTypes.IsEmpty
             || !program.Interfaces.IsEmpty
             || !program.EnumDefinitions.IsEmpty
@@ -47,6 +46,15 @@ public static partial class TrRmExecutableCompiler
         }
 
         ValidateA2SourceTypeDeclarationMap(program);
+        if (!NativePointerTypeContract.IsValidTable(
+                program.NativePointerTypes, program.Structures,
+                program.NativeFunctionPointerSignatures,
+                program.NativeFixedArrayTypes))
+        {
+            throw Unsupported(
+                "A2 Copy declaration emission received an invalid native pointer type table.");
+        }
+
         var typeDefCount = program.Structures.Length;
         var structureTypeDefRows = new Dictionary<int, int>(typeDefCount);
         for (var index = 0; index < typeDefCount; index++)
@@ -77,11 +85,14 @@ public static partial class TrRmExecutableCompiler
                 var isValidArray = isArray
                     && (uint)NativeFixedArrayTypes.Index(field.Type)
                         < (uint)program.NativeFixedArrayTypes.Length;
+                var isPointer = NativePointerTypes.IsType(field.Type)
+                    && (uint)NativePointerTypes.Index(field.Type)
+                        < (uint)program.NativePointerTypes.Length;
                 if (!DirectNativeImportContract.IsScalar(field.Type)
-                    && !isStructure && !isValidArray)
+                    && !isStructure && !isValidArray && !isPointer)
                 {
                     throw Unsupported(
-                        "A2 Copy declaration emission supports scalar, local struct, and fixed-array fields.");
+                        "A2 Copy declaration emission supports scalar, nominal, fixed-array and checked native-pointer fields.");
                 }
             }
         }
@@ -163,7 +174,10 @@ public static partial class TrRmExecutableCompiler
 
             return checked((uint)NativeBlittableFieldTypeRow(typeRows,
                 typeDefTypeSpecRows, structureTypeDefRows, type, 0,
-                nativeFunctionPointerTypeRows, nativePointerTypeRows, []));
+                nativeFunctionPointerTypeRows, nativePointerTypeRows,
+                program.NativePointerTypes,
+                pointeeType => checked((int)GetFieldTypeSpecRef(
+                    pointeeType))));
         }
 
         uint GetArrayTypeSpecRow(int arrayIndex)
@@ -412,7 +426,16 @@ public static partial class TrRmExecutableCompiler
             typeExports?.Count ?? 0);
         if (typeExports is null || typeExports.Count == 0)
         {
-            return rows;
+            return program.SourceTypePublications.IsDefault
+                ? rows
+                : CreateA2RetainedSourceTypeExportRows(program,
+                    structureTypeDefRows, getStringRow);
+        }
+        if (!program.SourceTypePublications.IsDefault)
+        {
+            throw new ArgumentException(
+                "A new source TypeDef export map cannot replace a retained Standard publication map.",
+                nameof(typeExports));
         }
 
         var sourceDeclarations = program.SourceTypeDeclarations;
@@ -517,6 +540,101 @@ public static partial class TrRmExecutableCompiler
                 getStringRow(export.ExportKey)));
         }
 
+        ValidateA2SourceTypeExportClosure(program, selectedStructures);
+        return rows;
+    }
+
+    private static List<TrRmExportRow> CreateA2RetainedSourceTypeExportRows(
+        BoundProgram program,
+        Dictionary<int, int> structureTypeDefRows,
+        Func<string, int> getStringRow)
+    {
+        var rows = new List<TrRmExportRow>();
+        var selectedStructures = new HashSet<int>();
+        var retainedStructures = new HashSet<int>();
+        var exportKeys = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var publication in program.SourceTypePublications)
+        {
+            if ((uint)publication.StructureIndex
+                    >= (uint)program.Structures.Length
+                || !retainedStructures.Add(publication.StructureIndex)
+                || publication.DeclarationSnapshot is null)
+            {
+                throw new ArgumentException(
+                    "The retained source TypeDef publication map is inconsistent.",
+                    nameof(program));
+            }
+
+            var structure = program.Structures[publication.StructureIndex];
+            if (structure.StandardTypeOrigin is not null
+                || !SameA2SourceTypeDeclaration(structure,
+                    publication.DeclarationSnapshot)
+                || publication.ExportKeys.IsDefault
+                || publication.ExpectedFixedArrayTypes.IsDefault
+                || !program.NativeFixedArrayTypes.AsSpan().SequenceEqual(
+                    publication.ExpectedFixedArrayTypes.AsSpan())
+                || publication.ExpectedNativePointerTypes.IsDefault
+                || !program.NativePointerTypes.AsSpan().SequenceEqual(
+                    publication.ExpectedNativePointerTypes.AsSpan()))
+            {
+                throw Unsupported(
+                    "A retained A2 TypeDef publication no longer matches its checked declaration and type tables.");
+            }
+
+            if (publication.ExportKeys.IsEmpty)
+            {
+                continue;
+            }
+
+            if (structure.IsPrivate || structure.IsInternal
+                || structure.IsUnique || structure.CleanupMethod is not null)
+            {
+                throw Unsupported(
+                    "A retained A2 TypeDef export no longer names a public ordinary Copy declaration.");
+            }
+
+            _ = selectedStructures.Add(publication.StructureIndex);
+            foreach (var exportKey in publication.ExportKeys)
+            {
+                if (string.IsNullOrEmpty(exportKey)
+                    || exportKey.Contains('\0', StringComparison.Ordinal))
+                {
+                    throw Unsupported(
+                        "A retained A2 TypeDef publication contains an invalid ExportKey.");
+                }
+
+                try
+                {
+                    _ = s_sourceTypeExportKeyEncoding.GetByteCount(exportKey);
+                }
+                catch (EncoderFallbackException exception)
+                {
+                    throw new NotSupportedException(
+                        "A retained A2 TypeDef ExportKey is not well-formed scalar text.",
+                        exception);
+                }
+
+                if (!exportKeys.Add(exportKey))
+                {
+                    throw Unsupported(
+                        "Retained A2 TypeDef ExportKeys are not unique.");
+                }
+
+                var typeDefRow = structureTypeDefRows[
+                    publication.StructureIndex];
+                rows.Add(new TrRmExportRow(
+                    0x1300_0000u | checked((uint)typeDefRow),
+                    getStringRow(exportKey)));
+            }
+        }
+
+        ValidateA2SourceTypeExportClosure(program, selectedStructures);
+        return rows;
+    }
+
+    private static void ValidateA2SourceTypeExportClosure(
+        BoundProgram program, HashSet<int> selectedStructures)
+    {
         var pendingStructures = new Stack<int>(selectedStructures);
         var checkedStructures = new HashSet<int>();
         while (pendingStructures.TryPop(out var structureIndex))
@@ -531,8 +649,6 @@ public static partial class TrRmExecutableCompiler
                 AddNominalDependencies(field.Type);
             }
         }
-
-        return rows;
 
         void AddNominalDependencies(PrimitiveType type)
         {
@@ -591,38 +707,69 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program)
     {
         var sourceDeclarations = program.SourceTypeDeclarations;
-        if (sourceDeclarations.IsDefault)
+        var sourcePublications = program.SourceTypePublications;
+        if (sourceDeclarations.IsDefault && sourcePublications.IsDefault)
         {
             return;
         }
 
         var sourceIndexes = new bool[program.Structures.Length];
-        foreach (var declaration in sourceDeclarations)
+        if (!sourceDeclarations.IsDefault)
         {
-            if ((uint)declaration.StructureIndex
-                    >= (uint)program.Structures.Length
-                || sourceIndexes[declaration.StructureIndex])
+            foreach (var declaration in sourceDeclarations)
             {
-                throw new ArgumentException(
-                    "The source TypeDef declaration map is inconsistent.",
-                    nameof(program));
-            }
+                if ((uint)declaration.StructureIndex
+                        >= (uint)program.Structures.Length
+                    || sourceIndexes[declaration.StructureIndex])
+                {
+                    throw new ArgumentException(
+                        "The source TypeDef declaration map is inconsistent.",
+                        nameof(program));
+                }
 
-            var structure = program.Structures[declaration.StructureIndex];
-            var qualifiedName = declaration.Namespace.Length == 0
-                ? declaration.Name
-                : $"{declaration.Namespace}.{declaration.Name}";
-            if (!StringComparer.Ordinal.Equals(structure.Name,
-                    qualifiedName)
-                || declaration.DeclarationSnapshot != structure
-                || structure.StandardTypeOrigin is not null)
+                var structure = program.Structures[declaration.StructureIndex];
+                var qualifiedName = declaration.Namespace.Length == 0
+                    ? declaration.Name
+                    : $"{declaration.Namespace}.{declaration.Name}";
+                if (!StringComparer.Ordinal.Equals(structure.Name,
+                        qualifiedName)
+                    || declaration.DeclarationSnapshot != structure
+                    || structure.StandardTypeOrigin is not null)
+                {
+                    throw new ArgumentException(
+                        "The source TypeDef declaration map no longer matches the checked program.",
+                        nameof(program));
+                }
+
+                sourceIndexes[declaration.StructureIndex] = true;
+            }
+        }
+
+        if (!sourcePublications.IsDefault)
+        {
+            foreach (var publication in sourcePublications)
             {
-                throw new ArgumentException(
-                    "The source TypeDef declaration map no longer matches the checked program.",
-                    nameof(program));
-            }
+                if ((uint)publication.StructureIndex
+                        >= (uint)program.Structures.Length
+                    || sourceIndexes[publication.StructureIndex])
+                {
+                    throw new ArgumentException(
+                        "The retained source TypeDef publication map is inconsistent.",
+                        nameof(program));
+                }
 
-            sourceIndexes[declaration.StructureIndex] = true;
+                var structure = program.Structures[publication.StructureIndex];
+                if (structure.StandardTypeOrigin is not null
+                    || publication.DeclarationSnapshot is null
+                    || !SameA2SourceTypeDeclaration(structure,
+                        publication.DeclarationSnapshot))
+                {
+                    throw Unsupported(
+                        "A retained A2 TypeDef identity no longer matches its checked local declaration.");
+                }
+
+                sourceIndexes[publication.StructureIndex] = true;
+            }
         }
 
         for (var index = 0; index < program.Structures.Length; index++)
