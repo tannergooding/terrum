@@ -129,7 +129,8 @@ internal readonly ref struct TrRmNativeFunctionPointerSignatureTableReader
     internal int Count => _recordCount;
 
     internal bool HasSignatureForMethod(int methodDefRow)
-        => methodDefRow > 0 && methodDefRow < _rowByMethod.Length
+        => _rowByMethod is not null && methodDefRow > 0
+            && methodDefRow < _rowByMethod.Length
             && _rowByMethod[methodDefRow] != 0;
 
     internal int GetMethodDefRow(int signatureRow)

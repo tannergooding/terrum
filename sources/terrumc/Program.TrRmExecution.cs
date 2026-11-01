@@ -18,6 +18,8 @@ internal static partial class Program
 {
     private const string A3FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+    private const string RegisterExceptionRegionsSchemaIdentity
+        = "trrm/1-draft-register-exception-regions-1";
 
     private static int RunTrRmExecutionCommand(string[] args, bool json)
     {
@@ -134,7 +136,8 @@ internal static partial class Program
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
-                        or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1")
+                        or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
+                        or RegisterExceptionRegionsSchemaIdentity)
                     || providers.Exists(static provider =>
                         provider.SchemaIdentity is not (
                             "trrm/1-draft-foreign-invocation-contracts-1"
@@ -142,7 +145,23 @@ internal static partial class Program
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
-                            or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"))))
+                            or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
+                            or RegisterExceptionRegionsSchemaIdentity))))
+            {
+                WriteInputError(json, "TRM2000", Usage);
+                return 2;
+            }
+            if (isArtifactCommand && schemaIdentity is not null
+                && (StringComparer.Ordinal.Equals(schemaIdentity,
+                        RegisterExceptionRegionsSchemaIdentity)
+                    || providers.Exists(static provider =>
+                        StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                            RegisterExceptionRegionsSchemaIdentity)))
+                && (!StringComparer.Ordinal.Equals(schemaIdentity,
+                        RegisterExceptionRegionsSchemaIdentity)
+                    || providers.Exists(static provider =>
+                        !StringComparer.Ordinal.Equals(provider.SchemaIdentity,
+                            RegisterExceptionRegionsSchemaIdentity))))
             {
                 WriteInputError(json, "TRM2000", Usage);
                 return 2;
@@ -268,7 +287,47 @@ internal static partial class Program
 
                 var rootInput = new TrRmStandardArtifactInput(schemaIdentity,
                     artifact);
-                if (command == "run-trrm")
+                if (StringComparer.Ordinal.Equals(schemaIdentity,
+                        RegisterExceptionRegionsSchemaIdentity))
+                {
+                    var program = TrRmExecutableCompiler.LoadStandard(rootInput,
+                        moduleIdentity!, providerInputs);
+                    if (command == "run-trrm")
+                    {
+                        if (program.EntryPoint < 0)
+                        {
+                            throw new InvalidDataException(
+                                "A library TRRM artifact has no executable entry.");
+                        }
+
+                        return NativeJit.Execute(program,
+                            NativeRuntimePolicy.FailFast,
+                            GraphJitRegistrarAssemblyPath());
+                    }
+                    else if (command == "build-trrm-library")
+                    {
+                        if (program.EntryPoint >= 0)
+                        {
+                            throw new InvalidDataException(
+                                "Library emission requires a no-entry TRRM module.");
+                        }
+
+                        image = NativeEmitter.EmitLibrary(program, exports,
+                            NativeRuntimePolicy.FailFast);
+                    }
+                    else
+                    {
+                        if (program.EntryPoint < 0)
+                        {
+                            throw new InvalidDataException(
+                                "An executable TRRM artifact requires an entry.");
+                        }
+
+                        image = NativeEmitter.Emit(program,
+                            NativeRuntimePolicy.FailFast);
+                    }
+                }
+                else if (command == "run-trrm")
                 {
                     try
                     {
@@ -287,8 +346,7 @@ internal static partial class Program
                         throw;
                     }
                 }
-
-                if (command == "build-trrm-library")
+                else if (command == "build-trrm-library")
                 {
                     try
                     {

@@ -48,6 +48,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+    private const string StandardRegisterExceptionRegionsSchemaIdentity
+        = "trrm/1-draft-register-exception-regions-1";
 
     private static readonly PrimitiveType[] s_types =
     [
@@ -212,6 +214,9 @@ public static partial class TrRmExecutableCompiler
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,
                     moduleIdentity,
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft),
+            StandardRegisterExceptionRegionsSchemaIdentity
+                => EmitRegisterExceptionRegionsDraft(program, moduleIdentity,
+                    moduleTargetRequirement),
             _ => throw new ArgumentException(
                 "The exact Standard TRRM schema identity is not supported by this emitter.",
                 nameof(schemaIdentity)),
@@ -222,6 +227,13 @@ public static partial class TrRmExecutableCompiler
         BoundProgram program, string moduleIdentity)
         => EmitDevelopment(program, moduleIdentity,
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
+
+    private static byte[] EmitRegisterExceptionRegionsDraft(
+        BoundProgram program, string moduleIdentity,
+        uint moduleTargetRequirement)
+        => EmitDevelopment(program, moduleIdentity,
+            TrRmArtifactSchema.RegisterExceptionRegionsDraft,
+            moduleTargetRequirement);
 
     private static byte[] EmitDevelopment(BoundProgram program, string moduleIdentity,
         TrRmArtifactSchema schema,
@@ -432,6 +444,14 @@ public static partial class TrRmExecutableCompiler
             nativeCallableContractCount += function.NativeFunctionPointerType is not null ? 1 : 0;
             nativeVTableCount += hasNativeVTable ? 1 : 0;
         }
+        if (schema.UsesRegisterExceptionRegions()
+            && (functionFeatures.Any(static features => features.HasIndexedFlow)
+                || outputFeatures.Any(static enabled => enabled)))
+        {
+            throw Unsupported(
+                "The current B+E1 source producer does not emit exception-region stream Bodies.");
+        }
+
         foreach (var signature in program.NativeFunctionPointerSignatures)
         {
             hasFloatingTypes |= IsFloat(signature.ReturnType)
@@ -1160,6 +1180,10 @@ public static partial class TrRmExecutableCompiler
         {
             _ = LoadDevelopmentFunctionPointerEffectsDraft(artifact);
         }
+        else if (schema.UsesRegisterExceptionRegions())
+        {
+            _ = LoadRegisterExceptionRegionsDraft(artifact);
+        }
         else
         {
             _ = Load(artifact);
@@ -1185,6 +1209,11 @@ public static partial class TrRmExecutableCompiler
         => LoadDevelopment(artifact,
             TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft);
 
+    internal static BoundProgram LoadRegisterExceptionRegionsDraft(
+        ReadOnlySpan<byte> artifact)
+        => LoadDevelopment(artifact,
+            TrRmArtifactSchema.RegisterExceptionRegionsDraft);
+
     private static BoundProgram LoadDevelopment(ReadOnlySpan<byte> artifact,
         TrRmArtifactSchema schema)
     {
@@ -1192,8 +1221,11 @@ public static partial class TrRmExecutableCompiler
         var validatedTables = schema.UsesDevelopmentFunctionPointerEffects()
             ? TrRmStructuralMetadataValidator
                 .ValidateDevelopmentFunctionPointerEffectsDraftAndGetExecutionTables(index)
-            : TrRmStructuralMetadataValidator
-                .ValidateDevelopmentAndGetExecutionTables(index);
+            : schema.UsesRegisterExceptionRegions()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateRegisterExceptionRegionsDraftAndGetExecutionTables(index)
+                : TrRmStructuralMetadataValidator
+                    .ValidateDevelopmentAndGetExecutionTables(index);
         var modules = validatedTables.Modules;
         var typeDefs = validatedTables.TypeDefs;
         var strings = validatedTables.Strings;
@@ -1238,6 +1270,12 @@ public static partial class TrRmExecutableCompiler
             || sigCount == 0 || typeCount == 0)
         {
             throw Invalid("Expected one self-contained scalar module with one Body per method.");
+        }
+
+        if (schema.UsesRegisterExceptionRegions() && featureCount != 0)
+        {
+            throw Unsupported(
+                "The current B+E1 scalar loader does not consume Module Feature requirements.");
         }
 
         var featureTable = new TrRmDevelopmentFeatureTableReader(featureBytes, featureCount);
@@ -1627,6 +1665,12 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundVariable>.Builder variables;
             ImmutableArray<BoundStatement> statements;
             var bodyForm = body[0] & 0x0C;
+            if (schema.UsesRegisterExceptionRegions()
+                && bodyForm is 0 or 0x08)
+            {
+                throw Unsupported(
+                    "The current B+E1 scalar loader does not consume register stream Bodies.");
+            }
             if (bodyForm == 0x08)
             {
                 TrRmCompactIndexedBodyReader.ValidateOnly(bodies, row, modules, defs, sigs,

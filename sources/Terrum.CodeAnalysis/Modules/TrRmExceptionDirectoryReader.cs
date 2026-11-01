@@ -293,10 +293,10 @@ internal readonly ref struct TrRmExceptionDirectoryReader
         for (var regionIndex = 0; regionIndex < RegionCount; regionIndex++)
         {
             _resourceLedger?.ConsumeWork();
-            if (regionKinds[regionIndex] is 2 or 3
-                && specialRegionOwners[regionIndex] != 1
-                || regionKinds[regionIndex] == 4
-                    && finallyRegionOwners[regionIndex] != 1)
+            if ((regionKinds[regionIndex] is 2 or 3
+                    && specialRegionOwners[regionIndex] != 1)
+                || (regionKinds[regionIndex] == 4
+                    && finallyRegionOwners[regionIndex] != 1))
             {
                 throw InvalidDirectory();
             }

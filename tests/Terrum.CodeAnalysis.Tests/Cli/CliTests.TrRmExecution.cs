@@ -187,6 +187,12 @@ public sealed partial class CliTests
             "trrm/1-draft-foreign-invocation-contracts-1", "--trrm-module",
             "root", "--trrm-provider", "unsupported-schema",
             "missing-provider.trrm", "--json");
+        await AssertUsageAsync("run-trrm", "missing.trrm", "--runtime",
+            "fail-fast", "--trrm-schema",
+            "trrm/1-draft-register-exception-regions-1", "--trrm-module",
+            "root", "--trrm-provider",
+            "trrm/1-draft-foreign-invocation-contracts-1",
+            "missing-provider.trrm", "--json");
 
         var collidingPath = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"trrm-provider-output-{Guid.NewGuid():N}.trrm");
@@ -338,6 +344,54 @@ public sealed partial class CliTests
         {
             File.Delete(artifact);
             await TestFileCleanup.DeleteWithRetryAsync(executable).ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public async Task RegisterExceptionRegionsStandardProfileRunsAndBuildsScalarBodiesAsync()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-register-exception-regions-1";
+        const string moduleIdentity = "e1-cli-module";
+        var prefix = Path.Combine(TestArtifactPaths.DirectoryPath,
+            $"trrm-e1-profile-{Guid.NewGuid():N}");
+        var artifact = prefix + ".trrm";
+        var executable = prefix + ".exe";
+        try
+        {
+            var (compiled, compileOutput, compileError) = await RunAsync(
+                Encoding.UTF8.GetBytes("int32 Main() { return 42; }"),
+                "compile-trrm", "-", "--identity", moduleIdentity,
+                "--trrm-schema", schemaIdentity, "-o", artifact,
+                "--runtime", "fail-fast", "--json");
+            Assert.That(compiled, Is.Zero,
+                $"{compileOutput}{Environment.NewLine}{compileError}");
+            Assert.That(compileError, Is.Empty);
+
+            var (ran, runOutput, runError) = await RunAsync([], "run-trrm",
+                artifact, "--runtime", "fail-fast", "--trrm-schema",
+                schemaIdentity, "--trrm-module", moduleIdentity, "--json");
+            Assert.That(ran, Is.EqualTo(42),
+                $"{runOutput}{Environment.NewLine}{runError}");
+            Assert.That(runOutput, Is.Empty);
+            Assert.That(runError, Is.Empty);
+
+            var (built, buildOutput, buildError) = await RunAsync([], "build-trrm",
+                artifact, "-o", executable, "--runtime", "fail-fast",
+                "--trrm-schema", schemaIdentity, "--trrm-module",
+                moduleIdentity, "--json");
+            Assert.That(built, Is.Zero,
+                $"{buildOutput}{Environment.NewLine}{buildError}");
+            Assert.That(buildError, Is.Empty);
+            Assert.That(await ExecuteTrRmImageAsync(executable),
+                Is.EqualTo(42));
+        }
+        finally
+        {
+            await TestFileCleanup.DeleteWithRetryAsync(artifact)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(executable)
+                .ConfigureAwait(true);
         }
     }
 

@@ -978,8 +978,14 @@ development Feature assignments and does not claim current schema conformance.
 Consumers load artifact bytes, validate metadata and Bodies, reconstruct typed
 inputs, and invoke the shared mandatory verifier and backend; there is no
 producer-trust bypass. General imported-call linking and standard
-exception-region Body support are not implemented. Body-local
-optional scalar values use independent presence and payload state, with the
+exception-region Body support are not implemented.
+The unapproved exact `B+E1` candidate now routes scalar compact Bodies through
+Standard emission/loading, source-reference creation, and CLI run/build. Its
+structural `0F`/`0A` readers do not bind or execute exception dispatch;
+Standard stream-Body production/loading, provider imports/remapping, source
+catch/filter forms, and JIT/AOT continuations remain incomplete. This candidate
+does not change current conformance. Body-local optional scalar values use
+independent presence and payload state, with the
 assigned optional operations covered by linear/indexed JIT and AOT tests.
 Optional floating types remain rejected, and optional `char16` is limited to
 its assigned optional operations and equality. `MakeOptional`, `None`,

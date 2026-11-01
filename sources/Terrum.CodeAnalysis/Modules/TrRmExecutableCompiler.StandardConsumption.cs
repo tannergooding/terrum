@@ -183,6 +183,20 @@ public static partial class TrRmExecutableCompiler
     {
         providerBinding = null;
         typeProviderBindings = [];
+        var includesRegisterExceptionRegions
+            = schemaIdentities.Contains(
+                StandardRegisterExceptionRegionsSchemaIdentity,
+                StringComparer.Ordinal);
+        if (includesRegisterExceptionRegions
+            && (schemaIdentities.Any(identity =>
+                    !StringComparer.Ordinal.Equals(identity,
+                        StandardRegisterExceptionRegionsSchemaIdentity))
+                || artifacts.Length != 1))
+        {
+            throw Unsupported(
+                "The current B+E1 Standard consumer requires one explicitly selected artifact.");
+        }
+
         moduleValidation = ValidateStandardInputModules(artifacts,
             schemaIdentities, moduleIdentity, a3LayoutResourceLedger);
         var rootModuleRow = moduleValidation.RootModuleRow;
@@ -191,6 +205,20 @@ public static partial class TrRmExecutableCompiler
         var tables = ValidateForeignInvocationArtifact(index,
             schemaIdentities[0], a3LayoutResourceLedger,
             createA3ResourceLedger: false);
+        if (StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardRegisterExceptionRegionsSchemaIdentity))
+        {
+            if (artifacts.Length != 1 || moduleValidation.Modules.Length != 1
+                || rootModuleRow != 1 || tables.Imports.Count != 0
+                || tables.ModuleRefs.Count != 0)
+            {
+                throw Unsupported(
+                    "The current B+E1 Standard loader requires one local Module without provider Imports.");
+            }
+
+            return LoadRegisterExceptionRegionsDraft(artifacts[0]);
+        }
+
         if (schemaIdentities[0] is
             StandardForeignInvocationStorageFixedArraySchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
@@ -530,7 +558,8 @@ public static partial class TrRmExecutableCompiler
             or StandardForeignInvocationStorageFixedArraySchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
             or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
-            or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity))
+            or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
+            or StandardRegisterExceptionRegionsSchemaIdentity))
         {
             throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
@@ -572,6 +601,8 @@ public static partial class TrRmExecutableCompiler
                     .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft,
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft,
+            StandardRegisterExceptionRegionsSchemaIdentity
+                => TrRmArtifactSchema.RegisterExceptionRegionsDraft,
             _ => throw new ArgumentException(
                 "The exact Standard schema identity is not selected by this consumer.",
                 nameof(schemaIdentity)),
@@ -581,6 +612,11 @@ public static partial class TrRmExecutableCompiler
         byte[] artifact, string schemaIdentity)
     {
         var schema = GetForeignInvocationSchema(schemaIdentity);
+        if (schema.UsesRegisterExceptionRegions())
+        {
+            return TrRmArtifactIndex.ForRegisterExceptionRegionsDraft(artifact);
+        }
+
         return schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
@@ -607,6 +643,10 @@ public static partial class TrRmExecutableCompiler
             TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
             bool createA3ResourceLedger = true)
         => GetForeignInvocationSchema(schemaIdentity)
+            .UsesRegisterExceptionRegions()
+            ? TrRmStructuralMetadataValidator
+                .ValidateRegisterExceptionRegionsDraftAndGetExecutionTables(index)
+            : GetForeignInvocationSchema(schemaIdentity)
             .UsesForeignInvocationStorageFixedArrays()
             ? GetForeignInvocationSchema(schemaIdentity)
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
@@ -684,6 +724,9 @@ public static partial class TrRmExecutableCompiler
                     StandardForeignInvocationStorageFixedArraySchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity;
+                var supportsRegisterExceptionRegions
+                    = StringComparer.Ordinal.Equals(schemaIdentities[index],
+                        StandardRegisterExceptionRegionsSchemaIdentity);
                 for (var offset = 0; offset < featureCount; offset++)
                 {
                     var feature = tables.Features.GetFeature(
@@ -694,7 +737,10 @@ public static partial class TrRmExecutableCompiler
                             or TrRmFeatureTableReader.ForeignInvocationContractsCandidateFeatureId)
                         && !(supportsA2Features
                             && feature.FeatureId
-                                == TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId))
+                                == TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId)
+                        && !(supportsRegisterExceptionRegions
+                            && feature.FeatureId
+                                == TrRmFeatureTableReader.RegisterExceptionRegionsFeatureId))
                     {
                         throw Unsupported(
                             "The bounded F consumer does not support a required Module feature.");

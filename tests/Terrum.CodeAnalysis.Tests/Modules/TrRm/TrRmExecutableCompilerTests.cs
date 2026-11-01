@@ -107,6 +107,46 @@ public sealed class TrRmExecutableCompilerTests
     }
 
     [Test]
+    public void StandardRegisterExceptionRegionsRouteUsesItsExactSchemaIdentity()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-register-exception-regions-1";
+        const uint targetRequirement
+            = TrRmModuleTableReader.WindowsX64NativeTargetRequirement;
+        var program = Compile("int32 Main() { return 42; }");
+        var artifact = TrRmExecutableCompiler.EmitStandard(program, "sample",
+            schemaIdentity, targetRequirement);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(input, "sample",
+            Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast),
+            Is.EqualTo(42));
+
+        var libraryArtifact = TrRmExecutableCompiler.EmitStandard(
+            Compile("public int32 Add(int32 left, int32 right) { return left + right; }",
+                library: true),
+            "library", schemaIdentity, targetRequirement);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, libraryArtifact),
+            "library", Array.Empty<TrRmStandardArtifactInput>());
+        Assert.That(reference.Functions.Single(
+            static function => function.Name == "Add").ReturnType,
+            Is.EqualTo(PrimitiveType.Int32));
+
+        Assert.Throws<ArgumentException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(
+                    "TRRM/1-draft-register-exception-regions-1", artifact),
+                "sample", Array.Empty<TrRmStandardArtifactInput>()));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(input, "sample",
+                [new TrRmStandardArtifactInput(
+                    "trrm/1-draft-foreign-invocation-contracts-1",
+                    new byte[] { 0 })]));
+    }
+
+    [Test]
     public void ExecutesStandardRegisterScalarReturnsWithoutDevelopmentFallback()
     {
         foreach (var (register, expected) in new (byte Register, int Expected)[] {

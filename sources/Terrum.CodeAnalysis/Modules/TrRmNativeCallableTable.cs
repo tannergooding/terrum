@@ -153,11 +153,13 @@ internal readonly ref struct TrRmNativeCallableTableReader
             : throw InvalidNativeCallable();
 
     internal bool HasCallableForMethod(int methodDefRow)
-        => methodDefRow > 0 && methodDefRow < _signatureRowByMethod.Length
+        => _signatureRowByMethod is not null && methodDefRow > 0
+            && methodDefRow < _signatureRowByMethod.Length
             && _signatureRowByMethod[methodDefRow] != 0;
 
     internal bool HasCallableEntryForMethod(int methodDefRow)
-        => methodDefRow > 0 && methodDefRow < _rowByMethod.Length
+        => _rowByMethod is not null && methodDefRow > 0
+            && methodDefRow < _rowByMethod.Length
             && _rowByMethod[methodDefRow] != 0;
 
     internal string? GetEntryName(int methodDefRow)
