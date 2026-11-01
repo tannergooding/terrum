@@ -919,6 +919,176 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
+    [Test]
+    public void StandardA2EUCapturesNestedScalarCallArgumentsBeforeMutation()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-unit-array-nested-call";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            internal extern int32 MutateAndGet(write ptr<int32> value);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern void RecordPair(int32 first, int32 second);
+
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut int32 marker = 0;
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    mut [void; 1] values = [
+                        RecordPair(marker, MutateAndGet(&marker))
+                    ];
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+
+        var directCallTargets = new List<string>();
+        var directCallResultKinds = new List<byte>();
+        var directCallRecords = new List<ReadOnlyMemory<byte>>();
+        var code = body.GetBlockCode(0);
+        var firstCopyOffset = int.MaxValue;
+        var firstDirectCallOffset = int.MaxValue;
+        var lastDirectCallOffset = -1;
+        var firstUnitStoreOffset = int.MaxValue;
+        for (var position = 0; position < code.Length;)
+        {
+            var instructionLength = TrRmRegisterBodyReader.InstructionLength(
+                code[position], body.Schema);
+            if (code[position] == 0xD5 || code[position] == 0xD6)
+            {
+                firstCopyOffset = Math.Min(firstCopyOffset, position);
+            }
+            if (code[position] == 0xE0)
+            {
+                var callRecord = body.GetRecord(
+                    BinaryPrimitives.ReadUInt16LittleEndian(
+                        code[(position + 2)..]));
+                if (callRecord[4] == 1)
+                {
+                    var methodMapIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            callRecord[8..]);
+                    var methodToken
+                        = BinaryPrimitives.ReadUInt32LittleEndian(
+                            body.MethodMap[(methodMapIndex * sizeof(uint))..]);
+                    var methodRow = checked((int)(methodToken
+                        & 0x00FF_FFFF));
+                    directCallTargets.Add(tables.Methods.GetName(methodRow));
+                    directCallResultKinds.Add(callRecord[5]);
+                    directCallRecords.Add(callRecord.ToArray());
+                    firstDirectCallOffset = Math.Min(firstDirectCallOffset,
+                        position);
+                    lastDirectCallOffset = position;
+                }
+            }
+            else if (code[position] == 0xD9)
+            {
+                firstUnitStoreOffset = Math.Min(firstUnitStoreOffset,
+                    position);
+            }
+            position += instructionLength;
+        }
+        Assert.That(firstCopyOffset, Is.LessThan(firstDirectCallOffset));
+        Assert.That(directCallTargets,
+            Is.EqualTo(new[] { "MutateAndGet", "RecordPair" }));
+        Assert.That(directCallResultKinds,
+            Is.EqualTo(new byte[] { 2, 0 }));
+        Assert.That(lastDirectCallOffset, Is.LessThan(firstUnitStoreOffset));
+        var nestedResultHome = BinaryPrimitives.ReadUInt16LittleEndian(
+            directCallRecords[0].Span[10..]);
+        var recordPairCall = directCallRecords[1].Span;
+        var snapshotHome = BinaryPrimitives.ReadUInt16LittleEndian(
+            recordPairCall[22..]);
+        var nestedResultInputHome = BinaryPrimitives.ReadUInt16LittleEndian(
+            recordPairCall[26..]);
+        Assert.That(snapshotHome, Is.Not.EqualTo(nestedResultHome));
+        Assert.That(nestedResultInputHome, Is.EqualTo(nestedResultHome));
+        Assert.That(body.HomeMap[nestedResultHome * 8], Is.EqualTo(3));
+        Assert.That(body.HomeMap[snapshotHome * 8], Is.EqualTo(3));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var unitArrays = new List<BoundNativeFixedArrayInitialization>();
+        var initializerCalls = new List<BoundCall>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayInitialization
+                    { Layout.ElementType: PrimitiveType.Void } initialization
+                    && initialization.Layout.ElementCount == 1)
+                {
+                    unitArrays.Add(initialization);
+                }
+                if (expression is BoundCall call)
+                {
+                    initializerCalls.Add(call);
+                }
+            }), Is.True);
+        Assert.That(unitArrays, Has.Count.EqualTo(1));
+        Assert.That(unitArrays[0].Elements.OfType<BoundConstant>().ToArray(),
+            Has.Length.EqualTo(1));
+        Assert.That(initializerCalls.Select(call =>
+                loaded.Functions[call.Function].Name),
+            Is.EquivalentTo(new[] { "MutateAndGet", "RecordPair" }));
+        var recordPair = initializerCalls.Single(call =>
+            loaded.Functions[call.Function].Name == "RecordPair");
+        Assert.That(recordPair.Arguments.OfType<BoundRead>().ToArray(),
+            Has.Length.EqualTo(2));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
     [TestCase(3, "uint32", "[0, 0, 0]", PrimitiveType.UInt32, false)]
     [TestCase(2, "int32", "[0, -1]", PrimitiveType.Int32, true)]

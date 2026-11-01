@@ -1076,11 +1076,10 @@ public static partial class TrRmExecutableCompiler
                 case 0xD6:
                     var storeControl = instruction[1];
                     var longSource = storeControl & 0x0F;
-                    if ((storeControl >> 4) != 1
-                        || longSource is not (14 or 15))
+                    if ((storeControl >> 4) != 1)
                     {
                         throw Unsupported(
-                            "F+S local initialization requires CopyRead from R14 or R15.");
+                            "F+S local initialization requires an admitted CopyRead source.");
                     }
                     instructions.Add((0xD6,
                         BinaryPrimitives.ReadUInt16LittleEndian(
@@ -1282,15 +1281,51 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var nonLocalHomeResults = new HashSet<int>();
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] == 0x0E && record[5] == 2)
+            {
+                _ = nonLocalHomeResults.Add(
+                    BinaryPrimitives.ReadUInt16LittleEndian(record[8..]));
+            }
+        }
+
+        var localInitializedByHome = new bool[body.HomeCount];
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            if (body.HomeMap[homeIndex * 8] != 3
+                || nonLocalHomeResults.Contains(homeIndex))
+            {
+                continue;
+            }
+
+            var typeMapIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                body.HomeMap[((homeIndex * 8) + 2)..]);
+            var localType = ReadForeignInvocationType(typeSpecs,
+                ReadForeignInvocationBodyTypeSpec(body, typeMapIndex),
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef,
+                arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
+            var localVariable = variables.Count;
+            localVariableByHome[homeIndex] = localVariable;
+            variables.Add(new BoundVariable(
+                $"__trrm_home_{homeIndex}", localType,
+                body.HomeMap[(homeIndex * 8) + 1] != 0, default));
+        }
+
         var storageAddressesByHome
             = new Dictionary<int, NativeStorageAddressFacts>();
         var consumedStorageHomes = new HashSet<int>();
-        var storageAddressHomeOrder = new List<int>();
+        var callArgumentHomeOrder = new List<int>();
         var localConstantByHome = new Dictionary<int, long>();
         var placeSelectionsByRegister
             = new Dictionary<int, NativeArrayPlaceSelectionFacts>();
         var registerConstants
             = new Dictionary<int, NativeAddressRegisterConstant>();
+        var registerHomeReads = new Dictionary<int, BoundRead>();
         if (directUnitCallRecordIndexes.Count > 0)
         {
             registerConstants.Add(14, new NativeAddressRegisterConstant(
@@ -1311,7 +1346,8 @@ public static partial class TrRmExecutableCompiler
                     var localHome = instruction.Index;
                     if ((uint)localHome >= (uint)body.HomeCount
                         || body.HomeMap[localHome * 8] != 3
-                        || localVariableByHome[localHome] != -1
+                        || localVariableByHome[localHome] < 0
+                        || localInitializedByHome[localHome]
                         || storageAddressesByHome.ContainsKey(localHome))
                     {
                         throw Invalid(
@@ -1324,26 +1360,42 @@ public static partial class TrRmExecutableCompiler
                         ReadForeignInvocationBodyTypeSpec(body, localMapType),
                         nativePointerTypeDefinitions,
                         signatureIndexByAnchorMethod, structureTypeByTypeDef);
-                    if ((!DirectNativeImportContract.IsScalar(localType)
-                            && !(localType == PrimitiveType.Void
-                                && body.Schema
-                                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()))
-                        || !TryGetContextualConstant(instruction.Register,
-                            localType, body.Schema, out var initialValue))
+                    BoundExpression localValue;
+                    if (registerHomeReads.Remove(instruction.Register,
+                            out var copiedHomeRead))
                     {
-                        throw Unsupported(
-                            "The F+S Home store has no admitted typed contextual constant.");
+                        if (copiedHomeRead.Type != localType
+                            || (!DirectNativeImportContract.IsScalar(localType)
+                                && !NativePointerTypes.IsType(localType)))
+                        {
+                            throw Invalid(
+                                "The F+S Home copy has a mismatched source type.");
+                        }
+
+                        localValue = copiedHomeRead;
+                    }
+                    else
+                    {
+                        if ((!DirectNativeImportContract.IsScalar(localType)
+                                && !(localType == PrimitiveType.Void
+                                    && body.Schema
+                                        .UsesForeignInvocationStorageFixedArrayUnitInitialization()))
+                            || !TryGetContextualConstant(instruction.Register,
+                                localType, body.Schema, out var initialValue))
+                        {
+                            throw Unsupported(
+                                "The F+S Home store has no admitted typed source.");
+                        }
+
+                        localValue = new BoundConstant(initialValue,
+                            localType, default);
+                        localConstantByHome.Add(localHome, initialValue);
                     }
 
-                    var localVariable = variables.Count;
-                    localVariableByHome[localHome] = localVariable;
-                    variables.Add(new BoundVariable(
-                        $"__trrm_home_{localHome}", localType,
-                        body.HomeMap[(localHome * 8) + 1] != 0, default));
-                    statements.Add(new BoundLocal(localVariable,
-                        new BoundConstant(initialValue, localType, default),
+                    var localVariable = localVariableByHome[localHome];
+                    localInitializedByHome[localHome] = true;
+                    statements.Add(new BoundLocal(localVariable, localValue,
                         default));
-                    localConstantByHome.Add(localHome, initialValue);
                     break;
 
                 case 0x13:
@@ -1351,6 +1403,7 @@ public static partial class TrRmExecutableCompiler
                     var shortLoadHome = instruction.Index >> 4;
                     if (shortLoadHome >= body.HomeCount
                         || localVariableByHome[shortLoadHome] < 0
+                        || !localInitializedByHome[shortLoadHome]
                         || !localConstantByHome.TryGetValue(shortLoadHome,
                             out var shortLoadValue)
                         || variables[localVariableByHome[shortLoadHome]].Type
@@ -1360,6 +1413,7 @@ public static partial class TrRmExecutableCompiler
                             "The F+S array-index register load is unsupported.");
                     }
 
+                    _ = registerHomeReads.Remove(shortLoadDestination);
                     registerConstants[shortLoadDestination]
                         = new NativeAddressRegisterConstant(
                             PrimitiveType.Int32,
@@ -1370,20 +1424,42 @@ public static partial class TrRmExecutableCompiler
                     var longLoadHome = instruction.Index;
                     var longLoadDestination = instruction.Register;
                     if (longLoadHome >= body.HomeCount
-                        || localVariableByHome[longLoadHome] < 0
-                        || !localConstantByHome.TryGetValue(longLoadHome,
-                            out var longLoadValue)
-                        || variables[localVariableByHome[longLoadHome]].Type
-                            != PrimitiveType.Int32)
+                        || longLoadDestination >= 14)
                     {
                         throw Invalid(
-                            "The F+S array-index register load is unsupported.");
+                            "The F+S Home load is invalid.");
                     }
 
-                    registerConstants[longLoadDestination]
-                        = new NativeAddressRegisterConstant(
-                            PrimitiveType.Int32,
-                            unchecked((uint)longLoadValue));
+                    var longLoadFormal
+                        = formalOrdinalByHome[longLoadHome];
+                    var longLoadVariable = longLoadFormal >= 0
+                        ? longLoadFormal
+                        : localVariableByHome[longLoadHome];
+                    if (longLoadVariable < 0
+                        || (longLoadFormal < 0
+                            && !localInitializedByHome[longLoadHome]))
+                    {
+                        throw Invalid(
+                            "The F+S Home load has no completed source.");
+                    }
+
+                    var longLoadType = variables[longLoadVariable].Type;
+                    if (longLoadType == PrimitiveType.Int32
+                        && localConstantByHome.TryGetValue(longLoadHome,
+                            out var longLoadValue))
+                    {
+                        registerConstants[longLoadDestination]
+                            = new NativeAddressRegisterConstant(
+                                PrimitiveType.Int32,
+                                unchecked((uint)longLoadValue));
+                    }
+                    else
+                    {
+                        _ = registerConstants.Remove(longLoadDestination);
+                    }
+
+                    registerHomeReads[longLoadDestination] = new BoundRead(
+                        longLoadVariable, longLoadType, default);
                     break;
 
                 case 0x10:
@@ -1403,9 +1479,20 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         registerConstants[destinationRegister] = moveSource;
+                        if (registerHomeReads.TryGetValue(rightRegister,
+                                out var movedHomeRead))
+                        {
+                            registerHomeReads[destinationRegister]
+                                = movedHomeRead;
+                        }
+                        else
+                        {
+                            _ = registerHomeReads.Remove(destinationRegister);
+                        }
                         break;
                     }
 
+                    _ = registerHomeReads.Remove(destinationRegister);
                     if (!registerConstants.TryGetValue(destinationRegister,
                             out var leftValue)
                         || leftValue.Type != PrimitiveType.Int32)
@@ -1537,8 +1624,8 @@ public static partial class TrRmExecutableCompiler
                         if (emptyArrayLayout.ElementCount != 0
                             || emptyArrayLayout.ByteExtent != 0
                             || initializationSelection.TargetKind is not (1 or 3)
-                            || localVariableByHome[
-                                initializationSelection.BaseHome] != -1)
+                            || localInitializedByHome[
+                                initializationSelection.BaseHome])
                         {
                             throw Invalid(
                                 "The A2E SemanticStore does not initialize a vacant empty array.");
@@ -1571,14 +1658,15 @@ public static partial class TrRmExecutableCompiler
                                     "The A2E Home selection has no local Home.");
                             }
 
-                            var emptyArrayVariable = variables.Count;
-                            localVariableByHome[emptyArrayHome]
-                                = emptyArrayVariable;
-                            variables.Add(new BoundVariable(
-                                $"__trrm_home_{emptyArrayHome}",
-                                emptyArrayType,
-                                body.HomeMap[(emptyArrayHome * 8) + 1] != 0,
-                                default));
+                            var emptyArrayVariable
+                                = localVariableByHome[emptyArrayHome];
+                            if (emptyArrayVariable < 0)
+                            {
+                                throw Invalid(
+                                    "The A2E empty Home has no local variable.");
+                            }
+
+                            localInitializedByHome[emptyArrayHome] = true;
                             statements.Add(new BoundLocal(
                                 emptyArrayVariable, emptyInitialization,
                                 default));
@@ -1626,7 +1714,8 @@ public static partial class TrRmExecutableCompiler
                                     initializationSelection.ElementCount,
                                     initializedElements, body,
                                     nativeFixedArrayTypes,
-                                    localVariableByHome, variables,
+                                    localVariableByHome,
+                                    localInitializedByHome,
                                     statements);
                                 _ = arrayInitializationElementsByHome.Remove(
                                     initializedArrayHome);
@@ -1637,8 +1726,8 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (initializationSelection.TargetKind != 3
                             || initializationSelection.ElementCount == 0
-                            || localVariableByHome[
-                                initializationSelection.BaseHome] != -1
+                            || localInitializedByHome[
+                                initializationSelection.BaseHome]
                             || !TryGetContextualConstant(
                                 checked((byte)sourceRegister),
                                 initializationSelection.ElementType,
@@ -1688,7 +1777,7 @@ public static partial class TrRmExecutableCompiler
                                 initializationSelection.ElementCount,
                                 initializedElements, body,
                                 nativeFixedArrayTypes, localVariableByHome,
-                                variables, statements);
+                                localInitializedByHome, statements);
                             _ = arrayInitializationElementsByHome.Remove(
                                 initializedArrayHome);
                         }
@@ -1699,7 +1788,8 @@ public static partial class TrRmExecutableCompiler
 
                 case 0xE9:
                     if (instruction.Index != nativeAddressRecordIndex
-                        || localVariableByHome[targetHome] != -1
+                        || localVariableByHome[targetHome] < 0
+                        || localInitializedByHome[targetHome]
                         || body.HomeMap[targetHome * 8] != 3
                         || ReadForeignInvocationType(typeSpecs,
                             ReadForeignInvocationBodyTypeSpec(body,
@@ -1712,11 +1802,8 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid("The F+S NativeAddress result Home is invalid.");
                     }
 
-                    var targetVariable = variables.Count;
-                    localVariableByHome[targetHome] = targetVariable;
-                    variables.Add(new BoundVariable(
-                        $"__trrm_native_address_{targetHome}", pointerType,
-                        body.HomeMap[(targetHome * 8) + 1] != 0, default));
+                    var targetVariable = localVariableByHome[targetHome];
+                    localInitializedByHome[targetHome] = true;
                     statements.Add(new BoundLocal(targetVariable,
                         new BoundNativeFunctionAddress(targetIndex,
                             pointerType, default)
@@ -1775,6 +1862,7 @@ public static partial class TrRmExecutableCompiler
                         var sourceHome = checked((int)storageSourceIndex);
                         if (sourceHome >= body.HomeCount
                             || localVariableByHome[sourceHome] < 0
+                            || !localInitializedByHome[sourceHome]
                             || requiredElementCount != 1)
                         {
                             throw Invalid(
@@ -1832,6 +1920,8 @@ public static partial class TrRmExecutableCompiler
                             || selectedPlace.BaseHome >= body.HomeCount
                             || localVariableByHome[
                                 selectedPlace.BaseHome] < 0
+                            || !localInitializedByHome[
+                                selectedPlace.BaseHome]
                             || requiredElementCount
                                 > selectedPlace.ElementCount)
                         {
@@ -1852,6 +1942,10 @@ public static partial class TrRmExecutableCompiler
                             ? formalOrdinalByHome[selectedPlace.IndexHome]
                             : localVariableByHome[selectedPlace.IndexHome];
                         if (indexVariable < 0
+                            || (formalOrdinalByHome[
+                                    selectedPlace.IndexHome] < 0
+                                && !localInitializedByHome[
+                                    selectedPlace.IndexHome])
                             || !NativeFixedArrayContract.IsIndexType(
                                 variables[indexVariable].Type))
                         {
@@ -1885,7 +1979,7 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     storageAddressesByHome.Add(resultHome, storageFacts);
-                    storageAddressHomeOrder.Add(resultHome);
+                    callArgumentHomeOrder.Add(resultHome);
                     break;
 
                 case 0xE0:
@@ -1903,22 +1997,70 @@ public static partial class TrRmExecutableCompiler
                                 body, body.GetRecord(instruction.Index),
                                 imports, directCallTargets,
                                 callerParameterTypes, formalOrdinalByHome,
-                                localVariableByHome, variables,
+                                localVariableByHome,
+                                localInitializedByHome, variables,
                                 storageAddressesByHome,
                                 consumedStorageHomes,
-                                storageAddressHomeOrder);
-                        statements.Add(new BoundExpressionStatement(
-                            directUnitCall, default));
+                                callArgumentHomeOrder,
+                                out var directCallResultHome);
+                        if (directCallResultHome >= 0)
+                        {
+                            if ((uint)directCallResultHome
+                                    >= (uint)body.HomeCount
+                                || body.HomeMap[directCallResultHome * 8] != 3
+                                || localVariableByHome[
+                                    directCallResultHome] < 0
+                                || localInitializedByHome[
+                                    directCallResultHome]
+                                || storageAddressesByHome.ContainsKey(
+                                    directCallResultHome))
+                            {
+                                throw Invalid(
+                                    "The A2EU direct-call result Home is invalid.");
+                            }
+
+                            var resultTypeMapIndex
+                                = BinaryPrimitives.ReadUInt16LittleEndian(
+                                    body.HomeMap[((directCallResultHome * 8) + 2)..]);
+                            var resultHomeType = ReadForeignInvocationType(
+                                typeSpecs,
+                                ReadForeignInvocationBodyTypeSpec(body,
+                                    resultTypeMapIndex),
+                                nativePointerTypeDefinitions,
+                                signatureIndexByAnchorMethod,
+                                structureTypeByTypeDef,
+                                arrayTypeByTypeSpecRow:
+                                    arrayTypeByTypeSpecRow);
+                            if (resultHomeType != directUnitCall.Type)
+                            {
+                                throw Invalid(
+                                    "The A2EU direct-call result Home has the wrong type.");
+                            }
+
+                            var resultVariable = localVariableByHome[
+                                directCallResultHome];
+                            localInitializedByHome[directCallResultHome] = true;
+                            statements.Add(new BoundLocal(resultVariable,
+                                directUnitCall, default));
+                        }
+                        else
+                        {
+                            statements.Add(new BoundExpressionStatement(
+                                directUnitCall, default));
+                        }
                         for (var register = 0; register < 14; register++)
                         {
                             _ = registerConstants.Remove(register);
+                            _ = registerHomeReads.Remove(register);
                         }
+                        localConstantByHome.Clear();
                         break;
                     }
 
                     if (sawCallSite
                         || instruction.Index != callSiteRecordIndex
-                        || localVariableByHome[targetHome] < 0)
+                        || localVariableByHome[targetHome] < 0
+                        || !localInitializedByHome[targetHome])
                     {
                         throw Invalid("The F+S indirect CallSite is misplaced.");
                     }
@@ -1946,6 +2088,7 @@ public static partial class TrRmExecutableCompiler
 
                     var callArguments = ImmutableArray.CreateBuilder<BoundExpression>(
                         targetParameterTypes.Length);
+                    var finalCallStorageHomes = new HashSet<int>();
                     for (var ordinal = 0;
                         ordinal < targetParameterTypes.Length; ordinal++)
                     {
@@ -2012,6 +2155,7 @@ public static partial class TrRmExecutableCompiler
                                 throw Invalid(
                                     "An F+S storage-address result is consumed more than once.");
                             }
+                            _ = finalCallStorageHomes.Add(selectorIndex);
                             continue;
                         }
 
@@ -2032,6 +2176,7 @@ public static partial class TrRmExecutableCompiler
                         var inputLocalVariable
                             = localVariableByHome[selectorIndex];
                         if (inputLocalVariable < 0
+                            || !localInitializedByHome[selectorIndex]
                             || variables[inputLocalVariable].Type
                                 != targetParameterTypes[ordinal])
                         {
@@ -2047,6 +2192,16 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Invalid(
                             "Every F+S storage-address result must feed the CallSite.");
+                    }
+
+                    for (var eventIndex = callArgumentHomeOrder.Count - 1;
+                        eventIndex >= 0; eventIndex--)
+                    {
+                        if (finalCallStorageHomes.Contains(
+                                callArgumentHomeOrder[eventIndex]))
+                        {
+                            callArgumentHomeOrder.RemoveAt(eventIndex);
+                        }
                     }
 
                     statements.Add(new BoundExpressionStatement(
@@ -2065,7 +2220,8 @@ public static partial class TrRmExecutableCompiler
                     if (sawReturn || instruction.Index != returnHome
                         || !sawCallSite
                         || (uint)returnHome >= (uint)body.HomeCount
-                        || localVariableByHome[returnHome] < 0)
+                        || localVariableByHome[returnHome] < 0
+                        || !localInitializedByHome[returnHome])
                     {
                         throw Invalid("The F+S ReturnHome is invalid.");
                     }
@@ -2090,6 +2246,7 @@ public static partial class TrRmExecutableCompiler
         if (!sawCallSite || !sawReturn
             || placeSelectionsByRegister.Count != 0
             || arrayInitializationElementsByHome.Count != 0
+            || callArgumentHomeOrder.Count != 0
             || storageAddressesByHome.Keys.Any(home =>
                 !consumedStorageHomes.Contains(home)))
         {
@@ -2098,9 +2255,20 @@ public static partial class TrRmExecutableCompiler
 
         for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
         {
-            if (body.HomeMap[homeIndex * 8] == 3
-                && localVariableByHome[homeIndex] < 0
-                && !storageAddressesByHome.ContainsKey(homeIndex))
+            if (body.HomeMap[homeIndex * 8] != 3)
+            {
+                continue;
+            }
+
+            if (localVariableByHome[homeIndex] >= 0)
+            {
+                if (!localInitializedByHome[homeIndex])
+                {
+                    throw Invalid(
+                        "An F+S local Home has no initialization operation.");
+                }
+            }
+            else if (!storageAddressesByHome.ContainsKey(homeIndex))
             {
                 throw Invalid("An F+S local Home has no initialization operation.");
             }
@@ -2361,13 +2529,14 @@ public static partial class TrRmExecutableCompiler
         int home, ulong elementCount, List<BoundExpression> elements,
         TrRmRegisterBodyReader body,
         ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
-        int[] localVariableByHome,         ImmutableArray<BoundVariable>.Builder variables,
+        int[] localVariableByHome, bool[] localInitializedByHome,
         ImmutableArray<BoundStatement>.Builder statements)
     {
         if (!NativeFixedArrayTypes.IsType(arrayType)
             || (uint)home >= (uint)body.HomeCount
             || body.HomeMap[home * 8] != 3
-            || localVariableByHome[home] != -1)
+            || localVariableByHome[home] < 0
+            || localInitializedByHome[home])
         {
             throw Invalid("The F+S array Home cannot be initialized.");
         }
@@ -2386,10 +2555,8 @@ public static partial class TrRmExecutableCompiler
                 "The F+S array initialization does not provide every element.");
         }
 
-        var variable = variables.Count;
-        localVariableByHome[home] = variable;
-        variables.Add(new BoundVariable($"__trrm_home_{home}", arrayType,
-            body.HomeMap[(home * 8) + 1] != 0, default));
+        var variable = localVariableByHome[home];
+        localInitializedByHome[home] = true;
         statements.Add(new BoundLocal(variable,
             new BoundNativeFixedArrayInitialization(
                 new BoundNativeFixedArrayLayout(arrayType,
@@ -2461,36 +2628,60 @@ public static partial class TrRmExecutableCompiler
         IReadOnlyDictionary<int, NativeAddressDirectCallTarget> callTargets,
         ImmutableArray<PrimitiveType> callerParameterTypes,
         int[] formalOrdinalByHome, int[] localVariableByHome,
+        bool[] localInitializedByHome,
         ImmutableArray<BoundVariable>.Builder variables,
         Dictionary<int, NativeStorageAddressFacts> storageAddressesByHome,
         HashSet<int> consumedStorageHomes,
-        List<int> storageAddressHomeOrder)
+        List<int> callArgumentHomeOrder, out int resultHome)
     {
+        resultHome = -1;
         var inputCount = BinaryPrimitives.ReadUInt32LittleEndian(
             record[12..]);
         var preparationCount = BinaryPrimitives.ReadUInt32LittleEndian(
             record[16..]);
         var targetMethodRow = ReadForeignInvocationBodyMethodDef(body,
             imports, BinaryPrimitives.ReadUInt16LittleEndian(record[8..]));
+        var callResultKind = record[5];
+        var callResultHome = BinaryPrimitives.ReadUInt16LittleEndian(
+            record[10..]);
         if (!body.Schema
                 .UsesForeignInvocationStorageFixedArrayUnitInitialization()
             || !callTargets.TryGetValue(targetMethodRow,
                 out var callTarget)
-            || callTarget.ReturnType != PrimitiveType.Void
-            || record[0] != 0x02 || record[4] != 1 || record[5] != 0
-            || BinaryPrimitives.ReadUInt16LittleEndian(record[10..]) != 0
+            || record[0] != 0x02 || record[4] != 1
             || inputCount != (uint)callTarget.ParameterTypes.Length
             || preparationCount != 0
             || (long)record.Length != 20L + (inputCount * 4L))
         {
             throw Invalid(
-                "The A2EU unit initializer CallSite does not match the direct Unit import.");
+                "The A2EU direct CallSite does not match a retained NativeImport.");
+        }
+
+        if (callTarget.ReturnType == PrimitiveType.Void)
+        {
+            if (callResultKind != 0 || callResultHome != 0)
+            {
+                throw Invalid(
+                    "The A2EU Unit CallSite has an invalid result selector.");
+            }
+        }
+        else
+        {
+            if (!DirectNativeImportContract.IsScalar(callTarget.ReturnType)
+                || callResultKind != 2
+                || callResultHome >= body.HomeCount)
+            {
+                throw Invalid(
+                    "The A2EU direct CallSite has an unsupported result Home.");
+            }
+
+            resultHome = callResultHome;
         }
 
         var targetParameterTypes = callTarget.ParameterTypes;
         var argumentByParameter = new BoundExpression?[
             targetParameterTypes.Length];
-        var storageParameterByHome = new Dictionary<int, int>();
+        var specialParameterByHome = new Dictionary<int, int>();
         for (var ordinal = 0; ordinal < targetParameterTypes.Length; ordinal++)
         {
             var inputOffset = 20 + (ordinal * 4);
@@ -2575,7 +2766,7 @@ public static partial class TrRmExecutableCompiler
                         byteExtent,
                         nativeParameter.Access == NativeParameterAccess.Read,
                         default);
-                storageParameterByHome.Add(selectorIndex, ordinal);
+                specialParameterByHome.Add(selectorIndex, ordinal);
                 continue;
             }
 
@@ -2589,7 +2780,9 @@ public static partial class TrRmExecutableCompiler
             var inputVariable = formalOrdinal >= 0
                 ? formalOrdinal
                 : localVariableByHome[selectorIndex];
-            if (inputVariable < 0)
+            if (inputVariable < 0
+                || (formalOrdinal < 0
+                    && !localInitializedByHome[selectorIndex]))
             {
                 throw Invalid(
                     "The A2EU CallSite input selects no initialized Home.");
@@ -2613,15 +2806,27 @@ public static partial class TrRmExecutableCompiler
         var argumentParameterIndices = ImmutableArray.CreateBuilder<int>(
             targetParameterTypes.Length);
         var addedParameters = new bool[targetParameterTypes.Length];
-        foreach (var storageHome in storageAddressHomeOrder)
+        var consumedEventHomes = new HashSet<int>();
+        foreach (var argumentHome in callArgumentHomeOrder)
         {
-            if (storageParameterByHome.TryGetValue(storageHome,
+            if (specialParameterByHome.TryGetValue(argumentHome,
                     out var parameterIndex))
             {
                 arguments.Add(argumentByParameter[parameterIndex]!);
                 argumentParameterIndices.Add(parameterIndex);
                 addedParameters[parameterIndex] = true;
+                if (!consumedEventHomes.Add(argumentHome))
+                {
+                    throw Invalid(
+                        "An A2EU direct-call argument Home is reused.");
+                }
             }
+        }
+
+        if (consumedEventHomes.Count != specialParameterByHome.Count)
+        {
+            throw Invalid(
+                "The A2EU direct-call arguments are not in capture order.");
         }
 
         for (var parameterIndex = 0;
@@ -2637,6 +2842,16 @@ public static partial class TrRmExecutableCompiler
             argumentParameterIndices.Add(parameterIndex);
         }
 
+        for (var eventIndex = callArgumentHomeOrder.Count - 1;
+            eventIndex >= 0; eventIndex--)
+        {
+            if (consumedEventHomes.Contains(
+                    callArgumentHomeOrder[eventIndex]))
+            {
+                callArgumentHomeOrder.RemoveAt(eventIndex);
+            }
+        }
+
         var isIdentityMapping = true;
         for (var argumentIndex = 0;
             argumentIndex < argumentParameterIndices.Count;
@@ -2647,7 +2862,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         return new BoundCall(callTarget.FunctionIndex, arguments.MoveToImmutable(),
-            PrimitiveType.Void, default)
+            callTarget.ReturnType, default)
         {
             ArgumentParameterIndices = isIdentityMapping
                 ? default : argumentParameterIndices.MoveToImmutable(),
