@@ -925,6 +925,7 @@ public static partial class TrRmExecutableCompiler
             BinaryPrimitives.ReadUInt16LittleEndian(block[8..]),
         };
         var storageRecordIndexes = new HashSet<int>();
+        var directUnitCallRecordIndexes = new HashSet<int>();
         var nativeAddressRecordIndex = -1;
         var callSiteRecordIndex = -1;
         var returnHome = -1;
@@ -1037,12 +1038,32 @@ public static partial class TrRmExecutableCompiler
                     }
                     else
                     {
-                        if (callSiteRecordIndex != -1)
+                        var callSiteTargetKind
+                            = body.GetRecord(recordIndex)[4];
+                        if (callSiteTargetKind == 3)
+                        {
+                            if (callSiteRecordIndex != -1)
+                            {
+                                throw Unsupported(
+                                    "The F+S Body supports one indirect CallSite.");
+                            }
+                            callSiteRecordIndex = recordIndex;
+                        }
+                        else if (callSiteTargetKind == 1
+                            && body.Schema
+                                .UsesForeignInvocationStorageFixedArrayUnitInitialization())
+                        {
+                            if (!directUnitCallRecordIndexes.Add(recordIndex))
+                            {
+                                throw Invalid(
+                                    "An A2EU direct CallSite is referenced more than once.");
+                            }
+                        }
+                        else
                         {
                             throw Unsupported(
-                                "The F+S Body supports one indirect CallSite.");
+                                "The F+S Body contains an unsupported direct CallSite.");
                         }
-                        callSiteRecordIndex = recordIndex;
                     }
                     instructions.Add((instruction[0], recordIndex, 0));
                     break;
@@ -1140,13 +1161,20 @@ public static partial class TrRmExecutableCompiler
         var storageAddressesByHome
             = new Dictionary<int, NativeStorageAddressFacts>();
         var consumedStorageHomes = new HashSet<int>();
+        var storageAddressHomeOrder = new List<int>();
         var localConstantByHome = new Dictionary<int, long>();
         var placeSelectionsByRegister
             = new Dictionary<int, NativeArrayPlaceSelectionFacts>();
         var registerConstants
             = new Dictionary<int, NativeAddressRegisterConstant>();
+        if (directUnitCallRecordIndexes.Count > 0)
+        {
+            registerConstants.Add(14, new NativeAddressRegisterConstant(
+                PrimitiveType.Int32, 0));
+        }
         var arrayInitializationElementsByHome
             = new Dictionary<int, List<BoundExpression>>();
+        var pendingUnitInitializerCalls = new Queue<BoundCall>();
         var statements = ImmutableArray.CreateBuilder<BoundStatement>();
         var sawCallSite = false;
         var sawReturn = false;
@@ -1525,9 +1553,24 @@ public static partial class TrRmExecutableCompiler
                             arrayInitializationElementsByHome.Add(
                                 initializedArrayHome, initializedElements);
                         }
-                        initializedElements.Add(new BoundConstant(
-                            initializationValue,
-                            initializationSelection.ElementType, default));
+                        BoundExpression initializedElement;
+                        if (initializationSelection.ElementType
+                                == PrimitiveType.Void
+                            && body.Schema
+                                .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                            && pendingUnitInitializerCalls.Count > 0)
+                        {
+                            initializedElement
+                                = pendingUnitInitializerCalls.Dequeue();
+                        }
+                        else
+                        {
+                            initializedElement = new BoundConstant(
+                                initializationValue,
+                                initializationSelection.ElementType, default);
+                        }
+
+                        initializedElements.Add(initializedElement);
                         if ((ulong)initializedElements.Count
                             == initializationSelection.ElementCount)
                         {
@@ -1734,9 +1777,36 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     storageAddressesByHome.Add(resultHome, storageFacts);
+                    storageAddressHomeOrder.Add(resultHome);
                     break;
 
                 case 0xE0:
+                    if (directUnitCallRecordIndexes.Contains(
+                            instruction.Index))
+                    {
+                        if (sawCallSite)
+                        {
+                            throw Invalid(
+                                "An A2EU unit initializer CallSite follows the indirect call.");
+                        }
+
+                        pendingUnitInitializerCalls.Enqueue(
+                            ReadForeignInvocationUnitInitializerCall(
+                                body, body.GetRecord(instruction.Index),
+                                imports, targetMethodRow, targetIndex,
+                                callerParameterTypes, targetParameterTypes,
+                                signature, formalOrdinalByHome,
+                                localVariableByHome, variables,
+                                storageAddressesByHome,
+                                consumedStorageHomes,
+                                storageAddressHomeOrder));
+                        for (var register = 0; register < 14; register++)
+                        {
+                            _ = registerConstants.Remove(register);
+                        }
+                        break;
+                    }
+
                     if (sawCallSite
                         || instruction.Index != callSiteRecordIndex
                         || localVariableByHome[targetHome] < 0)
@@ -1911,6 +1981,7 @@ public static partial class TrRmExecutableCompiler
         if (!sawCallSite || !sawReturn
             || placeSelectionsByRegister.Count != 0
             || arrayInitializationElementsByHome.Count != 0
+            || pendingUnitInitializerCalls.Count != 0
             || storageAddressesByHome.Keys.Any(home =>
                 !consumedStorageHomes.Contains(home)))
         {
@@ -2274,6 +2345,205 @@ public static partial class TrRmExecutableCompiler
             default:
                 return false;
         }
+    }
+
+    private static BoundCall ReadForeignInvocationUnitInitializerCall(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> record,
+        TrRmImportTableReader imports, int targetMethodRow, int targetIndex,
+        ImmutableArray<PrimitiveType> callerParameterTypes,
+        ImmutableArray<PrimitiveType> targetParameterTypes,
+        NativeFunctionPointerSignatureDefinition signature,
+        int[] formalOrdinalByHome, int[] localVariableByHome,
+        ImmutableArray<BoundVariable>.Builder variables,
+        Dictionary<int, NativeStorageAddressFacts> storageAddressesByHome,
+        HashSet<int> consumedStorageHomes,
+        List<int> storageAddressHomeOrder)
+    {
+        var inputCount = BinaryPrimitives.ReadUInt32LittleEndian(
+            record[12..]);
+        var preparationCount = BinaryPrimitives.ReadUInt32LittleEndian(
+            record[16..]);
+        if (!body.Schema
+                .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+            || signature.ReturnType != PrimitiveType.Void
+            || record[0] != 0x02 || record[4] != 1 || record[5] != 0
+            || BinaryPrimitives.ReadUInt16LittleEndian(record[10..]) != 0
+            || inputCount != (uint)targetParameterTypes.Length
+            || preparationCount != 0
+            || (long)record.Length != 20L + (inputCount * 4L)
+            || ReadForeignInvocationBodyMethodDef(body, imports,
+                BinaryPrimitives.ReadUInt16LittleEndian(record[8..]))
+                != targetMethodRow)
+        {
+            throw Invalid(
+                "The A2EU unit initializer CallSite does not match the direct Unit import.");
+        }
+
+        var argumentByParameter = new BoundExpression?[
+            targetParameterTypes.Length];
+        var storageParameterByHome = new Dictionary<int, int>();
+        for (var ordinal = 0; ordinal < targetParameterTypes.Length; ordinal++)
+        {
+            var inputOffset = 20 + (ordinal * 4);
+            var selectorKind = record[inputOffset];
+            var sourceUse = record[inputOffset + 1];
+            var selectorIndex = BinaryPrimitives.ReadUInt16LittleEndian(
+                record[(inputOffset + 2)..]);
+            var parameterType = targetParameterTypes[ordinal];
+            var nativeParameter = signature.NativeParameters
+                .FirstOrDefault(parameter => parameter.ParameterIndex == ordinal);
+            if (selectorKind == 0)
+            {
+                if (sourceUse != 0 || selectorIndex != 0
+                    || parameterType != PrimitiveType.Void
+                    || nativeParameter is not null)
+                {
+                    throw Invalid(
+                        "The A2EU absent selector is not an exact Unit argument.");
+                }
+
+                argumentByParameter[ordinal] = new BoundConstant(
+                    0, PrimitiveType.Void, default);
+                continue;
+            }
+
+            if (selectorKind == 1)
+            {
+                if (sourceUse != 1 || selectorIndex is not (14 or 15)
+                    || nativeParameter is not null
+                    || !TryGetContextualConstant(
+                        checked((byte)selectorIndex), parameterType,
+                        body.Schema, out var value))
+                {
+                    throw Invalid(
+                        "The A2EU contextual argument is not admitted for its formal.");
+                }
+
+                argumentByParameter[ordinal]
+                    = new BoundConstant(value, parameterType, default);
+                continue;
+            }
+
+            if (selectorKind != 2 || sourceUse != 1
+                || selectorIndex >= body.HomeCount)
+            {
+                throw Invalid(
+                    "The A2EU CallSite input selector is invalid.");
+            }
+
+            if (storageAddressesByHome.TryGetValue(selectorIndex,
+                    out var addressFacts))
+            {
+                if (nativeParameter is null
+                    || addressFacts.PointerType != parameterType
+                    || addressFacts.RequiredElementCount
+                        != (nativeParameter.Extent == 0
+                            ? 1u : nativeParameter.Extent)
+                    || nativeParameter.Extent > addressFacts.ElementCount
+                    || (!NativeFixedArrayTypes.IsType(
+                            addressFacts.CarrierType)
+                        && nativeParameter.Extent > 1)
+                    || ((nativeParameter.Access
+                            is NativeParameterAccess.Write
+                                or NativeParameterAccess.ReadWrite)
+                        && !addressFacts.PointerIsWritable)
+                    || addressFacts.ElementStride == 0
+                    || !consumedStorageHomes.Add(selectorIndex))
+                {
+                    throw Invalid(
+                        "The A2EU storage address does not satisfy its NativeParameter.");
+                }
+
+                var byteExtent = checked((ulong)
+                    addressFacts.RequiredElementCount
+                    * addressFacts.ElementStride);
+                argumentByParameter[ordinal]
+                    = new BoundNativeStorageAddress(
+                        addressFacts.SourceVariable, addressFacts.Index,
+                        addressFacts.CarrierType, addressFacts.ElementType,
+                        PrimitiveType.NativeStorageAddress,
+                        addressFacts.ElementCount, addressFacts.ElementStride,
+                        byteExtent,
+                        nativeParameter.Access == NativeParameterAccess.Read,
+                        default);
+                storageParameterByHome.Add(selectorIndex, ordinal);
+                continue;
+            }
+
+            if (nativeParameter is not null)
+            {
+                throw Invalid(
+                    "The A2EU NativeParameter input has no storage-address result.");
+            }
+
+            var formalOrdinal = formalOrdinalByHome[selectorIndex];
+            var inputVariable = formalOrdinal >= 0
+                ? formalOrdinal
+                : localVariableByHome[selectorIndex];
+            if (inputVariable < 0)
+            {
+                throw Invalid(
+                    "The A2EU CallSite input selects no initialized Home.");
+            }
+
+            var inputType = variables[inputVariable].Type;
+            if (inputType != parameterType
+                || (formalOrdinal >= 0
+                    && inputType != callerParameterTypes[formalOrdinal]))
+            {
+                throw Invalid(
+                    "The A2EU CallSite input type differs from its formal.");
+            }
+
+            argumentByParameter[ordinal] = new BoundRead(inputVariable,
+                inputType, default);
+        }
+
+        var arguments = ImmutableArray.CreateBuilder<BoundExpression>(
+            targetParameterTypes.Length);
+        var argumentParameterIndices = ImmutableArray.CreateBuilder<int>(
+            targetParameterTypes.Length);
+        var addedParameters = new bool[targetParameterTypes.Length];
+        foreach (var storageHome in storageAddressHomeOrder)
+        {
+            if (storageParameterByHome.TryGetValue(storageHome,
+                    out var parameterIndex))
+            {
+                arguments.Add(argumentByParameter[parameterIndex]!);
+                argumentParameterIndices.Add(parameterIndex);
+                addedParameters[parameterIndex] = true;
+            }
+        }
+
+        for (var parameterIndex = 0;
+            parameterIndex < targetParameterTypes.Length;
+            parameterIndex++)
+        {
+            if (addedParameters[parameterIndex])
+            {
+                continue;
+            }
+
+            arguments.Add(argumentByParameter[parameterIndex]!);
+            argumentParameterIndices.Add(parameterIndex);
+        }
+
+        var isIdentityMapping = true;
+        for (var argumentIndex = 0;
+            argumentIndex < argumentParameterIndices.Count;
+            argumentIndex++)
+        {
+            isIdentityMapping &= argumentParameterIndices[argumentIndex]
+                == argumentIndex;
+        }
+
+        return new BoundCall(targetIndex, arguments.MoveToImmutable(),
+            PrimitiveType.Void, default)
+        {
+            ArgumentParameterIndices = isIdentityMapping
+                ? default : argumentParameterIndices.MoveToImmutable(),
+            IsUnsafeAuthorized = true,
+        };
     }
 
     private static BoundCall ReadForeignInvocationStagedCall(

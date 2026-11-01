@@ -1886,6 +1886,10 @@ internal static class TrRmRegisterBodyMapValidator
             SetRegisterTypeState(body, registerTypes, destination,
                 source < 14
                     ? ReadRegisterTypeState(body, registerTypes, source)
+                    : source == 14
+                        && body.Schema
+                            .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                            ? RegisterTypeState.FromTypeSpecRef(0xF200_0008)
                     : RegisterTypeState.Unknown);
             return;
         }
