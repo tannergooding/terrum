@@ -70,9 +70,11 @@ public sealed class TrRmRegisterBodyWriterTests
         var body = TrRmRegisterBodyWriter.Encode(default, maps.TypeMap,
             maps.MethodMap, default, default,
             [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
-            [entryState, nativeAddressRecord, callSite], code);
+            [entryState, nativeAddressRecord, callSite], code,
+            schema: TrRmArtifactSchema.ForeignInvocationDraft);
 
-        var reader = new TrRmRegisterBodyReader(body);
+        var reader = new TrRmRegisterBodyReader(body,
+            schema: TrRmArtifactSchema.ForeignInvocationDraft);
         Assert.That(reader.MapMask, Is.EqualTo((byte)0x06));
         Assert.That(reader.RecordCount, Is.EqualTo(3));
         Assert.That(reader.GetRecord(1)[0], Is.EqualTo((byte)0x0D));
@@ -123,7 +125,7 @@ public sealed class TrRmRegisterBodyWriterTests
     }
 
     [Test]
-    public void TypeAndMethodMapsAreSortedAndDeduplicatedIndependently()
+    public void TypeAndMethodMapsPreserveFirstUseOrderAndDeduplicateIndependently()
     {
         var forward = TrRmRegisterBodyMapBuilder.Create(
             [0x1100_0003, 0x1100_0002, 0x1100_0003],
@@ -132,12 +134,25 @@ public sealed class TrRmRegisterBodyWriterTests
             [0x1100_0002, 0x1100_0003],
             [0x1600_0007, 0x1C00_0001]);
 
-        Assert.That(forward.TypeMap.ToArray(), Is.EqualTo(reverse.TypeMap.ToArray()));
-        Assert.That(forward.MethodMap.ToArray(), Is.EqualTo(reverse.MethodMap.ToArray()));
-        Assert.That(forward.GetTypeMapIndex(0x1100_0002), Is.Zero);
-        Assert.That(forward.GetTypeMapIndex(0x1100_0003), Is.EqualTo((ushort)1));
-        Assert.That(forward.GetMethodMapIndex(0x1600_0007), Is.Zero);
-        Assert.That(forward.GetMethodMapIndex(0x1C00_0001), Is.EqualTo((ushort)1));
+        Assert.That(forward.TypeMap.Length, Is.EqualTo(2 * sizeof(uint)));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            forward.TypeMap.Span), Is.EqualTo(0x1100_0003u));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
+            forward.TypeMap.Span[sizeof(uint)..]), Is.EqualTo(0x1100_0002u));
+        Assert.That(reverse.TypeMap.ToArray(),
+            Is.Not.EqualTo(forward.TypeMap.ToArray()));
+        Assert.That(forward.GetTypeMapIndex(0x1100_0003), Is.Zero);
+        Assert.That(forward.GetTypeMapIndex(0x1100_0002),
+            Is.EqualTo((ushort)1));
+        Assert.That(reverse.GetTypeMapIndex(0x1100_0002), Is.Zero);
+        Assert.That(reverse.GetTypeMapIndex(0x1100_0003),
+            Is.EqualTo((ushort)1));
+        Assert.That(forward.GetMethodMapIndex(0x1C00_0001), Is.Zero);
+        Assert.That(forward.GetMethodMapIndex(0x1600_0007),
+            Is.EqualTo((ushort)1));
+        Assert.That(reverse.GetMethodMapIndex(0x1600_0007), Is.Zero);
+        Assert.That(reverse.GetMethodMapIndex(0x1C00_0001),
+            Is.EqualTo((ushort)1));
     }
 
     [Test]

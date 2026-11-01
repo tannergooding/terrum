@@ -1747,6 +1747,9 @@ TypeSpec references under the using Module. It does not establish normalized
 constructed-type substitution, callee/provider contract equality,
 ConstantSource value-type equality, canonical writing or runtime execution,
 and is not current-schema conformance.
+The bounded NativeAddress producer now preserves TypeMap/MethodMap
+first-logical-use order and deduplicates repeated tokens, but this is not
+canonical emission for every selected Body form or an A2 array Body route.
 Numerical portable resource minima remain unassigned, not invented defaults.
 A lower fixed-width ID is not smaller on disk.
 

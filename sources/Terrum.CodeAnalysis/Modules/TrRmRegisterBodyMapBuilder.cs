@@ -37,22 +37,30 @@ internal static class TrRmRegisterBodyMapBuilder
             typeMapIndices, methodMapIndices);
     }
 
-    private static SortedSet<uint> Collect(IEnumerable<uint> tokens, string parameterName)
+    private static ImmutableArray<uint> Collect(IEnumerable<uint> tokens,
+        string parameterName)
     {
-        var result = new SortedSet<uint>();
+        var result = ImmutableArray.CreateBuilder<uint>();
+        var seen = ImmutableHashSet.CreateBuilder<uint>();
         foreach (var token in tokens)
         {
-            _ = result.Add(token);
-            if (result.Count > 65_536)
+            if (seen.Contains(token))
+            {
+                continue;
+            }
+            if (result.Count == 65_536)
             {
                 throw new ArgumentOutOfRangeException(parameterName);
             }
+
+            _ = seen.Add(token);
+            result.Add(token);
         }
 
-        return result;
+        return result.ToImmutable();
     }
 
-    private static byte[] Encode(SortedSet<uint> tokens,
+    private static byte[] Encode(IReadOnlyList<uint> tokens,
         out ImmutableDictionary<uint, ushort> indexes)
     {
         var bytes = new byte[tokens.Count * sizeof(uint)];

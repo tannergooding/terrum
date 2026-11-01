@@ -930,23 +930,57 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         Assert.That(body.MapMask, Is.EqualTo((byte)0x07));
         Assert.That(body.HomeMap.Length, Is.EqualTo(56));
+        var firstTypeMapIndexByToken
+            = new Dictionary<uint, ushort>(body.TypeCount);
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            var typeMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(home[2..]);
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint),
+                    sizeof(uint)));
+            if (!firstTypeMapIndexByToken.TryGetValue(token,
+                    out var firstTypeMapIndex))
+            {
+                firstTypeMapIndex
+                    = checked((ushort)firstTypeMapIndexByToken.Count);
+                firstTypeMapIndexByToken.Add(token, firstTypeMapIndex);
+            }
+
+            Assert.That(typeMapIndex, Is.EqualTo(firstTypeMapIndex));
+        }
+        Assert.That(firstTypeMapIndexByToken.Count,
+            Is.EqualTo(body.TypeCount));
+
+        var targetHomeTypeMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(
+                body.HomeMap.Slice(3 * 8 + 2, sizeof(ushort)));
+        Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+            body.GetRecord(1)[10..]), Is.EqualTo(targetHomeTypeMapIndex));
         Assert.That(body.GetRecord(2)[0], Is.EqualTo(0x0E));
         Assert.That(body.GetRecord(2)[4], Is.EqualTo(2));
         Assert.That(body.GetRecord(2)[5], Is.EqualTo(2));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
-            body.GetRecord(2)[6..]), Is.Zero);
+            body.GetRecord(2)[10..]),
+            Is.EqualTo(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.HomeMap.Slice(4 * 8 + 2, sizeof(ushort)))));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
             body.GetRecord(2)[8..]), Is.EqualTo(4));
         Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(
             body.GetRecord(2)[12..]), Is.EqualTo(1));
         Assert.That(body.GetRecord(3)[0], Is.EqualTo(0x0E));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
-            body.GetRecord(3)[6..]), Is.EqualTo(1));
+            body.GetRecord(3)[10..]),
+            Is.EqualTo(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.HomeMap.Slice(5 * 8 + 2, sizeof(ushort)))));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
             body.GetRecord(3)[8..]), Is.EqualTo(5));
         Assert.That(body.GetRecord(4)[0], Is.EqualTo(0x0E));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
-            body.GetRecord(4)[6..]), Is.EqualTo(2));
+            body.GetRecord(4)[10..]),
+            Is.EqualTo(BinaryPrimitives.ReadUInt16LittleEndian(
+                body.HomeMap.Slice(6 * 8 + 2, sizeof(ushort)))));
         Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
             body.GetRecord(4)[8..]), Is.EqualTo(6));
         Assert.That(body.GetBlockCode(0).ToArray(),

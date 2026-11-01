@@ -491,22 +491,32 @@ public static partial class TrRmExecutableCompiler
         var stagedResultTypeMapToken = stagedResultHomeCount == 0
             ? 0u
             : 0x1100_0000u | GetSignatureTypeSpecRef(signature.ReturnType);
-        var typeMapTokens = new List<uint> { 0x1100_0001 };
-        if (callResultHomeIndex >= 0)
+        var typeMapTokenCapacity = storageCall is null
+            ? 1 + (callResultHomeIndex >= 0 ? 1 : 0)
+                + stagedResultHomeCount + callerParameterTypeSpecRefs.Length
+            : callerLocalTypeSpecRefs.Length
+                + storageCall.StorageArguments.Length
+                + callerParameterTypeSpecRefs.Length;
+        var typeMapTokens = new List<uint>(typeMapTokenCapacity);
+        if (storageCall is null)
         {
-            typeMapTokens.Add(0x1100_0000u
-                | GetSignatureTypeSpecRef(caller.ReturnType));
-        }
-        if (stagedResultHomeCount > 0)
-        {
-            typeMapTokens.Add(stagedResultTypeMapToken);
-        }
+            typeMapTokens.Add(0x1100_0001);
+            if (callResultHomeIndex >= 0)
+            {
+                typeMapTokens.Add(0x1100_0000u
+                    | GetSignatureTypeSpecRef(caller.ReturnType));
+            }
+            if (stagedResultHomeCount > 0)
+            {
+                typeMapTokens.Add(stagedResultTypeMapToken);
+            }
 
-        foreach (var typeSpecRef in callerParameterTypeSpecRefs)
-        {
-            typeMapTokens.Add(0x1100_0000u | typeSpecRef);
+            foreach (var typeSpecRef in callerParameterTypeSpecRefs)
+            {
+                typeMapTokens.Add(0x1100_0000u | typeSpecRef);
+            }
         }
-        if (storageCall is not null)
+        else
         {
             for (var localOrdinal = 0;
                 localOrdinal < callerLocalTypeSpecRefs.Length; localOrdinal++)
@@ -524,6 +534,11 @@ public static partial class TrRmExecutableCompiler
                 typeMapTokens.Add(0x1100_0000u
                     | GetSignatureTypeSpecRef(signature.ParameterTypes[
                         storageArgument.ParameterOrdinal]));
+            }
+
+            foreach (var typeSpecRef in callerParameterTypeSpecRefs)
+            {
+                typeMapTokens.Add(0x1100_0000u | typeSpecRef);
             }
         }
 
