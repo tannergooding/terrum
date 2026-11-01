@@ -31,7 +31,7 @@ public static partial class TrRmExecutableCompiler
         PrimitiveType Type, uint Bits);
 
     private readonly record struct NativeAddressPendingComparison(
-        int Destination, BoundRead Left, BoundRead Right);
+        int Destination, BoundExpression Left, BoundExpression Right);
 
     private readonly record struct NativeAddressPendingBooleanXor(
         int Destination, BoundRead Left, BoundRead Right);
@@ -105,6 +105,10 @@ public static partial class TrRmExecutableCompiler
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+                : schema.UsesScalarFrozenValues()
+                    ? TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                            artifact)
                 : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
                     ? TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
@@ -125,6 +129,10 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
                         index, a3LayoutResourceLedger,
                         createA3ResourceLedger: a3LayoutResourceLedger is null)
+                : schema.UsesScalarFrozenValues()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                            index)
                 : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
                     ? TrRmStructuralMetadataValidator
                         .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
@@ -197,7 +205,8 @@ public static partial class TrRmExecutableCompiler
 
         if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
             && tables.TypeDefs.Count != 0 && methodEnd == methodStart
             && selectedModuleImports is null)
         {
@@ -427,15 +436,19 @@ public static partial class TrRmExecutableCompiler
             if (kind is not (0x0001 or 0x0002 or 0x0004 or 0x0010 or 0x0011
                 or 0x0016 or 0x0017 or 0x0018 or 0x001B or 0x001C
                 or 0x001D or 0x0020 or 0x0021)
+                && !(schema.UsesScalarFrozenValues()
+                    && (kind is 0x0003 or 0x0030 or 0x003F))
                 && !(kind == 0x0012
                     && (schema is
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft))
                 && !((schema
                         is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
                     && tables.TypeDefs.Count != 0
                     && (kind == 0x0013 || kind == 0x0014
                         || kind == 0x0015 || kind == 0x0023))
@@ -445,7 +458,8 @@ public static partial class TrRmExecutableCompiler
                     && (schema is
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)))
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)))
             {
                 throw Unsupported(
                     $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
@@ -643,7 +657,8 @@ public static partial class TrRmExecutableCompiler
         var nativeFixedArrayTypes = (schema is
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
                 ? ReadForeignInvocationFixedArrayTypes(tables,
                     selectedModuleRow, nativePointerTypeDefinitions,
                     signatureIndexByAnchorMethod, structureTypeByTypeDef,
@@ -725,6 +740,8 @@ public static partial class TrRmExecutableCompiler
 
         var (callerBody, callerVariables) = ReadForeignInvocationCallerBody(
             body, tables.TypeSpecs, tables.Imports,
+            tables.ConstantSources, tables.FrozenValueNodes, tables.Blobs,
+            tables.Features, tables.Modules, tables.TypeDefs, tables.EnumDefs,
             tables.TargetProfiles, tables.FixedArrayLayouts,
             arrayTypeByTypeSpecRow,
             nativeFixedArrayTypes, selectedModuleRow,
@@ -827,6 +844,11 @@ public static partial class TrRmExecutableCompiler
         ReadForeignInvocationCallerBody(
         TrRmRegisterBodyReader body, TrRmTypeSpecTableReader typeSpecs,
         TrRmImportTableReader imports,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs,
+        TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+        TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
         TrRmTargetProfileTableReader targetProfiles,
         TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
         IReadOnlyDictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
@@ -864,7 +886,9 @@ public static partial class TrRmExecutableCompiler
         if (hasStorageAddressRecords)
         {
             return ReadForeignInvocationStorageAddressCallerBody(body,
-                typeSpecs, imports, targetProfiles, fixedArrayLayouts,
+                typeSpecs, imports, constantSources, frozenValueNodes, blobs,
+                features, modules, typeDefs, enumDefs, targetProfiles,
+                fixedArrayLayouts,
                 arrayTypeByTypeSpecRow, nativeFixedArrayTypes,
                 selectedModuleRow, targetMethodRow, targetIndex,
                 callerParameterTypes, callerResultType, targetParameterTypes,
@@ -1203,6 +1227,11 @@ public static partial class TrRmExecutableCompiler
         ReadForeignInvocationStorageAddressCallerBody(
             TrRmRegisterBodyReader body, TrRmTypeSpecTableReader typeSpecs,
             TrRmImportTableReader imports,
+            TrRmConstantSourceTableReader constantSources,
+            TrRmFrozenValueNodeTableReader frozenValueNodes,
+            TrRmBlobTableReader blobs,
+            TrRmFeatureTableReader features, TrRmModuleTableReader modules,
+            TrRmTypeDefTableReader typeDefs, TrRmEnumDefTableReader enumDefs,
             TrRmTargetProfileTableReader targetProfiles,
             TrRmFixedArrayLayoutTableReader fixedArrayLayouts,
             IReadOnlyDictionary<int, PrimitiveType> arrayTypeByTypeSpecRow,
@@ -1218,7 +1247,11 @@ public static partial class TrRmExecutableCompiler
             IReadOnlyDictionary<int, NativeAddressDirectCallTarget>
                 directCallTargets)
     {
-        if (body.MapMask != 0x07 || body.RecordCount < 4)
+        var allowedMapMask = (byte)(0x07
+            | (body.Schema.UsesScalarFrozenValues() ? 0x10 : 0));
+        if ((body.MapMask & 0x07) != 0x07
+            || (body.MapMask & ~allowedMapMask) != 0
+            || body.RecordCount < 4)
         {
             throw Unsupported(
                 "The F+S caller requires Home, Type and Method maps and at least one storage address.");
@@ -1280,6 +1313,27 @@ public static partial class TrRmExecutableCompiler
                         checked((byte)shortSource)));
                     break;
 
+                case 0x09:
+                    if (!body.Schema.UsesScalarFrozenValues())
+                    {
+                        throw Unsupported(
+                            "The selected schema does not admit ConstantMap loads.");
+                    }
+
+                    instructions.Add((0x16, 0, 0));
+                    break;
+
+                case 0x16:
+                    if (!body.Schema.UsesScalarFrozenValues())
+                    {
+                        throw Unsupported(
+                            "The selected schema does not admit ConstantMap loads.");
+                    }
+
+                    instructions.Add((0x16, instruction[1] >> 4,
+                        checked((byte)(instruction[1] & 0x0F))));
+                    break;
+
                 case 0xD6:
                     var storeControl = instruction[1];
                     var longSource = storeControl & 0x0F;
@@ -1322,6 +1376,20 @@ public static partial class TrRmExecutableCompiler
                         throw Invalid("Invalid F+S Home-load control.");
                     }
                     instructions.Add((0xD5,
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            instruction[2..]),
+                        checked((byte)(instruction[1] & 0x0F))));
+                    break;
+
+                case 0xD4:
+                    if ((instruction[1] & 0xF0) != 0
+                        || !body.Schema.UsesScalarFrozenValues())
+                    {
+                        throw Unsupported(
+                            "The selected schema does not admit ConstantMap loads.");
+                    }
+
+                    instructions.Add((0x16,
                         BinaryPrimitives.ReadUInt16LittleEndian(
                             instruction[2..]),
                         checked((byte)(instruction[1] & 0x0F))));
@@ -2091,6 +2159,26 @@ public static partial class TrRmExecutableCompiler
                         longLoadVariable, longLoadType, default);
                     break;
 
+                case 0x16:
+                    var constantDestination = instruction.Register;
+                    if (constantDestination >= 14
+                        || placeSelectionsByRegister.ContainsKey(
+                            constantDestination))
+                    {
+                        throw Invalid(
+                            "The F+S constant load has an invalid destination.");
+                    }
+
+                    var comparisonConstant
+                        = ReadNativeAddressComparisonConstant(body,
+                            instruction.Index, selectedModuleRow, modules,
+                            constantSources, frozenValueNodes, blobs,
+                            typeSpecs, features, typeDefs, enumDefs, imports);
+                    _ = registerConstants.Remove(constantDestination);
+                    registerExpressions[constantDestination]
+                        = comparisonConstant;
+                    break;
+
                 case 0x40:
                     var comparisonOperand
                         = checked((byte)instruction.Index);
@@ -2100,14 +2188,23 @@ public static partial class TrRmExecutableCompiler
                         || comparisonRight >= 14
                         || !registerExpressions.TryGetValue(
                             comparisonDestination, out var comparisonLeftValue)
-                        || comparisonLeftValue is not BoundRead comparisonLeft
                         || !registerExpressions.TryGetValue(comparisonRight,
                             out var comparisonRightValue)
-                        || comparisonRightValue is not BoundRead comparisonRightRead
-                        || comparisonLeft.Type != comparisonRightRead.Type
-                        || comparisonLeft.Type == PrimitiveType.Bool
+                        || comparisonLeftValue is not (BoundRead
+                            or BoundConstant)
+                        || comparisonRightValue is not (BoundRead
+                            or BoundConstant)
+                        || comparisonLeftValue.Type
+                            != comparisonRightValue.Type
+                        || comparisonLeftValue.Type == PrimitiveType.Bool
+                        || (comparisonLeftValue is BoundConstant
+                            && !IsSupportedNativeUnitConditionalLiteralType(
+                                comparisonLeftValue.Type))
+                        || (comparisonRightValue is BoundConstant
+                            && !IsSupportedNativeUnitConditionalLiteralType(
+                                comparisonRightValue.Type))
                         || !DirectNativeImportContract.IsScalar(
-                            comparisonLeft.Type))
+                            comparisonLeftValue.Type))
                     {
                         throw Invalid(
                             "The F+S comparison has unsupported scalar operands.");
@@ -2116,8 +2213,8 @@ public static partial class TrRmExecutableCompiler
                     _ = registerConstants.Remove(comparisonDestination);
                     _ = registerExpressions.Remove(comparisonDestination);
                     pendingComparison = new NativeAddressPendingComparison(
-                        comparisonDestination, comparisonLeft,
-                        comparisonRightRead);
+                        comparisonDestination, comparisonLeftValue,
+                        comparisonRightValue);
                     break;
 
                 case 0x32:
@@ -3549,6 +3646,43 @@ public static partial class TrRmExecutableCompiler
             arrayInstanceKey, 0);
     }
 
+    private static BoundConstant ReadNativeAddressComparisonConstant(
+        TrRmRegisterBodyReader body, int constantMapIndex, int ownerModule,
+        TrRmModuleTableReader modules,
+        TrRmConstantSourceTableReader constantSources,
+        TrRmFrozenValueNodeTableReader frozenValueNodes,
+        TrRmBlobTableReader blobs, TrRmTypeSpecTableReader typeSpecs,
+        TrRmFeatureTableReader features, TrRmTypeDefTableReader typeDefs,
+        TrRmEnumDefTableReader enumDefs, TrRmImportTableReader imports)
+    {
+        if (!body.Schema.UsesScalarFrozenValues()
+            || (uint)constantMapIndex >= (uint)body.ConstantCount)
+        {
+            throw Unsupported(
+                "The selected Body has no supported numeric ConstantMap operand.");
+        }
+
+        var constantMap = body.ConstantMap.Slice(constantMapIndex * 8, 8);
+        var typeSpecRef
+            = BinaryPrimitives.ReadUInt32LittleEndian(constantMap);
+        var constantSourceRow
+            = BinaryPrimitives.ReadUInt32LittleEndian(constantMap[4..]);
+        var (targetRequirement, _) = modules.GetRequirements(ownerModule);
+        var constant
+            = TrRmConstantSourceValueValidator.MaterializeFrozenScalar(
+                checked((int)constantSourceRow), typeSpecRef, ownerModule,
+                targetRequirement, constantSources, frozenValueNodes, blobs,
+                typeSpecs, features, modules, typeDefs, enumDefs, imports,
+                body.ResourceLedger);
+        if (!IsSupportedNativeUnitConditionalLiteralType(constant.Type))
+        {
+            throw Unsupported(
+                "The selected Body admits only numeric scalar comparison constants.");
+        }
+
+        return constant;
+    }
+
     private static ulong ReadArrayInitializationElementIndex(
         NativeArrayPlaceSelectionFacts selection,
         TrRmRegisterBodyReader body,
@@ -4127,7 +4261,8 @@ public static partial class TrRmExecutableCompiler
         if (tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
             || selectedModuleRow <= 0
             || selectedModuleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd <= typeDefStart

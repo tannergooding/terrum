@@ -49,13 +49,16 @@ The public `EmitStandard` API also selects the unapproved
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1`
 (A2E), and
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1`
-(A2EU) identities.
+(A2EU),
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1`
+(A2EU+SF1) identities.
 The CLI does not accept an explicit `NativeCoreRegistration` input, so it
 cannot author the NativeImport source required by these bounded producers.
 Artifact commands accept exact per-artifact F or F+S schema identities and a
 root Module identity, plus repeatable explicitly selected provider
-schema/path pairs including A2, A2E and A2EU; they preflight selections
-before reading artifacts, and the Development default remains unchanged.
+schema/path pairs including A2, A2E, A2EU and A2EU+SF1; they preflight
+selections before reading artifacts, and the Development default remains
+unchanged.
 Artifact commands also accept repeatable
 `--trrm-core-exception-anchor <using-module> <role> <producer-module> <export-key>`
 options. The role is exactly `exception-interface` or `unreachable-payload`;
@@ -111,11 +114,24 @@ failure prevents the branch. Boolean `==`/`!=` with one literal lowers by
 inverting the existing read/call branch. The focused A2EU
 producer/reader/JIT/AOT selection passed 76/76 with zero skips at
 `artifacts\\tst\\Debug\\a2eu-boolean-literal-comparisons-final3\\a2eu-boolean-literal-comparisons-final3.trx`.
-Numeric literal comparison operands, non-source predicate masks, and call
-forms outside the direct NativeImport capture profile remain unsupported. A
-co-located selected-provider regression shifts the conditional caller to Body row 2,
-remaps its maps, preserves body-local
-branches/records, and checks compatible and incompatible provider replacement.
+Numeric comparison literals are supported only by the distinct, provisional
+A2EU+SF1 selector, which adds typed Feature 11/1 frozen-value tables for the
+existing scalar codec while leaving A2EU unchanged; this comparison path
+admits literals only for the ten numeric types. Feature 11 is required only
+when an emitted Body retains a ConstantMap value. Source-free loading
+validates the Body/source/node/blob references, reconstructs the comparison,
+and canonically re-emits the typed value. Regressions cover all ten types and
+six predicates, both literal operand positions, malformed table/map references,
+legacy A2EU rejection, selected and co-located provider remapping, and
+compatible/incompatible provider replacement. The A2EU+SF1 selector is
+available to the CLI artifact selection path; its contract remains provisional
+under the unapproved
+[A2EU scalar-literal comparison proposal](../proposals/standard-trrm-a2eu-scalar-literal-comparisons.md).
+Non-source predicate masks and call forms outside the direct NativeImport
+capture profile remain unsupported. A co-located selected-provider regression
+shifts the conditional caller to Body row 2, remaps its maps, preserves
+body-local branches/records, and checks compatible and incompatible provider
+replacement.
 Supervised source-free A2EU JIT/AOT exercises these conditions under FailFast,
 including selected comparison-call failure; CheckedExceptions and
 cleanup/loan transport remain incomplete.

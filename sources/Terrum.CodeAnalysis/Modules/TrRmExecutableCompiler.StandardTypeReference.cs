@@ -74,7 +74,8 @@ public static partial class TrRmExecutableCompiler
         if (schemaIdentities[0] is not (
                 StandardForeignInvocationStorageFixedArraySchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
-                or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
+                or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity))
         {
             throw Unsupported(
                 "Explicit TypeDef roots require the exact A2, A2E or A2EU schema.");
@@ -83,7 +84,8 @@ public static partial class TrRmExecutableCompiler
                 schemaIdentity is not (
                     StandardForeignInvocationStorageFixedArraySchemaIdentity
                     or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)))
+                    or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)))
         {
             throw Unsupported(
                 "The bounded A2 type-reference projection requires A2, A2E or A2EU provider artifacts.");
@@ -118,7 +120,8 @@ public static partial class TrRmExecutableCompiler
         if (tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
             || moduleRow <= 0 || moduleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd - typeDefStart
                 != program.Structures.Length
@@ -630,7 +633,8 @@ public static partial class TrRmExecutableCompiler
             || tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty)
         {

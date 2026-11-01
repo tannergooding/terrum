@@ -46,6 +46,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
     private const string StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+    private const string StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
     private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private const string StandardRegisterExceptionRegionsSchemaIdentity
@@ -131,7 +133,9 @@ public static partial class TrRmExecutableCompiler
             && !StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
+                StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity))
         {
             throw Unsupported(
                 "Explicit source TypeDef exports require the exact A2, A2E or A2EU schema.");
@@ -170,6 +174,7 @@ public static partial class TrRmExecutableCompiler
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
                 or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
             && moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
@@ -209,6 +214,12 @@ public static partial class TrRmExecutableCompiler
                     moduleIdentity,
                     TrRmArtifactSchema
                         .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft,
+                    sourceTypeExports),
+            StandardForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft,
                     sourceTypeExports),
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,

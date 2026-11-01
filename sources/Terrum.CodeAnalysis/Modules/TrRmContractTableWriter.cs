@@ -64,6 +64,7 @@ public static class TrRmContractTableWriter
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));

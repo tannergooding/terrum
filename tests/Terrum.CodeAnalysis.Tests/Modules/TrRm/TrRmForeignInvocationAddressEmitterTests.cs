@@ -24,6 +24,9 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 
 public sealed class TrRmForeignInvocationAddressEmitterTests
 {
+    private const string A2EUScalarFrozenValuesSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     private delegate int NativeAddressExport();
 
@@ -1963,6 +1966,121 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 moduleIdentity, []));
     }
 
+    [Test]
+    public void StandardA2EUScalarFrozenSchemaDoesNotRequireUnusedFeature()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string moduleIdentity = "a2eu-scalar-frozen-no-use";
+        var input = CreateStandardA2EUConditionalRuntimeInput(true,
+            moduleIdentity, false, schemaIdentity: schemaIdentity);
+        var artifactIndex
+            = TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                    input.Artifact.Span);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                artifactIndex);
+        var mainRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                mainRow = row;
+                break;
+            }
+        }
+
+        Assert.That(mainRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(mainRow), tables.Contracts.Count);
+        Assert.That(body.ConstantCount, Is.Zero);
+        Assert.That(tables.Features.TryGetFeature(
+            TrRmFeatureTableReader.TypedFrozenValuesFeatureId, out _),
+            Is.False);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1),
+            Is.EqualTo(input.Artifact.ToArray()));
+    }
+
+    [Test]
+    public void StandardA2EUScalarFrozenValuesRejectMalformedReferencesAndLegacySelection()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+        const string legacySchemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-scalar-frozen-malformed";
+        var input = CreateStandardA2EUConditionalRuntimeInput(true,
+            moduleIdentity, false, conditionExpression: "clearError == 0",
+            schemaIdentity: schemaIdentity);
+        var artifact = input.Artifact.ToArray();
+        var artifactIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                artifactIndex);
+        var typedFrozenFeatureRow = 0;
+        for (var row = 1; row <= tables.Features.Count; row++)
+        {
+            if (tables.Features.GetFeature(row).FeatureId
+                == TrRmFeatureTableReader.TypedFrozenValuesFeatureId)
+            {
+                typedFrozenFeatureRow = row;
+                break;
+            }
+        }
+        Assert.That(typedFrozenFeatureRow, Is.GreaterThan(0));
+        var missingTypedFrozenFeature = RewriteA2EUScalarFrozenSection(
+            artifact, 0x0004, bytes =>
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(
+                    (typedFrozenFeatureRow - 1) * 8),
+                    TrRmFeatureTableReader.NativeBoundaryContractsFeatureId));
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    missingTypedFrozenFeature),
+                moduleIdentity, []));
+
+        var malformedSources = RewriteA2EUScalarFrozenSection(artifact,
+            0x0030, static bytes =>
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(4),
+                    0x00FF_FFFF));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedSources),
+                moduleIdentity, []));
+
+        var malformedNodes = RewriteA2EUScalarFrozenSection(artifact,
+            0x003F, static bytes =>
+                BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(8),
+                    0x00FF_FFFF));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedNodes),
+                moduleIdentity, []));
+
+        var malformedConstantMap
+            = RewriteA2EUScalarConstantSourceMap(artifact, 0x00FF_FFFF);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedConstantMap),
+                moduleIdentity, []));
+
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(legacySchemaIdentity,
+                    artifact),
+                moduleIdentity, []));
+    }
+
     [TestCase(true, false, "choose", false)]
     [TestCase(false, false, "choose", false)]
     [TestCase(true, true, "choose", false)]
@@ -1984,6 +2102,22 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(true, false, "markedError <= clearError", false)]
     [TestCase(true, false, "markedError > clearError", false)]
     [TestCase(true, false, "markedError >= clearError", false)]
+    [TestCase(true, false, "clearError == 0", false)]
+    [TestCase(true, false, "0 == clearError", false)]
+    [TestCase(true, false, "clearError != 0", false)]
+    [TestCase(true, false, "0 != clearError", false)]
+    [TestCase(true, false, "clearError < 1", false)]
+    [TestCase(true, false, "0 <= clearError", false)]
+    [TestCase(true, false, "1 > clearError", false)]
+    [TestCase(true, false, "clearError >= 0", false)]
+    [TestCase(true, false, "markedError == 0", false)]
+    [TestCase(true, false, "0 == markedError", false)]
+    [TestCase(true, false, "markedError != 0", false)]
+    [TestCase(true, false, "0 != markedError", false)]
+    [TestCase(true, false, "GetCurrentProcessId() > 0", false)]
+    [TestCase(true, false, "0 == GetCurrentProcessId()", false)]
+    [TestCase(true, false, "GetCurrentProcessId() == 0", false)]
+    [TestCase(true, false, "uint32(0) == uint32(0)", false)]
     [TestCase(true, false, "choose == other", false)]
     [TestCase(false, false, "choose == other", false)]
     [TestCase(true, false, "choose != other", false)]
@@ -2010,9 +2144,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     {
         const string moduleIdentity = "a2eu-unit-conditional-jit";
         AssertA2EUWindowsX64();
+        var schemaIdentity = GetA2EUConditionalSchemaIdentity(
+            conditionExpression);
         var input = CreateStandardA2EUConditionalRuntimeInput(choose,
             moduleIdentity, failFalseArm, conditionExpression,
-            useIfStatement);
+            useIfStatement, schemaIdentity);
         var loaded = TrRmExecutableCompiler.LoadStandard(input,
             moduleIdentity, []);
         if (conditionExpression is
@@ -2060,6 +2196,16 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 or "markedError >= clearError" => true,
             "markedError == clearError" or "markedError < clearError"
                 or "markedError <= clearError" => false,
+            "clearError == 0" or "0 == clearError"
+                or "clearError < 1" or "0 <= clearError"
+                or "1 > clearError" or "clearError >= 0"
+                or "uint32(0) == uint32(0)" => true,
+            "clearError != 0" or "0 != clearError" => false,
+            "markedError == 0" or "0 == markedError"
+                or "0 == GetCurrentProcessId()"
+                or "GetCurrentProcessId() == 0" => false,
+            "markedError != 0" or "0 != markedError"
+                or "GetCurrentProcessId() > 0" => true,
             "choose == other" => choose,
             "choose != other" => !choose,
             "choose == true" or "choose != false" => choose,
@@ -2111,6 +2257,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     [TestCase(false, false, "choose != false", false)]
     [TestCase(true, false, "clearError == GetCurrentProcessId()", false)]
     [TestCase(true, false, "GetCurrentProcessId() > clearError", false)]
+    [TestCase(true, false, "clearError == 0", false)]
+    [TestCase(true, false, "0 == clearError", false)]
+    [TestCase(true, false, "markedError == 0", true)]
+    [TestCase(true, false, "GetCurrentProcessId() > 0", false)]
+    [TestCase(true, false, "uint32(0) == uint32(0)", false)]
     [TestCase(true, false,
         "GetCurrentProcessId() == GetCurrentProcessId()", false)]
     [TestCase(true, false,
@@ -2123,9 +2274,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     {
         const string moduleIdentity = "a2eu-unit-conditional-aot";
         AssertA2EUWindowsX64();
+        var schemaIdentity = GetA2EUConditionalSchemaIdentity(
+            conditionExpression);
         var input = CreateStandardA2EUConditionalRuntimeInput(choose,
             moduleIdentity, failFalseArm, conditionExpression,
-            useIfStatement);
+            useIfStatement, schemaIdentity);
         var image = NativeModuleCompiler.EmitStandardExecutable(input,
             moduleIdentity, [], NativeRuntimePolicy.FailFast);
         var imagePath = Path.Combine(Path.GetTempPath(),
@@ -2185,6 +2338,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 "choose && IsProcessorFeaturePresent(markedError / clearError)" => false,
                 "markedError > clearError" => true,
                 "markedError <= clearError" => false,
+                "clearError == 0" or "0 == clearError"
+                    or "uint32(0) == uint32(0)" => true,
+                "markedError == 0" => false,
+                "GetCurrentProcessId() > 0" => true,
                 "choose == other" => choose,
                 "choose != other" => !choose,
                 "choose == true" or "choose != false" => choose,
@@ -2225,14 +2382,142 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
     }
 
+    [Test]
+    public void StandardA2EUScalarLiteralComparisonTypesAndPredicatesRoundTrip()
+    {
+        const string moduleIdentity = "a2eu-scalar-literal-matrix";
+        var scalarTypes = new (string TypeName, string VariableName,
+            string Zero, string One)[] {
+            ("int8", "signed8", "0", "1"),
+            ("int16", "signed16", "0", "1"),
+            ("int32", "signed32", "0", "1"),
+            ("int64", "signed64", "0", "1"),
+            ("uint8", "unsigned8", "0", "1"),
+            ("uint16", "unsigned16", "0", "1"),
+            ("uint32", "unsigned32", "0", "1"),
+            ("uint64", "unsigned64", "0", "1"),
+            ("float32", "single", "0.0", "1.0"),
+            ("float64", "double", "0.0", "1.0"),
+        };
+        var declarations = new StringBuilder();
+        var falseComparisons = new List<string>(61);
+        foreach (var scalarType in scalarTypes)
+        {
+            declarations.Append(scalarType.TypeName).Append(' ')
+                .Append(scalarType.VariableName).Append(" = ")
+                .Append(scalarType.Zero).AppendLine(";");
+            falseComparisons.Add(
+                $"{scalarType.VariableName} == {scalarType.One}");
+            falseComparisons.Add(
+                $"{scalarType.VariableName} != {scalarType.Zero}");
+            falseComparisons.Add(
+                $"{scalarType.VariableName} < {scalarType.Zero}");
+            falseComparisons.Add(
+                $"{scalarType.One} <= {scalarType.VariableName}");
+            falseComparisons.Add(
+                $"{scalarType.Zero} > {scalarType.VariableName}");
+            falseComparisons.Add(
+                $"{scalarType.VariableName} >= {scalarType.One}");
+        }
+
+        falseComparisons.Add("uint32(0) == uint32(1)");
+        var additionalStatements = new StringBuilder(
+            "SetLastError(markedError);");
+        foreach (var comparison in falseComparisons)
+        {
+            additionalStatements.Append(" if (")
+                .Append(comparison)
+                .Append(") { SetLastError(clearError); }");
+        }
+        var input = CreateStandardA2EUConditionalRuntimeInput(true,
+            moduleIdentity, false, "choose", schemaIdentity:
+                A2EUScalarFrozenValuesSchemaIdentity,
+            additionalLocals: declarations.ToString(),
+            additionalStatements: additionalStatements.ToString());
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                        input.Artifact.Span));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+
+        Assert.That(callerRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        Assert.That(body.ConstantCount, Is.EqualTo(20));
+        Assert.That(tables.ConstantSources.Count, Is.EqualTo(20));
+        Assert.That(tables.FrozenValueNodes.Count, Is.EqualTo(20));
+        Assert.That(TrRmFeatureManifestValidator.Requires(tables.Features,
+            tables.Modules, 1,
+            TrRmFeatureTableReader.TypedFrozenValuesFeatureId), Is.True);
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var comparisons = new List<BoundBinary>();
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundBinary {
+                        Type: PrimitiveType.Bool,
+                    } comparison
+                    && (comparison.Left is BoundConstant
+                        || comparison.Right is BoundConstant))
+                {
+                    comparisons.Add(comparison);
+                }
+            }), Is.True);
+        Assert.That(comparisons, Has.Count.EqualTo(60));
+        foreach (var scalarType in scalarTypes)
+        {
+            var boundType = scalarType.TypeName switch {
+                "int8" => PrimitiveType.Int8,
+                "int16" => PrimitiveType.Int16,
+                "int32" => PrimitiveType.Int32,
+                "int64" => PrimitiveType.Int64,
+                "uint8" => PrimitiveType.UInt8,
+                "uint16" => PrimitiveType.UInt16,
+                "uint32" => PrimitiveType.UInt32,
+                "uint64" => PrimitiveType.UInt64,
+                "float32" => PrimitiveType.Float32,
+                "float64" => PrimitiveType.Float64,
+                _ => throw new InvalidOperationException(
+                    "The A2EU test type has no bound primitive."),
+            };
+            Assert.That(comparisons.Count(comparison =>
+                comparison.Left.Type == boundType),
+                Is.EqualTo(6));
+        }
+
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, A2EUScalarFrozenValuesSchemaIdentity, 1),
+            Is.EqualTo(input.Artifact.ToArray()));
+        var result = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2EU+SF1 scalar matrix source-free JIT: expected={Environment.ProcessId}; actual={result}; comparisons={comparisons.Count}; constants={body.ConstantCount}; policy=FailFast.");
+        Assert.That(result, Is.EqualTo(Environment.ProcessId));
+    }
+
     private static TrRmStandardArtifactInput
         CreateStandardA2EUConditionalRuntimeInput(bool choose,
             string moduleIdentity, bool failFalseArm,
             string conditionExpression = "choose",
-            bool useIfStatement = false)
+            bool useIfStatement = false,
+            string? schemaIdentity = null,
+            string additionalLocals = "",
+            string additionalStatements = "")
     {
-        const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        schemaIdentity ??=
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
         var options = new CompilationOptions {
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             NativeCoreRegistration
@@ -2283,7 +2568,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     bool other = true;
                     uint32 clearError = 0;
                     uint32 markedError = GetCurrentProcessId();
+                    {{additionalLocals}}
                     {{conditional}}
+                    {{additionalStatements}}
                     int32 observedError = GetLastError();
                     uint64 byteCount = 0;
                     var callback = &IsBadReadPtr;
@@ -2301,6 +2588,25 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             $"A2EU source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={typeof(TrRmExecutableCompiler).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(TrRmExecutableCompiler).Assembly.Location)))}.");
         return new TrRmStandardArtifactInput(schemaIdentity, artifact);
     }
+
+    private static bool IsA2EUScalarLiteralComparison(
+        string conditionExpression)
+        => conditionExpression is "clearError == 0" or "0 == clearError"
+            or "clearError != 0" or "0 != clearError"
+            or "clearError < 1" or "0 <= clearError"
+            or "1 > clearError" or "clearError >= 0"
+            or "markedError == 0" or "0 == markedError"
+            or "markedError != 0" or "0 != markedError"
+            or "GetCurrentProcessId() > 0"
+            or "0 == GetCurrentProcessId()"
+            or "GetCurrentProcessId() == 0"
+            or "uint32(0) == uint32(0)";
+
+    private static string GetA2EUConditionalSchemaIdentity(
+        string conditionExpression)
+        => IsA2EUScalarLiteralComparison(conditionExpression)
+            ? A2EUScalarFrozenValuesSchemaIdentity
+            : "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
 
     private static void AssertA2EUWindowsX64()
     {
@@ -2546,13 +2852,13 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public void StandardA2EUConditionalProviderBodySurvivesCoLocatedRemapping()
+    public void StandardA2EUScalarLiteralProviderBodySurvivesCoLocatedRemappingAndReplacement()
     {
         const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema
-                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft;
         const string providerIdentity = "a2eu-conditional-provider";
         const string consumerIdentity = "a2eu-conditional-consumer";
         var core = new CompilationReference([], [],
@@ -2581,6 +2887,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
         var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
             providerArtifact);
+        var providerIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                providerArtifact);
+        var providerTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                providerIndex);
         var providerReference = TrRmExecutableCompiler.CreateStandardReference(
             providerInput, providerIdentity, []);
         var consumerOptions = new CompilationOptions {
@@ -2599,11 +2911,15 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
             internal extern void RecordSecond();
 
+            [Terrum.Interop.NativeImport(
+                "consumer.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            internal extern uint32 GetCode();
+
             int32 Main() {
-                bool choose = true;
                 mut int32 output = 0;
                 unsafe {
-                    choose ? RecordFirst() : RecordSecond();
+                    GetCode() == 1 ? RecordFirst() : RecordSecond();
                     var callback = &Observe;
                     callback(&output);
                 }
@@ -2618,10 +2934,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var combinedArtifact = CombinePopulatedNativeAddressModules(
             providerArtifact, consumerArtifact, schema);
         var combinedIndex = TrRmArtifactIndex
-            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
                 combinedArtifact);
         var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
                 combinedIndex);
         var consumerModuleRow = 0;
         for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
@@ -2651,6 +2967,28 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(mainRow), tables.Contracts.Count);
         Assert.That(body.BlockCount, Is.EqualTo(4));
+        Assert.That(tables.ConstantSources.Count,
+            Is.GreaterThan(providerTables.ConstantSources.Count));
+        Assert.That(tables.FrozenValueNodes.Count,
+            Is.GreaterThan(providerTables.FrozenValueNodes.Count));
+        Assert.That(tables.Blobs.Count, Is.GreaterThan(providerTables.Blobs.Count));
+        Assert.That(body.ConstantCount, Is.GreaterThan(0));
+        for (var offset = 0; offset < body.ConstantMap.Length;
+            offset += 2 * sizeof(uint))
+        {
+            var sourceRow = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.ConstantMap[(offset + sizeof(uint))..]);
+            Assert.That(sourceRow,
+                Is.GreaterThan((uint)providerTables.ConstantSources.Count));
+            var nodeRow = tables.ConstantSources.GetPayloadReference(
+                checked((int)sourceRow));
+            Assert.That(nodeRow,
+                Is.GreaterThan((uint)providerTables.FrozenValueNodes.Count));
+            var blobRow = tables.FrozenValueNodes.GetScalarBlobRef(
+                checked((int)nodeRow));
+            Assert.That(blobRow,
+                Is.GreaterThan((uint)providerTables.Blobs.Count));
+        }
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, combinedArtifact),
@@ -2664,6 +3002,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var loadedMain = loaded.Functions.Single(static function =>
             function.Name == "Main");
         var conditionalCount = 0;
+        var comparisonConstants = new List<BoundConstant>();
         var selectedCallNames = new List<string>();
         Assert.That(BoundTreeTraversal.VisitStatements(loadedMain.Body,
             statement =>
@@ -2671,6 +3010,23 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 if (statement is BoundIf)
                 {
                     conditionalCount++;
+                }
+            }), Is.True);
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundBinary {
+                        Type: PrimitiveType.Bool,
+                    } comparison)
+                {
+                    if (comparison.Left is BoundConstant left)
+                    {
+                        comparisonConstants.Add(left);
+                    }
+                    if (comparison.Right is BoundConstant right)
+                    {
+                        comparisonConstants.Add(right);
+                    }
                 }
             }), Is.True);
         Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
@@ -2685,8 +3041,105 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 }
             }), Is.True);
         Assert.That(conditionalCount, Is.EqualTo(1));
+        Assert.That(comparisonConstants, Has.Count.EqualTo(1));
+        Assert.That(comparisonConstants[0].Type, Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(comparisonConstants[0].Bits.Low, Is.EqualTo(1));
         Assert.That(selectedCallNames,
             Is.EquivalentTo(new[] { "RecordFirst", "RecordSecond" }));
+        var reencodedConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            loaded, consumerIdentity, schemaIdentity, 1);
+        var reencodedIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                reencodedConsumerArtifact);
+        var reencodedTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                reencodedIndex);
+        Assert.That(reencodedTables.ConstantSources.Count,
+            Is.GreaterThan(0));
+        var reencodedLoaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                reencodedConsumerArtifact),
+            consumerIdentity, [providerInput]);
+        var reencodedMain = reencodedLoaded.Functions.Single(
+            static function => function.Name == "Main");
+        var reencodedComparisonConstants = new List<BoundConstant>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(reencodedMain.Body,
+            expression =>
+            {
+                if (expression is BoundBinary {
+                        Type: PrimitiveType.Bool,
+                    } comparison
+                    && comparison.Right is BoundConstant constant)
+                {
+                    reencodedComparisonConstants.Add(constant);
+                }
+            }), Is.True);
+        Assert.That(reencodedComparisonConstants, Has.Count.EqualTo(1));
+        Assert.That(reencodedComparisonConstants[0].Type,
+            Is.EqualTo(PrimitiveType.UInt32));
+        Assert.That(reencodedComparisonConstants[0].Bits.Low, Is.EqualTo(1));
+
+        const string secondConsumerIdentity
+            = "a2eu-conditional-consumer-second";
+        var secondConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, secondConsumerIdentity,
+            schemaIdentity, 1);
+        var twiceCombinedArtifact = CombinePopulatedNativeAddressModules(
+            combinedArtifact, secondConsumerArtifact, schema);
+        var twiceCombinedIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                twiceCombinedArtifact);
+        var twiceCombinedTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                twiceCombinedIndex);
+        var secondConsumerModuleRow = 0;
+        for (var moduleRow = 1;
+            moduleRow <= twiceCombinedTables.Modules.Count; moduleRow++)
+        {
+            if (twiceCombinedTables.Modules.GetIdentity(moduleRow)
+                == secondConsumerIdentity)
+            {
+                secondConsumerModuleRow = moduleRow;
+                break;
+            }
+        }
+        Assert.That(secondConsumerModuleRow, Is.GreaterThan(0));
+        var secondMainRow = 0;
+        for (var methodRow = 1;
+            methodRow <= twiceCombinedTables.Methods.Count; methodRow++)
+        {
+            if (twiceCombinedTables.Methods.GetOwnerModule(methodRow)
+                    == secondConsumerModuleRow
+                && twiceCombinedTables.Methods.GetName(methodRow) == "Main")
+            {
+                secondMainRow = methodRow;
+                break;
+            }
+        }
+        Assert.That(secondMainRow, Is.GreaterThan(0));
+        var secondConsumerBodyRow
+            = twiceCombinedTables.Methods.GetBodyRow(secondMainRow);
+        Assert.That(secondConsumerBodyRow,
+            Is.EqualTo(tables.Bodies.Count + 1));
+        var secondConsumerBody = twiceCombinedTables.Bodies
+            .GetRegisterBody(secondConsumerBodyRow,
+                twiceCombinedTables.Contracts.Count);
+        Assert.That(secondConsumerBody.ConstantCount, Is.EqualTo(1));
+        var secondSourceRow = BinaryPrimitives.ReadUInt32LittleEndian(
+            secondConsumerBody.ConstantMap[sizeof(uint)..]);
+        Assert.That(secondSourceRow,
+            Is.EqualTo((uint)tables.ConstantSources.Count + 1));
+        var secondNodeRow = twiceCombinedTables.ConstantSources
+            .GetPayloadReference(checked((int)secondSourceRow));
+        Assert.That(secondNodeRow,
+            Is.EqualTo((uint)tables.FrozenValueNodes.Count + 1));
+        var secondBlobRow = twiceCombinedTables.FrozenValueNodes
+            .GetScalarBlobRef(checked((int)secondNodeRow));
+        Assert.That(secondBlobRow,
+            Is.EqualTo((uint)tables.Blobs.Count + 1));
+        Assert.That(twiceCombinedTables.FrozenValueNodes.GetScalarPayload(
+            checked((int)secondNodeRow), twiceCombinedTables.Blobs).ToArray(),
+            Is.EqualTo(new byte[] { 1, 0, 0, 0 }));
 
         var compatibleProviderCompilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(providerSource.Replace("ProviderBody",
@@ -2706,6 +3159,22 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(compatibleLoaded.Functions.Single(
             static function => function.Name == "Observe")
             .ModuleImport!.ProducerIdentity, Is.EqualTo(providerIdentity));
+        var compatibleMain = compatibleLoaded.Functions.Single(
+            static function => function.Name == "Main");
+        var compatibleComparisonConstants = new List<BoundConstant>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(compatibleMain.Body,
+            expression =>
+            {
+                if (expression is BoundBinary {
+                        Type: PrimitiveType.Bool,
+                    } comparison
+                    && comparison.Right is BoundConstant constant)
+                {
+                    compatibleComparisonConstants.Add(constant);
+                }
+            }), Is.True);
+        Assert.That(compatibleComparisonConstants, Has.Count.EqualTo(1));
+        Assert.That(compatibleComparisonConstants[0].Bits.Low, Is.EqualTo(1));
 
         var incompatibleProviderSource = providerSource
             .Replace("NativeParameter(1, Write, NoEscape, 1)",
@@ -7249,28 +7718,46 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationDraft)
     {
-        var firstIndex = schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+        var usesScalarFrozenValues = schema
+            == TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft;
+        var usesA2EU = usesScalarFrozenValues || schema
+            == TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var firstIndex = usesScalarFrozenValues
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                    firstArtifact)
+            : usesA2EU
             ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
                     firstArtifact)
             : TrRmArtifactIndex.ForForeignInvocationDraft(firstArtifact);
-        var secondIndex = schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+        var secondIndex = usesScalarFrozenValues
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                    secondArtifact)
+            : usesA2EU
             ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
                     secondArtifact)
             : TrRmArtifactIndex.ForForeignInvocationDraft(secondArtifact);
-        var firstTables = schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+        var firstTables = usesScalarFrozenValues
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                    firstIndex)
+            : usesA2EU
             ? TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
                     firstIndex)
             : TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationDraftAndGetExecutionTables(
                     firstIndex);
-        var secondTables = schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+        var secondTables = usesScalarFrozenValues
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                    secondIndex)
+            : usesA2EU
             ? TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
                     secondIndex)
@@ -7317,8 +7804,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(firstTables.Bodies.Count,
             Is.EqualTo(firstTables.Modules.Count));
         Assert.That(secondTables.Bodies.Count, Is.EqualTo(1));
-        Assert.That(firstIndex.SectionCount, Is.AnyOf(9, 10, 11, 12));
-        Assert.That(secondIndex.SectionCount, Is.InRange(9, 12));
+        Assert.That(firstIndex.SectionCount, Is.GreaterThanOrEqualTo(9));
+        Assert.That(secondIndex.SectionCount, Is.GreaterThanOrEqualTo(9));
 
         Assert.That(firstIndex.TryGetSection(0x0001, out var firstModuleBytes,
             out var firstModuleCount), Is.True);
@@ -7442,6 +7929,13 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var featureCount = firstFeatureCount + secondFeatureCount;
         var features = new TrRmFeatureTableReader(featureBytes,
             featureCount, schema);
+        var scalarValueTables = usesScalarFrozenValues
+            ? CombineScalarFrozenValueTables(firstIndex, secondIndex)
+            : (BlobSection: Array.Empty<byte>(), BlobCount: 0,
+                ConstantSourceSection: Array.Empty<byte>(),
+                ConstantSourceCount: 0,
+                FrozenValueNodeSection: Array.Empty<byte>(),
+                FrozenValueNodeCount: 0);
         var methodCount = firstMethodCount + secondMethodCount;
 
         var typeSpecRows = new List<ReadOnlyMemory<byte>>(
@@ -7815,7 +8309,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 var body = sourceBodies.GetRegisterBody(bodyRow,
                     sourceContracts);
                 bodyRows.Add(RemapNativeAddressBody(body, typeOffset,
-                    methodOffset, importOffset, contractCount, schema));
+                    methodOffset, importOffset, contractCount, schema,
+                    artifact == 0 ? 0 : firstTables.ConstantSources.Count));
             }
         }
 
@@ -7862,8 +8357,15 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         {
             new TrRmSection(0x0001, 0, (uint)moduleRows.Count, moduleBytes),
             new TrRmSection(0x0002, 0, (uint)stringRows.Count, stringBytes),
-            new TrRmSection(0x0004, 0, (uint)featureCount, featureBytes),
         };
+        if (scalarValueTables.BlobCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0003, 0,
+                (uint)scalarValueTables.BlobCount,
+                scalarValueTables.BlobSection));
+        }
+        sections.Add(new TrRmSection(0x0004, 0, (uint)featureCount,
+            featureBytes));
         if (moduleRefRows.Count != 0)
         {
             sections.Add(new TrRmSection(0x0010, 0,
@@ -7905,15 +8407,33 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             new TrRmSection(0x0021, 0, (uint)nativeImportRows.Count,
                 nativeImportBytes),
         ]);
+        if (scalarValueTables.ConstantSourceCount != 0)
+        {
+            sections.Add(new TrRmSection(0x0030, 0,
+                (uint)scalarValueTables.ConstantSourceCount,
+                scalarValueTables.ConstantSourceSection));
+        }
+        if (scalarValueTables.FrozenValueNodeCount != 0)
+        {
+            sections.Add(new TrRmSection(0x003F, 0,
+                (uint)scalarValueTables.FrozenValueNodeCount,
+                scalarValueTables.FrozenValueNodeSection));
+        }
         var combinedArtifact = TrRmArtifactWriter.Encode(sections, schema);
-        var combinedIndex = schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+        var combinedIndex = usesScalarFrozenValues
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                    combinedArtifact)
+            : usesA2EU
             ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
                     combinedArtifact)
             : TrRmArtifactIndex.ForForeignInvocationDraft(combinedArtifact);
-        var combinedTables = schema
-                == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+        var combinedTables = usesScalarFrozenValues
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                    combinedIndex)
+            : usesA2EU
             ? TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
                     combinedIndex)
@@ -7931,6 +8451,224 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
 
         return combinedArtifact;
+    }
+
+    private static (
+        byte[] BlobSection,
+        int BlobCount,
+        byte[] ConstantSourceSection,
+        int ConstantSourceCount,
+        byte[] FrozenValueNodeSection,
+        int FrozenValueNodeCount) CombineScalarFrozenValueTables(
+        TrRmArtifactIndex firstIndex, TrRmArtifactIndex secondIndex)
+    {
+        var firstHasBlobs = firstIndex.TryGetSection(0x0003,
+            out var firstBlobBytes, out var firstBlobCount);
+        var secondHasBlobs = secondIndex.TryGetSection(0x0003,
+            out var secondBlobBytes, out var secondBlobCount);
+        var firstHasSources = firstIndex.TryGetSection(0x0030,
+            out var firstSourceBytes, out var firstSourceCount);
+        var secondHasSources = secondIndex.TryGetSection(0x0030,
+            out var secondSourceBytes, out var secondSourceCount);
+        var firstHasNodes = firstIndex.TryGetSection(0x003F,
+            out var firstNodeBytes, out var firstNodeCount);
+        var secondHasNodes = secondIndex.TryGetSection(0x003F,
+            out var secondNodeBytes, out var secondNodeCount);
+        Assert.That(firstHasBlobs, Is.EqualTo(firstBlobCount != 0));
+        Assert.That(secondHasBlobs, Is.EqualTo(secondBlobCount != 0));
+        Assert.That(firstHasSources, Is.EqualTo(firstSourceCount != 0));
+        Assert.That(secondHasSources, Is.EqualTo(secondSourceCount != 0));
+        Assert.That(firstHasNodes, Is.EqualTo(firstNodeCount != 0));
+        Assert.That(secondHasNodes, Is.EqualTo(secondNodeCount != 0));
+        Assert.That(firstSourceCount, Is.EqualTo(firstNodeCount));
+        Assert.That(secondSourceCount, Is.EqualTo(secondNodeCount));
+
+        var blobs = new List<ReadOnlyMemory<byte>>(
+            firstBlobCount + secondBlobCount);
+        if (firstBlobCount != 0)
+        {
+            var reader = new TrRmBlobTableReader(firstBlobBytes,
+                firstBlobCount);
+            for (var row = 1; row <= reader.Count; row++)
+            {
+                blobs.Add(reader.GetRow(row).ToArray());
+            }
+        }
+        if (secondBlobCount != 0)
+        {
+            var reader = new TrRmBlobTableReader(secondBlobBytes,
+                secondBlobCount);
+            for (var row = 1; row <= reader.Count; row++)
+            {
+                blobs.Add(reader.GetRow(row).ToArray());
+            }
+        }
+        Assert.That(blobs.Count, Is.LessThanOrEqualTo(0xFF_FFFF));
+        var blobSection = blobs.Count == 0
+            ? []
+            : TrRmVariableTableWriter.EncodeBlobs(blobs);
+
+        var sourceCount = checked(firstSourceCount + secondSourceCount);
+        Assert.That(sourceCount, Is.LessThanOrEqualTo(0xFF_FFFF));
+        var sourceSection = new byte[checked(sourceCount * 8)];
+        firstSourceBytes.CopyTo(sourceSection);
+        for (var row = 0; row < secondSourceCount; row++)
+        {
+            var sourceRow = secondSourceBytes.Slice(row * 8, 8);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(sourceRow),
+                Is.EqualTo(1));
+            var payloadReference
+                = BinaryPrimitives.ReadUInt32LittleEndian(sourceRow[4..]);
+            Assert.That(payloadReference, Is.InRange(1u,
+                (uint)secondNodeCount));
+            var destination = sourceSection.AsSpan(
+                (firstSourceCount + row) * 8, 8);
+            sourceRow.CopyTo(destination);
+            BinaryPrimitives.WriteUInt32LittleEndian(destination[4..],
+                checked(payloadReference + (uint)firstNodeCount));
+        }
+
+        var nodeCount = checked(firstNodeCount + secondNodeCount);
+        Assert.That(nodeCount, Is.LessThanOrEqualTo(0xFF_FFFF));
+        var nodeSection = new byte[checked(nodeCount * 24)];
+        firstNodeBytes.CopyTo(nodeSection);
+        for (var row = 0; row < secondNodeCount; row++)
+        {
+            var sourceRow = secondNodeBytes.Slice(row * 24, 24);
+            var destination = nodeSection.AsSpan(
+                (firstNodeCount + row) * 24, 24);
+            sourceRow.CopyTo(destination);
+            var blobReference = BinaryPrimitives.ReadUInt32LittleEndian(
+                destination[8..]);
+            if (blobReference != 0)
+            {
+                Assert.That(blobReference, Is.InRange(1u,
+                    (uint)secondBlobCount));
+                BinaryPrimitives.WriteUInt32LittleEndian(destination[8..],
+                    checked(blobReference + (uint)firstBlobCount));
+            }
+        }
+
+        for (var row = 0; row < nodeCount; row++)
+        {
+            var node = nodeSection.AsSpan(row * 24, 24);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(node)
+                & 0xFF00_0000u, Is.EqualTo(0xF200_0000u));
+            Assert.That(node[4], Is.EqualTo(1));
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(node[12..]),
+                Is.Zero);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(node[16..]),
+                Is.Zero);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(node[20..]),
+                Is.Zero);
+            var blobReference = BinaryPrimitives.ReadUInt32LittleEndian(
+                node[8..]);
+            Assert.That(blobReference, Is.InRange(1u, (uint)blobs.Count));
+        }
+        for (var row = 0; row < sourceCount; row++)
+        {
+            var source = sourceSection.AsSpan(row * 8, 8);
+            Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(source),
+                Is.EqualTo(1));
+            var payloadReference = BinaryPrimitives.ReadUInt32LittleEndian(
+                source[4..]);
+            Assert.That(payloadReference, Is.InRange(1u, (uint)nodeCount));
+        }
+
+        var sourceSectionBytes = sourceCount == 0 ? [] : sourceSection;
+        var nodeSectionBytes = nodeCount == 0 ? [] : nodeSection;
+        return (blobSection, blobs.Count, sourceSectionBytes, sourceCount,
+            nodeSectionBytes, nodeCount);
+    }
+
+    private static byte[] RewriteA2EUScalarFrozenSection(byte[] artifact,
+        int sectionKind, Action<byte[]> rewrite)
+    {
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                artifact);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        var found = false;
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            var sectionBytes = bytes.ToArray();
+            if (kind == sectionKind)
+            {
+                rewrite(sectionBytes);
+                found = true;
+            }
+            sections.Add(new TrRmSection(kind, flags, (uint)recordCount,
+                sectionBytes));
+        }
+
+        Assert.That(found, Is.True);
+        return TrRmArtifactWriter.Encode(sections,
+            TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft);
+    }
+
+    private static byte[] RewriteA2EUScalarConstantSourceMap(byte[] artifact,
+        uint sourceRow)
+    {
+        var schema = TrRmArtifactSchema
+            .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                index);
+        var mainRow = 0;
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            if (tables.Methods.GetName(methodRow) == "Main")
+            {
+                mainRow = methodRow;
+                break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(mainRow);
+        Assert.That(bodyRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        Assert.That(body.ConstantCount, Is.GreaterThan(0));
+        var constantMap = body.ConstantMap.ToArray();
+        BinaryPrimitives.WriteUInt32LittleEndian(
+            constantMap.AsSpan(sizeof(uint)), sourceRow);
+        var rewrittenBody = EncodeNativeAddressBody(body,
+            body.TypeMap.ToArray(), body.MethodMap.ToArray(), constantMap,
+            tables.Contracts.Count, schema);
+
+        Assert.That(index.TryGetSection(0x0020, out var bodySection,
+            out var bodyCount), Is.True);
+        var bodyIndex = new TrRmVariableTableIndex(bodySection, bodyCount,
+            1, 1);
+        var bodies = new List<ReadOnlyMemory<byte>>(bodyCount);
+        for (var row = 1; row <= bodyCount; row++)
+        {
+            bodies.Add(row == bodyRow
+                ? rewrittenBody
+                : bodyIndex.GetRow(row).ToArray());
+        }
+        var rewrittenBodySection = TrRmVariableTableWriter.EncodeBodies(
+            bodies);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var section = 0; section < index.SectionCount; section++)
+        {
+            index.GetSection(section, out var kind, out var flags,
+                out var bytes, out var recordCount);
+            sections.Add(kind == 0x0020
+                ? new TrRmSection(kind, flags, (uint)recordCount,
+                    rewrittenBodySection)
+                : new TrRmSection(kind, flags, (uint)recordCount,
+                    bytes.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     private static byte[] ReplaceRootBodyMethodWithForeignModuleMethod(
@@ -8003,7 +8741,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             + $"MethodMap={Convert.ToHexString(methodMap)}.");
 
         var rewrittenBody = EncodeNativeAddressBody(body,
-            body.TypeMap.ToArray(), methodMap, tables.Contracts.Count,
+            body.TypeMap.ToArray(), methodMap, body.ConstantMap.ToArray(),
+            tables.Contracts.Count,
             TrRmArtifactSchema.ForeignInvocationDraft);
         return ReplaceRegisterBody(artifact, bodyRow, rewrittenBody);
     }
@@ -8089,7 +8828,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             $"Expected TypeMap token {expectedToken:X8}; "
             + $"TypeMap={Convert.ToHexString(typeMap)}.");
         var rewrittenBody = EncodeNativeAddressBody(body, typeMap,
-            body.MethodMap.ToArray(), tables.Contracts.Count,
+            body.MethodMap.ToArray(), body.ConstantMap.ToArray(),
+            tables.Contracts.Count,
             TrRmArtifactSchema.ForeignInvocationDraft);
         return ReplaceRegisterBody(artifact, bodyRow, rewrittenBody);
     }
@@ -8137,7 +8877,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     private static byte[] RemapNativeAddressBody(
         TrRmRegisterBodyReader body, int typeSpecOffset,
         int methodDefOffset, int importOffset, int contractCount,
-        TrRmArtifactSchema schema)
+        TrRmArtifactSchema schema, int constantSourceOffset = 0)
     {
         var typeMap = body.TypeMap.ToArray();
         for (var offset = 0; offset < typeMap.Length; offset += sizeof(uint))
@@ -8175,13 +8915,29 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             }
         }
 
+        var constantMap = body.ConstantMap.ToArray();
+        for (var offset = 0; offset < constantMap.Length;
+            offset += 2 * sizeof(uint))
+        {
+            var typeSpecRef = BinaryPrimitives.ReadUInt32LittleEndian(
+                constantMap.AsSpan(offset));
+            Assert.That(typeSpecRef & 0xFF00_0000u,
+                Is.EqualTo(0xF200_0000u));
+            var sourceRow = BinaryPrimitives.ReadUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)));
+            Assert.That(sourceRow, Is.InRange(1u, 0x00FF_FFFFu));
+            BinaryPrimitives.WriteUInt32LittleEndian(
+                constantMap.AsSpan(offset + sizeof(uint)),
+                checked(sourceRow + (uint)constantSourceOffset));
+        }
+
         return EncodeNativeAddressBody(body, typeMap, methodMap,
-            contractCount, schema);
+            constantMap, contractCount, schema);
     }
 
     private static byte[] EncodeNativeAddressBody(
         TrRmRegisterBodyReader body, byte[] typeMap, byte[] methodMap,
-        int contractCount, TrRmArtifactSchema schema)
+        byte[] constantMap, int contractCount, TrRmArtifactSchema schema)
     {
         var blocks = new List<TrRmRegisterBodyBlock>(body.BlockCount);
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
@@ -8201,7 +8957,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         return TrRmRegisterBodyWriter.Encode(body.HomeMap.ToArray(),
             typeMap, methodMap, body.FieldMap.ToArray(),
-            body.ConstantMap.ToArray(), blocks, records, body.Code.ToArray(),
+            constantMap, blocks, records, body.Code.ToArray(),
             contractCount, schema);
     }
 

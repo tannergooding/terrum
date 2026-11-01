@@ -278,6 +278,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                     or TrRmArtifactSchema.ScalarFrozenValuesDraft
                     or TrRmArtifactSchema.NominalEnumsDraft
@@ -724,6 +725,12 @@ public static class TrRmStructuralMetadataValidator
             foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft: true);
 
     internal static ValidatedExecutionTables
+        ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft: true);
+
+    internal static ValidatedExecutionTables
         ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
         TrRmArtifactIndex index,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
@@ -1076,6 +1083,7 @@ public static class TrRmStructuralMetadataValidator
         bool foreignInvocationStorageFixedArrayDraft = false,
         bool foreignInvocationStorageFixedArrayEmptyInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft = false,
+        bool foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft = false,
         bool foreignInvocationStorageFixedArrayGenericDraft = false,
         bool registerExceptionRegionsDraft = false,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
@@ -1086,6 +1094,9 @@ public static class TrRmStructuralMetadataValidator
             ? TrRmArtifactSchema.Development
             : copyOriginDraft
                 ? TrRmArtifactSchema.CopyOriginDraft
+                : foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft
+                    ? TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
                 : foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft
                     ? TrRmArtifactSchema
                         .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
@@ -1116,6 +1127,10 @@ public static class TrRmStructuralMetadataValidator
             throw InvalidMetadata();
         }
         var selectedA3LayoutResourceLedger = a3LayoutResourceLedger;
+        scalarFrozenValuesDraft
+            |= foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft;
+        foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft
+            |= foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft;
         foreignInvocationStorageFixedArrayEmptyInitializationDraft
             |= foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft;
         foreignInvocationStorageFixedArrayDraft

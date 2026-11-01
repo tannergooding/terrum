@@ -232,6 +232,10 @@ public sealed partial class CliTests
         true, false)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1",
         true, true)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1",
+        true, false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1",
+        true, true)]
     public async Task BuildTrRmSelectsEmptyArrayArtifactSchemaAsync(
         string schemaIdentity, bool includesUnitValues,
         bool includesDistinctUnitCalls)

@@ -22,6 +22,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
     private const string FixedArrayEmptyUnitInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+    private const string FixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
     private const string GenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
 
@@ -1473,6 +1475,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
                         _artifacts[artifactIndex])
+                : schema.UsesScalarFrozenValues()
+                    ? TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                            _artifacts[artifactIndex])
                 : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
                     ? TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
@@ -1491,6 +1497,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         index, _a3ResourceLedger,
                         createA3ResourceLedger: _consumer.Schema
                             == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft)
+                : schema.UsesScalarFrozenValues()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                            index)
                 : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
                     ? TrRmStructuralMetadataValidator
                         .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
@@ -1536,6 +1546,14 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
 
             ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                FixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity));
+            if (StringComparer.Ordinal.Equals(schemaIdentity,
+                FixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity))
+            {
+                return true;
+            }
+
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
                 GenericFixedArraySchemaIdentity));
             return StringComparer.Ordinal.Equals(schemaIdentity,
                 GenericFixedArraySchemaIdentity);
@@ -1573,6 +1591,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
             {
                 return TrRmArtifactSchema
                     .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+            }
+
+            if (StringComparer.Ordinal.Equals(schemaIdentity,
+                FixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity))
+            {
+                return TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft;
             }
 
             ConsumeWork(GetStringComparisonWork(schemaIdentity,

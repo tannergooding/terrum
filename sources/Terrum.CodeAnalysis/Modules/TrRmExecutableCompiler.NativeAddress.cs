@@ -25,6 +25,7 @@ public static partial class TrRmExecutableCompiler
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
@@ -33,7 +34,8 @@ public static partial class TrRmExecutableCompiler
             && (schema is not (
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
                 || program.EntryPoint != -1 || !program.Functions.IsEmpty))
         {
             throw Unsupported(
@@ -55,7 +57,8 @@ public static partial class TrRmExecutableCompiler
 
         if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
             && program.EntryPoint < 0 && program.Functions.IsEmpty
             && !program.Structures.IsEmpty)
         {
@@ -224,6 +227,8 @@ public static partial class TrRmExecutableCompiler
                 out callResultHomeIndex);
         }
         var emitsIndirectCall = indirectCall is not null;
+        var scalarValues = schema.UsesScalarFrozenValues()
+            ? new TrRmFrozenScalarValueBuilder() : null;
         if (!emitsIndirectCall && caller.ParameterCount != 0)
         {
             throw Unsupported(
@@ -306,7 +311,8 @@ public static partial class TrRmExecutableCompiler
                 if (schema is not (
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft))
                 {
                     throw Unsupported(
                         "Fixed-array Body types require the exact A2 schema.");
@@ -478,6 +484,17 @@ public static partial class TrRmExecutableCompiler
             a3LayoutResourceLedger?.ConsumeWork();
             featureRows.Add(
                 TrRmFeatureRow.FixedInlineArrayStorageCandidate);
+        }
+        if (storageCall?.UsesScalarFrozenValues == true)
+        {
+            if (!schema.UsesScalarFrozenValues())
+            {
+                throw Unsupported(
+                    "Numeric comparison literals require the exact A2EU+SF1 schema.");
+            }
+
+            a3LayoutResourceLedger?.ConsumeWork();
+            featureRows.Add(TrRmFeatureRow.TypedFrozenValues);
         }
 
         var featureBytes = TrRmFeatureTableWriter.Encode(featureRows, schema,
@@ -1081,7 +1098,7 @@ public static partial class TrRmExecutableCompiler
                 program, storageCall, signature, maps, targetMethodMapToken,
                 contractRows.Count, GetSignatureTypeSpecRef,
                 fixedArrayLayoutRowByType, schema,
-                a3LayoutResourceLedger);
+                scalarValues, a3LayoutResourceLedger);
         }
         else
         {
@@ -1275,12 +1292,44 @@ public static partial class TrRmExecutableCompiler
             records, codeBytes, contractRows.Count,
             schema, a3LayoutResourceLedger);
         }
+        var scalarValueTables = scalarValues?.Encode(typeSpecs);
+        var hasScalarValues
+            = scalarValueTables is TrRmFrozenScalarValueTables {
+                ConstantSourceCount: > 0,
+            };
+        if ((storageCall?.UsesScalarFrozenValues == true) != hasScalarValues)
+        {
+            throw new InvalidOperationException(
+                "The A2EU+SF1 constant plan differs from its emitted value tables.");
+        }
+
         ReserveA3Collection(a3LayoutResourceLedger, 15);
         var sections = new List<TrRmSection>(15);
         AddA3Staged(sections, new TrRmSection(0x0001, 0, 1, moduleBytes),
             a3LayoutResourceLedger);
         AddA3Staged(sections, new TrRmSection(0x0002, 0,
             (uint)stringRows.Count, stringsBytes), a3LayoutResourceLedger);
+        if (scalarValueTables is TrRmFrozenScalarValueTables frozenValues)
+        {
+            if (frozenValues.BlobCount != 0)
+            {
+                AddA3Staged(sections, new TrRmSection(0x0003, 0,
+                    (uint)frozenValues.BlobCount, frozenValues.BlobSection),
+                    a3LayoutResourceLedger);
+            }
+
+            if (frozenValues.ConstantSourceCount != 0)
+            {
+                AddA3Staged(sections, new TrRmSection(0x0030, 0,
+                    (uint)frozenValues.ConstantSourceCount,
+                    frozenValues.ConstantSourceSection),
+                    a3LayoutResourceLedger);
+                AddA3Staged(sections, new TrRmSection(0x003F, 0,
+                    (uint)frozenValues.FrozenValueNodeCount,
+                    frozenValues.FrozenValueNodeSection),
+                    a3LayoutResourceLedger);
+            }
+        }
         AddA3Staged(sections, new TrRmSection(0x0004, 0,
             (uint)featureRows.Count, featureBytes), a3LayoutResourceLedger);
         AddA3Staged(sections, new TrRmSection(0x0011, 0,
@@ -1362,6 +1411,11 @@ public static partial class TrRmExecutableCompiler
                 ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
                 : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    && schema.UsesScalarFrozenValues()
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                        artifact)
+                : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
                         artifact)
@@ -1384,6 +1438,11 @@ public static partial class TrRmExecutableCompiler
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(artifactIndex)
+                : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    && schema.UsesScalarFrozenValues()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                        artifactIndex)
                 : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
                     ? TrRmStructuralMetadataValidator
                         .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
@@ -1442,7 +1501,8 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<NativeAddressUnitInitializerCall> UnitInitializerCalls,
         ImmutableArray<NativeAddressUnitConditionCapture> ConditionCaptures,
         int ConditionalEdgeCount,
-        int ArrayInitializationIndexVariable);
+        int ArrayInitializationIndexVariable,
+        bool UsesScalarFrozenValues);
 
     private static ImmutableArray<NativeAddressUnitCallHome>
         GetNativeAddressUnitCallHomes(
@@ -1761,7 +1821,8 @@ public static partial class TrRmExecutableCompiler
                 if (schema is not (
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
                     || !NativeFixedArrayContract.TryGetLayout(variable.Type,
                         program.Structures, program.NativeFixedArrayTypes,
                         out var arrayLayout)
@@ -1840,7 +1901,8 @@ public static partial class TrRmExecutableCompiler
                     ? (schema is
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
                         && NativeFixedArrayContract.TryGetLayout(
                             storageAddress.CarrierType,
                             program.Structures, program.NativeFixedArrayTypes,
@@ -1916,6 +1978,7 @@ public static partial class TrRmExecutableCompiler
         var nextUnitCallResultHome
             = function.Variables.Length - function.ParameterCount;
         var conditionalEdgeCount = 0;
+        var usesScalarFrozenValues = false;
         bool AddUnitInitializerCall(BoundCall unitCall,
             int initializerArrayVariable, int resultVariable)
         {
@@ -2024,7 +2087,7 @@ public static partial class TrRmExecutableCompiler
                 BoundConditional conditional
                     when conditional.Type == PrimitiveType.Void
                         && IsSupportedNativeUnitConditionalCondition(
-                            conditional.Condition) =>
+                            conditional.Condition, schema) =>
                     AddUnitConditionalControlFlow(
                         conditional.Condition,
                         () => AddUnitInitializerExpression(
@@ -2042,7 +2105,7 @@ public static partial class TrRmExecutableCompiler
         {
             using var frame = resourceLedger?.EnterFrame();
             resourceLedger?.ConsumeWork();
-            if (!IsSupportedNativeUnitConditionalCondition(condition))
+            if (!IsSupportedNativeUnitConditionalCondition(condition, schema))
             {
                 return false;
             }
@@ -2075,7 +2138,7 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundBinary comparison
                     when IsSupportedNativeUnitConditionalComparison(
-                            comparison)
+                            comparison, schema)
                         || IsSupportedNativeUnitConditionalBooleanXor(
                             comparison):
                     if (comparison.Left is BoundRead leftRead
@@ -2094,6 +2157,13 @@ public static partial class TrRmExecutableCompiler
                                 && !localVariables.Contains(rightRead.Variable))))
                     {
                         return false;
+                    }
+
+                    if (comparison.Left.Type != PrimitiveType.Bool
+                        && (comparison.Left is BoundConstant
+                            || comparison.Right is BoundConstant))
+                    {
+                        usesScalarFrozenValues = true;
                     }
 
                     if (comparison.Left is BoundRead
@@ -2302,7 +2372,8 @@ public static partial class TrRmExecutableCompiler
             unitInitializerCalls.ToImmutable(),
             conditionCaptures.ToImmutable(),
             conditionalEdgeCount,
-            arrayInitializationIndexVariable);
+            arrayInitializationIndexVariable,
+            usesScalarFrozenValues);
         return true;
     }
 
@@ -2558,7 +2629,8 @@ public static partial class TrRmExecutableCompiler
 
                 if (layout.ElementType == PrimitiveType.Void
                     && schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
-                    && IsSupportedNativeUnitConditionalExpression(element))
+                    && IsSupportedNativeUnitConditionalExpression(element,
+                        schema))
                 {
                     continue;
                 }
@@ -2581,7 +2653,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsSupportedNativeUnitConditionalExpression(
-        BoundExpression expression)
+        BoundExpression expression, TrRmArtifactSchema schema)
     {
         switch (expression)
         {
@@ -2599,7 +2671,8 @@ public static partial class TrRmExecutableCompiler
                 WhenTrue: var whenTrue,
                 WhenFalse: var whenFalse,
             }:
-                if (!IsSupportedNativeUnitConditionalCondition(condition))
+                if (!IsSupportedNativeUnitConditionalCondition(condition,
+                        schema))
                 {
                     return false;
                 }
@@ -2608,11 +2681,13 @@ public static partial class TrRmExecutableCompiler
                         out var selected))
                 {
                     return IsSupportedNativeUnitConditionalExpression(
-                        selected ? whenTrue : whenFalse);
+                        selected ? whenTrue : whenFalse, schema);
                 }
 
-                return IsSupportedNativeUnitConditionalExpression(whenTrue)
-                    && IsSupportedNativeUnitConditionalExpression(whenFalse);
+                return IsSupportedNativeUnitConditionalExpression(whenTrue,
+                        schema)
+                    && IsSupportedNativeUnitConditionalExpression(whenFalse,
+                        schema);
 
             default:
                 return false;
@@ -2620,7 +2695,7 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool IsSupportedNativeUnitConditionalCondition(
-        BoundExpression condition)
+        BoundExpression condition, TrRmArtifactSchema schema)
     {
         if (condition.Type != PrimitiveType.Bool)
         {
@@ -2639,32 +2714,35 @@ public static partial class TrRmExecutableCompiler
                 Operator: TokenKind.Bang,
                 Type: PrimitiveType.Bool,
                 Operand: var operand,
-            } => IsSupportedNativeUnitConditionalCondition(operand),
+            } => IsSupportedNativeUnitConditionalCondition(operand, schema),
             BoundBinary {
                 Operator: TokenKind.AmpersandAmpersand
                     or TokenKind.PipePipe,
                 Type: PrimitiveType.Bool,
                 Left: var left,
                 Right: var right,
-            } => IsSupportedNativeUnitConditionalCondition(left)
-                && IsSupportedNativeUnitConditionalCondition(right),
+            } => IsSupportedNativeUnitConditionalCondition(left, schema)
+                && IsSupportedNativeUnitConditionalCondition(right, schema),
             BoundBinary comparison =>
-                IsSupportedNativeUnitConditionalComparison(comparison)
+                IsSupportedNativeUnitConditionalComparison(comparison,
+                    schema)
                 || IsSupportedNativeUnitConditionalBooleanXor(comparison),
             BoundConditional {
                 Type: PrimitiveType.Bool,
                 Condition: var nestedCondition,
                 WhenTrue: var whenTrue,
                 WhenFalse: var whenFalse,
-            } => IsSupportedNativeUnitConditionalCondition(nestedCondition)
-                && IsSupportedNativeUnitConditionalCondition(whenTrue)
-                && IsSupportedNativeUnitConditionalCondition(whenFalse),
+            } => IsSupportedNativeUnitConditionalCondition(nestedCondition,
+                    schema)
+                && IsSupportedNativeUnitConditionalCondition(whenTrue, schema)
+                && IsSupportedNativeUnitConditionalCondition(whenFalse,
+                    schema),
             _ => false,
         };
     }
 
     private static bool IsSupportedNativeUnitConditionalComparison(
-        BoundBinary comparison)
+        BoundBinary comparison, TrRmArtifactSchema schema)
     {
         if (comparison.Type != PrimitiveType.Bool
             || comparison.Left.Type != comparison.Right.Type)
@@ -2682,18 +2760,42 @@ public static partial class TrRmExecutableCompiler
                     comparison.Right);
         }
 
-        if (comparison.Left is not (BoundRead or BoundCall)
-            || comparison.Right is not (BoundRead or BoundCall))
+        if (!DirectNativeImportContract.IsScalar(comparison.Left.Type)
+            || comparison.Operator is not (TokenKind.EqualsEquals
+                or TokenKind.BangEquals or TokenKind.Less
+                or TokenKind.LessEquals or TokenKind.Greater
+                or TokenKind.GreaterEquals))
         {
             return false;
         }
 
-        return DirectNativeImportContract.IsScalar(comparison.Left.Type)
-            && comparison.Operator is TokenKind.EqualsEquals
-                or TokenKind.BangEquals or TokenKind.Less
-                or TokenKind.LessEquals or TokenKind.Greater
-                or TokenKind.GreaterEquals;
+        var leftIsReadOrCall
+            = comparison.Left is BoundRead or BoundCall;
+        var rightIsReadOrCall
+            = comparison.Right is BoundRead or BoundCall;
+        if (leftIsReadOrCall && rightIsReadOrCall)
+        {
+            return true;
+        }
+
+        return schema.UsesScalarFrozenValues()
+            && IsSupportedNativeUnitConditionalLiteralType(
+                comparison.Left.Type)
+            && (leftIsReadOrCall
+                || comparison.Left is BoundConstant)
+            && (rightIsReadOrCall
+                || comparison.Right is BoundConstant)
+            && (comparison.Left is BoundConstant
+                || comparison.Right is BoundConstant);
     }
+
+    private static bool IsSupportedNativeUnitConditionalLiteralType(
+        PrimitiveType type)
+        => type is PrimitiveType.Int8 or PrimitiveType.Int16
+            or PrimitiveType.Int32 or PrimitiveType.Int64
+            or PrimitiveType.UInt8 or PrimitiveType.UInt16
+            or PrimitiveType.UInt32 or PrimitiveType.UInt64
+            or PrimitiveType.Float32 or PrimitiveType.Float64;
 
     private static bool IsSupportedNativeUnitConditionalBooleanXor(
         BoundBinary binary)
@@ -2898,9 +3000,61 @@ public static partial class TrRmExecutableCompiler
         int contractCount, Func<PrimitiveType, uint> getSignatureTypeSpecRef,
         Dictionary<int, int> fixedArrayLayoutRowByType,
         TrRmArtifactSchema schema,
+        TrRmFrozenScalarValueBuilder? scalarValues,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var localCount = caller.Variables.Length - caller.ParameterCount;
+        var bodyConstantMapRows
+            = new List<TrRmFrozenScalarValueReference>();
+        var bodyConstantMapIndexByValue
+            = new Dictionary<(PrimitiveType Type, ScalarBits Bits), ushort>();
+        ushort GetConstantMapIndex(BoundConstant constant)
+        {
+            if (scalarValues is null
+                || !IsSupportedNativeUnitConditionalLiteralType(
+                    constant.Type))
+            {
+                throw Unsupported(
+                    "The selected Body has no typed numeric ConstantMap profile.");
+            }
+
+            var key = (constant.Type, constant.Bits);
+            if (bodyConstantMapIndexByValue.TryGetValue(key,
+                    out var existingIndex))
+            {
+                return existingIndex;
+            }
+
+            if (bodyConstantMapRows.Count == 65_536)
+            {
+                throw Unsupported(
+                    "The A2EU+SF1 Body ConstantMap exceeds its index domain.");
+            }
+
+            var valueReference = scalarValues.Add(constant);
+            var index = checked((ushort)bodyConstantMapRows.Count);
+            bodyConstantMapRows.Add(valueReference);
+            bodyConstantMapIndexByValue.Add(key, index);
+            return index;
+        }
+
+        byte[] EncodeBodyConstantMap()
+        {
+            var result = new byte[bodyConstantMapRows.Count * 8];
+            for (var index = 0; index < bodyConstantMapRows.Count; index++)
+            {
+                var valueReference = bodyConstantMapRows[index];
+                var offset = index * 8;
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    result.AsSpan(offset), valueReference.TypeSpecRef);
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    result.AsSpan(offset + 4),
+                    valueReference.ConstantSourceRow);
+            }
+
+            return result;
+        }
+
         var unitCallTemporaryHomes = GetNativeAddressUnitCallHomes(
             storageCall.UnitInitializerCalls, storageCall.ConditionCaptures,
             localCount, resourceLedger);
@@ -3658,6 +3812,34 @@ public static partial class TrRmExecutableCompiler
             return unitCallPlan.ResultHome;
         }
 
+        void AppendBodyConstantLoad(byte destinationRegister,
+            ushort constantIndex)
+        {
+            if (destinationRegister > 13)
+            {
+                throw Unsupported(
+                    "The A2EU comparison constant has no writable register.");
+            }
+
+            if (destinationRegister == 0 && constantIndex == 0)
+            {
+                code.Add(0x09);
+            }
+            else if (constantIndex <= 15)
+            {
+                code.Add(0x16);
+                code.Add(checked((byte)((constantIndex << 4)
+                    | destinationRegister)));
+            }
+            else
+            {
+                code.Add(0xD4);
+                code.Add(destinationRegister);
+                code.Add((byte)constantIndex);
+                code.Add((byte)(constantIndex >> 8));
+            }
+        }
+
         void AppendUnitInitializerCondition(BoundExpression condition)
         {
             using var frame = resourceLedger?.EnterFrame();
@@ -3683,10 +3865,12 @@ public static partial class TrRmExecutableCompiler
 
                 case BoundBinary comparison
                     when IsSupportedNativeUnitConditionalComparison(
-                            comparison)
+                            comparison, schema)
                         || IsSupportedNativeUnitConditionalBooleanXor(
                             comparison):
-                    int leftHome;
+                    var leftHome = -1;
+                    var leftConstantIndex = (ushort)0;
+                    var leftIsConstant = false;
                     if (comparison.Left is BoundRead leftRead)
                     {
                         leftHome = GetCallerHome(leftRead.Variable);
@@ -3702,13 +3886,22 @@ public static partial class TrRmExecutableCompiler
                     {
                         leftHome = AppendUnitInitializerCall(leftCall);
                     }
+                    else if (comparison.Left is BoundConstant leftConstant
+                        && comparison.Left.Type != PrimitiveType.Bool)
+                    {
+                        leftConstantIndex
+                            = GetConstantMapIndex(leftConstant);
+                        leftIsConstant = true;
+                    }
                     else
                     {
                         throw Unsupported(
                             "An A2EU comparison has no supported left operand.");
                     }
 
-                    int rightHome;
+                    var rightHome = -1;
+                    var rightConstantIndex = (ushort)0;
+                    var rightIsConstant = false;
                     if (comparison.Right is BoundRead rightRead)
                     {
                         rightHome = GetCallerHome(rightRead.Variable);
@@ -3717,20 +3910,43 @@ public static partial class TrRmExecutableCompiler
                     {
                         rightHome = AppendUnitInitializerCall(rightCall);
                     }
+                    else if (comparison.Right is BoundConstant rightConstant
+                        && comparison.Right.Type != PrimitiveType.Bool)
+                    {
+                        rightConstantIndex
+                            = GetConstantMapIndex(rightConstant);
+                        rightIsConstant = true;
+                    }
                     else
                     {
                         throw Unsupported(
                             "An A2EU comparison has no supported right operand.");
                     }
 
-                    if (leftHome < 0 || rightHome < 0)
+                    if ((leftHome < 0 && !leftIsConstant)
+                        || (rightHome < 0 && !rightIsConstant))
                     {
                         throw Unsupported(
                             "An A2EU comparison operand has no result Home.");
                     }
 
-                    AppendHomeLoad(code, 0, leftHome);
-                    AppendHomeLoad(code, 1, rightHome);
+                    if (leftIsConstant)
+                    {
+                        AppendBodyConstantLoad(0, leftConstantIndex);
+                    }
+                    else
+                    {
+                        AppendHomeLoad(code, 0, leftHome);
+                    }
+
+                    if (rightIsConstant)
+                    {
+                        AppendBodyConstantLoad(1, rightConstantIndex);
+                    }
+                    else
+                    {
+                        AppendHomeLoad(code, 1, rightHome);
+                    }
                     if (comparison.Left.Type == PrimitiveType.Bool)
                     {
                         code.Add(0x32);
@@ -3906,7 +4122,7 @@ public static partial class TrRmExecutableCompiler
                 case BoundConditional conditional
                     when conditional.Type == PrimitiveType.Void
                         && IsSupportedNativeUnitConditionalCondition(
-                            conditional.Condition):
+                            conditional.Condition, schema):
                     if (TryGetNativeAddressKnownBoolean(
                             conditional.Condition, out var selected))
                     {
@@ -4046,7 +4262,7 @@ public static partial class TrRmExecutableCompiler
             using var frame = resourceLedger?.EnterFrame();
             resourceLedger?.ConsumeWork();
             if (!IsSupportedNativeUnitConditionalCondition(
-                    branch.Condition))
+                    branch.Condition, schema))
             {
                 throw Unsupported(
                     "A conditional A2EU branch requires an admitted Boolean condition.");
@@ -4657,7 +4873,7 @@ public static partial class TrRmExecutableCompiler
         ReserveA3Buffer(resourceLedger, code.Count);
         var codeBytes = code.ToArray();
         return TrRmRegisterBodyWriter.Encode(homeMap, maps.TypeMap,
-            maps.MethodMap, default, default,
+            maps.MethodMap, default, EncodeBodyConstantMap(),
             blocks,
             records, codeBytes, contractCount,
             schema, resourceLedger);

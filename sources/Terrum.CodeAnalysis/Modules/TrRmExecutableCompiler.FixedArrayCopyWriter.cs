@@ -26,7 +26,8 @@ public static partial class TrRmExecutableCompiler
         if (schema is not (
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
@@ -422,7 +423,11 @@ public static partial class TrRmExecutableCompiler
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        var index = schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+        var index = schema.UsesScalarFrozenValues()
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
+                    artifact)
+            : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
             ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
                     artifact)
@@ -432,7 +437,13 @@ public static partial class TrRmExecutableCompiler
                         artifact)
                 : TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
-        if (schema.UsesForeignInvocationStorageFixedArrayUnitInitialization())
+        if (schema.UsesScalarFrozenValues())
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
+                    index);
+        }
+        else if (schema.UsesForeignInvocationStorageFixedArrayUnitInitialization())
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(

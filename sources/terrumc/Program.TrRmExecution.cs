@@ -18,6 +18,8 @@ internal static partial class Program
 {
     private const string A3FixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
+    private const string A2EUScalarFrozenValuesSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
     private const string RegisterExceptionRegionsSchemaIdentity
         = "trrm/1-draft-register-exception-regions-1";
 
@@ -206,6 +208,7 @@ internal static partial class Program
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
+                        or A2EUScalarFrozenValuesSchemaIdentity
                         or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
                         or RegisterExceptionRegionsSchemaIdentity)
                     || providers.Exists(static provider =>
@@ -215,6 +218,7 @@ internal static partial class Program
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1"
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
+                            or A2EUScalarFrozenValuesSchemaIdentity
                             or "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1"
                             or RegisterExceptionRegionsSchemaIdentity))))
             {
