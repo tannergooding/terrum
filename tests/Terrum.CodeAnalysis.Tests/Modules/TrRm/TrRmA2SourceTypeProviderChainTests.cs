@@ -20,6 +20,8 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string EmptyInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+    private const string EmptyUnitInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
 
     [Test]
     public void StandardA2EConsumerBindsA2TypeProviders()
@@ -60,6 +62,21 @@ internal sealed class TrRmA2SourceTypeProviderChainTests
                 ],
                 ["ContainerKey"]);
         Assert.That(a2eProviderReference.Structures.Single(
+            static structure => structure.Name == "Pair")
+            .StandardTypeOrigin!.Provider.ModuleIdentity,
+            Is.EqualTo("Provider"));
+
+        var a2euReference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(
+                EmptyUnitInitializationSchemaIdentity, rootArtifact),
+            "Root",
+            [
+                new TrRmStandardArtifactInput(
+                    EmptyUnitInitializationSchemaIdentity, providerArtifact),
+                new TrRmStandardArtifactInput(SchemaIdentity, leafArtifact),
+            ],
+            ["ContainerKey"]);
+        Assert.That(a2euReference.Structures.Single(
             static structure => structure.Name == "Pair")
             .StandardTypeOrigin!.Provider.ModuleIdentity,
             Is.EqualTo("Provider"));

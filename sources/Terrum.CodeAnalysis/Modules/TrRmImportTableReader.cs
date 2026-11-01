@@ -114,7 +114,8 @@ public readonly ref struct TrRmImportTableReader
         _resourceLedger?.ConsumeWork((ulong)recordCount);
         var allowsTypeDefAliases = profileAware
             && (schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft);
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft);
         if (allowsTypeDefAliases)
         {
             resourceLedger?.ConsumeWork(

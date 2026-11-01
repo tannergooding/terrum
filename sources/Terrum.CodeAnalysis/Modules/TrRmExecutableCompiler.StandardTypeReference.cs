@@ -73,18 +73,20 @@ public static partial class TrRmExecutableCompiler
         var schemaIdentities = GetStandardSchemaIdentities(input, providers);
         if (schemaIdentities[0] is not (
                 StandardForeignInvocationStorageFixedArraySchemaIdentity
-                or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
+                or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
         {
             throw Unsupported(
-                "Explicit TypeDef roots require the exact A2 or A2E schema.");
+                "Explicit TypeDef roots require the exact A2, A2E or A2EU schema.");
         }
         if (schemaIdentities.Skip(1).Any(schemaIdentity =>
                 schemaIdentity is not (
                     StandardForeignInvocationStorageFixedArraySchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)))
+                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)))
         {
             throw Unsupported(
-                "The bounded A2 type-reference projection requires A2 or A2E provider artifacts.");
+                "The bounded A2 type-reference projection requires A2, A2E or A2EU provider artifacts.");
         }
 
         var program = LoadStandardProgram(artifacts, schemaIdentities,
@@ -114,7 +116,8 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetMethodDefRange(moduleRow);
         if (tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
             || moduleRow <= 0 || moduleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd - typeDefStart
                 != program.Structures.Length
@@ -620,10 +623,13 @@ public static partial class TrRmExecutableCompiler
         if (!(StringComparer.Ordinal.Equals(schemaIdentities[0],
                 StandardForeignInvocationStorageFixedArraySchemaIdentity)
             || StringComparer.Ordinal.Equals(schemaIdentities[0],
-                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
+                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
+            || StringComparer.Ordinal.Equals(schemaIdentities[0],
+                StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
             || tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
             || program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty)
         {
@@ -659,10 +665,11 @@ public static partial class TrRmExecutableCompiler
             var schemaIdentity = schemaIdentities[artifactIndex];
             if (schemaIdentity is not (
                     StandardForeignInvocationStorageFixedArraySchemaIdentity
-                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
+                    or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+                    or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
             {
                 throw Unsupported(
-                    "Loaded A2 type origins require A2 or A2E provider snapshots.");
+                    "Loaded A2 type origins require A2, A2E or A2EU provider snapshots.");
             }
 
             var providerTables = ValidateForeignInvocationArtifact(

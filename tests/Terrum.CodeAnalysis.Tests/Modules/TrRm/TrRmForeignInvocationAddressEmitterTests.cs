@@ -184,22 +184,28 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2",
-        false, false)]
+        false, false, false)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1",
-        false, true)]
+        false, true, false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1",
+        false, false, true)]
     [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1",
-        true, false)]
+        true, false, false)]
     public void FixedArraySchemaSelectionPreservesStorageAddressLoading(
         string schemaIdentity, bool usesGenericSchema,
-        bool usesEmptyInitializationSchema)
+        bool usesEmptyInitializationSchema, bool usesUnitInitializationSchema)
     {
         const string moduleIdentity = "native-address-fixed-array-schema";
         var expectedSchema = usesGenericSchema
             ? TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
-            : usesEmptyInitializationSchema
+            : usesUnitInitializationSchema
                 ? TrRmArtifactSchema
-                    .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
-                : TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+                    .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                : usesEmptyInitializationSchema
+                    ? TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                    : TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyDraft;
         var artifact = CreateStorageAddressArtifact(moduleIdentity,
             schemaIdentity);
         var index = expectedSchema switch
@@ -207,6 +213,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 => TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
+                        artifact),
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                => TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
                         artifact),
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 => TrRmArtifactIndex
@@ -220,6 +230,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 => TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
+                        index),
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
+                => TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
                         index),
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 => TrRmStructuralMetadataValidator
@@ -437,6 +451,155 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     doubleInitialization),
                 moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+    }
+
+    [TestCase(1, "()")]
+    [TestCase(2, "(), ()")]
+    public void StandardA2EUStoresTypedUnitElementsAndRejectsA2AndA2E(
+        int unitElementCount, string unitInitializers)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        const string moduleIdentity = "a2eu-unit-array-initialization";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse($$"""
+            [Terrum.Interop.NativeImport(
+                "example.dll",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            internal extern void Observe(
+                ptr<uint32> value,
+                write ptr<int32> output);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [void; {{unitElementCount}}] values = [{{unitInitializers}}];
+                mut uint32 input = 0;
+                mut int32 output = 0;
+                unsafe {
+                    var callback = &Observe;
+                    callback(&input, &output);
+                }
+                return output;
+            }
+            """), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
+        foreach (var unsupportedSchema in new[] {
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2",
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1",
+        })
+        {
+            _ = Assert.Throws<NotSupportedException>(() =>
+                TrRmExecutableCompiler.EmitStandard(program, moduleIdentity,
+                    unsupportedSchema, 1));
+        }
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(program,
+            moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact));
+        var callerRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                callerRow = row;
+                break;
+            }
+        }
+        Assert.That(callerRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(callerRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
+        AssertHomeFirstUseTypeMap(body);
+        var unitElementStores = 0;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] == 0x05 && record[4] == 1
+                && record[5] == 1)
+            {
+                Assert.That(record[6], Is.EqualTo(1));
+                Assert.That(record[7], Is.EqualTo(1));
+                Assert.That(BinaryPrimitives.ReadUInt16LittleEndian(
+                    record[10..]), Is.EqualTo(14));
+                unitElementStores++;
+            }
+        }
+        Assert.That(unitElementStores, Is.EqualTo(unitElementCount));
+
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity, artifact),
+            moduleIdentity, Array.Empty<TrRmStandardArtifactInput>());
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var unitArray = new List<BoundNativeFixedArrayInitialization>();
+        var unitConstants = new List<BoundConstant>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayInitialization
+                    initialization
+                    && initialization.Layout.ElementCount
+                        == (ulong)unitElementCount
+                    && initialization.Layout.ElementType == PrimitiveType.Void)
+                {
+                    unitArray.Add(initialization);
+                }
+                else if (expression is BoundConstant
+                    { Type: PrimitiveType.Void } constant)
+                {
+                    unitConstants.Add(constant);
+                }
+            }), Is.True);
+        Assert.That(unitArray, Has.Count.EqualTo(1));
+        Assert.That(unitArray[0].Elements,
+            Has.Length.EqualTo(unitElementCount));
+        Assert.That(unitConstants, Has.Count.EqualTo(unitElementCount));
+        Assert.That(unitConstants.All(static constant => constant.Value == 0),
+            Is.True);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+
+        foreach (var unsupportedSchema in new[] {
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2",
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1",
+        })
+        {
+            _ = Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(unsupportedSchema,
+                        artifact),
+                    moduleIdentity,
+                    Array.Empty<TrRmStandardArtifactInput>()));
+        }
+
+        foreach (var defect in new[] {
+            "unit-source-r15",
+            "unit-store-source-use",
+            "unit-store-transition",
+            "unit-store-place-kind",
+            "unit-store-dependency",
+            "unit-store-formal",
+        })
+        {
+            var malformed = RewriteA2EUUnitStoreArtifact(artifact, defect);
+            Assert.Throws<InvalidDataException>(() =>
+                TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity, malformed),
+                    moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+        }
     }
 
     [TestCase(1, "uint32", "[0]", PrimitiveType.UInt32, false)]
@@ -3880,6 +4043,94 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             sections.Add(new TrRmSection(kind, flags,
                 checked((uint)recordCount),
                 TrRmVariableTableWriter.EncodeBodies([rewrittenBody])));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] RewriteA2EUUnitStoreArtifact(byte[] artifact,
+        string defect)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                artifact);
+        _ = index.TryGetSection(0x001B, out _, out var contractCount);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0; sectionIndex < index.SectionCount;
+            sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            if (kind != 0x0020)
+            {
+                sections.Add(new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+                continue;
+            }
+
+            var bodyTable = new TrRmBodyTableReader(section, recordCount,
+                schema);
+            var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
+                contractCount, schema);
+            var bodyBytes = bodyTable.GetRow(1).ToArray();
+            var modified = false;
+            for (var recordIndex = 0; recordIndex < body.RecordCount;
+                recordIndex++)
+            {
+                var record = body.GetRecord(recordIndex);
+                if (modified || record[0] != 0x05 || record[5] != 1
+                    || BinaryPrimitives.ReadUInt16LittleEndian(
+                        record[10..]) != 14)
+                {
+                    continue;
+                }
+
+                var recordOffset = bodyBytes.AsSpan().IndexOf(record);
+                if (recordOffset < 0)
+                {
+                    throw new InvalidOperationException(
+                        "The A2EU unit store has no serialized record bytes.");
+                }
+
+                switch (defect)
+                {
+                    case "unit-source-r15":
+                        bodyBytes[recordOffset + 10] = 15;
+                        break;
+                    case "unit-store-source-use":
+                        bodyBytes[recordOffset + 7] = 2;
+                        break;
+                    case "unit-store-transition":
+                        bodyBytes[recordOffset + 6] = 2;
+                        break;
+                    case "unit-store-place-kind":
+                        bodyBytes[recordOffset + 4] = 2;
+                        break;
+                    case "unit-store-dependency":
+                        bodyBytes[recordOffset + 12] = 1;
+                        break;
+                    case "unit-store-formal":
+                        bodyBytes[recordOffset + 16] = 1;
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(defect));
+                }
+
+                modified = true;
+            }
+
+            if (!modified)
+            {
+                throw new InvalidOperationException(
+                    "The A2EU Body contains no typed Unit SemanticStore.");
+            }
+
+            sections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                TrRmVariableTableWriter.EncodeBodies([bodyBytes])));
         }
 
         return TrRmArtifactWriter.Encode(sections, schema);

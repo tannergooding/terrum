@@ -22,6 +22,7 @@ public static partial class TrRmExecutableCompiler
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
@@ -29,7 +30,8 @@ public static partial class TrRmExecutableCompiler
         if (sourceTypeExports is { Count: > 0 }
             && (schema is not (
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
                 || program.EntryPoint != -1 || !program.Functions.IsEmpty))
         {
             throw Unsupported(
@@ -45,7 +47,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
             && program.EntryPoint < 0 && program.Functions.IsEmpty
             && !program.Structures.IsEmpty)
         {
@@ -258,7 +261,8 @@ public static partial class TrRmExecutableCompiler
             {
                 if (schema is not (
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft))
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
                 {
                     throw Unsupported(
                         "Fixed-array Body types require the exact A2 schema.");
@@ -568,7 +572,8 @@ public static partial class TrRmExecutableCompiler
         var stagedResultHomeStart = 1 + (callResultHomeIndex >= 0 ? 1 : 0);
         var stagedResultTypeMapToken = stagedResultHomeCount == 0
             ? 0u
-            : 0x1100_0000u | GetSignatureTypeSpecRef(signature.ReturnType);
+            : CreateStandardBodyTypeMapToken(
+                GetSignatureTypeSpecRef(signature.ReturnType));
         var typeMapTokenCapacity = storageCall is null
             ? 1 + (callResultHomeIndex >= 0 ? 1 : 0)
                 + stagedResultHomeCount + callerParameterTypeSpecRefs.Length
@@ -581,8 +586,8 @@ public static partial class TrRmExecutableCompiler
             typeMapTokens.Add(0x1100_0001);
             if (callResultHomeIndex >= 0)
             {
-                typeMapTokens.Add(0x1100_0000u
-                    | GetSignatureTypeSpecRef(caller.ReturnType));
+                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
+                    GetSignatureTypeSpecRef(caller.ReturnType)));
             }
             if (stagedResultHomeCount > 0)
             {
@@ -591,7 +596,8 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var typeSpecRef in callerParameterTypeSpecRefs)
             {
-                typeMapTokens.Add(0x1100_0000u | typeSpecRef);
+                typeMapTokens.Add(
+                    CreateStandardBodyTypeMapToken(typeSpecRef));
             }
         }
         else
@@ -603,20 +609,21 @@ public static partial class TrRmExecutableCompiler
                     caller.ParameterCount + localOrdinal];
                 typeMapTokens.Add(NativeFunctionPointerTypes.IsType(variable.Type)
                     ? 0x1100_0001u
-                    : 0x1100_0000u
-                        | callerLocalTypeSpecRefs[localOrdinal]);
+                    : CreateStandardBodyTypeMapToken(
+                        callerLocalTypeSpecRefs[localOrdinal]));
             }
 
             foreach (var storageArgument in storageCall.StorageArguments)
             {
-                typeMapTokens.Add(0x1100_0000u
-                    | GetSignatureTypeSpecRef(signature.ParameterTypes[
-                        storageArgument.ParameterOrdinal]));
+                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
+                    GetSignatureTypeSpecRef(signature.ParameterTypes[
+                        storageArgument.ParameterOrdinal])));
             }
 
             foreach (var typeSpecRef in callerParameterTypeSpecRefs)
             {
-                typeMapTokens.Add(0x1100_0000u | typeSpecRef);
+                typeMapTokens.Add(
+                    CreateStandardBodyTypeMapToken(typeSpecRef));
             }
 
             for (var localOrdinal = 0;
@@ -636,8 +643,8 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
-                typeMapTokens.Add(0x1100_0000u
-                    | GetSignatureTypeSpecRef(arrayType.ElementType));
+                typeMapTokens.Add(CreateStandardBodyTypeMapToken(
+                    GetSignatureTypeSpecRef(arrayType.ElementType)));
             }
         }
 
@@ -681,8 +688,8 @@ public static partial class TrRmExecutableCompiler
             if (callResultHomeIndex >= 0)
             {
                 var resultOffset = callResultHomeIndex * 8;
-                var resultTypeMapToken = 0x1100_0000u
-                    | GetSignatureTypeSpecRef(caller.ReturnType);
+                var resultTypeMapToken = CreateStandardBodyTypeMapToken(
+                    GetSignatureTypeSpecRef(caller.ReturnType));
                 homeMap[resultOffset] = 0x03;
                 homeMap[resultOffset + 1]
                     = caller.Variables[caller.ParameterCount + 1].IsMutable
@@ -706,8 +713,8 @@ public static partial class TrRmExecutableCompiler
                 ordinal < callerParameterTypeSpecRefs.Length; ordinal++)
             {
                 var offset = (ordinal + callLocalHomeCount) * 8;
-                var typeMapToken = 0x1100_0000u
-                    | callerParameterTypeSpecRefs[ordinal];
+                var typeMapToken = CreateStandardBodyTypeMapToken(
+                    callerParameterTypeSpecRefs[ordinal]);
                 homeMap[offset] = 0x02;
                 BinaryPrimitives.WriteUInt16LittleEndian(
                     homeMap.AsSpan(offset + 2),
@@ -861,7 +868,11 @@ public static partial class TrRmExecutableCompiler
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+                .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+                : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                        artifact)
                 : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
                     ? TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
@@ -876,6 +887,10 @@ public static partial class TrRmExecutableCompiler
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(artifactIndex)
+                : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                            artifactIndex)
                 : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
                     ? TrRmStructuralMetadataValidator
                         .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
@@ -1015,7 +1030,8 @@ public static partial class TrRmExecutableCompiler
             {
                 if (schema is not (
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
                     || !NativeFixedArrayContract.TryGetLayout(variable.Type,
                         program.Structures, program.NativeFixedArrayTypes,
                         out var arrayLayout)
@@ -1032,7 +1048,7 @@ public static partial class TrRmExecutableCompiler
             else if (declaration.Initializer is not BoundConstant constant
                 || constant.Type != variable.Type
                 || !TryGetContextualInitializationRegister(constant,
-                    variable.Type, out _))
+                    variable.Type, schema, out _))
             {
                 return false;
             }
@@ -1060,7 +1076,8 @@ public static partial class TrRmExecutableCompiler
                 var isSupportedStorageType = isFixedArray
                     ? (schema is
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
                         && NativeFixedArrayContract.TryGetLayout(
                             storageAddress.CarrierType,
                             program.Structures, program.NativeFixedArrayTypes,
@@ -1220,7 +1237,7 @@ public static partial class TrRmExecutableCompiler
         {
             if (element is BoundConstant constant
                 && TryGetContextualInitializationRegister(constant,
-                    layout.ElementType, out _))
+                    layout.ElementType, schema, out _))
             {
                 continue;
             }
@@ -1251,10 +1268,29 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool TryGetContextualInitializationRegister(
-        BoundConstant constant, PrimitiveType type, out byte register)
+        BoundConstant constant, PrimitiveType type,
+        TrRmArtifactSchema schema, out byte register)
     {
         register = 0;
-        if (constant.Type != type || !DirectNativeImportContract.IsScalar(type))
+        if (constant.Type != type)
+        {
+            return false;
+        }
+
+        if (type == PrimitiveType.Void)
+        {
+            if (!schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                || constant.Bits.Low != 0 || constant.Bits.High != 0)
+            {
+                return false;
+            }
+
+            register = 14;
+            return true;
+        }
+
+        if (!DirectNativeImportContract.IsScalar(type))
         {
             return false;
         }
@@ -1291,6 +1327,13 @@ public static partial class TrRmExecutableCompiler
 
         register = 15;
         return true;
+    }
+
+    private static uint CreateStandardBodyTypeMapToken(uint typeSpecRef)
+    {
+        var encoding = (byte)(typeSpecRef >> 24);
+        return encoding is 0xF2 or 0xF3
+            ? typeSpecRef : 0x1100_0000u | typeSpecRef;
     }
 
     private static byte[] EncodeForeignInvocationStorageAddressBody(
@@ -1330,8 +1373,8 @@ public static partial class TrRmExecutableCompiler
                 maps.GetTypeMapIndex(NativeFunctionPointerTypes.IsType(
                         variable.Type)
                     ? 0x1100_0001u
-                    : 0x1100_0000u
-                        | getSignatureTypeSpecRef(variable.Type)));
+                    : CreateStandardBodyTypeMapToken(
+                        getSignatureTypeSpecRef(variable.Type))));
         }
 
         var storageHomeByParameter = new Dictionary<int, int>();
@@ -1345,10 +1388,10 @@ public static partial class TrRmExecutableCompiler
             homeMap[offset] = 3;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2),
-                maps.GetTypeMapIndex(0x1100_0000u
-                    | getSignatureTypeSpecRef(
+                maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
+                    getSignatureTypeSpecRef(
                         signature.ParameterTypes[
-                            storageArgument.ParameterOrdinal])));
+                            storageArgument.ParameterOrdinal]))));
         }
 
         for (var ordinal = 0; ordinal < caller.ParameterCount; ordinal++)
@@ -1359,8 +1402,8 @@ public static partial class TrRmExecutableCompiler
             homeMap[offset] = 2;
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 2),
-                maps.GetTypeMapIndex(0x1100_0000u
-                    | getSignatureTypeSpecRef(variable.Type)));
+                maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
+                    getSignatureTypeSpecRef(variable.Type))));
             BinaryPrimitives.WriteUInt16LittleEndian(
                 homeMap.AsSpan(offset + 4), checked((ushort)ordinal));
         }
@@ -1474,9 +1517,9 @@ public static partial class TrRmExecutableCompiler
                                         0, 0, 0,
                                         checked((uint)homeIndex),
                                         maps.GetTypeMapIndex(
-                                            0x1100_0000u
-                                                | getSignatureTypeSpecRef(
-                                                    arrayType)),
+                                            CreateStandardBodyTypeMapToken(
+                                                getSignatureTypeSpecRef(
+                                                    arrayType))),
                                         schema));
                             code.Add(0xD8);
                             code.Add(2);
@@ -1532,9 +1575,9 @@ public static partial class TrRmExecutableCompiler
                                         checked((uint)
                                             fixedArrayLayoutRow),
                                         maps.GetTypeMapIndex(
-                                            0x1100_0000u
-                                                | getSignatureTypeSpecRef(
-                                                    elementType)),
+                                            CreateStandardBodyTypeMapToken(
+                                                getSignatureTypeSpecRef(
+                                                    elementType))),
                                         schema));
                             code.Add(0xD8);
                             code.Add(2);
@@ -1549,6 +1592,7 @@ public static partial class TrRmExecutableCompiler
                             {
                                 if (!TryGetContextualInitializationRegister(
                                         initializerConstant, elementType,
+                                        schema,
                                         out var initializerRegister))
                                 {
                                     throw Unsupported(
@@ -1585,7 +1629,7 @@ public static partial class TrRmExecutableCompiler
 
                     if (local.Initializer is not BoundConstant constant
                         || !TryGetContextualInitializationRegister(constant,
-                            caller.Variables[local.Variable].Type,
+                            caller.Variables[local.Variable].Type, schema,
                             out var sourceRegister))
                     {
                         throw Unsupported(
@@ -1670,9 +1714,9 @@ public static partial class TrRmExecutableCompiler
                                                 checked((uint)
                                                     fixedArrayLayoutRow),
                                                 maps.GetTypeMapIndex(
-                                                    0x1100_0000u
-                                                        | getSignatureTypeSpecRef(
-                                                            elementType)),
+                                                    CreateStandardBodyTypeMapToken(
+                                                        getSignatureTypeSpecRef(
+                                                            elementType))),
                                                 schema));
                                     code.Add(0xD8);
                                     code.Add(0);
@@ -1706,10 +1750,10 @@ public static partial class TrRmExecutableCompiler
                                             checked((ushort)
                                                 storageHomeByParameter[ordinal]),
                                             maps.GetTypeMapIndex(
-                                                0x1100_0000u
-                                                    | getSignatureTypeSpecRef(
+                                                    CreateStandardBodyTypeMapToken(
+                                                        getSignatureTypeSpecRef(
                                                         signature.ParameterTypes[
-                                                            ordinal])),
+                                                                ordinal]))),
                                             requiredElementCount));
                                 code.Add(0xEC);
                                 code.Add(0);

@@ -47,13 +47,16 @@ The public `EmitStandard` API also selects the unapproved
 `trrm/1-draft-foreign-invocation-storage-addresses-1` (F+S) and
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-2` (A2),
 `trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1`
-(A2E) identities.
+(A2E), and
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1`
+(A2EU) identities.
 The CLI does not accept an explicit `NativeCoreRegistration` input, so it
 cannot author the NativeImport source required by these bounded producers.
 Artifact commands accept exact per-artifact F or F+S schema identities and a
 root Module identity, plus repeatable explicitly selected provider
-schema/path pairs including A2 and A2E; they preflight selections before reading
-artifacts, and the Development default remains unchanged. Exact A3 selection
+schema/path pairs including A2, A2E and A2EU; they preflight selections
+before reading artifacts, and the Development default remains unchanged.
+Exact A3 selection
 uses `trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1`; the
 flag-free `...-3` identity is not an alias. For an A3 root only, marked
 admission failures map to experimental `TRM5001`/1 (invalid metadata),
@@ -63,12 +66,13 @@ and `TRM5007`/2 (deterministic resource refusal). A2 retains its existing
 diagnostics. These A3-only codes and the host resource envelope are
 provisional candidates under the unapproved
 [A3 failure-class proposal](../proposals/standard-trrm-a3-layout-failure-classes.md),
-not `terrum.cli/1` assignments. The artifact-command selectors include exact A2 and A2E identities. Source-free
-loading reconstructs the exercised A2 positive-count scalar initialization and
-A2E direct/nested empty-array initialization paths; an A2E artifact also passes
-the CLI PE-build path. These checks establish reconstruction and emission, not
-native execution or zero-extent backing. Other element values and complete
-JIT/AOT runtime qualification remain open. The
+not `terrum.cli/1` assignments. Source-free loading reconstructs the exercised
+A2 positive-count scalar initialization, A2E direct/nested empty-array
+initialization, and provisional A2EU positive-count Unit stores using typed
+R14 `()`. A2E and A2EU artifacts pass their CLI PE-build selectors. These
+checks establish reconstruction and emission, not native execution or
+zero-extent backing. Other initializer effects and complete JIT/AOT runtime
+qualification remain open. The
 bounded F route runs/builds direct NativeImport
 executables and emits direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected

@@ -16,6 +16,7 @@ internal enum TrRmArtifactSchema
     ForeignInvocationStorageAddressDraft,
     ForeignInvocationStorageFixedArrayCopyDraft,
     ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft,
+    ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft,
     ForeignInvocationStorageFixedArrayGenericCopyDraft,
     ScalarFrozenValuesDraft,
     NominalEnumsDraft,
@@ -40,6 +41,7 @@ internal static class TrRmArtifactSchemaFacts
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
 
     internal static bool SupportsDeclaredUniqueEvidence(
@@ -63,6 +65,7 @@ internal static class TrRmArtifactSchemaFacts
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
 
     internal static bool UsesForeignInvocationStorageAddresses(
@@ -70,18 +73,25 @@ internal static class TrRmArtifactSchemaFacts
         schema is TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
 
     internal static bool UsesForeignInvocationStorageFixedArrays(
         this TrRmArtifactSchema schema) =>
         schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft;
 
     internal static bool UsesForeignInvocationStorageFixedArrayEmptyInitialization(
         this TrRmArtifactSchema schema) =>
+        schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
+
+    internal static bool UsesForeignInvocationStorageFixedArrayUnitInitialization(
+        this TrRmArtifactSchema schema) =>
         schema
-            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft;
+            == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
 }
 
 /// <summary>Validates TRRM (1, 0) framing and indexes present sections without binding them.</summary>
@@ -110,6 +120,7 @@ public readonly ref struct TrRmArtifactIndex
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
@@ -316,6 +327,13 @@ public readonly ref struct TrRmArtifactIndex
         => new(artifact,
             TrRmArtifactSchema
                 .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft);
+
+    internal static TrRmArtifactIndex
+        ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+            ReadOnlySpan<byte> artifact)
+        => new(artifact,
+            TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft);
 
     internal static TrRmArtifactIndex
         ForForeignInvocationStorageFixedArrayGenericCopyDraft(

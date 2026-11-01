@@ -198,11 +198,13 @@ public sealed partial class CliTests
             "--json");
     }
 
-    [Test]
-    public async Task BuildTrRmSelectsA2EArtifactSchemaAsync()
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1",
+        false)]
+    [TestCase("trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1",
+        true)]
+    public async Task BuildTrRmSelectsEmptyArrayArtifactSchemaAsync(
+        string schemaIdentity, bool includesUnitValues)
     {
-        const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
         const string moduleIdentity = "a2e-cli-selection";
         var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
             $"a2e-cli-{Guid.NewGuid():N}.trrm");
@@ -215,7 +217,29 @@ public sealed partial class CliTests
                 NativeCoreRegistration
                     = NativeCoreRegistrationTests.CreateRegistration(),
             };
-            var compilation = Compilation.Create(SyntaxTree.Parse("""
+            var source = includesUnitValues ? """
+                [Terrum.Interop.NativeImport(
+                    "example.dll",
+                    CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+                [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+                [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+                internal extern void Observe(
+                    ptr<uint32> value,
+                    write ptr<int32> output);
+
+                int32 Main() {
+                    int32 zeroIndex = 0;
+                    [uint32; 0] empty = [];
+                    mut [void; 2] units = [(), ()];
+                    mut uint32 input = 0;
+                    mut int32 output = 0;
+                    unsafe {
+                        var callback = &Observe;
+                        callback(&input, &output);
+                    }
+                    return output;
+                }
+                """ : """
                 [Terrum.Interop.NativeImport(
                     "example.dll",
                     CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
@@ -235,7 +259,8 @@ public sealed partial class CliTests
                     }
                     return output;
                 }
-                """), options);
+                """;
+            var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
             Assert.That(compilation.HasErrors, Is.False,
                 string.Join(Environment.NewLine, compilation.Diagnostics));
             var artifact = TrRmExecutableCompiler.EmitStandard(

@@ -54,6 +54,10 @@ public static partial class TrRmExecutableCompiler
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(artifact)
+                : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    ? TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                            artifact)
                 : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
                     ? TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
@@ -70,6 +74,10 @@ public static partial class TrRmExecutableCompiler
                     .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
                         index, a3LayoutResourceLedger,
                         createA3ResourceLedger: a3LayoutResourceLedger is null)
+                : schema.UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                    ? TrRmStructuralMetadataValidator
+                        .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                            index)
                 : schema.UsesForeignInvocationStorageFixedArrayEmptyInitialization()
                     ? TrRmStructuralMetadataValidator
                         .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
@@ -91,10 +99,12 @@ public static partial class TrRmExecutableCompiler
                 && !(kind == 0x0012
                     && (schema is
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft))
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft))
                 && !((schema
                         is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
                     && tables.TypeDefs.Count != 0
                     && (kind == 0x0013 || kind == 0x0014
                         || kind == 0x0015 || kind == 0x0023))
@@ -103,7 +113,8 @@ public static partial class TrRmExecutableCompiler
                         || tables.TypeDefs.Count != 0)
                     && (schema is
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)))
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)))
             {
                 throw Unsupported(
                     $"Section 0x{kind:X4} is outside the bounded foreign-invocation source-free loader.");
@@ -137,7 +148,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
             && tables.TypeDefs.Count != 0 && methodEnd == methodStart
             && selectedModuleImport is null)
         {
@@ -412,7 +424,8 @@ public static partial class TrRmExecutableCompiler
         var arrayTypeByTypeSpecRow = new Dictionary<int, PrimitiveType>();
         var nativeFixedArrayTypes = (schema is
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
                 ? ReadForeignInvocationFixedArrayTypes(tables,
                     selectedModuleRow, nativePointerTypeDefinitions,
                     signatureIndexByAnchorMethod, structureTypeByTypeDef,
@@ -1160,12 +1173,15 @@ public static partial class TrRmExecutableCompiler
                         ReadForeignInvocationBodyTypeSpec(body, localMapType),
                         nativePointerTypeDefinitions,
                         signatureIndexByAnchorMethod, structureTypeByTypeDef);
-                    if (!DirectNativeImportContract.IsScalar(localType)
+                    if ((!DirectNativeImportContract.IsScalar(localType)
+                            && !(localType == PrimitiveType.Void
+                                && body.Schema
+                                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()))
                         || !TryGetContextualConstant(instruction.Register,
-                            localType, out var initialValue))
+                            localType, body.Schema, out var initialValue))
                     {
                         throw Unsupported(
-                            "The F+S Home store has no admitted scalar contextual constant.");
+                            "The F+S Home store has no admitted typed contextual constant.");
                     }
 
                     var localVariable = variables.Count;
@@ -1475,6 +1491,7 @@ public static partial class TrRmExecutableCompiler
                             || !TryGetContextualConstant(
                                 checked((byte)sourceRegister),
                                 initializationSelection.ElementType,
+                                body.Schema,
                                 out var initializationValue))
                         {
                             throw Invalid(
@@ -2205,9 +2222,16 @@ public static partial class TrRmExecutableCompiler
     }
 
     private static bool TryGetContextualConstant(byte sourceRegister,
-        PrimitiveType type, out long value)
+        PrimitiveType type, TrRmArtifactSchema schema, out long value)
     {
         value = 0;
+        if (type == PrimitiveType.Void)
+        {
+            return schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                && sourceRegister == 14;
+        }
+
         if (sourceRegister == 14)
         {
             return DirectNativeImportContract.IsScalar(type);
@@ -2439,7 +2463,8 @@ public static partial class TrRmExecutableCompiler
             = tables.Modules.GetModuleRefRange(selectedModuleRow);
         if (tables.Schema is not (
                 TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft)
             || selectedModuleRow <= 0
             || selectedModuleRow > tables.Modules.Count
             || typeDefStart <= 0 || typeDefEnd <= typeDefStart
@@ -2974,7 +2999,13 @@ public static partial class TrRmExecutableCompiler
         var offset = typeMapIndex * sizeof(uint);
         var token = BinaryPrimitives.ReadUInt32LittleEndian(
             body.TypeMap[offset..]);
-        if (token >> 24 != 0x11 || (token & 0x00FF_FFFF) == 0)
+        var kind = (byte)(token >> 24);
+        if (kind is 0xF2 or 0xF3)
+        {
+            return token;
+        }
+
+        if (kind != 0x11 || (token & 0x00FF_FFFF) == 0)
         {
             throw Unsupported("The bounded loader requires TypeSpec Body map tokens.");
         }

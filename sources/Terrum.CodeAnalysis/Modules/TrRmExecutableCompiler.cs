@@ -44,6 +44,8 @@ public static partial class TrRmExecutableCompiler
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+    private const string StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
 
@@ -89,7 +91,7 @@ public static partial class TrRmExecutableCompiler
         => EmitStandardCore(program, moduleIdentity, schemaIdentity,
             moduleTargetRequirement, null);
 
-    /// <summary>Emits an A2/A2E type library with explicit source TypeDef exports.</summary>
+    /// <summary>Emits an A2/A2E/A2EU type library with explicit source TypeDef exports.</summary>
     /// <param name="program">The checked source-bound type library to serialize.</param>
     /// <param name="moduleIdentity">The output Module identity.</param>
     /// <param name="schemaIdentity">The exact out-of-band Standard schema identity.</param>
@@ -125,10 +127,12 @@ public static partial class TrRmExecutableCompiler
         if (!StringComparer.Ordinal.Equals(schemaIdentity,
                 StandardForeignInvocationStorageFixedArraySchemaIdentity)
             && !StringComparer.Ordinal.Equals(schemaIdentity,
-                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity))
+                StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
+            && !StringComparer.Ordinal.Equals(schemaIdentity,
+                StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
         {
             throw Unsupported(
-                "Explicit source TypeDef exports require the exact A2 or A2E schema.");
+                "Explicit source TypeDef exports require the exact A2, A2E or A2EU schema.");
         }
         if (program.EntryPoint != -1 || !program.Functions.IsEmpty
             || program.Structures.IsEmpty)
@@ -163,6 +167,7 @@ public static partial class TrRmExecutableCompiler
                 or StandardForeignInvocationStorageAddressSchemaIdentity
                 or StandardForeignInvocationStorageFixedArraySchemaIdentity
                 or StandardForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
+                or StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
                 or StandardForeignInvocationStorageGenericFixedArraySchemaIdentity)
             && moduleTargetRequirement
                 != TrRmModuleTableReader.WindowsX64NativeTargetRequirement)
@@ -196,6 +201,12 @@ public static partial class TrRmExecutableCompiler
                     moduleIdentity,
                     TrRmArtifactSchema
                         .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft,
+                    sourceTypeExports),
+            StandardForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
+                => EmitForeignInvocationDraftNativeAddressLibrary(program,
+                    moduleIdentity,
+                    TrRmArtifactSchema
+                        .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft,
                     sourceTypeExports),
             StandardForeignInvocationStorageGenericFixedArraySchemaIdentity
                 => EmitForeignInvocationDraftNativeAddressLibrary(program,

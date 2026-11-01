@@ -45,6 +45,8 @@ internal sealed class TrRmStandardNativeBindingPlan
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
     private const string ForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+    private const string ForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string ForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private readonly TrRmA3LayoutResourceLedger? _a3LayoutResourceLedger;
@@ -452,6 +454,8 @@ internal sealed class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageGenericFixedArraySchemaIdentity);
 
     private bool IsFixedArraySchemaIdentity(string? schemaIdentity)
@@ -459,6 +463,8 @@ internal sealed class TrRmStandardNativeBindingPlan
                 ForeignInvocationStorageFixedArrayCopySchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageFixedArrayEmptyInitializationSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageGenericFixedArraySchemaIdentity);
 
@@ -481,6 +487,13 @@ internal sealed class TrRmStandardNativeBindingPlan
         {
             return TrRmArtifactSchema
                 .ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft;
+        }
+
+        if (AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayEmptyUnitInitializationSchemaIdentity))
+        {
+            return TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft;
         }
 
         throw new InvalidDataException(
