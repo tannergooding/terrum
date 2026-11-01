@@ -92,11 +92,12 @@ reconstructs structured `BoundIf` control flow and canonically re-emits the
 Body, including nested checked scalar and storage-address arguments. Its
 condition subset now includes Boolean Home reads, direct Boolean NativeImport
 results, constant selection, logical-not, short-circuit `&&`/`||`, and nested
-Boolean conditional expressions. Right-side calls and checks stay on reached
-paths. The focused A2EU producer/reader/JIT/AOT selection passed 32/32 with
-zero skips at `artifacts\\tst\\Debug\\a2eu-conditional-boolean-forms-final3.trx`.
-Scalar comparisons and other Boolean forms remain unsupported. A co-located
-selected-provider regression shifts the
+Boolean conditional expressions in expression and statement conditions.
+Right-side calls and checks stay on reached paths. The focused A2EU
+producer/reader/JIT/AOT selection passed 34/34 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-conditional-if-statement.trx`. Scalar comparisons
+and other Boolean forms remain unsupported. A co-located selected-provider
+regression shifts the
 conditional caller to Body row 2, remaps its maps, preserves body-local
 branches/records, and checks compatible and incompatible provider replacement.
 Supervised A2EU JIT/AOT runtime qualification remains open; other effectful

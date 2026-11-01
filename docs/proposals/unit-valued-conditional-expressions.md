@@ -139,11 +139,11 @@ multi-block `E4`/`ConditionalEdge` branches with `E3` joins using assigned
 records, and performs the Unit stores only after the selected-arm effects
 complete. Condition support now includes Boolean Home reads, direct Boolean
 NativeImport results, constant selection, logical-not, short-circuit `&&`/`||`,
-and nested Boolean conditional expressions. Right-side calls and checks stay
-on reached paths. The focused A2EU producer/reader/JIT/AOT selection passed
-32/32 with zero skips at
-`artifacts\\tst\\Debug\\a2eu-conditional-boolean-forms-final3.trx`. Scalar
-comparisons and other Boolean forms remain outside this Body profile. The corresponding
+and nested Boolean conditional expressions in both expression and statement
+conditions. Right-side calls and checks stay on reached paths. The focused
+A2EU producer/reader/JIT/AOT selection passed 34/34 with zero skips at
+`artifacts\\tst\\Debug\\a2eu-conditional-if-statement.trx`. Scalar comparisons
+and other Boolean forms remain outside this Body profile. The corresponding
 [source-free reader](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddressReader.cs)
 reconstructs structured `BoundIf` control flow and canonically re-emits the
 artifact. The active Body regression covers nested arms, checked
