@@ -526,8 +526,19 @@ direct-pointer, function-pointer and nested-array types; it rebuilds bound
 array identities, checks target geometry and preserves wide counts. Its
 synthetic consumer and combined TRRM array suites passed 151/151 with zero
 skips. The executable NativeAddress path still does not bind external/imported
-Copy provider origins, and neither route constructs executable array TypeMap
-entries or PlaceSelection/EC Bodies.
+Copy provider origins. The exact A2 executable NativeAddress route now emits
+positive-count scalar-array TypeMap/Layout and PlaceSelection/SemanticStore/EC
+Body records from checked source. Its exact A2E successor also binds
+`init [E; 0] value; value = [];` and `init mut` forms, verifies the vacant
+whole-array transition, emits the Home PlaceSelection and nullary store with
+canonical short `91`/`92` references when representable, and reconstructs and
+byte-identically re-emits the operation. A2 still rejects the A2E record.
+The focused A2E and related Body/array/vacancy selection passed 312/312 with
+zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_12_50_47_net11.0.trx`. These
+results are provisional implementation evidence, not approval of the A2E
+proposal, provider Body remapping, or native execution. Provider replacement/
+re-encoding and supervised JIT/AOT qualification remain open.
 The [A2 source Copy identity proposal](../proposals/standard-trrm-source-copy-type-identity.md)
 remains unapproved. Its local A2 `EmitStandard` export-map slice is
 implemented provisionally: source-bound public ordinary Copy declarations

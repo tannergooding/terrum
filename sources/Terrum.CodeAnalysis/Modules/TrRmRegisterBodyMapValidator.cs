@@ -2015,10 +2015,12 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
-        if (opcode == 0xD9)
+        if (opcode is 0xD9 or 0x92)
         {
             var store = GetRecordPayload(body,
-                ReadUInt16(body, instruction, 2));
+                opcode == 0xD9
+                    ? ReadUInt16(body, instruction, 2)
+                    : ReadByte(body, instruction, 1));
             if (ReadByte(body, store, 1) == 0)
             {
                 ValidateEmptyArrayInitializationStore(body, store,

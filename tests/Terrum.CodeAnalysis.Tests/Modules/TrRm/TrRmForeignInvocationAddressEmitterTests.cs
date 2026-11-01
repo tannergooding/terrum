@@ -389,6 +389,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
             int32 Main() {
                 [uint32; 0] empty = [];
+                init [uint32; 0] fixedEmpty;
+                fixedEmpty = [];
+                init mut [uint32; 0] mutableEmpty;
+                mutableEmpty = [];
                 int32 zeroIndex = 0;
                 mut [[uint32; 0]; 2] nested = [[], []];
                 mut uint32 input = 0;
@@ -430,6 +434,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var body = tables.Bodies.GetRegisterBody(
             tables.Methods.GetBodyRow(callerRow), tables.Contracts.Count);
         AssertHomeFirstUseTypeMap(body);
+        var emptyInitializationCode = body.GetBlockCode(0).ToArray();
+        Assert.That(emptyInitializationCode, Does.Contain((byte)0x91));
+        Assert.That(emptyInitializationCode, Does.Contain((byte)0x92));
         var homePlaceSelections = 0;
         var elementPlaceSelections = 0;
         var nullaryStores = 0;
@@ -454,9 +461,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     record[10..]), Is.Zero);
             }
         }
-        Assert.That(homePlaceSelections, Is.EqualTo(1));
+        Assert.That(homePlaceSelections, Is.EqualTo(3));
         Assert.That(elementPlaceSelections, Is.EqualTo(2));
-        Assert.That(nullaryStores, Is.EqualTo(3));
+        Assert.That(nullaryStores, Is.EqualTo(5));
 
         var loaded = TrRmExecutableCompiler.LoadStandard(
             new TrRmStandardArtifactInput(schemaIdentity, artifact),
@@ -473,7 +480,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     emptyInitializations.Add(initialization);
                 }
             }), Is.True);
-        Assert.That(emptyInitializations, Has.Count.EqualTo(3));
+        Assert.That(emptyInitializations, Has.Count.EqualTo(5));
         Assert.That(emptyInitializations.All(static initialization =>
             initialization.Elements.IsEmpty), Is.True);
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
@@ -505,6 +512,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         Assert.That(rejectedByA2, Is.True);
 
         foreach (var defect in new[] {
+            "nonzero-source-kind",
             "nonzero-source-index",
             "nonzero-source-use",
             "wrong-transition",
@@ -514,6 +522,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             "nonzero-formal-ordinal",
             "wrong-place-kind",
             "wrong-home-access",
+            "wrong-home-type",
+            "out-of-range-home",
+            "wrong-home-role",
         })
         {
             var malformed = RewriteA2EEmptyInitializationArtifact(artifact,
@@ -531,6 +542,25 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 new TrRmStandardArtifactInput(schemaIdentity,
                     doubleInitialization),
                 moduleIdentity, Array.Empty<TrRmStandardArtifactInput>()));
+
+    }
+
+    [TestCase("init [uint32; 0] empty; return int32(empty[0]);")]
+    [TestCase("init [uint32; 0] empty; empty = []; empty = []; return 0;")]
+    [TestCase("init mut [uint32; 0] empty; empty = []; empty = []; return 0;")]
+    public void A2ERejectsVacantReadsAndRepeatedNullaryInitialization(
+        string body)
+    {
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var source = $"int32 Main() {{ {body} }}";
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            options);
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
     }
 
     [TestCase(0, "")]
@@ -8120,17 +8150,62 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             var body = new TrRmRegisterBodyReader(bodyTable.GetRow(1),
                 contractCount, schema);
             var bodyBytes = bodyTable.GetRow(1).ToArray();
-            var modified = false;
+            var isHomeRoleDefect = defect == "wrong-home-role";
+            var modified = isHomeRoleDefect;
+            if (isHomeRoleDefect)
+            {
+                ReadOnlySpan<byte> homeSelection = default;
+                for (var recordIndex = 0;
+                    recordIndex < body.RecordCount;
+                    recordIndex++)
+                {
+                    var record = body.GetRecord(recordIndex);
+                    if (record[0] == 0x04 && record[4] == 1)
+                    {
+                        homeSelection = record;
+                        break;
+                    }
+                }
+
+                if (homeSelection.IsEmpty)
+                {
+                    throw new InvalidOperationException(
+                        "The A2E Body contains no Home PlaceSelection.");
+                }
+
+                var homeIndex = BinaryPrimitives.ReadUInt32LittleEndian(
+                    homeSelection[16..]);
+                if (homeIndex >= (uint)body.HomeCount)
+                {
+                    throw new InvalidOperationException(
+                        "The A2E Home PlaceSelection has an invalid Home.");
+                }
+
+                var homeMap = body.HomeMap.ToArray();
+                var homeMapOffset = bodyBytes.AsSpan().IndexOf(homeMap);
+                if (homeMapOffset < 0)
+                {
+                    throw new InvalidOperationException(
+                        "The A2E Body has no serialized HomeMap.");
+                }
+
+                bodyBytes[homeMapOffset + checked((int)homeIndex * 8)] = 2;
+            }
             for (var recordIndex = 0; recordIndex < body.RecordCount;
                 recordIndex++)
             {
                 var record = body.GetRecord(recordIndex);
+                var isHomePlaceDefect = defect is "wrong-home-access"
+                    or "wrong-home-type" or "out-of-range-home";
                 var isHomeAccessDefect = defect == "wrong-home-access"
                     && record[0] == 0x04 && record[4] == 1;
-                var isNullaryStoreDefect = defect != "wrong-home-access"
+                var isNullaryStoreDefect = !isHomePlaceDefect
+                    && !isHomeRoleDefect
                     && record[0] == 0x05 && record[5] == 0;
                 if (!modified
-                    && (isHomeAccessDefect || isNullaryStoreDefect))
+                    && (isHomePlaceDefect && record[0] == 0x04
+                        && record[4] == 1
+                        || isNullaryStoreDefect))
                 {
                     var recordOffset = bodyBytes.AsSpan().IndexOf(record);
                     if (recordOffset < 0)
@@ -8143,10 +8218,37 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     {
                         bodyBytes[recordOffset + 5] = 2;
                     }
+                    else if (defect == "wrong-home-type")
+                    {
+                        if (body.TypeCount < 2)
+                        {
+                            throw new InvalidOperationException(
+                                "The A2E fixture needs two TypeMap entries for the wrong-type case.");
+                        }
+
+                        var currentTypeMapIndex
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                record[20..]);
+                        var wrongTypeMapIndex = checked((ushort)(
+                            ((int)currentTypeMapIndex + 1)
+                            % body.TypeCount));
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            bodyBytes.AsSpan(recordOffset + 20),
+                            wrongTypeMapIndex);
+                    }
+                    else if (defect == "out-of-range-home")
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            bodyBytes.AsSpan(recordOffset + 16),
+                            checked((uint)body.HomeCount));
+                    }
                     else
                     {
                         switch (defect)
                         {
+                            case "nonzero-source-kind":
+                                bodyBytes[recordOffset + 5] = 1;
+                                break;
                             case "nonzero-source-index":
                                 bodyBytes[recordOffset + 10] = 1;
                                 break;

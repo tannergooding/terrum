@@ -1349,6 +1349,27 @@ public static partial class TrRmExecutableCompiler
                             : (byte)0));
                     break;
 
+                case 0x91:
+                    var shortPlaceRecordIndex = instruction[1] >> 4;
+                    if (!referencedRecords.Add(shortPlaceRecordIndex))
+                    {
+                        throw Invalid(
+                            "An F+S place record is referenced more than once.");
+                    }
+                    instructions.Add((0xD8, shortPlaceRecordIndex,
+                        checked((byte)(instruction[1] & 0x0F))));
+                    break;
+
+                case 0x92:
+                    var shortStoreRecordIndex = instruction[1];
+                    if (!referencedRecords.Add(shortStoreRecordIndex))
+                    {
+                        throw Invalid(
+                            "An F+S place record is referenced more than once.");
+                    }
+                    instructions.Add((0xD9, shortStoreRecordIndex, 0));
+                    break;
+
                 case 0xE9:
                 case 0xEC:
                 case 0xE0:

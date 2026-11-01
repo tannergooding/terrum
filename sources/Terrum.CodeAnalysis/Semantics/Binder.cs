@@ -6548,7 +6548,32 @@ internal sealed partial class Binder
                 }
 
                 var unresolved = _unresolvedVacantLocals.Contains(slot);
-                var value = BindExpression(valueNode, unresolved ? null : _variables[slot].Type);
+                BoundExpression value;
+                if (!unresolved
+                    && valueNode.Kind == SyntaxKind.ArrayInitializerExpression
+                    && NativeFixedArrayTypes.IsType(_variables[slot].Type))
+                {
+                    var arrayType = _variables[slot].Type;
+                    if (!NativeFixedArrayContract.TryGetLayout(arrayType,
+                            _structs, _nativeFixedArrayTypes,
+                            out var arrayLayout))
+                    {
+                        Report("TRM3030",
+                            "The fixed-array assignment target has no valid layout.",
+                            target.Span);
+                        value = ErrorExpression(valueNode.Span);
+                    }
+                    else
+                    {
+                        value = BindNativeFixedArrayInitializer(valueNode,
+                            arrayType, arrayLayout.ElementType,
+                            arrayLayout.ElementCount);
+                    }
+                }
+                else
+                {
+                    value = BindExpression(valueNode,
+                        unresolved ? null : _variables[slot].Type);
                 if (unresolved)
                 {
                     _variables[slot] = _variables[slot] with { Type = value.Type };

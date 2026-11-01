@@ -1376,6 +1376,9 @@ public static partial class TrRmExecutableCompiler
     private readonly record struct NativeAddressStorageArgument(
         int ParameterOrdinal, BoundNativeStorageAddress Address);
 
+    private readonly record struct NativeAddressLocalDeclaration(
+        int Variable, BoundExpression? Initializer, bool IsVacant);
+
     private readonly record struct NativeAddressUnitInitializerCall(
         BoundCall Call, NativeFunctionPointerSignatureDefinition Signature,
         int ResultHome, ImmutableArray<int> ArgumentCaptureHomes);
@@ -1533,14 +1536,25 @@ public static partial class TrRmExecutableCompiler
             .OfType<BoundLocal>()
             .ToArray();
         ReserveA3Collection(resourceLedger, 0);
-        var localDeclarations = new List<BoundLocal>();
+        var localDeclarations
+            = new List<NativeAddressLocalDeclaration>();
         void CollectLocalDeclarations(BoundStatement statement)
         {
             resourceLedger?.ConsumeWork();
             switch (statement)
             {
                 case BoundLocal local:
-                    AddA3Staged(localDeclarations, local, resourceLedger);
+                    AddA3Staged(localDeclarations,
+                        new NativeAddressLocalDeclaration(local.Variable,
+                            local.Initializer, false),
+                        resourceLedger);
+                    break;
+
+                case BoundVacantLocal vacant:
+                    AddA3Staged(localDeclarations,
+                        new NativeAddressLocalDeclaration(vacant.Variable,
+                            null, true),
+                        resourceLedger);
                     break;
 
                 case BoundBlock block:
@@ -1569,16 +1583,82 @@ public static partial class TrRmExecutableCompiler
             CollectLocalDeclarations(statement);
         }
 
+        ReserveA3Collection(resourceLedger, 0);
+        var nullaryArrayInitializationVariables = new HashSet<int>();
+        bool IsA2EEmptyArrayInitialization(BoundAssignment assignment,
+            out BoundNativeFixedArrayInitialization initialization)
+        {
+            return IsSupportedA2EEmptyArrayInitialization(assignment,
+                function, program, schema, out initialization);
+        }
+
+        bool CollectA2EEmptyArrayInitializations(
+            BoundStatement statement)
+        {
+            resourceLedger?.ConsumeWork();
+            switch (statement)
+            {
+                case BoundAssignment assignment:
+                    if (!IsA2EEmptyArrayInitialization(assignment,
+                            out _))
+                    {
+                        return false;
+                    }
+
+                    _ = AddA3Staged(
+                        nullaryArrayInitializationVariables,
+                        assignment.Variable, resourceLedger);
+                    return true;
+
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        if (!CollectA2EEmptyArrayInitializations(nested))
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+
+                case BoundUnsafe unsafeBlock:
+                    return CollectA2EEmptyArrayInitializations(
+                        unsafeBlock.Body);
+
+                case BoundIf branch:
+                    return CollectA2EEmptyArrayInitializations(branch.Then)
+                        && (branch.Else is null
+                            || CollectA2EEmptyArrayInitializations(
+                                branch.Else));
+
+                default:
+                    return true;
+            }
+        }
+
+        bool IsSupportedStorageCallStatement(BoundStatement statement)
+        {
+            return statement is BoundLocal or BoundVacantLocal or BoundIf
+                or BoundExpressionStatement
+                    { Expression: BoundCall }
+                or BoundExpressionStatement
+                    { Expression: BoundConditional
+                        { Type: PrimitiveType.Void } };
+        }
+
+        foreach (var statement in statements.Take(callStatements[0].index))
+        {
+            if (!CollectA2EEmptyArrayInitializations(statement))
+            {
+                return false;
+            }
+        }
+
         if (localDeclarations.Count
                 != function.Variables.Length - function.ParameterCount
             || statements.Take(callStatements[0].index)
-                .Any(static statement => statement is not BoundLocal
-                    and not BoundIf
-                    and not BoundExpressionStatement
-                        { Expression: BoundCall }
-                    and not BoundExpressionStatement
-                        { Expression: BoundConditional
-                            { Type: PrimitiveType.Void } }))
+                .Any(statement => !IsSupportedStorageCallStatement(statement)
+                    && statement is not BoundAssignment
+                        { Value: BoundNativeFixedArrayInitialization }))
         {
             return false;
         }
@@ -1598,9 +1678,25 @@ public static partial class TrRmExecutableCompiler
             var variable = function.Variables[declaration.Variable];
             if (variable.IsOut || variable.IsInit || variable.IsImplicitRef
                 || variable.IsImplicitReferenceTemporary
-                || variable.IsInitializationLocal)
+                || variable.IsInitializationLocal != declaration.IsVacant)
             {
                 return false;
+            }
+
+            if (declaration.IsVacant)
+            {
+                if (!NativeFixedArrayTypes.IsType(variable.Type)
+                    || !nullaryArrayInitializationVariables.Contains(
+                        declaration.Variable)
+                    || !NativeFixedArrayContract.TryGetLayout(variable.Type,
+                        program.Structures, program.NativeFixedArrayTypes,
+                        out var emptyArrayLayout)
+                    || emptyArrayLayout.ElementCount != 0)
+                {
+                    return false;
+                }
+
+                continue;
             }
 
             if (declaration.Variable == targetRead.Variable)
@@ -2065,6 +2161,12 @@ public static partial class TrRmExecutableCompiler
                 }
                 return true;
 
+            case BoundVacantLocal:
+                return true;
+
+            case BoundAssignment assignment:
+                return IsA2EEmptyArrayInitialization(assignment, out _);
+
             case BoundExpressionStatement
                 { Expression: BoundCall call }:
                 return call.Type == PrimitiveType.Void
@@ -2314,6 +2416,34 @@ public static partial class TrRmExecutableCompiler
             Right: BoundRead { Type: var rightType },
             OverflowBehavior: BoundIntegerOverflowBehavior.Checked,
         } binary && leftType == binary.Type && rightType == binary.Type;
+
+    private static bool IsSupportedA2EEmptyArrayInitialization(
+        BoundAssignment assignment, BoundFunction function,
+        BoundProgram program, TrRmArtifactSchema schema,
+        out BoundNativeFixedArrayInitialization initialization)
+    {
+        initialization = null!;
+        if (!schema
+                .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+            || (uint)assignment.Variable >= (uint)function.Variables.Length
+            || !function.Variables[assignment.Variable]
+                .IsInitializationLocal
+            || !NativeFixedArrayTypes.IsType(
+                function.Variables[assignment.Variable].Type)
+            || assignment.Value
+                is not BoundNativeFixedArrayInitialization candidate
+            || candidate.Layout.ElementCount != 0
+            || !candidate.Elements.IsEmpty
+            || !IsSupportedNativeFixedArrayInitialization(
+                function.Variables[assignment.Variable].Type, candidate,
+                program, schema))
+        {
+            return false;
+        }
+
+        initialization = candidate;
+        return true;
+    }
 
     private static int GetBoundCallParameterIndex(BoundCall call,
         int argumentIndex)
@@ -2889,6 +3019,45 @@ public static partial class TrRmExecutableCompiler
             throw Unsupported("The F+S caller Body cannot be flattened.");
         }
 
+        long CountArrayInitializationRecords(BoundStatement statement)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            return statement switch
+            {
+                BoundLocal
+                {
+                    Initializer: BoundNativeFixedArrayInitialization initialization,
+                } => initialization.Elements.IsEmpty
+                    ? 2 : (long)initialization.Elements.Length * 2,
+                BoundAssignment assignment
+                    when IsSupportedA2EEmptyArrayInitialization(
+                        assignment, caller, program, schema, out _) => 2,
+                BoundBlock block => CountNestedArrayInitializationRecords(
+                    block.Statements),
+                BoundUnsafe unsafeBlock
+                    => CountArrayInitializationRecords(unsafeBlock.Body),
+                BoundIf branch => checked(
+                    CountArrayInitializationRecords(branch.Then)
+                    + (branch.Else is null ? 0
+                        : CountArrayInitializationRecords(branch.Else))),
+                _ => 0,
+            };
+        }
+
+        long CountNestedArrayInitializationRecords(
+            ImmutableArray<BoundStatement> nestedStatements)
+        {
+            long count = 0;
+            foreach (var nested in nestedStatements)
+            {
+                count = checked(count
+                    + CountArrayInitializationRecords(nested));
+            }
+
+            return count;
+        }
+
         long recordCount = 3 + storageCall.StorageArguments.Length
             + storageCall.ConditionalEdgeCount
             + storageCall.UnitInitializerCalls.Length;
@@ -2912,15 +3081,8 @@ public static partial class TrRmExecutableCompiler
         }
         foreach (var statement in statements)
         {
-            resourceLedger?.ConsumeWork();
-            if (statement is BoundLocal
-                {
-                    Initializer: BoundNativeFixedArrayInitialization initialization,
-                })
-            {
-                recordCount += initialization.Elements.IsEmpty
-                    ? 2 : (long)initialization.Elements.Length * 2;
-            }
+            recordCount = checked(recordCount
+                + CountArrayInitializationRecords(statement));
         }
 
         foreach (var storageArgument in storageCall.StorageArguments)
@@ -3005,6 +3167,50 @@ public static partial class TrRmExecutableCompiler
                 ? (byte)0x24 : (byte)0x25);
             code.Add(0x10);
             AppendHomeStore(code, 0, destinationHome);
+        }
+
+        void AppendEmptyArrayHomeInitialization(int variable,
+            BoundNativeFixedArrayInitialization initialization)
+        {
+            if (!schema
+                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
+                || (uint)variable >= (uint)caller.Variables.Length
+                || !NativeFixedArrayTypes.IsType(
+                    caller.Variables[variable].Type)
+                || !IsSupportedNativeFixedArrayInitialization(
+                    caller.Variables[variable].Type, initialization, program,
+                    schema)
+                || initialization.Layout.ElementCount != 0
+                || !fixedArrayLayoutRowByType.ContainsKey(
+                    NativeFixedArrayTypes.Index(
+                        caller.Variables[variable].Type)))
+            {
+                throw Unsupported(
+                    "A2E empty initialization requires an exact local array layout.");
+            }
+
+            var homeIndex = homeIndexByVariable[variable];
+            if (homeIndex < 0)
+            {
+                throw Unsupported(
+                    "The A2E empty initialization has no local Home.");
+            }
+
+            var selectionIndex = checked((ushort)records.Count);
+            records.Add(
+                TrRmRegisterBodyRecordWriter.EncodePlaceSelection(1, 3,
+                    1, 0, 2, 0, 0, 0, 0, checked((uint)homeIndex),
+                    maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
+                        getSignatureTypeSpecRef(
+                            caller.Variables[variable].Type))),
+                    schema));
+            AppendRecordPlaceSelectionInstruction(code, selectionIndex);
+
+            var storeIndex = checked((ushort)records.Count);
+            records.Add(
+                TrRmRegisterBodyRecordWriter.EncodeEmptyArrayInitialization(
+                    2, schema));
+            AppendNullaryArrayStoreInstruction(code, storeIndex);
         }
 
         ReserveA3Collection(resourceLedger,
@@ -3717,6 +3923,21 @@ public static partial class TrRmExecutableCompiler
                     AppendUnitInitializerLocal(local);
                     return;
 
+                case BoundVacantLocal:
+                    return;
+
+                case BoundAssignment assignment:
+                    if (!IsSupportedA2EEmptyArrayInitialization(assignment,
+                            caller, program, schema, out var initialization))
+                    {
+                        throw Unsupported(
+                            "F+S supports only exact A2E vacant empty-array assignments.");
+                    }
+
+                    AppendEmptyArrayHomeInitialization(
+                        assignment.Variable, initialization);
+                    return;
+
                 case BoundExpressionStatement
                     { Expression: BoundCall call }
                     when call.Type == PrimitiveType.Void:
@@ -3794,6 +4015,22 @@ public static partial class TrRmExecutableCompiler
         {
             switch (statement)
             {
+                case BoundVacantLocal:
+                    break;
+
+                case BoundAssignment assignment:
+                    if (!IsSupportedA2EEmptyArrayInitialization(assignment,
+                            caller, program, schema,
+                            out var emptyInitialization))
+                    {
+                        throw Unsupported(
+                            "F+S supports only exact A2E vacant empty-array assignments.");
+                    }
+
+                    AppendEmptyArrayHomeInitialization(
+                        assignment.Variable, emptyInitialization);
+                    break;
+
                 case BoundLocal local:
                     var homeIndex = homeIndexByVariable[local.Variable];
                     if (homeIndex < 0)
@@ -3817,11 +4054,7 @@ public static partial class TrRmExecutableCompiler
                                 is not BoundNativeFixedArrayInitialization arrayInitialization
                             || !IsSupportedNativeFixedArrayInitialization(
                                 caller.Variables[local.Variable].Type,
-                                arrayInitialization, program, schema)
-                            || !fixedArrayLayoutRowByType.TryGetValue(
-                                NativeFixedArrayTypes.Index(
-                                    caller.Variables[local.Variable].Type),
-                                out var fixedArrayLayoutRow))
+                                arrayInitialization, program, schema))
                         {
                             throw Unsupported(
                                 "The A2 Body array initializer is not a complete supported local.");
@@ -3830,40 +4063,17 @@ public static partial class TrRmExecutableCompiler
                         var arrayType = caller.Variables[local.Variable].Type;
                         if (arrayInitialization.Layout.ElementCount == 0)
                         {
-                            if (!schema
-                                    .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
-                                || arrayInitialization.Layout.ByteExtent != 0)
-                            {
-                                throw Unsupported(
-                                    "The A2E nullary initialization requires an exact empty fixed array.");
-                            }
-
-                            var emptySelectionIndex
-                                = checked((ushort)records.Count);
-                            records.Add(
-                                TrRmRegisterBodyRecordWriter
-                                    .EncodePlaceSelection(1, 3, 1, 0, 2, 0,
-                                        0, 0, 0,
-                                        checked((uint)homeIndex),
-                                        maps.GetTypeMapIndex(
-                                            CreateStandardBodyTypeMapToken(
-                                                getSignatureTypeSpecRef(
-                                                    arrayType))),
-                                        schema));
-                            code.Add(0xD8);
-                            code.Add(2);
-                            code.Add((byte)emptySelectionIndex);
-                            code.Add((byte)(emptySelectionIndex >> 8));
-
-                            var emptyStoreIndex = checked((ushort)records.Count);
-                            records.Add(
-                                TrRmRegisterBodyRecordWriter
-                                    .EncodeEmptyArrayInitialization(2, schema));
-                            code.Add(0xD9);
-                            code.Add(0);
-                            code.Add((byte)emptyStoreIndex);
-                            code.Add((byte)(emptyStoreIndex >> 8));
+                            AppendEmptyArrayHomeInitialization(
+                                local.Variable, arrayInitialization);
                             break;
+                        }
+
+                        if (!fixedArrayLayoutRowByType.TryGetValue(
+                                NativeFixedArrayTypes.Index(arrayType),
+                                out var fixedArrayLayoutRow))
+                        {
+                            throw Unsupported(
+                                "The A2 Body array initializer has no mapped layout row.");
                         }
 
                         foreach (var initializer in
@@ -3918,6 +4128,12 @@ public static partial class TrRmExecutableCompiler
                             elementIndex < arrayInitialization.Elements.Length;
                             elementIndex++)
                         {
+                            var isNullaryEmptyChild
+                                = arrayInitialization.Elements[elementIndex]
+                                    is BoundNativeFixedArrayInitialization {
+                                        Layout.ElementCount: 0,
+                                        Elements.IsEmpty: true,
+                                    };
                             var initializationSelectionIndex
                                 = checked((ushort)records.Count);
                             records.Add(
@@ -3933,11 +4149,19 @@ public static partial class TrRmExecutableCompiler
                                                 getSignatureTypeSpecRef(
                                                     elementType))),
                                         schema));
-                            code.Add(0xD8);
-                            code.Add(2);
-                            code.Add((byte)initializationSelectionIndex);
-                            code.Add((byte)(initializationSelectionIndex
-                                >> 8));
+                            if (isNullaryEmptyChild)
+                            {
+                                AppendRecordPlaceSelectionInstruction(code,
+                                    initializationSelectionIndex);
+                            }
+                            else
+                            {
+                                code.Add(0xD8);
+                                code.Add(2);
+                                code.Add((byte)initializationSelectionIndex);
+                                code.Add((byte)(initializationSelectionIndex
+                                    >> 8));
+                            }
 
                             var initializationStoreIndex
                                 = checked((ushort)records.Count);
@@ -3972,19 +4196,34 @@ public static partial class TrRmExecutableCompiler
                                             .EncodeSemanticStore(1, 1, 1, 1,
                                                 2, 14));
                                 }
-                                else
+                                else if (isNullaryEmptyChild
+                                    && schema
+                                        .UsesForeignInvocationStorageFixedArrayEmptyInitialization())
                                 {
                                     records.Add(
                                         TrRmRegisterBodyRecordWriter
                                             .EncodeEmptyArrayInitialization(2,
                                                 schema));
                                 }
+                                else
+                                {
+                                    throw Unsupported(
+                                        "The A2 Body array element has no admitted store encoding.");
+                                }
                             }
 
-                            code.Add(0xD9);
-                            code.Add(0);
-                            code.Add((byte)initializationStoreIndex);
-                            code.Add((byte)(initializationStoreIndex >> 8));
+                            if (isNullaryEmptyChild)
+                            {
+                                AppendNullaryArrayStoreInstruction(code,
+                                    initializationStoreIndex);
+                            }
+                            else
+                            {
+                                code.Add(0xD9);
+                                code.Add(0);
+                                code.Add((byte)initializationStoreIndex);
+                                code.Add((byte)(initializationStoreIndex >> 8));
+                            }
                             if (elementIndex + 1
                                 < arrayInitialization.Elements.Length)
                             {
@@ -4578,6 +4817,38 @@ public static partial class TrRmExecutableCompiler
         TrRmA3StagedList<byte> code, ushort recordIndex)
     {
         code.Add(0xE0);
+        code.Add(0);
+        code.Add((byte)recordIndex);
+        code.Add((byte)(recordIndex >> 8));
+    }
+
+    private static void AppendRecordPlaceSelectionInstruction(
+        TrRmA3StagedList<byte> code, ushort recordIndex)
+    {
+        if (recordIndex <= 0x0F)
+        {
+            code.Add(0x91);
+            code.Add((byte)((recordIndex << 4) | 2));
+            return;
+        }
+
+        code.Add(0xD8);
+        code.Add(2);
+        code.Add((byte)recordIndex);
+        code.Add((byte)(recordIndex >> 8));
+    }
+
+    private static void AppendNullaryArrayStoreInstruction(
+        TrRmA3StagedList<byte> code, ushort recordIndex)
+    {
+        if (recordIndex <= byte.MaxValue)
+        {
+            code.Add(0x92);
+            code.Add((byte)recordIndex);
+            return;
+        }
+
+        code.Add(0xD9);
         code.Add(0);
         code.Add((byte)recordIndex);
         code.Add((byte)(recordIndex >> 8));

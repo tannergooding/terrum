@@ -641,7 +641,6 @@ public static partial class SemanticVerifier
                             && (function.IsExternal || function.IndexedBody is not null
                                 || variableIndex < function.ParameterCount + (function.IsConstructor ? 1 : 0)
                                 || variable.IsOut || variable.IsInit
-                                || variable.IsInitializationLocal
                                 || !NativeFixedArrayContract.TryGetLayout(
                                     variable.Type, program.Structures,
                                     program.NativeFixedArrayTypes,
@@ -3149,8 +3148,12 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(assignment.Span, "Ownership");
                 }
-                var assignmentCouldComplete = CanCompleteNormally(assignment.Value,
-                    initialized, program, ref remaining, depth + 1);
+                var nullaryArrayInitialization
+                    = assignment.Value is BoundNativeFixedArrayInitialization
+                        { Layout.ElementCount: 0, Elements.IsEmpty: true };
+                var assignmentCouldComplete = nullaryArrayInitialization
+                    || CanCompleteNormally(assignment.Value, initialized,
+                        program, ref remaining, depth + 1);
                 if (assignmentCouldComplete)
                 {
                     CheckBackingInvalidation(assignment.Variable, initialized, assignment.Span);
@@ -3168,9 +3171,29 @@ public static partial class SemanticVerifier
                     initialized.Dependencies?.TransferBackingSource(
                         assignmentMove.Variable, assignment.Variable);
                 }
-                var assignmentCompletes = EvaluateExpression(assignment.Value, initialized, fieldMasks,
-                    declarations, function, program, ref remaining, depth + 1, failures,
-                    cleanupCounterStep: cleanupCounterStep);
+                bool assignmentCompletes;
+                if (nullaryArrayInitialization)
+                {
+                    if (!function.Variables[assignment.Variable].IsInitializationLocal
+                        || !initialized.IsVacant(assignment.Variable))
+                    {
+                        throw InvalidEffect(assignment.Span, "NativeImport");
+                    }
+
+                    VerifyNativeFixedArrayInitialization(assignment.Value,
+                        assignment.Variable, initialized, fieldMasks,
+                        declarations, function, program, ref remaining,
+                        depth + 1, failures);
+                    assignmentCompletes = true;
+                }
+                else
+                {
+                    assignmentCompletes = EvaluateExpression(
+                        assignment.Value, initialized, fieldMasks,
+                        declarations, function, program, ref remaining,
+                        depth + 1, failures,
+                        cleanupCounterStep: cleanupCounterStep);
+                }
                 if (assignment.Value.Type != function.Variables[assignment.Variable].Type)
                 {
                     throw Invalid();
