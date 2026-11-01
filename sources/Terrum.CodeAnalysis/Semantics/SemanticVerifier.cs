@@ -3839,10 +3839,11 @@ public static partial class SemanticVerifier
                 return false;
             case BoundExpressionStatement expressionStatement:
                 var effect = UnwrapUnsafeExpression(expressionStatement.Expression);
-                if (effect is not (BoundCall or BoundIndirectCall or BoundViewRead or BoundUpdate
-                    or BoundNominalUpdate or BoundCompoundAssignment or BoundNativeFixedArrayWrite
-                    or BoundNativeFixedArrayPathWrite or BoundNativePointerWrite
-                    or BoundReferenceWrite))
+                if (effect.Type != PrimitiveType.Void
+                    && effect is not (BoundCall or BoundIndirectCall or BoundViewRead
+                        or BoundUpdate or BoundNominalUpdate or BoundCompoundAssignment
+                        or BoundNativeFixedArrayWrite or BoundNativeFixedArrayPathWrite
+                        or BoundNativePointerWrite or BoundReferenceWrite))
                 {
                     throw Invalid();
                 }
@@ -6675,6 +6676,7 @@ public static partial class SemanticVerifier
             allowVoid: expression is BoundCall or BoundIndirectCall
                 or BoundUnsafeExpression { Type: PrimitiveType.Void }
                 or BoundConstant { Type: PrimitiveType.Void }
+                or BoundConditional { Type: PrimitiveType.Void }
                 or BoundNativeFixedArrayElement { Type: PrimitiveType.Void }
                 or BoundNativeFixedArrayPathElement { Type: PrimitiveType.Void }
                 or BoundNativeFixedArrayWrite or BoundNativeFixedArrayPathWrite
@@ -8356,8 +8358,8 @@ public static partial class SemanticVerifier
             case BoundConditional conditional:
                 if (conditional.Condition is null || conditional.WhenTrue is null || conditional.WhenFalse is null
                     || conditional.Condition.Type != PrimitiveType.Bool
-                    || conditional.WhenTrue.Type != conditional.Type || conditional.WhenFalse.Type != conditional.Type
-                    || conditional.Type == PrimitiveType.Void)
+                    || conditional.WhenTrue.Type != conditional.Type
+                    || conditional.WhenFalse.Type != conditional.Type)
                 {
                     throw Invalid();
                 }

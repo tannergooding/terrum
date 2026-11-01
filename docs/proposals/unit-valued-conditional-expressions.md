@@ -27,7 +27,7 @@ The [specification index](../specs/README.md) reaches these owners:
 | [Unit values](../specs/language/expressions-and-statements.md#the-zero-data-void-value) and [result use](../specs/language/expressions-and-statements.md#using-results-and-explicit-discard) | `void` is inhabited, Copy and has exactly `()`. Ordinary value/result positions admit it; unit expression statements and expression-bodied unit results are meaningful. There is no implicit discard/conversion from arbitrary T to `void`. |
 | [Evaluation](../specs/language/expressions-and-statements.md#evaluation-and-expression-boundaries) and [Boolean composition](../specs/language/initialization-and-flow.md#boolean-and-pattern-composition) | A conditional evaluates only its selected branch and joins facts from possible reached edges. Neither passage excludes a unit result. |
 | [Authority](../specs/overview/conformance.md#normative-status-and-authority) | Compiler behavior and implementation inventories do not define or narrow normative contracts. |
-| [Binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs), `SyntaxKind.ConditionalExpression`; [verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs), `BoundConditional` validation | The Binder explicitly rejects `resultType == PrimitiveType.Void` with TRM3007; the verifier explicitly rejects `conditional.Type == PrimitiveType.Void`. These establish the current source boundary, not an accepted exclusion. |
+| [Binder](../../sources/Terrum.CodeAnalysis/Semantics/Binder.cs), `SyntaxKind.ConditionalExpression`; [verifier](../../sources/Terrum.CodeAnalysis/Semantics/SemanticVerifier.cs), `BoundConditional` validation | The earlier source implementation rejected `resultType == PrimitiveType.Void` with TRM3007 and the verifier rejected `conditional.Type == PrimitiveType.Void`. Provisional source support now admits exact Unit/Unit arms in return and expression-statement contexts and exercises both selected arms through native JIT. Explicit/inferred Unit local declarations remain a separate source gap; none of this approves the proposal or establishes A2EU Body/runtime support. |
 
 This is a **genuine missing explicit applicability rule**, not evidence of an
 intentional accepted non-`void` contract. First-class unit does not make every
@@ -122,6 +122,11 @@ responsibilities still need their ordinary joins. After **all N captures**
 complete, A2EU's existing exact typed R14 `()` and ordinary unit stores can
 install those logical values. R14 is not a predecessor binding, proof of
 completion, or permission to initialize early; None is not a unit store source.
+
+The source-level both-arm behavior is exercised by
+[`UnitConditionalExecutesOnlyItsSelectedArm`](../../tests/Terrum.CodeAnalysis.Tests/Semantics/ConditionalExpressionTests.cs).
+It does not establish conditional capture in a Standard Body; explicit and
+inferred Unit local declarations remain unimplemented.
 
 Current [array Body production](../../sources/Terrum.CodeAnalysis/Modules/TrRmExecutableCompiler.NativeAddress.cs),
 including `IsSupportedNativeFixedArrayInitialization`, admits unit constants

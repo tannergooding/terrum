@@ -6610,7 +6610,8 @@ internal sealed partial class Binder
                     && (uint)call.Function < (uint)_signatures.Count
                     && _signatures[call.Function].IsConstructor
                     && _signatures[call.Function].DoesNotReturn;
-                if (!isDirectCall && !isNonReturningConstruction)
+                if (!isDirectCall && !isNonReturningConstruction
+                    && boundExpression.Type != PrimitiveType.Void)
                 {
                     Report("TRM3009", "Only direct calls and updates may be used as expression statements.", expressionNode.Span);
                 }
@@ -6697,7 +6698,7 @@ internal sealed partial class Binder
                     if (valueNode is not null)
                     {
                         var value = BindExpression(valueNode, PrimitiveType.Void);
-                        if (value is BoundCall or BoundUnsafeExpression { Expression: BoundCall })
+                        if (value.Type == PrimitiveType.Void)
                         {
                             return new BoundBlock(
                                 [new BoundExpressionStatement(value, valueNode.Span), new BoundReturn(null, node.Span)],
@@ -7856,10 +7857,10 @@ internal sealed partial class Binder
                     : falseKnown is null || trueKnown == falseKnown ? trueKnown : null);
                 var whenTrue = BindExpression(trueNode, resultType);
                 var whenFalse = BindExpression(falseNode, resultType);
-                if (resultType is null || resultType == PrimitiveType.Void
+                if (resultType is null
                     || whenTrue.Type != resultType || whenFalse.Type != resultType)
                 {
-                    Report("TRM3007", "Conditional arms require the same known, non-void result type or an expected result type.", node.Span);
+                    Report("TRM3007", "Conditional arms require the same known result type or an expected result type.", node.Span);
                 }
                 expression = new BoundConditional(condition, whenTrue, whenFalse,
                     resultType ?? PrimitiveType.Int32, node.Span);

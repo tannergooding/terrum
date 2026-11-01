@@ -2108,7 +2108,8 @@ internal sealed class Parser
             offset++;
         }
 
-        return Peek(offset).Kind == TokenKind.Identifier;
+        return Peek(offset).Kind == TokenKind.Identifier
+            && Peek(offset + 1).Kind != TokenKind.OpenParen;
     }
 
     private SyntaxNode ParseExpression(int parentPrecedence = 0, bool allowGreaterAsTypeTerminator = false)

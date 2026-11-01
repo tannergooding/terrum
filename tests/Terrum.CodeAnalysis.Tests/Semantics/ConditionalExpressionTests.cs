@@ -45,6 +45,22 @@ public sealed class ConditionalExpressionTests
         Assert.That(supplied.Root.DescendantNodes().Select(node => node.Kind), Is.EqualTo(ordinary.Root.DescendantNodes().Select(node => node.Kind)));
         Assert.That(global::System.Linq.Enumerable.Any(lexical.Tokens,token => token.Kind == TokenKind.Question),Is.True);
     }
+
+    [Test]
+    public void ConditionalExpressionStatementIsNotParsedAsAnOptionalLocal()
+    {
+        const string Source
+            = "void Main(bool flag) { flag ? Left() : Right(); }";
+        var tree = SyntaxTree.Parse(Source);
+        Assert.That(tree.HasErrors, Is.False,
+            string.Join(Environment.NewLine, tree.Diagnostics));
+        var statement = global::System.Linq.Enumerable.Single(
+            tree.Root.DescendantNodes(),
+            static node => node.Kind == SyntaxKind.ExpressionStatement);
+        Assert.That(((SyntaxNode)statement.Children[0]).Kind,
+            Is.EqualTo(SyntaxKind.ConditionalExpression));
+    }
+
     [TestCase("true ? : 1",TokenKind.Identifier)]
     [TestCase("true ? 1 2",TokenKind.Colon)]
     [TestCase("true ? 1 : ",TokenKind.Identifier)]
@@ -84,6 +100,72 @@ public sealed class ConditionalExpressionTests
             """;
         Assert.That(NativeJit.Execute(Compile(Source, policy), policy), Is.EqualTo(42));
     }
+
+    [TestCase(NativeRuntimePolicy.FailFast, true, 1)]
+    [TestCase(NativeRuntimePolicy.FailFast, false, 2)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions, true, 1)]
+    [TestCase(NativeRuntimePolicy.CheckedExceptions, false, 2)]
+    public void UnitConditionalExecutesOnlyItsSelectedArm(
+        NativeRuntimePolicy policy, bool selectTrue, int expected)
+    {
+        var source = $$"""
+            struct UnitChooser {
+                public mut int32 Value;
+                public UnitChooser() { Value = 0; }
+                public mut void SetFirst() { Value = 1; }
+                public mut void SetSecond() { Value = 2; }
+                public mut void Choose(bool flag) {
+                    flag ? SetFirst() : SetSecond();
+                }
+                public mut void ChooseReturn(bool flag) {
+                    return flag ? SetFirst() : SetSecond();
+                }
+            }
+
+            int32 Main() {
+                mut UnitChooser chooser = new UnitChooser();
+                chooser.Choose({{selectTrue.ToString().ToLowerInvariant()}});
+                chooser.ChooseReturn({{selectTrue.ToString().ToLowerInvariant()}});
+                return chooser.Value;
+            }
+            """;
+        var program = Compile(source, policy);
+        var unitConditionalCount = 0;
+        foreach (var function in program.Functions)
+        {
+            Assert.That(BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundConditional
+                        { Type: PrimitiveType.Void })
+                    {
+                        unitConditionalCount++;
+                    }
+                }), Is.True);
+        }
+        Assert.That(unitConditionalCount, Is.EqualTo(2));
+        Assert.That(NativeJit.Execute(program, policy), Is.EqualTo(expected));
+    }
+
+    [Test]
+    public void UnitConditionalRejectsNonBooleanConditionsAndMixedArms()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            void Empty() {}
+            int32 Value() { return 1; }
+            void MixedArms(bool flag) {
+                return flag ? Empty() : Value();
+            }
+            void WrongCondition(int32 flag) {
+                return flag ? Empty() : Empty();
+            }
+            int32 Main() { return 0; }
+            """));
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Count(diagnostic =>
+            diagnostic.Code == "TRM3007"), Is.GreaterThanOrEqualTo(2));
+    }
+
     [TestCase(NativeRuntimePolicy.FailFast)]
     [TestCase(NativeRuntimePolicy.CheckedExceptions)]
     public void GenericAndRequiredConstantsEvaluateSelectedArm(NativeRuntimePolicy policy)

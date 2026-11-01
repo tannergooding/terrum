@@ -78,10 +78,15 @@ canonical re-emission. It also retains checked fixed-array element-address
 arguments as PlaceSelection plus StorageAddress operations before the direct
 call, preserving the dynamic index Home through source-free reconstruction.
 These checks establish encoded ordering and re-emission, not runtime failure
-behavior. This remains a bounded operand profile; other effectful expressions,
-cleanup/loan transport, and complete JIT/AOT runtime qualification remain open. The
-bounded F route runs/builds direct NativeImport
-executables and emits direct-import libraries. A provisional
+behavior. Provisional source support admits exact Unit/Unit conditional
+expressions in return and expression-statement contexts; both selected arms
+pass native JIT under both runtime policies. Explicit/inferred Unit locals
+remain unsupported, and the proposal remains unapproved. The Standard A2EU
+Body path is still single-block and rejects `BoundConditional`; conditional
+Body reconstruction and A2EU JIT/AOT runtime qualification remain open.
+Other effectful expressions and cleanup/loan transport are also incomplete.
+The bounded F route runs/builds direct NativeImport executables and emits
+direct-import libraries. A provisional
 NativeModuleCompiler path verifies one retained Import against one selected
 F/F+S provider and carries the checked origin/expectation plan through JIT
 and PE lowering. The source-free loader selects exact non-first root/provider
