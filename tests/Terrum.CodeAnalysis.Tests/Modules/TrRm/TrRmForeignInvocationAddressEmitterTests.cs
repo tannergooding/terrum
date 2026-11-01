@@ -5156,6 +5156,56 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
+    public void StandardFProviderClosureUsesExactUnicodeModuleIdentity()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-contracts-1";
+        const string rootIdentity = "SupplementaryRoot";
+        const string supplementaryProviderIdentity = "Provider-\U0001F680";
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration:
+                NativeCoreRegistrationTests.CreateRegistration());
+        var providerCompilation = CreateMultipleImportProviderCompilation(
+            "Owned", "GetCurrentProcessId", core);
+        var supplementaryProviderArtifact =
+            TrRmExecutableCompiler.EmitStandard(
+                providerCompilation.Program!, supplementaryProviderIdentity,
+                schemaIdentity, 1);
+        var supplementaryRootArtifact = CreateRootMethodImportArtifact(
+            rootIdentity, "Owned", "Owned", "Owned", core);
+        supplementaryRootArtifact = ReencodeFirstModuleRefIdentity(
+            supplementaryRootArtifact, supplementaryProviderIdentity,
+            encoding: 2);
+        var loaded = TrRmExecutableCompiler.LoadStandard(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                supplementaryRootArtifact), rootIdentity, [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    supplementaryProviderArtifact),
+            ]);
+        Assert.That(loaded.Functions.Single(static function =>
+            function.Name == "Owned").ModuleImport!.ProducerIdentity,
+            Is.EqualTo(supplementaryProviderIdentity));
+
+        const string ringSymbolIdentity = "\u212B";
+        const string composedRingIdentity = "\u00C5";
+        var ringRootArtifact = CreateRootMethodImportArtifact(
+            "RingRoot", "Owned", "Owned", "Owned", core);
+        ringRootArtifact = ReencodeFirstModuleRefIdentity(
+            ringRootArtifact, ringSymbolIdentity, encoding: 2);
+        var composedRingProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, composedRingIdentity,
+            schemaIdentity, 1);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    ringRootArtifact), "RingRoot", [
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        composedRingProviderArtifact),
+                ]));
+    }
+
+    [Test]
     public void StandardFProviderClosureSupportsSelfAndMutualDependencies()
     {
         const string schemaIdentity

@@ -463,17 +463,19 @@ preserves `NativeParameter` extent `0xffffffff` and rejects a provider with an
 incompatible extent. A four-Module acyclic Root→P→Q→R chain now also loads from
 one artifact with Root last. A second ordering Q,Root,R,P re-encodes the
 ModuleRef, Import, MethodDef, TypeSpec and Body-map references and preserves
-the selected root and checked lowering plan. The final Debug fast build and
-combined NativeAddress/provider-CLI selection passed 146/146 with zero skips
-at `artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_25_12_net11.0.trx`.
+the selected root and checked lowering plan. Unicode identity coverage now
+also binds a supplementary scalar (`U+1F680`) exactly and rejects normalization
+of `U+212B` to `U+00C5`. The final Debug fast build and combined
+NativeAddress/provider-CLI selection passed 147/147 with zero skips at
+`artifacts\\tst\\tagoo_GOODING-ZEN4_2026-11-01_09_30_23_net11.0.trx`.
 The normal analyzer build remains at its existing baseline: 709 errors and
 353 normalized identities, with zero additions/removals against
 `artifacts\\log\\compiler-adoption-final-debug-analyzers.log`; output:
-`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final10.log`.
+`artifacts\\log\\compiler-adoption-f-provider-closure-analyzers-final11.log`.
 This remains provisional, not formal approval or full Standard conformance.
 Further evidence is still required for additional Module/Import/Body
-permutation and re-encoding cases, Unicode identity cases beyond the exercised
-NFC/NFD pair and row/map/work limits beyond the tested fan-in of 17. Same-name expanded lowering,
+permutation and re-encoding cases and row/map/work limits beyond the tested
+fan-in of 17. Same-name expanded lowering,
 general source production/
 re-emission of non-target Imports and broader schema compositions remain
 unsupported.
