@@ -545,6 +545,178 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
     }
 
+    [Test]
+    public async Task StandardA2ESourceFreeJitAndAotExecuteEmptyInitialization()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-initialization-1";
+        const string moduleIdentity = "a2e-empty-array-runtime";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetSystemTimeAdjustment",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(3, Write, NoEscape, 1)]
+            internal extern int32 GetSystemTimeAdjustment(
+                write ptr<uint32> adjustment,
+                write ptr<uint32> increment,
+                write ptr<int32> disabled);
+
+            int32 Main() {
+                [uint32; 0] ordinary = [];
+                init [uint32; 0] fixedEmpty;
+                fixedEmpty = [];
+                init mut [uint32; 0] mutableEmpty;
+                mutableEmpty = [];
+                int32 zeroIndex = 0;
+                mut [[uint32; 0]; 2] nested = [[], []];
+                mut uint32 adjustment = 0;
+                mut uint32 increment = 0;
+                mut int32 disabled = -1;
+                unsafe {
+                    var callback = &GetSystemTimeAdjustment;
+                    callback(&adjustment, &increment, &disabled);
+                }
+                return disabled;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var initializations
+            = new List<BoundNativeFixedArrayInitialization>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeFixedArrayInitialization init)
+                {
+                    initializations.Add(init);
+                }
+            }), Is.True);
+        Assert.That(initializations, Has.Count.EqualTo(6));
+        Assert.That(initializations.All(static init =>
+            init.Layout.ByteExtent == 0), Is.True);
+        Assert.That(initializations.Count(static init =>
+            init.Layout.ElementCount == 0), Is.EqualTo(5));
+
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyInitializationDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft(
+                        artifact));
+        var mainRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                mainRow = row;
+                break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        tables.ValidateRegisterBodyMapsForMethod(mainRow);
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(mainRow), tables.Contracts.Count);
+        var storageAddressRecordCount = 0;
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            storageAddressRecordCount += body.GetRecord(recordIndex)[0]
+                == 0x0E ? 1 : 0;
+        }
+        Assert.That(storageAddressRecordCount, Is.EqualTo(3),
+            "The only storage addresses are the three scalar import outputs.");
+
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+        TestContext.WriteLine(
+            $"A2E source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={typeof(TrRmExecutableCompiler).Assembly.Location}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(typeof(TrRmExecutableCompiler).Assembly.Location)))}.");
+        var jitResult = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2E source-free JIT: policy=FailFast; actual={jitResult}; allowed-disabled-range=0..1.");
+        Assert.That(jitResult, Is.InRange(0, 1));
+
+        var image = NativeModuleCompiler.EmitStandardExecutable(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast);
+        Assert.That(image, Is.Not.Empty);
+        var imagePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-{moduleIdentity}-{Guid.NewGuid():N}.exe");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            process = Process.Start(new ProcessStartInfo(imagePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException(
+                "The A2E native executable was not started.");
+            var processId = process.Id;
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"A2E native executable exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            var output = await stdout.ConfigureAwait(true);
+            var error = await stderr.ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"A2E source-free AOT: policy=FailFast; pid={processId}; actual={process.ExitCode}; allowed-disabled-range=0..1; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
+            Assert.That(process.ExitCode, Is.InRange(0, 1));
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
     [TestCase("init [uint32; 0] empty; return int32(empty[0]);")]
     [TestCase("init [uint32; 0] empty; empty = []; empty = []; return 0;")]
     [TestCase("init mut [uint32; 0] empty; empty = []; empty = []; return 0;")]
