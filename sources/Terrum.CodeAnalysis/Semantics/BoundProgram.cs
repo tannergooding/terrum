@@ -602,6 +602,26 @@ public sealed record BoundStruct(string Name, ImmutableArray<BoundStructField> F
     /// <summary>Whether this Copy value has the storage and call ABI of its sole scalar field.</summary>
     public bool IsTransparent { get; init; }
 
+    internal bool IsUnion
+        => !IsSequential && !IsTransparent
+            && BlittableTargetRequirement
+                == FixedLayoutStorage.WindowsX64TargetRequirement;
+    internal byte LayoutKind
+    {
+        get
+        {
+            if (IsSequential && !IsTransparent)
+            {
+                return 1;
+            }
+            if (IsTransparent && !IsSequential)
+            {
+                return 3;
+            }
+            return IsUnion ? (byte)2 : (byte)0;
+        }
+    }
+
     /// <summary>Whether a value has one noncopyable owner.</summary>
     public bool IsUnique { get; init; }
 

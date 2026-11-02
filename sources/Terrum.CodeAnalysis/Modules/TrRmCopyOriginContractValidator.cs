@@ -477,7 +477,7 @@ internal static class TrRmCopyOriginContractValidator
         var (first, count) = types.GetLayoutRange(typeDefRow);
         for (var layout = first; layout < first + count; layout++)
         {
-            if (layouts.GetLayoutKind(layout) is not (0 or 1 or 3))
+            if (layouts.GetLayoutKind(layout) is not (0 or 1 or 2 or 3))
             {
                 return false;
             }

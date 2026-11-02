@@ -124,6 +124,91 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void DerivesUnionArrayStrideFromLargestRootlessAlternative()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
+            stride: 4, extent: 8, alignment: 4, layoutKind: 2);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+
+        Assert.That(tables.FixedArrayLayouts.GetRow(1).ElementStride,
+            Is.EqualTo(4));
+        Assert.That(tables.FixedArrayLayouts.GetRow(1).ByteExtent,
+            Is.EqualTo(8));
+        Assert.That(tables.FixedArrayLayouts.GetRow(1).Alignment,
+            Is.EqualTo(4));
+    }
+
+    [Test]
+    public void StandardA2SourceFreeRoundTripsRawUnionArrayFields()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-raw-union-array-types";
+        const string source = """
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public uint32 Narrow;
+                public ptr<int32> Pointer;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public [RawWord; 2] Values;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+        var rawWordRow = 0;
+        for (var row = 1; row <= tables.TypeDefs.Count; row++)
+        {
+            if (tables.TypeDefs.GetName(row) == "RawWord")
+            {
+                rawWordRow = row;
+                break;
+            }
+        }
+        Assert.That(rawWordRow, Is.GreaterThan(0));
+        var rawWordLayout = tables.Layouts.GetLayoutForProfile(rawWordRow, 1);
+        Assert.That(tables.Layouts.GetLayoutKind(rawWordLayout),
+            Is.EqualTo(2));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(1));
+        var arrayLayout = tables.FixedArrayLayouts.GetRow(1);
+        Assert.That(arrayLayout.OwnerModuleRow, Is.EqualTo(1));
+        Assert.That(arrayLayout.TargetProfileRef, Is.EqualTo(1));
+        Assert.That(arrayLayout.ElementStride, Is.EqualTo(8));
+        Assert.That(arrayLayout.ByteExtent, Is.EqualTo(16));
+        Assert.That(arrayLayout.Alignment, Is.EqualTo(8));
+
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var loadedUnion = loaded.Structures.Single(static structure =>
+            structure.Name == "RawWord");
+        Assert.That(loadedUnion.IsUnion, Is.True);
+        Assert.That(loadedUnion.Size, Is.EqualTo(8));
+        Assert.That(loadedUnion.Fields[0].Offset, Is.Zero);
+        Assert.That(loadedUnion.Fields[1].Offset, Is.Zero);
+        Assert.That(loadedUnion.Fields[0].Size, Is.EqualTo(4));
+        Assert.That(loadedUnion.Fields[1].Size, Is.EqualTo(8));
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [Test]
     public void A3RootLedgerAccountsForASelectedA2Provider()
     {
         var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
@@ -322,6 +407,20 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
                     TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayCopyDraft(artifact)));
+    }
+
+    [Test]
+    public void RejectsUnionArrayElementWithoutDeclaredCopy()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: false,
+            stride: 4, extent: 8, alignment: 4, layoutKind: 2);
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(
+                            artifact)));
     }
 
     [Test]
@@ -535,6 +634,89 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         Assert.That(bindings[0].ProviderArtifactIndex, Is.EqualTo(1));
         Assert.That(bindings[0].ProviderModuleRow, Is.EqualTo(1));
         Assert.That(bindings[0].ProviderTypeDefRow, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void BindsImportedArrayElementToExternalUnionCopyProvider()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        var consumerArtifact = CreateA2SourceTypeReferenceConsumerArtifact(
+            copyLayoutKind: 2);
+        var providerArtifact = CreateCopyProviderArtifact(
+            prependUnrelatedType: true, providerLayoutKind: 2);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        consumerArtifact));
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 0, 1, 1),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
+
+        var bindings = TrRmFixedArrayProviderBindingValidator.Validate(
+            tables, [consumerArtifact, providerArtifact],
+            [schemaIdentity, schemaIdentity], modules, 1);
+
+        Assert.That(bindings, Has.Length.EqualTo(1));
+        Assert.That(bindings[0].ProviderArtifactIndex, Is.EqualTo(1));
+        Assert.That(bindings[0].ProviderModuleRow, Is.EqualTo(1));
+        Assert.That(bindings[0].ProviderTypeDefRow, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void RejectsSequentialProviderForExpectedUnionArrayElement()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        var consumerArtifact = CreateA2SourceTypeReferenceConsumerArtifact(
+            copyLayoutKind: 2);
+        var providerArtifact = CreateCopyProviderArtifact(
+            providerLayoutKind: 1);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        consumerArtifact));
+        var modules = ImmutableArray.Create(
+            new TrRmStandardModuleSelection(0, 1, "Root", 1, 0, 0, 1, 1),
+            new TrRmStandardModuleSelection(1, 1, "Provider", 1, 0, 0, 1, 1));
+
+        _ = Assert.Throws<InvalidDataException>(() =>
+            ValidateA2ProviderBinding(consumerArtifact, providerArtifact,
+                schemaIdentity, modules));
+    }
+
+    [Test]
+    public void A2SourceReferencePreservesUnionProviderLayout()
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        var consumerArtifact = CreateA2SourceTypeReferenceConsumerArtifact(
+            copyLayoutKind: 2);
+        var providerArtifact = CreateCopyProviderArtifact(
+            providerLayoutKind: 2);
+        var reference = TrRmExecutableCompiler.CreateStandardReference(
+            new TrRmStandardArtifactInput(schemaIdentity, consumerArtifact),
+            "Root",
+            [
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    providerArtifact),
+            ],
+            ["ContainerKey"]);
+
+        var importedUnion = reference.Structures.Single(
+            static structure => structure.Name == "Pair");
+        Assert.That(importedUnion.IsUnion, Is.True);
+        var sourceConsumer = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public Container Value;
+            }
+            """), reference);
+        Assert.That(sourceConsumer.HasErrors, Is.False,
+            string.Join(Environment.NewLine, sourceConsumer.Diagnostics));
     }
 
     [Test]
@@ -2656,7 +2838,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     private static byte[] CreateA2SourceTypeReferenceConsumerArtifact(
-        bool includeArrayField = true)
+        bool includeArrayField = true, byte copyLayoutKind = 1)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -2732,9 +2914,12 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var profiles = new TrRmTargetProfileTableReader(profilesBytes, 1,
             schema);
         var profileContainerFieldFirst = 3 + containerFieldCount;
+        var copyPack = copyLayoutKind is 1 or 2 ? 16u : 0u;
         var layoutsBytes = TrRmLayoutTableWriter.Encode([
-            new TrRmLayoutRow(1, 0, 1, 0, 0, 16, 1, 1),
-            new TrRmLayoutRow(1, 1, 1, 1, 0, 16, 2, 1),
+            new TrRmLayoutRow(1, 0, copyLayoutKind, 0, 0, copyPack,
+                1, 1),
+            new TrRmLayoutRow(1, 1, copyLayoutKind, 1, 0, copyPack,
+                2, 1),
             new TrRmLayoutRow(2, 0, 1, 0, 0, 16, 3,
                 containerFieldCount),
             new TrRmLayoutRow(2, 1, 1, 1, 0, 16,
@@ -3751,7 +3936,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
     private static byte[] CreateCopyProviderArtifact(
         bool prependUnrelatedType = false, uint providerPack = 16,
-        uint providerAlignment = 0)
+        uint providerAlignment = 0, byte providerLayoutKind = 1)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -3851,13 +4036,15 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         {
             var defaultLayoutRow = layoutRows.Count + 1;
             var defaultFieldRow = layoutFieldRows.Count + 1;
-            layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, 1, 0, 0, pack,
+            layoutRows.Add(new TrRmLayoutRow(typeDefRow, 0, providerLayoutKind,
+                0, 0, pack,
                 defaultFieldRow, 1));
             layoutFieldRows.Add(new TrRmLayoutFieldRow(defaultLayoutRow, 0,
                 fieldDefRow));
             var profileLayoutRow = layoutRows.Count + 1;
             var profileFieldRow = layoutFieldRows.Count + 1;
-            layoutRows.Add(new TrRmLayoutRow(typeDefRow, 1, 1, 1, alignment,
+            layoutRows.Add(new TrRmLayoutRow(typeDefRow, 1,
+                providerLayoutKind, 1, alignment,
                 pack, profileFieldRow, 1));
             layoutFieldRows.Add(new TrRmLayoutFieldRow(profileLayoutRow, 0,
                 fieldDefRow));
@@ -4848,7 +5035,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         bool includePlaceSelectionBody = false, uint targetLayoutRow = 1,
         bool registerIndex = false, uint pack = 16,
         uint explicitAlignment = 0, bool pointerElement = false,
-        byte pointerQualifiers = 0, bool declaredUniqueFlag = false)
+        byte pointerQualifiers = 0, bool declaredUniqueFlag = false,
+        byte layoutKind = 1)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -4909,7 +5097,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             targetProfilesBytes, 1, schema);
         var layoutBytes = TrRmLayoutTableWriter.Encode([
             new TrRmLayoutRow(1, 0, 1, 0, 0, 16, 1, 2),
-            new TrRmLayoutRow(1, 1, 1, 1, explicitAlignment, pack, 3, 2),
+            new TrRmLayoutRow(1, 1, layoutKind, 1, explicitAlignment, pack,
+                3, 2),
         ], typeDefs, targetProfiles, 4);
         var layouts = new TrRmLayoutTableReader(layoutBytes, 2,
             typeDefs, targetProfiles, 4);
@@ -5002,6 +5191,20 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
         tables.ValidateRegisterBodyMapsForMethod(1);
+    }
+
+    private static void ValidateA2ProviderBinding(byte[] consumerArtifact,
+        byte[] providerArtifact, string schemaIdentity,
+        ImmutableArray<TrRmStandardModuleSelection> modules)
+    {
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        consumerArtifact));
+        _ = TrRmFixedArrayProviderBindingValidator.Validate(
+            tables, [consumerArtifact, providerArtifact],
+            [schemaIdentity, schemaIdentity], modules, 1);
     }
 
     private static byte[] CreateNestedArrayPlaceArtifact(

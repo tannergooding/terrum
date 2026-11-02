@@ -669,7 +669,11 @@ remains type-only for local Blittable Copy types; it emits TypeSpec form
 `0x11` and FixedArrayLayout rows for scalar, unit, and nested array fields.
 The source-free type-only route reconstructs local non-generic DeclaredCopy
 TypeDefs and those array fields, including acyclic arrays whose elements are
-local nominal Copy structs.
+local nominal Copy structs and raw Union layouts. Whole-Union initialization
+and executable union-array values remain under the unapproved, provisionally
+actionable
+[raw Union initialization proposal](proposals/standard-trrm-raw-union-initialization.md);
+current runtime evidence does not include them.
 Separately, the bounded F+S/A2 executable path emits positive-count local
 arrays initialized by source-ordered scalar stores and indexed EC/RegisterPlace
 addresses. Nested PlaceSelection chains now reach scalar-leaf PlaceLoad, and
@@ -717,6 +721,10 @@ in an initialized fixed-array local; native lowering retains its checked
 element bounds. Fixed-array expressions, including those pointer addresses,
 remain unsupported by private semantic modules. Standard TRRM does not encode
 general pointer address/read/write operations, but it carries typed
+Raw `LayoutKind.Union` is now carried through source binding, fixed-array
+geometry, A2 type-only metadata and private-module round-tripping; all
+alternatives must satisfy the rootless Copy closure, and typed alternative
+access requires `unsafe`.
 native-pointer TypeSpecs and admitted pointer-valued declaration/call
 arguments in its bounded executable profile.
 

@@ -533,7 +533,10 @@ public static partial class SemanticVerifier
                             program.NativeLoweringAgreement,
                             program.NativeFixedArrayTypes);
                 }
-                var alignedOffset = fieldAlignment == 0 ? offset : (offset + fieldAlignment - 1) & -fieldAlignment;
+                var alignedOffset = structure.IsTransparent || structure.IsUnion
+                    ? 0
+                    : fieldAlignment == 0 ? offset
+                    : (offset + fieldAlignment - 1) & -fieldAlignment;
                 if (string.IsNullOrWhiteSpace(field.Name) || !fieldNames.Add(field.Name)
                     || (field.IsPrivate && field.IsInternal)
                     || (width == 0 && !fixedArrayField)
@@ -542,7 +545,8 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                offset = alignedOffset + width;
+                offset = structure.IsUnion
+                    ? Math.Max(offset, width) : alignedOffset + width;
                 alignment = Math.Max(alignment, fieldAlignment);
             }
             if (((offset + alignment - 1) & -alignment) != structure.Size || structure.Fields.Length > ValueLayout.MaximumSize)
@@ -3452,7 +3456,8 @@ public static partial class SemanticVerifier
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
                 var targetField = Fields(program, ownerType)[fieldAssignment.Field];
-                var requiresUnsafeCaller = targetField.RequiresUnsafeCaller;
+                var requiresUnsafeCaller = RequiresUnsafeFieldAccess(
+                    program, ownerType, targetField);
                 if (ManagedClassTypes.IsClass(ownerType) && !ManagedClassTypes.IsWritable(ownerType)
                     && !((function.IsConstructor || function.IsClassConstructor)
                         && fieldAssignment.Variable == 0 && fieldAssignment.NestedFields.IsEmpty)
@@ -3473,7 +3478,8 @@ public static partial class SemanticVerifier
                         throw Invalid();
                     }
                     targetField = Fields(program, nestedType)[nestedField];
-                    requiresUnsafeCaller |= targetField.RequiresUnsafeCaller;
+                    requiresUnsafeCaller |= RequiresUnsafeFieldAccess(
+                        program, nestedType, targetField);
                     if (ManagedClassTypes.IsClass(nestedType) && !ManagedClassTypes.IsWritable(nestedType)
                         && (index == fieldAssignment.NestedFields.Length - 1
                             || !ManagedClassTypes.IsClass(targetField.Type)))
@@ -6119,7 +6125,8 @@ public static partial class SemanticVerifier
             {
                 throw Invalid(field.Span);
             }
-            if (Fields(program, ownerType)[field.Field].RequiresUnsafeCaller
+            if (RequiresUnsafeFieldAccess(program, ownerType,
+                    Fields(program, ownerType)[field.Field])
                 && !field.IsUnsafeAuthorized)
             {
                 throw InvalidEffect(field.Span, "UnsafeCaller");
@@ -6193,7 +6200,8 @@ public static partial class SemanticVerifier
                 fieldPath = default;
                 return false;
             }
-            if (Fields(program, ownerType)[field.Field].RequiresUnsafeCaller
+            if (RequiresUnsafeFieldAccess(program, ownerType,
+                    Fields(program, ownerType)[field.Field])
                 && !field.IsUnsafeAuthorized)
             {
                 throw InvalidEffect(field.Span, "UnsafeCaller");
@@ -6411,7 +6419,8 @@ public static partial class SemanticVerifier
             || !program.Structures[owner].Fields[place.Field].IsMutable
             || !CanAccessField(function, program.Structures[owner], place.Field)
             || place.Type != program.Structures[owner].Fields[place.Field].Type
-            || (program.Structures[owner].Fields[place.Field].RequiresUnsafeCaller
+            || (RequiresUnsafeFieldAccess(program, place.Receiver.Type,
+                    program.Structures[owner].Fields[place.Field])
                 && !place.IsUnsafeAuthorized)
             || (!(allowBufferLeaf && place.Type == PrimitiveType.OwnedInt32Buffer)
                 && (!HasFields(program, place.Type) || ManagedClassTypes.IsClass(place.Type))))
@@ -7731,7 +7740,8 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                if (Fields(program, readType)[fieldRead.Field].RequiresUnsafeCaller
+                if (RequiresUnsafeFieldAccess(program, readType,
+                        Fields(program, readType)[fieldRead.Field])
                     && !fieldRead.IsUnsafeAuthorized)
                 {
                     throw InvalidEffect(fieldRead.Span, "UnsafeCaller");
@@ -9664,6 +9674,23 @@ public static partial class SemanticVerifier
             || BoundGenericNominalTypeContract.IsCoreTaskType(type, program)
             || ((int)type >= 100 && (int)type - 100 < program.Structures.Length
                 && program.Structures[(int)type - 100].IsUnique);
+
+    private static bool RequiresUnsafeFieldAccess(BoundProgram program,
+        PrimitiveType ownerType, BoundStructField field)
+        => field.RequiresUnsafeCaller || IsUnion(program, ownerType);
+
+    private static bool IsUnion(BoundProgram program, PrimitiveType type)
+    {
+        if (ManagedClassTypes.IsClass(type) || BoundEnumTypes.IsType(type)
+            || BoundGenericNominalTypeTypes.IsType(type))
+        {
+            return false;
+        }
+
+        var index = (int)type - 100;
+        return (uint)index < (uint)program.Structures.Length
+            && program.Structures[index].IsUnion;
+    }
 
     private static bool IsManagedLifetimeValue(BoundProgram program, PrimitiveType type)
     {

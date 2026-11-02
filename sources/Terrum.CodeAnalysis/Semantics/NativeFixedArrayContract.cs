@@ -85,7 +85,14 @@ internal static class NativeFixedArrayContract
     internal static bool IsSupportedElementType(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
-        => IsSupportedElement(type, structures, fixedArrays, []);
+        => IsSupportedElement(type, structures, fixedArrays, [],
+            allowEnums: false);
+
+    internal static bool IsRootlessCopyFieldType(PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        => IsSupportedElement(type, structures, fixedArrays, [],
+            allowEnums: true);
 
     internal static bool TryCreateType(PrimitiveType elementType,
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
@@ -570,7 +577,7 @@ internal static class NativeFixedArrayContract
     private static bool IsSupportedElement(PrimitiveType type,
         IReadOnlyList<BoundStruct> structures,
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
-        HashSet<PrimitiveType> visiting)
+        HashSet<PrimitiveType> visiting, bool allowEnums)
     {
         if (type == PrimitiveType.Void
             || (PrimitiveTypeFacts.ScalarWidth(type) > 0
@@ -596,7 +603,7 @@ internal static class NativeFixedArrayContract
                 var index = NativeFixedArrayTypes.Index(type);
                 return (uint)index < (uint)fixedArrays.Count
                     && IsSupportedElement(fixedArrays[index].ElementType,
-                        structures, fixedArrays, visiting);
+                        structures, fixedArrays, visiting, allowEnums);
             }
 
             var structureIndex = (int)type - 100;
@@ -609,7 +616,7 @@ internal static class NativeFixedArrayContract
             var structure = structures[structureIndex];
             if (structure.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
-                || structure.IsSequential == structure.IsTransparent
+                || structure.LayoutKind is not (1 or 2 or 3)
                 || structure.IsUnique || structure.CleanupMethod is not null
                 || structure.Fields.IsDefaultOrEmpty
                 || (structure.IsTransparent && structure.Fields.Length != 1))
@@ -621,13 +628,18 @@ internal static class NativeFixedArrayContract
             {
                 if (field.RequiresUnsafeCaller
                     || !IsSupportedElement(field.Type, structures,
-                        fixedArrays, visiting))
+                        fixedArrays, visiting, allowEnums))
                 {
                     return false;
                 }
             }
 
             return true;
+        if (BoundEnumTypes.IsType(type))
+        {
+            return allowEnums;
+        }
+
         }
         finally
         {
@@ -709,7 +721,7 @@ internal static class NativeFixedArrayContract
     {
         layout = default;
         if (structure.Fields.IsDefaultOrEmpty
-            || structure.IsSequential == structure.IsTransparent
+            || structure.LayoutKind is not (1 or 2 or 3)
             || (structure.IsTransparent && structure.Fields.Length != 1))
         {
             return false;
@@ -729,7 +741,7 @@ internal static class NativeFixedArrayContract
             }
 
             var fieldAlignment = Math.Max(1UL, fieldLayout.Alignment);
-            var fieldOffset = structure.IsTransparent
+            var fieldOffset = structure.IsTransparent || structure.IsUnion
                 ? 0 : RoundUp(offset, fieldAlignment);
             if (fieldOffset > (ulong)ValueLayout.MaximumStructureSize
                     - fieldLayout.Size
@@ -739,7 +751,9 @@ internal static class NativeFixedArrayContract
                 return false;
             }
 
-            offset = fieldOffset + fieldLayout.Size;
+            offset = structure.IsUnion
+                ? Math.Max(offset, fieldLayout.Size)
+                : fieldOffset + fieldLayout.Size;
             alignment = Math.Max(alignment, fieldAlignment);
             requiredAlignment = Math.Max(requiredAlignment,
                 fieldLayout.RequiredAlignment);

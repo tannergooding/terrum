@@ -5760,7 +5760,7 @@ public static partial class TrRmExecutableCompiler
                 || !tables.Layouts.HasBlittableLayout(typeDefRow,
                     (uint)profileRow, 1)
                 || tables.Layouts.GetFlags(layout) != 1
-                || tables.Layouts.GetLayoutKind(layout) is not (1 or 3))
+                || tables.Layouts.GetLayoutKind(layout) is not (1 or 2 or 3))
             {
                 throw Unsupported(
                     "The bounded A2 type-library loader requires local nongeneric Copy structs with supported Blittable layouts.");

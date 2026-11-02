@@ -1667,7 +1667,7 @@ internal static class TrRmFixedArrayLayoutValidator
                             genericCount == 0 ? null : substitutions));
                 }
 
-                if (kind != 1)
+                if (kind is not (1 or 2))
                 {
                     throw InvalidLayout();
                 }
@@ -1707,9 +1707,11 @@ internal static class TrRmFixedArrayLayoutValidator
                     var placementAlignment = Math.Max(
                         Math.Min(fieldLayout.Alignment, pack),
                         fieldLayout.RequiredAlignment);
-                    end = AddTargetLayout(
-                        RoundUpTargetLayout(end, placementAlignment),
-                        fieldLayout.Size);
+                    end = kind == 2
+                        ? Math.Max(end, fieldLayout.Size)
+                        : AddTargetLayout(
+                            RoundUpTargetLayout(end, placementAlignment),
+                            fieldLayout.Size);
                     ConsumeWork();
                     aggregateAlignment = Math.Max(aggregateAlignment,
                         placementAlignment);

@@ -2652,7 +2652,8 @@ public static partial class ModuleCompiler
             {
                 return false;
             }
-            requiresUnsafeCaller |= declaration.RequiresUnsafeCaller;
+            requiresUnsafeCaller |= declaration.RequiresUnsafeCaller
+                || structures[ownerIndex].IsUnion;
         }
         return requiresUnsafeCaller;
     }
@@ -2663,7 +2664,8 @@ public static partial class ModuleCompiler
         var ownerIndex = (int)field.Receiver.Type - 100;
         return ownerIndex >= 0 && ownerIndex < structures.Length
             && field.Field >= 0 && field.Field < structures[ownerIndex].Fields.Length
-            && structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller;
+            && (structures[ownerIndex].Fields[field.Field].RequiresUnsafeCaller
+                || structures[ownerIndex].IsUnion);
     }
 
     private static BoundFieldRead? GetProjectedFieldReceiver(BoundExpression expression)

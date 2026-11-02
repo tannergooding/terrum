@@ -75,12 +75,12 @@ public static partial class TrRmExecutableCompiler
         {
             if (structure.BlittableTargetRequirement
                     != FixedLayoutStorage.WindowsX64TargetRequirement
-                || structure.IsSequential == structure.IsTransparent
+                || structure.LayoutKind is not (1 or 2 or 3)
                 || structure.CleanupMethod is not null
                 || structure.Fields.IsDefaultOrEmpty)
             {
                 throw Unsupported(
-                    "A2 Copy declaration emission supports Blittable Sequential/Transparent structs without Cleanup.");
+                    "A2 Copy declaration emission supports Blittable fixed-layout structs without Cleanup.");
             }
 
             foreach (var field in structure.Fields)
@@ -260,8 +260,8 @@ public static partial class TrRmExecutableCompiler
             }
 
             layoutFirstByStructure[typeDefOrdinal] = layoutRows.Count + 1;
-            var layoutKind = structure.IsSequential ? (byte)1 : (byte)3;
-            var pack = structure.IsSequential ? 16u : 0u;
+            var layoutKind = structure.LayoutKind;
+            var pack = layoutKind is 1 or 2 ? 16u : 0u;
             for (var variant = 0; variant < 2; variant++)
             {
                 var layoutRow = layoutRows.Count + 1;

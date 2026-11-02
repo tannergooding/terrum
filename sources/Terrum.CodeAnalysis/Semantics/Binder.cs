@@ -1804,6 +1804,7 @@ internal sealed partial class Binder
         var isUnique = false;
         var isTransparent = false;
         var isSequential = false;
+        var isUnion = false;
         var isBlittable = false;
         var layoutAttributeSeen = false;
         var visibilityCount = 0;
@@ -1852,9 +1853,7 @@ internal sealed partial class Binder
                                     isTransparent = true;
                                     break;
                                 case "Union":
-                                    Report("TRM3005",
-                                        "Union layout is not supported by the current source layout profile.",
-                                        attribute.Span);
+                                    isUnion = true;
                                     break;
                                 default:
                                     Report("TRM3005", "LayoutKind does not name a supported layout form.",
@@ -1928,6 +1927,12 @@ internal sealed partial class Binder
             {
                 Report("TRM3023", "Copy structs cannot store unique owning fields.", field.Span);
             }
+            if (isUnion && IsUnique(type))
+            {
+                Report("TRM3023",
+                    "Raw union alternatives must have rootless Copy storage.",
+                    field.Span);
+            }
             int width;
             int fieldAlignment;
             if (NativeFixedArrayTypes.IsType(type))
@@ -1968,7 +1973,8 @@ internal sealed partial class Binder
             {
                 duplicate |= previous.Name == fieldName.Name;
             }
-            var offset = (size + fieldAlignment - 1) & -fieldAlignment;
+            var offset = isTransparent || isUnion
+                ? 0 : (size + fieldAlignment - 1) & -fieldAlignment;
             if (width == 0 || offset + width > ValueLayout.MaximumStructureSize || duplicate
                 || fields.Count >= ValueLayout.MaximumSize)
             {
@@ -2026,7 +2032,7 @@ internal sealed partial class Binder
                 IsInternal = fieldIsInternal,
                 RequiresUnsafeCaller = unsafeModifiers != 0,
             });
-            size = offset + width;
+            size = isUnion ? Math.Max(size, width) : offset + width;
             alignment = Math.Max(alignment, fieldAlignment);
         }
         if (fields.Count == 0)
@@ -2053,10 +2059,17 @@ internal sealed partial class Binder
             Report("TRM3005", "Public instance fields require an explicit Blittable layout commitment.",
                 declaration.Span);
         }
-        if (isBlittable && (!layoutAttributeSeen || (!isSequential && !isTransparent)))
+        if (isUnion && !isBlittable)
         {
             Report("TRM3005",
-                "The current Blittable source profile requires an explicit Layout(LayoutKind.Sequential) commitment.",
+                "Union layout requires an explicit Blittable commitment.",
+                declaration.Span);
+        }
+        if (isBlittable && (!layoutAttributeSeen
+            || (!isSequential && !isTransparent && !isUnion)))
+        {
+            Report("TRM3005",
+                "Blittable values require an explicit Sequential, Union, or Transparent layout commitment.",
                 declaration.Span);
         }
         size = (size + alignment - 1) & -alignment;
@@ -9853,6 +9866,8 @@ internal sealed partial class Binder
     private bool CheckFieldAccess(PrimitiveType type, int field, TextSpan span)
     {
         var declaration = GetField(type, field);
+        var requiresUnsafeCaller = declaration.RequiresUnsafeCaller
+            || (IsStruct(type) && _structs[(int)type - 100].IsUnion);
         if (declaration.IsPrivate
             && (IsClass(type) ? _classes[ManagedClassTypes.ClassIndex(type)].Name
                 : _structs[(int)type - 100].Name) != (string.IsNullOrEmpty(_namespace)
@@ -9860,11 +9875,11 @@ internal sealed partial class Binder
         {
             Report("TRM3011", "Private field cannot be accessed outside its declaring struct.", span);
         }
-        if (declaration.RequiresUnsafeCaller && _unsafeDepth == 0)
+        if (requiresUnsafeCaller && _unsafeDepth == 0)
         {
             Report("TRM3028", "Field access requires an explicit unsafe context.", span);
         }
-        return declaration.RequiresUnsafeCaller && _unsafeDepth != 0;
+        return requiresUnsafeCaller && _unsafeDepth != 0;
     }
 
     [SuppressMessage("Style", "IDE0072:Populate switch", Justification = "Unsupported literal contexts are diagnosed before code emission.")]

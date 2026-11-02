@@ -6,13 +6,13 @@ using System.Collections.Immutable;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
-/// <summary>Validates provisional explicit fixed-storage commitments independently of executable aggregate limits and call classification.</summary>
+/// <summary>Validates provisional fixed-storage commitments independently of executable aggregate limits and call classification.</summary>
 public static class FixedLayoutStorage
 {
     /// <summary>The existing Windows x64 target requirement; not a separate layout-profile identity.</summary>
     public const int WindowsX64TargetRequirement = 1;
 
-    /// <summary>Recomputes committed Sequential and Transparent layouts, returning natural alignment by structure index, or zero for uncommitted structures.</summary>
+    /// <summary>Recomputes committed Sequential, Union, and Transparent layouts, returning natural alignment by structure index, or zero for uncommitted structures.</summary>
     /// <exception cref="ArgumentException">A commitment, transitive field, or recorded layout is invalid.</exception>
     /// <exception cref="NotSupportedException">The declaration graph exceeds verification limits.</exception>
     public static ImmutableArray<int> Validate(ImmutableArray<BoundStruct> structures)
@@ -110,7 +110,7 @@ public static class FixedLayoutStorage
             }
 
             if (structure.BlittableTargetRequirement != WindowsX64TargetRequirement
-                || structure.IsSequential == structure.IsTransparent
+                || structure.LayoutKind is not (1 or 2 or 3)
                 || (structure.IsTransparent && structure.Fields.Length != 1)
                 || (structure.CleanupMethod is not null && !structure.IsUnique)
                 || (structure.IsPrivate && structure.IsInternal)
@@ -189,7 +189,14 @@ public static class FixedLayoutStorage
                     fieldAlignment = alignments[nested];
                     height = Math.Max(height, heights[nested] + 1);
                 }
-                var offset = structure.IsTransparent ? 0 : Align(size, fieldAlignment);
+                if (structure.IsUnion
+                    && !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                        field.Type, structures, fixedArrays))
+                {
+                    throw Invalid();
+                }
+                var offset = structure.IsTransparent || structure.IsUnion
+                    ? 0 : Align(size, fieldAlignment);
                 if (offset > int.MaxValue - width
                     || (validateRecordedLayout
                         && (field.Offset != offset || field.Size != width)))
@@ -200,7 +207,8 @@ public static class FixedLayoutStorage
                     Offset = (int)offset,
                     Size = width,
                 });
-                size = offset + width;
+                size = structure.IsUnion
+                    ? Math.Max(size, width) : offset + width;
                 alignment = Math.Max(alignment, fieldAlignment);
             }
             var computedSize = structure.IsTransparent ? size : Align(size, alignment);
@@ -222,5 +230,5 @@ public static class FixedLayoutStorage
     private static long Align(long size, int alignment) => (size + alignment - 1) & -(long)alignment;
 
     private static ArgumentException Invalid() =>
-        new("Invalid explicit Windows x64 Blittable Sequential storage commitment.");
+        new("Invalid explicit Windows x64 Blittable fixed-storage commitment.");
 }

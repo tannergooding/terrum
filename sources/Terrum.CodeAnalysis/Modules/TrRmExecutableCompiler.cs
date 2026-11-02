@@ -601,8 +601,8 @@ public static partial class TrRmExecutableCompiler
 
             structureLayoutFirst[index] = layoutRows.Count + 1;
             structureLayoutCount[index] = 2;
-            var layoutKind = structure.IsSequential ? (byte)1 : (byte)3;
-            var pack = structure.IsSequential ? 16u : 0u;
+            var layoutKind = structure.LayoutKind;
+            var pack = layoutKind is 1 or 2 ? 16u : 0u;
             for (var variant = 0; variant < 2; variant++)
             {
                 var layoutRow = layoutRows.Count + 1;
@@ -2912,7 +2912,7 @@ public static partial class TrRmExecutableCompiler
 
             var structure = program.Structures[index];
             if (structure.BlittableTargetRequirement != FixedLayoutStorage.WindowsX64TargetRequirement
-                || structure.IsSequential == structure.IsTransparent
+                || structure.LayoutKind is not (1 or 2 or 3)
                 || structure.IsUnique || structure.CleanupMethod is not null
                 || (structure.IsPrivate && structure.IsInternal)
                 || structure.Fields.IsDefaultOrEmpty)
@@ -3355,9 +3355,10 @@ public static partial class TrRmExecutableCompiler
             var flags = typeDefs.GetFlags(row);
             var layoutRow = layouts.GetLayoutForProfile(row, checked((uint)windowsX64ProfileRow));
             var layoutKind = layouts.GetLayoutKind(layoutRow);
-            var pack = layoutKind == 1 ? 16u : 0u;
+            var pack = layoutKind is 1 or 2 ? 16u : 0u;
             if (layouts.GetTargetProfileRef(layoutRow) != windowsX64ProfileRow
-                || layoutKind is not (1 or 3) || layouts.GetFlags(layoutRow) != 1
+                || layoutKind is not (1 or 2 or 3)
+                || layouts.GetFlags(layoutRow) != 1
                 || layouts.GetAlignment(layoutRow) != 0 || layouts.GetPack(layoutRow) != pack)
             {
                 throw Invalid("A native Blittable Layout uses an unsupported Windows x64 variant.");

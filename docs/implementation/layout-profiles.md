@@ -10,18 +10,20 @@ contracts. A private target-requirement number is not a standard Feature ID.
 ## Implemented public fixed-layout source profile
 
 Source-authored `[Blittable]` commitments support natural Windows x64
-`Sequential` layouts and one-field scalar-or-raw-pointer `Transparent`
-layouts. Sequential fields may use the fixed scalar/pointer set or transitively
-committed structures. Raw pointer fields preserve only address bits; they do
-not describe or extend the referent's lifetime. Unique fields remain restricted
-to unique owners. The compiler
+`Sequential` and raw `Union` layouts, plus one-field scalar-or-raw-pointer
+`Transparent` layouts. Sequential fields may use the fixed scalar/pointer set
+or transitively committed structures. Raw `Union` alternatives require
+rootless Copy storage; typed alternative access requires an explicit unsafe
+scope, and no active-member tracker is provided. Raw pointer fields preserve
+only address bits; they do not describe or extend the referent's lifetime.
+Unique fields remain restricted to unique owners. The compiler
 recomputes the layout under mandatory verification and uses the existing
 Windows x64 target requirement `1`, not a separate layout-profile identity.
 Externally visible public fields require this commitment; a public field on
 an internal struct does not independently expose its layout for replacement.
-Private semantic modules persist and revalidate these facts. Packing and
-alignment controls, unions, and standard TRRM layout persistence are not
-implemented.
+Private semantic modules persist and revalidate these facts using the existing
+BoundStruct flags; raw `Union` adds no private record or revision. Packing and
+alignment controls remain unsupported in the source profile.
 
 Direct native `NativeParameter` inputs may use a committed aggregate pointee.
 The address-based storage limit is 128 bytes, independent of the 16-byte
