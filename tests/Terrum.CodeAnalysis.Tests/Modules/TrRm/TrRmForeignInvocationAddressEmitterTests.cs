@@ -3662,6 +3662,15 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             (int)PrimitiveType.Float32);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(badAncestorIndexType));
+        var finalIndexOffset = addressOffset + 54
+            + (ancestorCount * (sizeof(int) + 1 + (4 * sizeof(int))));
+        Assert.That(producer[finalIndexOffset], Is.EqualTo(2));
+        var badFinalIndexType = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            badFinalIndexType.AsSpan(finalIndexOffset + 1, sizeof(int)),
+            (int)PrimitiveType.Float32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(badFinalIndexType));
         var truncatedPath = producer
             .AsSpan(0, addressOffset + 56).ToArray();
         Assert.Throws<ModuleFormatException>(() =>

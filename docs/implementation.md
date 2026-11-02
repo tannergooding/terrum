@@ -697,8 +697,8 @@ dynamic `0 <= i < N` and `Q <= N-i`,
 initialization/publication, actual address/alignment execution and source-free
 reconstruction/remapping remain open outside the selected nested scalar-read
 and NativeParameter cases. The final private/A2 nested-address selection
-passed 37/37 with zero skips at
-`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_18_52_46_net11.0.trx`;
+passed 38/38 with zero skips at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_18_55_48_net11.0.trx`;
 its bounded private address-only backing cases do not discharge the wider A2
 or overall source/runtime gates.
 The `MessageBoxW` sample is authored using the same direct import form as any
