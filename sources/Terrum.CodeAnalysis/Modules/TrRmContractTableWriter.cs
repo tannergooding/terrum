@@ -112,17 +112,20 @@ public static class TrRmContractTableWriter
 
     private static TrRmContractRow[] CanonicalizeCopyOriginRows(
         IReadOnlyList<TrRmContractRow> rows,
-        TrRmFieldPathTableReader fieldPaths)
+        TrRmFieldPathTableReader fieldPaths,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
+        resourceLedger?.ConsumeWork(checked((ulong)rows.Count + 1UL));
         var result = new TrRmContractRow[rows.Count];
         for (var index = 0; index < rows.Count; index++)
         {
+            resourceLedger?.ConsumeWork();
             var row = rows[index];
             result[index] = row.Kind == 0x0D
                 ? row with
                 {
                     Payload = CanonicalizeCopyOriginPayload(
-                        row.Payload, fieldPaths),
+                        row.Payload, fieldPaths, resourceLedger),
                 }
                 : row;
         }
@@ -144,7 +147,8 @@ public static class TrRmContractTableWriter
 
         resourceLedger?.ConsumeWork(checked((ulong)rows.Count
             + (ulong)payloadLength + 1UL));
-        var result = CanonicalizeCopyOriginRows(rows, fieldPaths);
+        var result = CanonicalizeCopyOriginRows(rows, fieldPaths,
+            resourceLedger);
         for (var index = 0; index < result.Length; index++)
         {
             resourceLedger?.ConsumeWork();
@@ -255,8 +259,9 @@ public static class TrRmContractTableWriter
             throw InvalidReturnCoverage();
         }
 
-        plainRegions.Sort(static (left, right) =>
+        plainRegions.Sort((left, right) =>
         {
+            resourceLedger?.ConsumeWork();
             var offsetOrder = left.Offset.CompareTo(right.Offset);
             return offsetOrder != 0 ? offsetOrder
                 : left.Length.CompareTo(right.Length);
@@ -289,7 +294,11 @@ public static class TrRmContractTableWriter
             }
         }
 
-        repeatedRegions.Sort(CompareReturnCoverageRegions);
+        repeatedRegions.Sort((left, right) =>
+        {
+            resourceLedger?.ConsumeWork();
+            return CompareReturnCoverageRegions(left, right);
+        });
         var uniqueRepeatedRegions = new List<ReturnCoverageRegion>(
             repeatedRegions.Count);
         foreach (var region in repeatedRegions)
@@ -305,9 +314,16 @@ public static class TrRmContractTableWriter
 
         var canonicalRegions = new List<ReturnCoverageRegion>(
             canonicalPlainRegions.Count + uniqueRepeatedRegions.Count);
+        resourceLedger?.ConsumeWork(checked(
+            (ulong)canonicalPlainRegions.Count
+            + (ulong)uniqueRepeatedRegions.Count + 1UL));
         canonicalRegions.AddRange(canonicalPlainRegions);
         canonicalRegions.AddRange(uniqueRepeatedRegions);
-        canonicalRegions.Sort(CompareReturnCoverageRegions);
+        canonicalRegions.Sort((left, right) =>
+        {
+            resourceLedger?.ConsumeWork();
+            return CompareReturnCoverageRegions(left, right);
+        });
         var canonicalLength = checked(8L + (canonicalRegions.Count * 20L));
         foreach (var region in canonicalRegions)
         {
@@ -415,7 +431,8 @@ public static class TrRmContractTableWriter
     }
 
     private static byte[] CanonicalizeCopyOriginPayload(
-        ReadOnlyMemory<byte> payload, TrRmFieldPathTableReader fieldPaths)
+        ReadOnlyMemory<byte> payload, TrRmFieldPathTableReader fieldPaths,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         var data = payload.Span;
         if (data.Length < 12)
@@ -429,11 +446,13 @@ public static class TrRmContractTableWriter
             throw InvalidCopyOrigin();
         }
 
+        resourceLedger?.ConsumeWork(checked((ulong)factCount + 2UL));
         var facts = new CopyOriginFact[checked((int)factCount)];
         var pathSequences = new Dictionary<uint, uint[]>();
         var offset = 12;
         for (var fact = 0; fact < facts.Length; fact++)
         {
+            resourceLedger?.ConsumeWork();
             if (offset > data.Length - 8)
             {
                 throw InvalidCopyOrigin();
@@ -447,19 +466,23 @@ public static class TrRmContractTableWriter
                 throw InvalidCopyOrigin();
             }
 
+            resourceLedger?.ConsumeWork(checked((ulong)originCount + 1UL));
             var origins = new CopyOriginOrigin[checked((int)originCount)];
             offset += 8;
             for (var origin = 0; origin < origins.Length; origin++)
             {
+                resourceLedger?.ConsumeWork();
                 var sourcePath = Read(data, offset + 8);
                 origins[origin] = new CopyOriginOrigin(data[offset],
                     data[offset + 1], Read(data, offset + 4), sourcePath,
-                    GetPathSequence(sourcePath, fieldPaths, pathSequences), offset);
+                    GetPathSequence(sourcePath, fieldPaths, pathSequences,
+                        resourceLedger), offset);
                 offset += 12;
             }
 
             Array.Sort(origins, (left, right) =>
             {
+                resourceLedger?.ConsumeWork();
                 var comparison = left.SourceKind.CompareTo(right.SourceKind);
                 if (comparison == 0)
                 {
@@ -473,10 +496,11 @@ public static class TrRmContractTableWriter
 
                 return comparison != 0 ? comparison
                     : CompareFieldPathSequences(left.SourcePathReferences,
-                        right.SourcePathReferences);
+                        right.SourcePathReferences, resourceLedger);
             });
             facts[fact] = new CopyOriginFact(destinationPath,
-                GetPathSequence(destinationPath, fieldPaths, pathSequences),
+                GetPathSequence(destinationPath, fieldPaths, pathSequences,
+                    resourceLedger),
                 origins);
         }
 
@@ -486,9 +510,14 @@ public static class TrRmContractTableWriter
         }
 
         Array.Sort(facts, (left, right) =>
-            CompareFieldPathSequences(left.DestinationPathReferences,
-                right.DestinationPathReferences));
+        {
+            resourceLedger?.ConsumeWork();
+            return CompareFieldPathSequences(
+                left.DestinationPathReferences,
+                right.DestinationPathReferences, resourceLedger);
+        });
 
+        resourceLedger?.ConsumeWork(checked((ulong)data.Length + 1UL));
         var result = new byte[data.Length];
         data[..12].CopyTo(result.AsSpan());
         offset = 12;
@@ -509,18 +538,22 @@ public static class TrRmContractTableWriter
 
     private static uint[] GetPathSequence(uint pathRow,
         TrRmFieldPathTableReader fieldPaths,
-        Dictionary<uint, uint[]> pathSequences)
+        Dictionary<uint, uint[]> pathSequences,
+        TrRmA3LayoutResourceLedger? resourceLedger)
     {
         if (pathSequences.TryGetValue(pathRow, out var fields))
         {
+            resourceLedger?.ConsumeWork();
             return fields;
         }
 
         var count = pathRow == 0 ? 0
             : fieldPaths.GetFieldCount(checked((int)pathRow));
+        resourceLedger?.ConsumeWork(checked((ulong)count + 1UL));
         fields = new uint[count];
         for (var ordinal = 0; ordinal < count; ordinal++)
         {
+            resourceLedger?.ConsumeWork();
             fields[ordinal] = fieldPaths.GetFieldReference(
                 checked((int)pathRow), ordinal);
         }
@@ -529,11 +562,13 @@ public static class TrRmContractTableWriter
         return fields;
     }
 
-    private static int CompareFieldPathSequences(uint[] left, uint[] right)
+    private static int CompareFieldPathSequences(uint[] left, uint[] right,
+        TrRmA3LayoutResourceLedger? resourceLedger = null)
     {
         var commonCount = Math.Min(left.Length, right.Length);
         for (var ordinal = 0; ordinal < commonCount; ordinal++)
         {
+            resourceLedger?.ConsumeWork();
             var comparison = left[ordinal].CompareTo(right[ordinal]);
             if (comparison != 0)
             {
