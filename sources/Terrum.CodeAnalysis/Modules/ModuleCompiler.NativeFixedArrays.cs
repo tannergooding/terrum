@@ -47,7 +47,7 @@ public static partial class ModuleCompiler
 
             if (NativeFixedArrayTypes.IsType(type))
             {
-                _ = VisitArray(NativeFixedArrayTypes.Index(type), depth + 1);
+                _ = VisitArray(NativeFixedArrayTypes.Index(type), depth);
                 return;
             }
             if (NativePointerTypes.IsType(type))

@@ -3671,6 +3671,24 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             (int)PrimitiveType.Float32);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(badFinalIndexType));
+        if (ancestorCount == 1)
+        {
+            var firstIndexOffset = addressOffset + 58;
+            var oversizedIndex = CreatePrivateBinaryExpressionTree(16);
+            var replacementArtifact = new byte[
+                producer.Length - 17 + oversizedIndex.Length];
+            producer.AsSpan(0, firstIndexOffset)
+                .CopyTo(replacementArtifact);
+            oversizedIndex.CopyTo(
+                replacementArtifact.AsSpan(firstIndexOffset));
+            producer.AsSpan(firstIndexOffset + 17)
+                .CopyTo(replacementArtifact.AsSpan(
+                    firstIndexOffset + oversizedIndex.Length));
+            Assert.That(replacementArtifact.Length,
+                Is.LessThan(4 * 1024 * 1024));
+            Assert.Throws<ModuleFormatException>(() =>
+                ModuleCompiler.CreateReference(replacementArtifact));
+        }
         var truncatedPath = producer
             .AsSpan(0, addressOffset + 56).ToArray();
         Assert.Throws<ModuleFormatException>(() =>
@@ -3775,7 +3793,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public async Task PrivateRevision101MaximumNestedTypeClosureExecutes()
+    public async Task PrivateRevision101NestedTypeClosureDepth64Executes()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
@@ -3810,7 +3828,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     }
 
     [Test]
-    public void PrivateRevision101RejectsNestedTypeClosurePastDepth64()
+    public async Task PrivateRevision101NestedTypeClosureDepth65Executes()
     {
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(CreateDeepPrivateNestedAddressSource(65)),
@@ -3819,11 +3837,28 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             string.Join(Environment.NewLine,
                 compilation.Diagnostics));
 
-        var exception = Assert.Throws<ModuleContractException>(() =>
-            ModuleCompiler.CreateProducer(compilation.Program!,
-                ["Exercise"]));
-        Assert.That(exception!.Message,
-            Does.Contain("fixed-array type closure"));
+        var producer = ModuleCompiler.CreateProducer(
+            compilation.Program!, ["Exercise"]);
+        _ = FindPrivateStorageAddressWithAncestorCount(producer, 64,
+            expectedElementCount: 1);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(77));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        await AssertPrivateNestedBackingAotAsync(
+            ModuleCompiler.Link(consumer, producer),
+            "private-nested-depth-65", 77).ConfigureAwait(true);
     }
 
     private static string CreateDeepPrivateNestedAddressSource(int dimensions)
@@ -3985,6 +4020,40 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         Assert.Fail("The nested fixed-array initializer was not encoded.");
         return -1;
+    }
+
+    private static byte[] CreatePrivateBinaryExpressionTree(int depth)
+    {
+        var leafCount = 1 << depth;
+        var nodeCount = (leafCount * 2) - 1;
+        using var stream = new MemoryStream(
+            (leafCount * 21) + ((leafCount - 1) * 18));
+        using (var writer = new BinaryWriter(stream, Encoding.UTF8,
+                   leaveOpen: true))
+        {
+            WriteNode(writer, depth);
+        }
+
+        Assert.That(nodeCount, Is.GreaterThan(100_000));
+        return stream.ToArray();
+
+        static void WriteNode(BinaryWriter writer, int remainingDepth)
+        {
+            writer.Write(remainingDepth == 0 ? (byte)1 : (byte)4);
+            writer.Write((int)PrimitiveType.Int32);
+            writer.Write(0);
+            writer.Write(0);
+            if (remainingDepth == 0)
+            {
+                writer.Write(0L);
+                return;
+            }
+
+            writer.Write((int)TokenKind.Plus);
+            writer.Write((byte)0);
+            WriteNode(writer, remainingDepth - 1);
+            WriteNode(writer, remainingDepth - 1);
+        }
     }
 
     private static async Task AssertPrivateNestedBackingAotAsync(
