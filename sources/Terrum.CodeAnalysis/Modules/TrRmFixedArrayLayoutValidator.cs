@@ -17,6 +17,8 @@ internal readonly record struct TrRmReturnCoverageSubjectGeometry(
 
 internal static class TrRmFixedArrayLayoutValidator
 {
+    private const int MaximumReturnCoverageComparisonDepth = 64;
+
     internal static void Validate(
         TrRmFixedArrayLayoutTableReader arrayLayouts,
         TrRmTypeSpecTableReader typeSpecs,
@@ -2123,13 +2125,303 @@ internal static class TrRmFixedArrayLayoutValidator
                     }
                 }
 
-                if (!isContained)
+                if (!isContained
+                    && !IsLargeCoverageCoveredByPayloadUnion(
+                        region, normalizedPayloads))
                 {
                     return false;
                 }
             }
 
             return true;
+        }
+
+        private bool IsLargeCoverageCoveredByPayloadUnion(
+            TrRmReturnCoverageRegion coverage,
+            ImmutableArray<TrRmReturnCoverageRegion> possiblePayloads)
+            => coverage.Repetitions.IsDefaultOrEmpty
+                ? IsCompactRankZeroCoverageCoveredByPayloadUnion(coverage,
+                    possiblePayloads, 0)
+                : IsRepeatedCoverageCoveredByCommonOuterDimensions(coverage,
+                    possiblePayloads);
+
+        private bool IsCompactRankZeroCoverageCoveredByPayloadUnion(
+            TrRmReturnCoverageRegion coverage,
+            ImmutableArray<TrRmReturnCoverageRegion> possiblePayloads,
+            int depth)
+        {
+            if (!coverage.Repetitions.IsDefaultOrEmpty
+                || possiblePayloads.IsDefaultOrEmpty)
+            {
+                return false;
+            }
+
+            if (TryGetSmallCoverageByteCount(coverage, out var byteCount))
+            {
+                return IsSmallCoverageCoveredByPayloadUnion(coverage,
+                    byteCount, possiblePayloads);
+            }
+
+            foreach (var payload in possiblePayloads)
+            {
+                ConsumeWork();
+                if (ContainsPayloadRegion(payload, coverage))
+                {
+                    return true;
+                }
+            }
+
+            var allPayloadsRankZero = true;
+            foreach (var payload in possiblePayloads)
+            {
+                ConsumeWork();
+                if (!payload.Repetitions.IsDefaultOrEmpty)
+                {
+                    allPayloadsRankZero = false;
+                    break;
+                }
+            }
+
+            if (allPayloadsRankZero)
+            {
+                var coverageEnd = checked(coverage.Offset
+                    + coverage.Length);
+                var coveredUntil = coverage.Offset;
+                foreach (var payload in possiblePayloads)
+                {
+                    ConsumeWork();
+                    if (payload.Offset > coveredUntil)
+                    {
+                        return false;
+                    }
+
+                    var payloadEnd = checked(payload.Offset
+                        + payload.Length);
+                    coveredUntil = Math.Max(coveredUntil, payloadEnd);
+                    if (coveredUntil >= coverageEnd)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            if (depth >= MaximumReturnCoverageComparisonDepth)
+            {
+                throw new TrRmResourceLimitException(
+                    "validating ReturnCoverage payload inclusion",
+                    "MethodDef Contract 000F", "depth",
+                    MaximumReturnCoverageComparisonDepth,
+                    new BigInteger(depth + 1), moduleIdentity: null);
+            }
+
+            var commonOuter = default(
+                TrRmReturnCoverageRepetition);
+            var hasCommonOuter = false;
+            var elementPayloads
+                = ImmutableArray.CreateBuilder<
+                    TrRmReturnCoverageRegion>(possiblePayloads.Length);
+            foreach (var payload in possiblePayloads)
+            {
+                ConsumeWork();
+                var repetitions = payload.Repetitions;
+                if (repetitions.IsDefaultOrEmpty)
+                {
+                    return false;
+                }
+
+                var outer = repetitions[^1];
+                if (!hasCommonOuter)
+                {
+                    commonOuter = outer;
+                    hasCommonOuter = true;
+                }
+                else if (outer != commonOuter)
+                {
+                    return false;
+                }
+
+                if (outer.Stride == 0
+                    || payload.Offset >= outer.Stride)
+                {
+                    return false;
+                }
+
+                var innerRepetitionCount = repetitions.Length - 1;
+                var innerRepetitions
+                    = ImmutableArray.CreateBuilder<
+                        TrRmReturnCoverageRepetition>(
+                            innerRepetitionCount);
+                for (var dimension = 0;
+                    dimension < innerRepetitionCount;
+                    dimension++)
+                {
+                    ConsumeWork();
+                    innerRepetitions.Add(repetitions[dimension]);
+                }
+
+                var elementPayload = payload with
+                {
+                    Repetitions = innerRepetitions.MoveToImmutable(),
+                };
+                var elementSpan = GetRegionSpan(elementPayload);
+                if (elementSpan > outer.Stride - payload.Offset)
+                {
+                    return false;
+                }
+                elementPayloads.Add(elementPayload);
+            }
+
+            var arrayExtent = checked(commonOuter.Count
+                * commonOuter.Stride);
+            if (coverage.Offset > arrayExtent
+                || coverage.Length > arrayExtent - coverage.Offset)
+            {
+                return false;
+            }
+
+            var normalizedElementPayloads = CanonicalizePayloadRanges(
+                elementPayloads.MoveToImmutable());
+            var remainingBytes = coverage.Length;
+            var elementOffset = coverage.Offset % commonOuter.Stride;
+            if (elementOffset != 0)
+            {
+                var prefixLength = Math.Min(remainingBytes,
+                    commonOuter.Stride - elementOffset);
+                if (!IsCompactRankZeroCoverageCoveredByPayloadUnion(
+                        new TrRmReturnCoverageRegion(elementOffset,
+                            prefixLength, []),
+                        normalizedElementPayloads, depth + 1))
+                {
+                    return false;
+                }
+
+                remainingBytes -= prefixLength;
+            }
+
+            var completeElementCount
+                = remainingBytes / commonOuter.Stride;
+            if (completeElementCount != 0
+                && !IsCompactRankZeroCoverageCoveredByPayloadUnion(
+                    new TrRmReturnCoverageRegion(0,
+                        commonOuter.Stride, []),
+                    normalizedElementPayloads, depth + 1))
+            {
+                return false;
+            }
+
+            var suffixLength = remainingBytes % commonOuter.Stride;
+            return suffixLength == 0
+                || IsCompactRankZeroCoverageCoveredByPayloadUnion(
+                    new TrRmReturnCoverageRegion(0, suffixLength, []),
+                    normalizedElementPayloads, depth + 1);
+        }
+
+        private bool IsRepeatedCoverageCoveredByCommonOuterDimensions(
+            TrRmReturnCoverageRegion coverage,
+            ImmutableArray<TrRmReturnCoverageRegion> possiblePayloads)
+        {
+            if (coverage.Offset != 0)
+            {
+                return false;
+            }
+
+            var coverageRepetitions = coverage.Repetitions;
+            var commonSuffixLength = 0;
+            for (var candidateLength = coverageRepetitions.Length;
+                candidateLength > 0;
+                candidateLength--)
+            {
+                var matches = true;
+                foreach (var payload in possiblePayloads)
+                {
+                    ConsumeWork();
+                    var payloadRepetitions = payload.Repetitions;
+                    if (payloadRepetitions.IsDefaultOrEmpty
+                        || payloadRepetitions.Length < candidateLength)
+                    {
+                        matches = false;
+                        break;
+                    }
+
+                    for (var dimension = 1;
+                        dimension <= candidateLength;
+                        dimension++)
+                    {
+                        ConsumeWork();
+                        var coverageRepetition
+                            = coverageRepetitions[
+                                coverageRepetitions.Length - dimension];
+                        var payloadRepetition
+                            = payloadRepetitions[
+                                payloadRepetitions.Length - dimension];
+                        if (coverageRepetition.Stride
+                                != payloadRepetition.Stride
+                            || coverageRepetition.Count
+                                > payloadRepetition.Count)
+                        {
+                            matches = false;
+                            break;
+                        }
+                    }
+
+                    if (!matches)
+                    {
+                        break;
+                    }
+
+                    var outerStride
+                        = coverageRepetitions[
+                            coverageRepetitions.Length - 1].Stride;
+                    if (payload.Offset >= outerStride)
+                    {
+                        matches = false;
+                        break;
+                    }
+                }
+
+                if (matches)
+                {
+                    commonSuffixLength = candidateLength;
+                    break;
+                }
+            }
+
+            if (commonSuffixLength == 0)
+            {
+                return false;
+            }
+
+            var baseRepetitionCount = coverageRepetitions.Length
+                - commonSuffixLength;
+            var baseRepetitions
+                = ImmutableArray.CreateBuilder<
+                    TrRmReturnCoverageRepetition>(baseRepetitionCount);
+            for (var dimension = 0;
+                dimension < baseRepetitionCount;
+                dimension++)
+            {
+                ConsumeWork();
+                baseRepetitions.Add(coverageRepetitions[dimension]);
+            }
+
+            var baseCoverage = coverage with
+            {
+                Repetitions = baseRepetitions.MoveToImmutable(),
+            };
+            if (!TryGetSmallCoverageByteCount(baseCoverage,
+                    out var byteCount))
+            {
+                return false;
+            }
+
+            var result = baseCoverage.Repetitions.IsDefaultOrEmpty
+                ? IsCompactRankZeroCoverageCoveredByPayloadUnion(
+                    baseCoverage, possiblePayloads, 0)
+                : IsSmallCoverageCoveredByPayloadUnion(baseCoverage,
+                    byteCount, possiblePayloads);
+            return result;
         }
 
         private bool IsSmallCoverageCoveredByPayloadUnion(

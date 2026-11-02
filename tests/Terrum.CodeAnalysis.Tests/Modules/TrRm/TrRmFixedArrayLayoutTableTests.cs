@@ -314,23 +314,33 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
             public void UsePayloadArray() {
                 init mut [PayloadUnion; 10] values;
+                init mut [PayloadUnion; 999999999999] largeValues;
             }
 
             [Blittable]
             [Layout(LayoutKind.Union)]
             public struct DensePayloadUnion {
-                public DensePayload Whole;
+                public [Sparse; 2] Parts;
+                public PayloadBridge Bridge;
             }
 
             [Blittable]
             [Layout(LayoutKind.Sequential)]
-            public struct DensePayload {
-                public uint64 Low;
-                public uint64 High;
+            public struct SparsePayload {
+                public uint32 Prefix;
+                public uint8 Suffix;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct PayloadBridge {
+                public SparsePayload Prefix;
+                public [uint8; 5] Suffix;
             }
 
             public void UseDensePayloadArray() {
                 init mut [DensePayloadUnion; 9] values;
+                init mut [DensePayloadUnion; 1000000000000] largeValues;
             }
 
             [Blittable]
@@ -379,7 +389,7 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var rawWordLayout = tables.Layouts.GetLayoutForProfile(rawWordRow, 1);
         Assert.That(tables.Layouts.GetLayoutKind(rawWordLayout),
             Is.EqualTo(2));
-        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(7));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(10));
         if (isA2R1)
         {
             var envelopeTypeDef = 0;
@@ -595,6 +605,16 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                     .CalculateReturnCoverageSubjectGeometry(tables,
                         largePayloadArrayTypeSpecRef, 1);
             Assert.That(largePayloadArrayGeometry.Size, Is.EqualTo(144));
+            Assert.That(largePayloadArrayGeometry.PossiblePayloads,
+                Has.Length.GreaterThan(2));
+            Assert.That(largePayloadArrayGeometry.PossiblePayloads.All(
+                static payload => payload.Length < 129), Is.True);
+            Assert.That(largePayloadArrayGeometry.PossiblePayloads.Any(
+                static payload => payload.Repetitions.Length == 1),
+                Is.True);
+            Assert.That(largePayloadArrayGeometry.PossiblePayloads.Any(
+                static payload => payload.Repetitions.Length == 2),
+                Is.True);
             Assert.That(TrRmFixedArrayLayoutValidator
                 .IsReturnCoverageSubjectAndRegionsValid(tables,
                     largePayloadArrayTypeSpecRef, 1,
@@ -606,6 +626,112 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                     largePayloadArrayTypeSpecRef, 1,
                     ImmutableArray.Create(
                         new TrRmReturnCoverageRegion(0, 145, []))),
+                Is.False);
+
+            const ulong hugeDenseArrayCount = 1_000_000_000_000;
+            var hugeDenseArrayTypeSpecRef = 0u;
+            for (var typeSpecRow = 1;
+                typeSpecRow <= tables.TypeSpecs.Count;
+                typeSpecRow++)
+            {
+                if (tables.TypeSpecs.TryGetFixedInlineArray(
+                        (uint)typeSpecRow, out _, out var count)
+                    && count == hugeDenseArrayCount)
+                {
+                    hugeDenseArrayTypeSpecRef = (uint)typeSpecRow;
+                    break;
+                }
+            }
+            Assert.That(hugeDenseArrayTypeSpecRef, Is.GreaterThan(0));
+            var hugeDenseArrayGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        hugeDenseArrayTypeSpecRef, 1);
+            Assert.That(hugeDenseArrayGeometry.Size,
+                Is.EqualTo(16_000_000_000_000));
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeDenseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0,
+                            hugeDenseArrayGeometry.Size, []))),
+                Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeDenseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 16, [
+                            new TrRmReturnCoverageRepetition(
+                                hugeDenseArrayCount, 16),
+                        ]))), Is.True);
+
+            const ulong hugeSparseArrayCount = 999_999_999_999;
+            var hugeSparseArrayTypeSpecRef = 0u;
+            for (var typeSpecRow = 1;
+                typeSpecRow <= tables.TypeSpecs.Count;
+                typeSpecRow++)
+            {
+                if (tables.TypeSpecs.TryGetFixedInlineArray(
+                        (uint)typeSpecRow, out _, out var count)
+                    && count == hugeSparseArrayCount)
+                {
+                    hugeSparseArrayTypeSpecRef = (uint)typeSpecRow;
+                    break;
+                }
+            }
+            Assert.That(hugeSparseArrayTypeSpecRef, Is.GreaterThan(0));
+            var hugeSparseArrayGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        hugeSparseArrayTypeSpecRef, 1);
+            Assert.That(hugeSparseArrayGeometry.Size,
+                Is.EqualTo(16UL * hugeSparseArrayCount));
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeSparseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 9, []))),
+                Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeSparseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 9, [
+                            new TrRmReturnCoverageRepetition(
+                                hugeSparseArrayCount, 16),
+                        ]))), Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeSparseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 8, [
+                            new TrRmReturnCoverageRepetition(
+                                hugeSparseArrayCount, 16),
+                        ]),
+                        new TrRmReturnCoverageRegion(0, 1, [
+                            new TrRmReturnCoverageRepetition(2, 8),
+                            new TrRmReturnCoverageRepetition(
+                                hugeSparseArrayCount, 16),
+                        ]),
+                        new TrRmReturnCoverageRegion(4, 4, [
+                            new TrRmReturnCoverageRepetition(2, 8),
+                            new TrRmReturnCoverageRepetition(
+                                hugeSparseArrayCount, 16),
+                        ]))), Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeSparseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 16, [
+                            new TrRmReturnCoverageRepetition(
+                                hugeSparseArrayCount, 16),
+                        ]))), Is.False);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    hugeSparseArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0,
+                            hugeSparseArrayGeometry.Size, []))),
                 Is.False);
 
             var sparsePayloadArrayTypeSpecRef = 0u;

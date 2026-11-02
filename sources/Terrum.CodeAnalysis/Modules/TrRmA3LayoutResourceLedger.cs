@@ -23,7 +23,7 @@ public enum TrRmA3AdmissionFailureKind
     ResourceLimit = 4,
 }
 
-/// <summary>Reports deterministic capacity exhaustion while validating the selected A3 fixed-array profile.</summary>
+/// <summary>Reports deterministic capacity exhaustion while validating TRRM metadata.</summary>
 [SuppressMessage("Design", "CA1032:Implement standard exception constructors",
     Justification = "Construction is internal to the selected A3 host boundary.")]
 public sealed class TrRmResourceLimitException : NotSupportedException
