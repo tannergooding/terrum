@@ -4597,10 +4597,42 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             consumerArtifact, "Main");
         Assert.That(remappedProviderArtifact, Is.Not.EqualTo(providerArtifact));
         Assert.That(remappedConsumerArtifact, Is.Not.EqualTo(consumerArtifact));
+
+        var noCopyConsumerSource = consumerSource.Replace(
+            "                    [[ptr<int32>; 1]; 1] copied = pointers;\n"
+                + "                    mut [[ptr<int32>; 1]; 1] assigned = [\n"
+                + "                        [&values[zeroIndex]]];\n"
+                + "                    assigned = copied;\n",
+            "", StringComparison.Ordinal)
+            .Replace("&assigned[zeroIndex][zeroIndex]",
+                "&pointers[zeroIndex][zeroIndex]", StringComparison.Ordinal);
+        var noCopyConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(noCopyConsumerSource), providerReference,
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(noCopyConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                noCopyConsumerCompilation.Diagnostics));
+        var noCopyConsumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            noCopyConsumerCompilation.Program!, consumerIdentity,
+            schemaIdentity, 1);
+        var remappedNoCopyConsumerArtifact = PermuteA2BodyLocalMaps(
+            noCopyConsumerArtifact, "Main");
+        var malformedD9Consumer = ReplaceA2PointerStoreType(
+            remappedNoCopyConsumerArtifact);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            CombinePopulatedNativeAddressModules(remappedProviderArtifact,
+                malformedD9Consumer, schema));
+
         var combinedArtifact = CombinePopulatedNativeAddressModules(
             remappedProviderArtifact, remappedConsumerArtifact, schema);
         var input = new TrRmStandardArtifactInput(schemaIdentity,
             combinedArtifact);
+        AssertA2ProviderBodyMalformedInputs(schemaIdentity,
+            providerIdentity, consumerIdentity, combinedArtifact);
         var loaded = TrRmExecutableCompiler.LoadStandard(input,
             consumerIdentity, []);
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
@@ -4682,6 +4714,147 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             .ConfigureAwait(true);
     }
 
+    private static void AssertA2ProviderBodyMalformedInputs(
+        string schemaIdentity, string providerIdentity,
+        string consumerIdentity, byte[] combinedArtifact)
+    {
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyDraft(
+                combinedArtifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                index);
+        var providerModuleRow = 0;
+        var consumerModuleRow = 0;
+        for (var moduleRow = 1; moduleRow <= tables.Modules.Count;
+            moduleRow++)
+        {
+            var identity = tables.Modules.GetIdentity(moduleRow);
+            if (identity == providerIdentity)
+            {
+                providerModuleRow = moduleRow;
+            }
+            else if (identity == consumerIdentity)
+            {
+                consumerModuleRow = moduleRow;
+            }
+        }
+        Assert.That(providerModuleRow, Is.GreaterThan(0));
+        Assert.That(consumerModuleRow, Is.GreaterThan(0));
+
+        var mainRow = 0;
+        for (var methodRow = 1; methodRow <= tables.Methods.Count;
+            methodRow++)
+        {
+            if (tables.Methods.GetOwnerModule(methodRow) == consumerModuleRow
+                && tables.Methods.GetName(methodRow) == "Main")
+            {
+                mainRow = methodRow;
+                break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(mainRow), tables.Contracts.Count);
+
+        var providerLayoutRow = 0;
+        var providerArrayTypeSpecRow = 0;
+        var consumerArrayTypeSpecRows = new HashSet<int>();
+        for (var layoutRow = 1;
+            layoutRow <= tables.FixedArrayLayouts.Count; layoutRow++)
+        {
+            var layout = tables.FixedArrayLayouts.GetRow(layoutRow);
+            if (layout.OwnerModuleRow == providerModuleRow
+                && providerLayoutRow == 0)
+            {
+                providerLayoutRow = layoutRow;
+                providerArrayTypeSpecRow = layout.ArrayTypeSpecRow;
+            }
+            else if (layout.OwnerModuleRow == consumerModuleRow)
+            {
+                _ = consumerArrayTypeSpecRows.Add(layout.ArrayTypeSpecRow);
+            }
+        }
+        Assert.That(providerLayoutRow, Is.GreaterThan(0));
+        Assert.That(providerArrayTypeSpecRow, Is.GreaterThan(0));
+        Assert.That(consumerArrayTypeSpecRows, Is.Not.Empty);
+        Assert.That(consumerArrayTypeSpecRows,
+            Does.Not.Contain(providerArrayTypeSpecRow));
+
+        var consumerArrayTypeMapIndex = -1;
+        for (var typeMapIndex = 0; typeMapIndex < body.TypeCount;
+            typeMapIndex++)
+        {
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint)));
+            if ((byte)(token >> 24) == 0x11
+                && consumerArrayTypeSpecRows.Contains(
+                    checked((int)(token & 0x00FF_FFFF))))
+            {
+                consumerArrayTypeMapIndex = typeMapIndex;
+                break;
+            }
+        }
+        Assert.That(consumerArrayTypeMapIndex,
+            Is.GreaterThanOrEqualTo(0));
+
+        var malformedTypeMapToken = RewriteA2BodyArtifact(
+            combinedArtifact, "Main",
+            (_, typeMap, _, _) =>
+                BinaryPrimitives.WriteUInt32LittleEndian(typeMap,
+                    0xFF00_0000));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedTypeMapToken), consumerIdentity, []));
+
+        var providerArrayTypeToken = 0x1100_0000u
+            | checked((uint)providerArrayTypeSpecRow);
+        var malformedTypeMapOwner = RewriteA2BodyArtifact(
+            combinedArtifact, "Main",
+            (_, typeMap, _, _) =>
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    typeMap.AsSpan(consumerArrayTypeMapIndex * sizeof(uint)),
+                    providerArrayTypeToken));
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedTypeMapOwner), consumerIdentity, []));
+
+        var malformedPlaceSelectionOwner = RewriteA2BodyArtifact(
+            combinedArtifact, "Main",
+            (_, _, records, _) =>
+            {
+                var placeSelection = -1;
+                for (var recordIndex = 0;
+                    recordIndex < records.Length; recordIndex++)
+                {
+                    var record = records[recordIndex];
+                    if (record[0] == 0x04 && record.Length == 24
+                        && record[4] == 3 && record[13] == 3)
+                    {
+                        placeSelection = recordIndex;
+                        break;
+                    }
+                }
+                Assert.That(placeSelection, Is.GreaterThanOrEqualTo(0));
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    records[placeSelection].AsSpan(16),
+                    checked((uint)providerLayoutRow));
+            });
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedPlaceSelectionOwner), consumerIdentity, []));
+
+        var malformedHomeCopy = ReplaceA2HomeCopyTargetWithIncompatibleType(
+            combinedArtifact, "Main");
+        _ = Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedHomeCopy), consumerIdentity, []));
+    }
+
     private static byte[] ReplaceA2PointerStoreType(byte[] artifact)
     {
         const TrRmArtifactSchema schema
@@ -4721,7 +4894,6 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         var pointerToPointerStoreD5Offset = -1;
         var wrongPointerValueHome = -1;
-        var rewrittenCode = body.Code.ToArray();
         for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
         {
             var block = body.GetBlock(blockIndex);
@@ -4776,9 +4948,48 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
         Assert.That(wrongPointerValueHome, Is.GreaterThanOrEqualTo(0));
 
-        BinaryPrimitives.WriteUInt16LittleEndian(
-            rewrittenCode.AsSpan(pointerToPointerStoreD5Offset + 2),
-            checked((ushort)wrongPointerValueHome));
+        return RewriteA2BodyArtifact(artifact, "Main",
+            (_, _, _, code) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    code.AsSpan(pointerToPointerStoreD5Offset + 2),
+                    checked((ushort)wrongPointerValueHome)));
+    }
+
+    private static byte[] RewriteA2BodyArtifact(byte[] artifact,
+        string methodName,
+        Action<byte[], byte[], byte[][], byte[]> rewrite)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == methodName)
+            {
+                methodRow = row;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var bodyRow = tables.Methods.GetBodyRow(methodRow);
+        var body = tables.Bodies.GetRegisterBody(bodyRow,
+            tables.Contracts.Count);
+        var homeMap = body.HomeMap.ToArray();
+        var typeMap = body.TypeMap.ToArray();
+        var records = new byte[body.RecordCount][];
+        for (var recordIndex = 0; recordIndex < records.Length;
+            recordIndex++)
+        {
+            records[recordIndex] = body.GetRecord(recordIndex).ToArray();
+        }
+        var code = body.Code.ToArray();
+        rewrite(homeMap, typeMap, records, code);
+
         var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
         for (var blockIndex = 0; blockIndex < blocks.Length; blockIndex++)
         {
@@ -4788,31 +4999,30 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
                 BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
         }
-        var records = new ReadOnlyMemory<byte>[body.RecordCount];
-        for (var recordIndex = 0; recordIndex < records.Length; recordIndex++)
+        var encodedRecords = new ReadOnlyMemory<byte>[records.Length];
+        for (var recordIndex = 0; recordIndex < records.Length;
+            recordIndex++)
         {
-            records[recordIndex] = body.GetRecord(recordIndex).ToArray();
+            encodedRecords[recordIndex] = records[recordIndex];
         }
-
-        var rewrittenBody = TrRmRegisterBodyWriter.Encode(
-            body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+        var rewrittenBody = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
             body.MethodMap.ToArray(), body.FieldMap.ToArray(),
-            body.ConstantMap.ToArray(), blocks, records, rewrittenCode,
+            body.ConstantMap.ToArray(), blocks, encodedRecords, code,
             tables.Contracts.Count, schema);
         if (!index.TryGetSection(0x0020, out var bodySection,
                 out var bodyCount))
         {
             throw new InvalidOperationException(
-                "The A2 pointer-store fixture has no Body section.");
+                "The A2 body rewriter has no Body section.");
         }
 
         var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount,
             schema);
         var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
-        for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+        for (var row = 1; row <= bodyCount; row++)
         {
-            bodyRows[bodyRow - 1] = bodyRow == mainBodyRow
-                ? rewrittenBody : bodyTable.GetRow(bodyRow).ToArray();
+            bodyRows[row - 1] = row == bodyRow
+                ? rewrittenBody : bodyTable.GetRow(row).ToArray();
         }
         var rewrittenBodySection
             = TrRmVariableTableWriter.EncodeBodies(bodyRows);
@@ -4830,6 +5040,118 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
 
         return TrRmArtifactWriter.Encode(sections, schema);
+    }
+
+    private static byte[] ReplaceA2HomeCopyTargetWithIncompatibleType(
+        byte[] artifact, string methodName)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == methodName)
+            {
+                methodRow = row;
+                break;
+            }
+        }
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
+        var homeTypeSpecRefs = new uint[body.HomeCount];
+        var isFixedArrayHome = new bool[body.HomeCount];
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            var typeMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(home[2..]);
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint)));
+            if ((byte)(token >> 24) != 0x11)
+            {
+                continue;
+            }
+
+            var typeSpecRef = token & 0x00FF_FFFF;
+            homeTypeSpecRefs[homeIndex] = typeSpecRef;
+            isFixedArrayHome[homeIndex]
+                = tables.TypeSpecs.GetTypeSpecRef(typeSpecRef).Form == 0x11;
+        }
+
+        var copyStoreOffset = -1;
+        var incompatibleHome = -1;
+        for (var blockIndex = 0; blockIndex < body.BlockCount;
+            blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            var codeOffset = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(block));
+            var code = body.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], schema);
+                if (code[position] == 0xD5)
+                {
+                    var sourceRegister = code[position + 1] & 0x0F;
+                    var sourceHome
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            code[(position + 2)..]);
+                    var nextPosition = position + instructionLength;
+                    if (nextPosition < code.Length
+                        && code[nextPosition] == 0xD6
+                        && (code[nextPosition + 1] & 0x0F)
+                            == sourceRegister
+                        && isFixedArrayHome[sourceHome])
+                    {
+                        for (var candidate = 0;
+                            candidate < body.HomeCount; candidate++)
+                        {
+                            var candidateHome = body.HomeMap.Slice(
+                                candidate * 8, 8);
+                            if (candidate == sourceHome
+                                || candidateHome[0] != 3
+                                || !isFixedArrayHome[candidate]
+                                || tables.TypeSpecs.AreEquivalentTypeSpecRefs(
+                                    homeTypeSpecRefs[sourceHome],
+                                    homeTypeSpecRefs[candidate]))
+                            {
+                                continue;
+                            }
+
+                            copyStoreOffset = codeOffset + nextPosition + 2;
+                            incompatibleHome = candidate;
+                            break;
+                        }
+                    }
+                }
+
+                if (copyStoreOffset >= 0)
+                {
+                    break;
+                }
+                position += instructionLength;
+            }
+            if (copyStoreOffset >= 0)
+            {
+                break;
+            }
+        }
+        Assert.That(copyStoreOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(incompatibleHome, Is.GreaterThanOrEqualTo(0));
+
+        return RewriteA2BodyArtifact(artifact, methodName,
+            (_, _, _, code) =>
+                BinaryPrimitives.WriteUInt16LittleEndian(
+                    code.AsSpan(copyStoreOffset),
+                    checked((ushort)incompatibleHome)));
     }
 
     private static byte[] PermuteA2BodyLocalMaps(byte[] artifact,
