@@ -5670,9 +5670,12 @@ public static partial class SemanticVerifier
             && function.Intrinsic == BoundIntrinsic.None && function.IndexedBody is null;
 
     private static int[] CopyOriginSummaryVerificationOrder(
-        BoundProgram program, bool[] recursiveFunctions)
+        BoundProgram program, bool[] recursiveCopyOriginFunctions,
+        bool[] recursiveRawUnionReturnCoverageFunctions)
     {
-        if (recursiveFunctions.Length != program.Functions.Length)
+        if (recursiveCopyOriginFunctions.Length != program.Functions.Length
+            || recursiveRawUnionReturnCoverageFunctions.Length
+                != program.Functions.Length)
         {
             throw Invalid();
         }
@@ -5682,7 +5685,14 @@ public static partial class SemanticVerifier
         for (var index = 0; index < program.Functions.Length; index++)
         {
             var function = program.Functions[index];
-            sourceFunctions[index] = IsCopyOriginSummarySourceFunction(function);
+            sourceFunctions[index] = !function.IsExternal
+                && function.Intrinsic == BoundIntrinsic.None
+                && function.IndexedBody is null;
+        }
+
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            var function = program.Functions[index];
             if (!sourceFunctions[index])
             {
                 continue;
@@ -5693,7 +5703,7 @@ public static partial class SemanticVerifier
                 {
                     if (expression is BoundCall call
                         && (uint)call.Function < (uint)program.Functions.Length
-                        && IsCopyOriginSummarySourceFunction(program.Functions[call.Function]))
+                        && sourceFunctions[call.Function])
                     {
                         _ = callees.Add(call.Function);
                     }
@@ -5745,7 +5755,20 @@ public static partial class SemanticVerifier
                         }
                         for (var cycleIndex = cycleStart; cycleIndex < active.Count; cycleIndex++)
                         {
-                            recursiveFunctions[active[cycleIndex]] = true;
+                            var recursiveFunction = active[cycleIndex];
+                            if (IsCopyOriginSummarySourceFunction(
+                                    program.Functions[recursiveFunction]))
+                            {
+                                recursiveCopyOriginFunctions[
+                                    recursiveFunction] = true;
+                            }
+                            if (IsRawUnionType(program,
+                                    program.Functions[recursiveFunction]
+                                        .ReturnType))
+                            {
+                                recursiveRawUnionReturnCoverageFunctions[
+                                    recursiveFunction] = true;
+                            }
                         }
                     }
                 }

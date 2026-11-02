@@ -757,6 +757,7 @@ public sealed record BoundFunction(string Name, PrimitiveType ReturnType, Immuta
     internal DirectNativeImport? DirectNativeImport { get; init; }
     internal NativeOutputDeclarationRole? NativeOutputRole { get; init; }
     internal ImmutableArray<NativeOutputContract> NativeOutputContracts { get; init; } = [];
+    internal ImmutableArray<byte> RawUnionReturnCoverage { get; init; } = [];
     internal BoundModuleImport? ModuleImport { get; init; }
     /// <summary>Whether this external declaration originated in a module reference rather than source import syntax.</summary>
     internal bool IsModuleReference { get; init; }
