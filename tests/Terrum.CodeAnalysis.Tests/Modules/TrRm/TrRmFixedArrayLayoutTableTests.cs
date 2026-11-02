@@ -21,6 +21,9 @@ namespace Terrum.CodeAnalysis.Tests.Modules.TrRm;
 [SuppressMessage("Performance", "CA1812:Avoid uninstantiated internal classes", Justification = "NUnit instantiates this fixture through reflection.")]
 internal sealed class TrRmFixedArrayLayoutTableTests
 {
+    private const string A2R1SchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
+
     private sealed class TrackingMemoryManager(int length)
         : MemoryManager<byte>
     {
@@ -143,9 +146,15 @@ internal sealed class TrRmFixedArrayLayoutTableTests
 
     [Test]
     public void StandardA2SourceFreeRoundTripsRawUnionArrayFields()
+        => VerifyRawUnionArrayTypeLibrary(
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2");
+
+    [Test]
+    public void StandardA2R1SourceFreeRoundTripsRawUnionArrayFields()
+        => VerifyRawUnionArrayTypeLibrary(A2R1SchemaIdentity);
+
+    private static void VerifyRawUnionArrayTypeLibrary(string schemaIdentity)
     {
-        const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
         const string moduleIdentity = "a2-raw-union-array-types";
         const string source = """
             [Blittable]
@@ -165,13 +174,22 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program!;
 
         var artifact = TrRmExecutableCompiler.EmitStandard(
-            compilation.Program!, moduleIdentity, schemaIdentity, 1);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
-                TrRmArtifactIndex
-                    .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
+            program, moduleIdentity, schemaIdentity, 1);
+        var isA2R1 = StringComparer.Ordinal.Equals(schemaIdentity,
+            A2R1SchemaIdentity);
+        var tables = isA2R1
+            ? TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                            artifact))
+            : TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                    TrRmArtifactIndex
+                        .ForForeignInvocationStorageFixedArrayCopyDraft(artifact));
         var rawWordRow = 0;
         for (var row = 1; row <= tables.TypeDefs.Count; row++)
         {

@@ -27,7 +27,8 @@ public static partial class TrRmExecutableCompiler
             TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft))
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
@@ -423,7 +424,11 @@ public static partial class TrRmExecutableCompiler
         sections.Sort(static (left, right)
             => left.Kind.CompareTo(right.Kind));
         var artifact = TrRmArtifactWriter.Encode(sections, schema);
-        var index = schema.UsesScalarFrozenValues()
+        var index = schema.UsesRawUnionValueCoverage()
+            ? TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                    artifact)
+            : schema.UsesScalarFrozenValues()
             ? TrRmArtifactIndex
                 .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
                     artifact)
@@ -437,7 +442,13 @@ public static partial class TrRmExecutableCompiler
                         artifact)
                 : TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
-        if (schema.UsesScalarFrozenValues())
+        if (schema.UsesRawUnionValueCoverage())
+        {
+            _ = TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                    index);
+        }
+        else if (schema.UsesScalarFrozenValues())
         {
             _ = TrRmStructuralMetadataValidator
                 .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(

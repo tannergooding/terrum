@@ -279,6 +279,7 @@ public static class TrRmStructuralMetadataValidator
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                     or TrRmArtifactSchema.ScalarFrozenValuesDraft
                     or TrRmArtifactSchema.NominalEnumsDraft
@@ -731,6 +732,12 @@ public static class TrRmStructuralMetadataValidator
             foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft: true);
 
     internal static ValidatedExecutionTables
+        ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+        TrRmArtifactIndex index)
+        => ValidateCore(index, BodyInspection.None, developmentProfile: false,
+            foreignInvocationStorageFixedArrayCopyReturnCoverageDraft: true);
+
+    internal static ValidatedExecutionTables
         ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
         TrRmArtifactIndex index,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null,
@@ -1084,6 +1091,7 @@ public static class TrRmStructuralMetadataValidator
         bool foreignInvocationStorageFixedArrayEmptyInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft = false,
         bool foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft = false,
+        bool foreignInvocationStorageFixedArrayCopyReturnCoverageDraft = false,
         bool foreignInvocationStorageFixedArrayGenericDraft = false,
         bool registerExceptionRegionsDraft = false,
         TrRmA3LayoutResourceLedger? a3LayoutResourceLedger = null)
@@ -1092,6 +1100,9 @@ public static class TrRmStructuralMetadataValidator
             ? TrRmArtifactSchema.DevelopmentFunctionPointerEffectsDraft
             : developmentProfile
             ? TrRmArtifactSchema.Development
+            : foreignInvocationStorageFixedArrayCopyReturnCoverageDraft
+                ? TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             : copyOriginDraft
                 ? TrRmArtifactSchema.CopyOriginDraft
                 : foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft
@@ -1127,6 +1138,9 @@ public static class TrRmStructuralMetadataValidator
             throw InvalidMetadata();
         }
         var selectedA3LayoutResourceLedger = a3LayoutResourceLedger;
+        copyOriginDraft |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft;
+        foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft
+            |= foreignInvocationStorageFixedArrayCopyReturnCoverageDraft;
         scalarFrozenValuesDraft
             |= foreignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesDraft;
         foreignInvocationStorageFixedArrayEmptyUnitInitializationDraft
@@ -1757,6 +1771,11 @@ public static class TrRmStructuralMetadataValidator
                 eagerGroups, staticFields, staticFieldContracts,
                 eagerInitializers, lazyUnits,
                 selectedA3LayoutResourceLedger);
+        if (index.Schema.UsesRawUnionValueCoverage())
+        {
+            ValidateReturnCoverageProfiles(contracts, targetProfiles,
+                modules, methods);
+        }
         if (index.Schema.SupportsDeclaredCopyEvidence())
         {
             for (var typeDef = 1; typeDef <= types.Count; typeDef++)
@@ -2381,6 +2400,36 @@ public static class TrRmStructuralMetadataValidator
                     requiredFeature, schema))
             {
                 throw InvalidMetadata();
+            }
+        }
+    }
+
+    private static void ValidateReturnCoverageProfiles(
+        TrRmContractTableReader contracts,
+        TrRmTargetProfileTableReader targetProfiles,
+        TrRmModuleTableReader modules,
+        TrRmMethodDefTableReader methods)
+    {
+        for (var method = 1; method <= methods.Count; method++)
+        {
+            foreach (var coverage
+                in contracts.GetReturnCoverageContracts(method))
+            {
+                var profile = targetProfiles.GetProfile(
+                    coverage.TargetProfileRow);
+                var requirements
+                    = modules.GetRequirements(methods.GetOwnerModule(method));
+                if (profile.ProfileId
+                        != TrRmTargetProfileTableReader.WindowsX64NativeProfileId
+                    || profile.RuleRevision
+                        != TrRmTargetProfileTableReader
+                            .WindowsX64NativeProfileRuleRevision
+                    || requirements.TargetRequirement
+                        != TrRmModuleTableReader
+                            .WindowsX64NativeTargetRequirement)
+                {
+                    throw InvalidMetadata();
+                }
             }
         }
     }

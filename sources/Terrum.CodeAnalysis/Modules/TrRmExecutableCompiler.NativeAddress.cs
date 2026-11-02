@@ -26,6 +26,7 @@ public static partial class TrRmExecutableCompiler
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft))
         {
             throw new ArgumentOutOfRangeException(nameof(schema));
@@ -35,7 +36,8 @@ public static partial class TrRmExecutableCompiler
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
                 || program.EntryPoint != -1 || !program.Functions.IsEmpty))
         {
             throw Unsupported(
@@ -58,7 +60,8 @@ public static partial class TrRmExecutableCompiler
         if ((schema is TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
             && program.EntryPoint < 0 && program.Functions.IsEmpty
             && !program.Structures.IsEmpty)
         {
@@ -313,7 +316,8 @@ public static partial class TrRmExecutableCompiler
                     TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                     or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft))
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                    or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft))
                 {
                     throw Unsupported(
                         "Fixed-array Body types require the exact A2 schema.");
@@ -1444,6 +1448,10 @@ public static partial class TrRmExecutableCompiler
         var artifactIndex = a3LayoutResourceLedger is not null
             ? new TrRmArtifactIndex(artifact, schema,
                 a3LayoutResourceLedger)
+            : schema.UsesRawUnionValueCoverage()
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                        artifact)
             : schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
@@ -1472,6 +1480,10 @@ public static partial class TrRmExecutableCompiler
                 .ValidateForeignInvocationStorageFixedArrayGenericCopyDraftAndGetExecutionTables(
                     artifactIndex, a3LayoutResourceLedger,
                     createA3ResourceLedger: false)
+            : schema.UsesRawUnionValueCoverage()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                        artifactIndex)
             : schema.UsesForeignInvocationStorageFixedArrays()
             ? schema
                 == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
@@ -1870,7 +1882,8 @@ public static partial class TrRmExecutableCompiler
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
                     || !NativeFixedArrayContract.TryGetLayout(variable.Type,
                         program.Structures, program.NativeFixedArrayTypes,
                             out _)
@@ -1975,7 +1988,8 @@ public static partial class TrRmExecutableCompiler
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
-                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                        or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft)
                         && IsSupportedNativeAddressStorageArray(
                             storageAddress, function, program,
                             localVariables)

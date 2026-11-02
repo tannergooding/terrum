@@ -76,6 +76,8 @@ internal sealed class TrRmStandardNativeBindingPlan
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string ForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+    private const string ForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
     private const string ForeignInvocationStorageGenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
     private readonly TrRmA3LayoutResourceLedger? _a3LayoutResourceLedger;
@@ -529,6 +531,8 @@ internal sealed class TrRmStandardNativeBindingPlan
             || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageFixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity)
             || AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity)
+            || AreEqualOrdinal(schemaIdentity,
                 ForeignInvocationStorageGenericFixedArraySchemaIdentity);
 
     private bool IsFixedArraySchemaIdentity(string? schemaIdentity)
@@ -576,6 +580,13 @@ internal sealed class TrRmStandardNativeBindingPlan
         {
             return TrRmArtifactSchema
                 .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft;
+        }
+
+        if (AreEqualOrdinal(schemaIdentity,
+                ForeignInvocationStorageFixedArrayCopyReturnCoverageSchemaIdentity))
+        {
+            return TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft;
         }
 
         throw new InvalidDataException(

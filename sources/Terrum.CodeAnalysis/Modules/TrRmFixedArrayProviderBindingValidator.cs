@@ -24,6 +24,8 @@ internal static class TrRmFixedArrayProviderBindingValidator
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
     private const string FixedArrayEmptyUnitScalarFrozenValuesSchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-1";
+    private const string FixedArrayCopyReturnCoverageSchemaIdentity
+        = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-scalar-frozen-values-copy-origin-return-coverage-1";
     private const string GenericFixedArraySchemaIdentity
         = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1";
 
@@ -1475,6 +1477,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                 ? TrRmArtifactIndex
                     .ForForeignInvocationStorageFixedArrayGenericCopyDraft(
                         _artifacts[artifactIndex])
+                : schema.UsesRawUnionValueCoverage()
+                ? TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                        _artifacts[artifactIndex])
                 : schema.UsesScalarFrozenValues()
                     ? TrRmArtifactIndex
                         .ForForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft(
@@ -1497,6 +1503,10 @@ internal static class TrRmFixedArrayProviderBindingValidator
                         index, _a3ResourceLedger,
                         createA3ResourceLedger: _consumer.Schema
                             == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft)
+                : schema.UsesRawUnionValueCoverage()
+                ? TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                        index)
                 : schema.UsesScalarFrozenValues()
                     ? TrRmStructuralMetadataValidator
                         .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraftAndGetExecutionTables(
@@ -1554,6 +1564,14 @@ internal static class TrRmFixedArrayProviderBindingValidator
             }
 
             ConsumeWork(GetStringComparisonWork(schemaIdentity,
+                FixedArrayCopyReturnCoverageSchemaIdentity));
+            if (StringComparer.Ordinal.Equals(schemaIdentity,
+                FixedArrayCopyReturnCoverageSchemaIdentity))
+            {
+                return true;
+            }
+
+            ConsumeWork(GetStringComparisonWork(schemaIdentity,
                 GenericFixedArraySchemaIdentity));
             return StringComparer.Ordinal.Equals(schemaIdentity,
                 GenericFixedArraySchemaIdentity);
@@ -1598,6 +1616,13 @@ internal static class TrRmFixedArrayProviderBindingValidator
             {
                 return TrRmArtifactSchema
                     .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft;
+            }
+
+            if (StringComparer.Ordinal.Equals(schemaIdentity,
+                FixedArrayCopyReturnCoverageSchemaIdentity))
+            {
+                return TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft;
             }
 
             ConsumeWork(GetStringComparisonWork(schemaIdentity,

@@ -31,6 +31,13 @@ internal readonly record struct TrRmStaticInitializationRoleContract(
     byte RoleTag, int EagerGroupRow, uint OwnerTypeSpecRef);
 internal readonly record struct TrRmStaticInitializationDemandContract(
     int EagerGroupRow, uint OwnerTypeSpecRef);
+internal readonly record struct TrRmReturnCoverageRepetition(
+    ulong Count, ulong Stride);
+internal readonly record struct TrRmReturnCoverageRegion(
+    ulong Offset, ulong Length,
+    ImmutableArray<TrRmReturnCoverageRepetition> Repetitions);
+internal readonly record struct TrRmReturnCoverageContract(
+    int TargetProfileRow, ImmutableArray<TrRmReturnCoverageRegion> Regions);
 
 /// <summary>Validates Contract row framing, owner ranges and assigned clause shapes.</summary>
 /// <remarks>Structural decoding does not prove the promises or make unassigned clause modes executable.</remarks>
@@ -54,6 +61,8 @@ public readonly ref struct TrRmContractTableReader
         _staticInitializationRoles;
     private readonly ImmutableArray<TrRmStaticInitializationDemandContract>[]
         _staticInitializationDemands;
+    private readonly ImmutableArray<TrRmReturnCoverageContract>[]
+        _returnCoverageContracts;
     private readonly byte[] _nativeCallableConventions;
     private readonly int[] _nativeCallableContractRows;
     private readonly HashSet<int> _cleanupMethodRows;
@@ -149,13 +158,14 @@ public readonly ref struct TrRmContractTableReader
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
                 or TrRmArtifactSchema.RootPinRuntimeDraft
                 or TrRmArtifactSchema.GeneralPredicateGraphsDraft
                 or TrRmArtifactSchema.RegisterExceptionRegionsDraft)
-            || (schema == TrRmArtifactSchema.CopyOriginDraft && !profileAware))
+            || (schema.UsesCopyOrigin() && !profileAware))
         {
             throw InvalidContract();
         }
@@ -171,7 +181,7 @@ public readonly ref struct TrRmContractTableReader
         _schema = schema;
         _resourceLedger = resourceLedger;
         var methodArrayWork
-            = checked(((ulong)methods.Count + 1UL) * 11UL);
+            = checked(((ulong)methods.Count + 1UL) * 12UL);
         var recordStateWork = checked((ulong)recordCount + 14UL);
         resourceLedger?.ConsumeWork(
             checked(methodArrayWork + recordStateWork));
@@ -190,6 +200,8 @@ public readonly ref struct TrRmContractTableReader
             new ImmutableArray<TrRmStaticInitializationRoleContract>[methods.Count + 1];
         _staticInitializationDemands =
             new ImmutableArray<TrRmStaticInitializationDemandContract>[methods.Count + 1];
+        _returnCoverageContracts =
+            new ImmutableArray<TrRmReturnCoverageContract>[methods.Count + 1];
         _nativeCallableConventions = new byte[methods.Count + 1];
         _nativeCallableContractRows = new int[methods.Count + 1];
         _cleanupMethodRows = new HashSet<int>();
@@ -278,7 +290,7 @@ public readonly ref struct TrRmContractTableReader
             if (owners[row] == 0 || owner != owners[row]
                 || BinaryPrimitives.ReadUInt16LittleEndian(data[6..]) != 0
                 || (!developmentProfile && kind is 0x10 or 0x11 or 0x12)
-                || (kind is 1 or 5 or 0x0C or 0x0D or 0x10 or 0x13
+                || (kind is 1 or 5 or 0x0C or 0x0D or 0x0F or 0x10 or 0x13
                     && !AddState(singletons, (owner, kind))))
             {
                 throw InvalidContract();
@@ -536,7 +548,7 @@ public readonly ref struct TrRmContractTableReader
                     _nativeCallableContractRows[nativeCallableMethod] = row;
                     break;
                 case 0x0D:
-                    if (schema != TrRmArtifactSchema.CopyOriginDraft
+                    if (!schema.UsesCopyOrigin()
                         || !profileAware || owner >> 24 != 0x16)
                     {
                         throw InvalidContract();
@@ -552,6 +564,109 @@ public readonly ref struct TrRmContractTableReader
                     {
                         throw InvalidContract();
                     }
+                    break;
+                case 0x0F:
+                    if (!schema.UsesRawUnionValueCoverage()
+                        || !profileAware || data.Length < 16
+                        || owner >> 24 != 0x16)
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var coverageMethod = checked((int)(owner & 0x00FF_FFFF));
+                    var targetProfile = Read(data, 8);
+                    var regionCount = Read(data, 12);
+                    var remainingCoverageBytes = data.Length - 16;
+                    if (targetProfile is 0 or > 0x00FF_FFFF
+                        || regionCount
+                            > checked((uint)(remainingCoverageBytes / 20)))
+                    {
+                        throw InvalidContract();
+                    }
+
+                    var regionCountInt = checked((int)regionCount);
+                    ConsumeWork(checked((ulong)regionCountInt + 1UL));
+                    var coverageRegions =
+                        ImmutableArray.CreateBuilder<TrRmReturnCoverageRegion>(
+                            regionCountInt);
+                    var coverageOffset = 16;
+                    for (var regionIndex = 0;
+                        regionIndex < regionCountInt;
+                        regionIndex++)
+                    {
+                        ConsumeWork();
+                        if (coverageOffset > data.Length - 20)
+                        {
+                            throw InvalidContract();
+                        }
+
+                        var byteOffset = ReadUInt64(data, coverageOffset);
+                        var byteLength = ReadUInt64(data, coverageOffset + 8);
+                        var repeatRank = Read(data, coverageOffset + 16);
+                        coverageOffset += 20;
+                        if (byteLength == 0
+                            || repeatRank
+                                > checked((uint)((data.Length - coverageOffset) / 16)))
+                        {
+                            throw InvalidContract();
+                        }
+
+                        var repeatRankInt = checked((int)repeatRank);
+                        ConsumeWork(checked((ulong)repeatRankInt + 1UL));
+                        var repetitions =
+                            ImmutableArray.CreateBuilder<
+                                TrRmReturnCoverageRepetition>(
+                                    repeatRankInt);
+                        var span = byteLength;
+                        for (var dimension = 0;
+                            dimension < repeatRankInt;
+                            dimension++)
+                        {
+                            ConsumeWork();
+                            if (coverageOffset > data.Length - 16)
+                            {
+                                throw InvalidContract();
+                            }
+
+                            var repeatCount
+                                = ReadUInt64(data, coverageOffset);
+                            var repeatStride
+                                = ReadUInt64(data, coverageOffset + 8);
+                            coverageOffset += 16;
+                            if (repeatCount < 2 || repeatStride < span
+                                || repeatStride == 0
+                                || repeatCount - 1
+                                    > (ulong.MaxValue - span) / repeatStride)
+                            {
+                                throw InvalidContract();
+                            }
+
+                            span = ((repeatCount - 1) * repeatStride) + span;
+                            repetitions.Add(new TrRmReturnCoverageRepetition(
+                                repeatCount, repeatStride));
+                        }
+
+                        if (byteOffset > ulong.MaxValue - span)
+                        {
+                            throw InvalidContract();
+                        }
+
+                        coverageRegions.Add(new TrRmReturnCoverageRegion(
+                            byteOffset, byteLength, repetitions.ToImmutable()));
+                    }
+
+                    if (coverageOffset != data.Length
+                        || !TrRmFeatureManifestValidator.Requires(features,
+                            modules, methods.GetOwnerModule(coverageMethod),
+                            TrRmFeatureTableReader
+                                .RawUnionValueCoverageFeatureId, schema))
+                    {
+                        throw InvalidContract();
+                    }
+
+                    _returnCoverageContracts[coverageMethod] =
+                        [new TrRmReturnCoverageContract(
+                            checked((int)targetProfile), coverageRegions.ToImmutable())];
                     break;
                 case 0x0E:
                     if (!schema.UsesForeignInvocationContracts()
@@ -892,6 +1007,16 @@ public readonly ref struct TrRmContractTableReader
         }
 
         return default;
+    }
+
+    internal ImmutableArray<TrRmReturnCoverageContract>
+        GetReturnCoverageContracts(int methodDefRow)
+    {
+        ConsumeWork();
+        return methodDefRow > 0 && methodDefRow < _returnCoverageContracts.Length
+            ? _returnCoverageContracts[methodDefRow].IsDefault
+                ? [] : _returnCoverageContracts[methodDefRow]
+            : throw InvalidContract();
     }
 
     internal uint GetEffectsMask(int methodRow)

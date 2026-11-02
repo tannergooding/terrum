@@ -92,13 +92,16 @@ public readonly ref struct TrRmExportTableReader
             var nonpublicContractIdentity = definitionKind is 0x13 or 0x14
                 && nonpublicDefinition;
             var allowsContractOnlyIdentity = profileAware
-                && schema == TrRmArtifactSchema.CopyOriginDraft
-                && nonpublicContractIdentity
+                && ((schema == TrRmArtifactSchema.CopyOriginDraft
+                        && nonpublicContractIdentity)
+                    || (schema.UsesRawUnionValueCoverage()
+                        && definitionKind is 0x13 or 0x14
+                        && nonpublicDefinition))
                 && TrRmFeatureManifestValidator.Requires(features, modules,
                     module, TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
                     schema);
             var missingFieldPathFeature = profileAware
-                && schema == TrRmArtifactSchema.CopyOriginDraft
+                && schema.UsesCopyOrigin()
                 && definitionKind == 0x14
                 && !TrRmFeatureManifestValidator.Requires(features, modules,
                     module, TrRmFeatureTableReader.LayoutQueriesFeatureId, schema);
