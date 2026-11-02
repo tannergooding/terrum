@@ -179,12 +179,46 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
-    public void BoundedPublishedPredicateFeatureDoesNotRequireFrozenValues()
+    public void GeneralPredicateProfileRetainsBothEvaluationFormsByTag()
+    {
+        var input = Section(EvaluationForm(2), EvaluationForm(1));
+        var emitted = Create(input, recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            developmentProfile: false, generalPredicateGraphsDraft: true,
+            includeConstantExecutionFeature: true,
+            writeRows: true, canonicalizeEvaluationForms: true,
+            frameArtifact: true,
+            expectedEvaluationForms: [1, 2]);
+        var rows = new TrRmVariableTableIndex(emitted, 2, 8, 1);
+        Assert.That(rows.GetRow(1)[8], Is.EqualTo((byte)1));
+        Assert.That(rows.GetRow(2)[8], Is.EqualTo((byte)2));
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(EvaluationForm(1), EvaluationForm(1)),
+            recordCount: 2, declaredCount: 2,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 2,
+            developmentProfile: false, generalPredicateGraphsDraft: true));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(EvaluationForm(1)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, generalPredicateGraphsDraft: true,
+            includeGeneralPredicateGraphsFeature: false));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(EvaluationForm(2)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, generalPredicateGraphsDraft: true,
+            frameArtifact: true));
+    }
+
+    [Test]
+    public void ForeignInvocationCandidatePublishedPredicateFeatureDoesNotRequireFrozenValues()
     {
         Create(Section(Effects()), recordCount: 1, declaredCount: 1,
             typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
             developmentProfile: false, includePublishedPredicatesFeature: true,
-            verifyPublishedPredicatePrerequisites: true);
+            foreignInvocationDraft: true, verifyPublishedPredicatePrerequisites: true);
     }
 
     [Test]
@@ -601,6 +635,77 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void CopyOriginDraftRejectsStandardFunctionPointerAnchorContracts()
+    {
+        var facts = new[]
+        {
+            new CopyOriginTestFact(1,
+                [new CopyOriginTestOrigin(1, 1, 0, 1)]),
+        };
+        Assert.Throws<InvalidDataException>(() =>
+            ValidateCopyOriginFieldArtifact(facts,
+                standardFunctionPointerAnchor: true));
+    }
+
+    [Test]
+    public void A2R1ReturnCoverageReadsNestedRepeatedRanges()
+    {
+        _ = Create(Section(ReturnCoverageContract(repetitions:
+                [(3, 8), (2, 24)])),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, a2r1ReturnCoverageDraft: true,
+            expectedReturnCoverageRegions: 1, expectedCoverageRepeatRank: 2);
+    }
+
+    [Test]
+    public void A2R1ReturnCoverageAllowsEmptyAndRejectsInvalidRepetitionShapes()
+    {
+        var emptyPayload = new byte[8];
+        Write(emptyPayload, 0, 1);
+        _ = Create(Section(Contract(0x1600_0001, 0x0F, emptyPayload)),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, a2r1ReturnCoverageDraft: true,
+            expectedReturnCoverageRegions: 0);
+
+        foreach (var repetitions in new[]
+        {
+            new (ulong Count, ulong Stride)[] { (1, 8) },
+            new (ulong Count, ulong Stride)[] { (3, 7) },
+            new (ulong Count, ulong Stride)[] { (ulong.MaxValue, ulong.MaxValue) },
+        })
+        {
+            Assert.Throws<InvalidDataException>(() => Create(
+                Section(ReturnCoverageContract(repetitions: repetitions)),
+                recordCount: 1, declaredCount: 1,
+                typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+                developmentProfile: false, a2r1ReturnCoverageDraft: true));
+        }
+
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(ReturnCoverageContract()),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, a2r1ReturnCoverageDraft: true,
+            includeRawUnionValueCoverageFeature: false));
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(ReturnCoverageContract()),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, foreignInvocationDraft: true));
+    }
+
+    [Test]
+    public void A2R1StructuralReaderUsesTheExactComposedSchema()
+    {
+        _ = Create(Section(Effects()), recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, a2r1ReturnCoverageDraft: true,
+            frameArtifact: true);
+    }
+
+    [Test]
     public void CopyOriginDraftWriterSortsOriginsByLogicalSourceIdentity()
     {
         var written = Create(Section(CopyOriginContractWithOrigins(1, 0)),
@@ -696,15 +801,34 @@ public sealed class TrRmContractTableReaderTests
         bool includePublishedPredicatesFeature = false,
         int? expectedPredicateGraphContractCount = null,
         bool verifyPublishedPredicatePrerequisites = false,
-        uint? expectedNativeParameterExtent = null)
+        uint? expectedNativeParameterExtent = null,
+        bool generalPredicateGraphsDraft = false,
+        bool includeGeneralPredicateGraphsFeature = true,
+        bool includeConstantExecutionFeature = false,
+        bool canonicalizeEvaluationForms = false,
+        byte[]? expectedEvaluationForms = null,
+        bool a2r1ReturnCoverageDraft = false,
+        bool includeRawUnionValueCoverageFeature = true,
+        int? expectedReturnCoverageRegions = null,
+        int expectedCoverageRepeatRank = 0)
     {
-        if (copyOriginDraft && foreignInvocationDraft)
+        if ((copyOriginDraft && foreignInvocationDraft)
+            || (generalPredicateGraphsDraft
+                && (copyOriginDraft || foreignInvocationDraft || developmentProfile))
+            || (a2r1ReturnCoverageDraft
+                && (copyOriginDraft || foreignInvocationDraft
+                    || generalPredicateGraphsDraft || developmentProfile)))
         {
             throw new ArgumentException("The selected fixture profiles are distinct.");
         }
 
-        var schema = copyOriginDraft ? TrRmArtifactSchema.CopyOriginDraft
+        var schema = a2r1ReturnCoverageDraft
+            ? TrRmArtifactSchema
+                .ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
+            : copyOriginDraft ? TrRmArtifactSchema.CopyOriginDraft
             : foreignInvocationDraft ? TrRmArtifactSchema.ForeignInvocationDraft
+            : generalPredicateGraphsDraft
+                ? TrRmArtifactSchema.GeneralPredicateGraphsDraft
             : developmentProfile ? TrRmArtifactSchema.Development
             : TrRmArtifactSchema.Standard;
         var nameBytes = TrRmStringTableWriter.EncodeTextRows(
@@ -713,7 +837,20 @@ public sealed class TrRmContractTableReaderTests
         var module = new byte[48];
         Write(module, 0, 2);
         Write(module, 4, 1);
-        TrRmFeatureRow[] featureRows = copyOriginDraft
+        TrRmFeatureRow[] featureRows = a2r1ReturnCoverageDraft
+            ? includeRawUnionValueCoverageFeature
+                ? [
+                    new TrRmFeatureRow(
+                        TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId, 1),
+                    TrRmFeatureRow.TypedFrozenValues,
+                    TrRmFeatureRow.RawUnionValueCoverageCandidate,
+                ]
+                : [
+                    new TrRmFeatureRow(
+                        TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId, 1),
+                    TrRmFeatureRow.TypedFrozenValues,
+                ]
+            : copyOriginDraft
             ? pointerParameter
                 ? includeCopyOriginFeature
                     ? [new TrRmFeatureRow(1, 1), new TrRmFeatureRow(2, 1),
@@ -723,15 +860,35 @@ public sealed class TrRmContractTableReaderTests
                     ? [new TrRmFeatureRow(15, 1)]
                     : Array.Empty<TrRmFeatureRow>()
             : foreignInvocationDraft
-                ? (includeNativeBoundaryFeature, includeForeignInvocationFeature) switch
+                ? (includeNativeBoundaryFeature, includeForeignInvocationFeature,
+                    includePublishedPredicatesFeature) switch
                 {
-                    (true, true) =>
+                    (true, true, true) =>
+                        [TrRmFeatureRow.NativeBoundaryContracts,
+                            TrRmFeatureRow.PublishedPredicates,
+                            TrRmFeatureRow.ForeignInvocationContractsCandidate],
+                    (true, true, false) =>
                         [TrRmFeatureRow.NativeBoundaryContracts,
                             TrRmFeatureRow.ForeignInvocationContractsCandidate],
-                    (true, false) => [TrRmFeatureRow.NativeBoundaryContracts],
-                    (false, true) => [TrRmFeatureRow.ForeignInvocationContractsCandidate],
+                    (true, false, true) =>
+                        [TrRmFeatureRow.NativeBoundaryContracts,
+                            TrRmFeatureRow.PublishedPredicates],
+                    (true, false, false) => [TrRmFeatureRow.NativeBoundaryContracts],
+                    (false, true, true) =>
+                        [TrRmFeatureRow.PublishedPredicates,
+                            TrRmFeatureRow.ForeignInvocationContractsCandidate],
+                    (false, true, false) =>
+                        [TrRmFeatureRow.ForeignInvocationContractsCandidate],
+                    (false, false, true) => [TrRmFeatureRow.PublishedPredicates],
                     _ => Array.Empty<TrRmFeatureRow>(),
                 }
+            : generalPredicateGraphsDraft
+                ? includeGeneralPredicateGraphsFeature
+                    ? includeConstantExecutionFeature
+                        ? [TrRmFeatureRow.GeneralPredicateGraphsCandidate,
+                            TrRmFeatureRow.ConstantExecution]
+                        : [TrRmFeatureRow.GeneralPredicateGraphsCandidate]
+                    : Array.Empty<TrRmFeatureRow>()
             : (includeNativeBoundaryFeature, includePublishedPredicatesFeature) switch
                 {
                     (true, true) =>
@@ -857,7 +1014,11 @@ public sealed class TrRmContractTableReaderTests
                     data[8..].ToArray());
             }
 
-            var emitted = copyOriginDraft
+            var emitted = a2r1ReturnCoverageDraft
+                ? TrRmContractTableWriter.EncodeForeignInvocationDraft(
+                    rows, types, methods, signatures, parameters, typeSpecs,
+                    features, modules, predicateGraphCount, schema)
+                : copyOriginDraft
                 ? TrRmContractTableWriter.EncodeCopyOriginDraft(
                     rows, types, methods, signatures, parameters, typeSpecs,
                     default, fieldPathCount, features, modules)
@@ -865,6 +1026,10 @@ public sealed class TrRmContractTableReaderTests
                     ? TrRmContractTableWriter.EncodeForeignInvocationDraft(
                         rows, types, methods, signatures, parameters, typeSpecs,
                         features, modules, predicateGraphCount)
+                : generalPredicateGraphsDraft
+                    ? TrRmContractTableWriter.EncodeGeneralPredicateGraphsDraft(
+                        rows, types, methods, signatures, parameters, typeSpecs,
+                        fieldPathCount, features, modules, predicateGraphCount)
                 : !developmentProfile && predicateGraphCount != 0
                     ? TrRmContractTableWriter.EncodeWithPredicateGraphs(
                         rows, types, methods, signatures, parameters, typeSpecs,
@@ -872,7 +1037,7 @@ public sealed class TrRmContractTableReaderTests
                     : TrRmContractTableWriter.Encode(
                         rows, types, methods, signatures, parameters, typeSpecs,
                         developmentProfile);
-            if (!canonicalizeCopyOrigin)
+            if (!canonicalizeCopyOrigin && !canonicalizeEvaluationForms)
             {
                 Assert.That(emitted, Is.EqualTo(section));
             }
@@ -924,6 +1089,35 @@ public sealed class TrRmContractTableReaderTests
             Assert.That(contractReader.GetPredicateGraphContracts(1).Length,
                 Is.EqualTo(expectedPredicateCount));
         }
+        if (expectedEvaluationForms is { } expectedForms)
+        {
+            var actualForms = contractReader.GetEvaluationFormContracts(1);
+            Assert.That(actualForms.Length, Is.EqualTo(expectedForms.Length));
+            for (var index = 0; index < expectedForms.Length; index++)
+            {
+                Assert.That(actualForms[index].FormTag,
+                    Is.EqualTo(expectedForms[index]));
+            }
+        }
+        if (expectedReturnCoverageRegions is int expectedRegionCount)
+        {
+            var coverageContracts
+                = contractReader.GetReturnCoverageContracts(1);
+            Assert.That(coverageContracts, Has.Length.EqualTo(1));
+            Assert.That(coverageContracts[0].TargetProfileRow,
+                Is.EqualTo(1));
+            Assert.That(coverageContracts[0].Regions,
+                Has.Length.EqualTo(expectedRegionCount));
+            if (expectedRegionCount != 0)
+            {
+                Assert.That(coverageContracts[0].Regions[0].Offset,
+                    Is.Zero);
+                Assert.That(coverageContracts[0].Regions[0].Length,
+                    Is.EqualTo(8));
+                Assert.That(coverageContracts[0].Regions[0].Repetitions,
+                    Has.Length.EqualTo(expectedCoverageRepeatRank));
+            }
+        }
         if (expectedNativeParameterExtent is uint expectedExtent)
         {
             var nativeParameters = contractReader.GetNativeParameters(1);
@@ -956,6 +1150,15 @@ public sealed class TrRmContractTableReaderTests
             }
             artifactSections.Add(new TrRmSection(0x001B, 0,
                 (uint)recordCount, section));
+            if (generalPredicateGraphsDraft
+                && !contractReader.GetEvaluationFormContracts(1).IsEmpty)
+            {
+                var readBound = new byte[12];
+                Write(readBound, 0, 1);
+                Write(readBound, 4, 1);
+                artifactSections.Add(new TrRmSection(0x0038, 0, 1, new byte[16]));
+                artifactSections.Add(new TrRmSection(0x0051, 0, 1, readBound));
+            }
             if (predicateGraphCount != 0)
             {
                 var graphBytes = TrRmPredicateGraphTableWriter.Encode([
@@ -970,7 +1173,15 @@ public sealed class TrRmContractTableReaderTests
                 artifactSections.Add(new TrRmSection(0x003B, 0, 1, new byte[16]));
             }
             var artifact = TrRmArtifactWriter.Encode(artifactSections, schema);
-            if (copyOriginDraft)
+            if (a2r1ReturnCoverageDraft)
+            {
+                _ = TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyReturnCoverageDraftAndGetExecutionTables(
+                        TrRmArtifactIndex
+                            .ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                                artifact));
+            }
+            else if (copyOriginDraft)
             {
                 _ = TrRmStructuralMetadataValidator
                     .ValidateCopyOriginDraftAndGetExecutionTables(
@@ -981,6 +1192,12 @@ public sealed class TrRmContractTableReaderTests
                 _ = TrRmStructuralMetadataValidator
                     .ValidateForeignInvocationDraftAndGetExecutionTables(
                         TrRmArtifactIndex.ForForeignInvocationDraft(artifact));
+            }
+            else if (generalPredicateGraphsDraft)
+            {
+                _ = TrRmStructuralMetadataValidator
+                    .ValidateGeneralPredicateGraphsDraftAndGetExecutionTables(
+                        TrRmArtifactIndex.ForGeneralPredicateGraphsDraft(artifact));
             }
             else if (developmentProfile)
             {
@@ -1012,7 +1229,8 @@ public sealed class TrRmContractTableReaderTests
         bool nativeImportMethod = false, bool functionPointerAnchor = false,
         bool twoFields = false, bool reverseFieldPathRows = false,
         bool writerCanonicalizesFacts = false,
-        bool writerCanonicalizesOrigins = false)
+        bool writerCanonicalizesOrigins = false,
+        bool standardFunctionPointerAnchor = false)
     {
         var fieldCount = twoFields ? 2 : 1;
         var fieldPathCount = twoFields ? 2 : 1;
@@ -1034,9 +1252,13 @@ public sealed class TrRmContractTableReaderTests
             new TrRmFeatureRow(2, 1),
             new TrRmFeatureRow(15, 1),
         ], TrRmArtifactSchema.CopyOriginDraft);
-        var typeSpecs = Section(
-            [1, 0, 0x8C, 8],
-            [2, 0, 1, 0, 0, 0]);
+        var typeSpecs = standardFunctionPointerAnchor
+            ? Section(
+                TrRmTypeSpecTableWriter.NativeFunctionPointer(1, 1),
+                [2, 0, 1, 0, 0, 0])
+            : Section(
+                [1, 0, 0x8C, 8],
+                [2, 0, 1, 0, 0, 0]);
 
         var type = new byte[44];
         Write(type, 0, 1);
@@ -1259,6 +1481,10 @@ public sealed class TrRmContractTableReaderTests
         return Contract(0x1600_0001, 1, data);
     }
 
+    private static byte[] EvaluationForm(byte formTag,
+        uint owner = 0x1600_0001)
+        => Contract(owner, 0x0A, [formTag, 0, 0, 0]);
+
     private static byte[] NativeCallable(byte convention = 1,
         uint owner = 0x1600_0001)
         => Contract(owner, 0x0C, [convention, 0, 0, 0]);
@@ -1314,6 +1540,28 @@ public sealed class TrRmContractTableReaderTests
         BinaryPrimitives.WriteUInt16LittleEndian(row.AsSpan(4), kind);
         data.CopyTo(row.AsSpan(8));
         return row;
+    }
+
+    private static byte[] ReturnCoverageContract(
+        ulong byteOffset = 0, ulong byteLength = 8,
+        params (ulong Count, ulong Stride)[] repetitions)
+    {
+        var data = new byte[8 + 20 + (repetitions.Length * 16)];
+        Write(data, 0, 1);
+        Write(data, 4, 1);
+        BinaryPrimitives.WriteUInt64LittleEndian(data.AsSpan(8), byteOffset);
+        BinaryPrimitives.WriteUInt64LittleEndian(data.AsSpan(16), byteLength);
+        Write(data, 24, (uint)repetitions.Length);
+        var offset = 28;
+        foreach (var (count, stride) in repetitions)
+        {
+            BinaryPrimitives.WriteUInt64LittleEndian(data.AsSpan(offset), count);
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                data.AsSpan(offset + 8), stride);
+            offset += 16;
+        }
+
+        return Contract(0x1600_0001, 0x0F, data);
     }
 
     private static byte[] Section(params byte[][] rows)
