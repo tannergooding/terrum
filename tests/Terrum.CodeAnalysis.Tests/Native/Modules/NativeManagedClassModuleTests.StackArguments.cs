@@ -22,7 +22,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var source = StackArgumentLeaf(copyArgument) + "int32 Loop() { while (true) { break; } return 0; }";
         var producer = ModuleCompiler.CreateProducer(Compile(source, policy), ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-20"));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.Structures, Is.Empty);
@@ -45,7 +45,7 @@ public sealed partial class NativeManagedClassModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var program = Compile(StackArgumentLeaf(copyArgument: true), policy);
         var replacement = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
         var linked = ModuleCompiler.Link(consumer, replacement);
         Assert.That(await ExecuteAsync(NativeEmitter.Emit(linked, policy)).ConfigureAwait(true), Is.EqualTo(44));
         Assert.That(SHA256.HashData(consumer), Is.EqualTo(consumerHash));

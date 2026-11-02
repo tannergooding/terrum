@@ -19,8 +19,7 @@ public static partial class ModuleCompiler
             if (module.Functions.Any(static item =>
                     item.Function is BoundFunction function
                     && function.Variables.Any(static variable =>
-                        NativeFixedArrayTypes.IsType(variable.Type)
-                        || variable.NativeFixedArrayLayout is not null)))
+                        NativeFixedArrayTypes.IsType(variable.Type))))
             {
                 throw new ModuleFormatException(
                     "Module has a fixed-array local without a type-table row.");
@@ -360,5 +359,517 @@ public static partial class ModuleCompiler
                 "Unknown native fixed-array type.");
         }
         return mapping[index];
+    }
+
+    private static bool IsAddressOnlyNestedBackingType(
+        PrimitiveType type,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers)
+    {
+        var depth = 0;
+        var current = type;
+        while (NativeFixedArrayTypes.IsType(current))
+        {
+            if (++depth > SemanticVerifier.MaximumDepth
+                || !NativeFixedArrayContract.TryGetLayout(current,
+                    structures, fixedArrays, out var layout)
+                || !NativeFixedArrayContract.MatchesLayout(layout,
+                    structures, fixedArrays)
+                || layout.ElementCount == 0
+                || layout.ElementStride == 0
+                || layout.ByteExtent == 0)
+            {
+                return false;
+            }
+
+            if (NativeFixedArrayTypes.IsType(layout.ElementType))
+            {
+                current = layout.ElementType;
+                continue;
+            }
+
+            return depth > 1
+                && IsRevision100RuntimeArrayLayout(layout, structures,
+                    fixedArrays, pointerTypes, functionPointers);
+        }
+
+        return false;
+    }
+
+    private static bool IsAddressOnlyNestedBackingInitializer(
+        BoundNativeFixedArrayInitialization initializer,
+        PrimitiveType expectedType,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        IReadOnlyList<NativePointerTypeDefinition> pointerTypes,
+        IReadOnlyList<NativeFunctionPointerSignatureDefinition>
+            functionPointers)
+    {
+        var pending = new Stack<(BoundNativeFixedArrayInitialization
+            Initializer, PrimitiveType ExpectedType, int Depth)>();
+        pending.Push((initializer, expectedType, 1));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            if (--remaining < 0
+                || item.Depth > SemanticVerifier.MaximumDepth
+                || item.Initializer.Type != item.ExpectedType
+                || !NativeFixedArrayTypes.IsType(item.ExpectedType)
+                || !NativeFixedArrayContract.TryGetLayout(item.ExpectedType,
+                    structures, fixedArrays, out var layout)
+                || !NativeFixedArrayContract.MatchesType(item.ExpectedType,
+                    layout, structures, fixedArrays)
+                || !NativeFixedArrayContract.MatchesLayout(layout,
+                    structures, fixedArrays)
+                || layout.ElementCount == 0
+                || layout.ElementStride == 0
+                || layout.ByteExtent == 0
+                || item.Initializer.Elements.IsDefault
+                || (ulong)item.Initializer.Elements.Length
+                    != layout.ElementCount)
+            {
+                return false;
+            }
+
+            if (NativeFixedArrayTypes.IsType(layout.ElementType))
+            {
+                foreach (var element in item.Initializer.Elements)
+                {
+                    if (--remaining < 0
+                        || element is not BoundNativeFixedArrayInitialization
+                            nested
+                        || nested.Type != layout.ElementType)
+                    {
+                        return false;
+                    }
+
+                    pending.Push((nested, layout.ElementType,
+                        item.Depth + 1));
+                }
+                continue;
+            }
+
+            if (!IsRevision100RuntimeArrayLayout(layout, structures,
+                    fixedArrays, pointerTypes, functionPointers)
+                || item.Initializer.Elements.Any(element =>
+                    element is null
+                    || element.Type != layout.ElementType
+                    || NativeFixedArrayTypes.IsType(element.Type)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool ContainsAddressToVariable(
+        BoundExpression expression, int variable)
+    {
+        var pending = new Stack<(BoundExpression? Expression, int Depth)>();
+        pending.Push((expression, 0));
+        var remaining = SemanticVerifier.MaximumAnalysisVisits;
+        while (pending.TryPop(out var item))
+        {
+            if (item.Expression is null
+                || item.Depth > SemanticVerifier.MaximumDepth
+                || --remaining < 0)
+            {
+                return true;
+            }
+
+            if (item.Expression is BoundNativeStorageAddress address
+                && address.Variable == variable)
+            {
+                return true;
+            }
+
+            foreach (var nested in item.Expression.NestedExpressions)
+            {
+                pending.Push((nested, item.Depth + 1));
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TryGetAddressOnlyNestedBackingVariables(
+        BoundProgram program, BoundFunction function,
+        out HashSet<int> variables, out string reason)
+    {
+        var nestedBackingVariables = new HashSet<int>();
+        variables = nestedBackingVariables;
+        reason = string.Empty;
+        for (var variable = function.ParameterCount
+                + (function.IsConstructor ? 1 : 0);
+            variable < function.Variables.Length; variable++)
+        {
+            if (IsAddressOnlyNestedBackingType(
+                    function.Variables[variable].Type,
+                    program.Structures, program.NativeFixedArrayTypes,
+                    program.NativePointerTypes,
+                    program.NativeFunctionPointerSignatures))
+            {
+                _ = nestedBackingVariables.Add(variable);
+            }
+        }
+
+        if (nestedBackingVariables.Count == 0)
+        {
+            return true;
+        }
+
+        var initializers
+            = new Dictionary<int, BoundNativeFixedArrayInitialization>(
+                nestedBackingVariables.Count);
+        var valid = true;
+        var failure
+            = "a nested array local is not completely initialized backing";
+        reason = "a nested array local is not completely initialized backing";
+        if (!BoundTreeTraversal.VisitStatements(function.Body, statement =>
+            {
+                switch (statement)
+                {
+                    case BoundLocal local when nestedBackingVariables.Contains(
+                        local.Variable):
+                        if (local.Initializer
+                                is not BoundNativeFixedArrayInitialization
+                                    initializer
+                            || !initializers.TryAdd(local.Variable,
+                                initializer)
+                            || !IsAddressOnlyNestedBackingInitializer(
+                                initializer,
+                                function.Variables[local.Variable].Type,
+                                program.Structures,
+                                program.NativeFixedArrayTypes,
+                                program.NativePointerTypes,
+                                program.NativeFunctionPointerSignatures)
+                            || ContainsAddressToVariable(initializer,
+                                local.Variable))
+                        {
+                            valid = false;
+                        }
+                        break;
+
+                    case BoundVacantLocal vacant
+                        when nestedBackingVariables.Contains(
+                        vacant.Variable):
+                        valid = false;
+                        break;
+
+                    case BoundAssignment assignment
+                        when nestedBackingVariables.Contains(
+                        assignment.Variable):
+                        valid = false;
+                        break;
+
+                    case BoundDrop drop
+                        when nestedBackingVariables.Contains(drop.Variable):
+                    case BoundDropConstructedFields constructedDrop
+                        when nestedBackingVariables.Contains(
+                            constructedDrop.Variable):
+                    case BoundDropSpan spanDrop
+                        when nestedBackingVariables.Contains(
+                            spanDrop.Variable):
+                        valid = false;
+                        break;
+                }
+            }))
+        {
+            reason = "the function statement traversal exceeds the analysis limit";
+            return false;
+        }
+
+        if (!valid)
+        {
+            reason = failure;
+            return false;
+        }
+
+        foreach (var variable in nestedBackingVariables)
+        {
+            if (!initializers.ContainsKey(variable))
+            {
+                reason = "a nested array local has no initialized declaration";
+                return false;
+            }
+        }
+
+        var functionIndexByName = new Dictionary<string, int>(
+            program.Functions.Length, StringComparer.Ordinal);
+        for (var index = 0; index < program.Functions.Length; index++)
+        {
+            if (!functionIndexByName.TryAdd(program.Functions[index].Name,
+                    index))
+            {
+                reason = "the module function table is ambiguous";
+                return false;
+            }
+        }
+
+        var permittedAddressUses = new Dictionary<int, int>(
+            nestedBackingVariables.Count);
+        if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+            {
+                ImmutableArray<BoundExpression> arguments;
+                ImmutableArray<int> argumentParameterIndices;
+                BoundFunction? target = null;
+                switch (expression)
+                {
+                    case BoundCall call:
+                        if ((uint)call.Function
+                            >= (uint)program.Functions.Length)
+                        {
+                            arguments = call.Arguments;
+                            argumentParameterIndices
+                                = call.ArgumentParameterIndices;
+                        }
+                        else
+                        {
+                            target = program.Functions[call.Function];
+                            arguments = call.Arguments;
+                            argumentParameterIndices
+                                = call.ArgumentParameterIndices;
+                        }
+                        break;
+
+                    case SymbolicCall call:
+                        if (!functionIndexByName.TryGetValue(call.Name,
+                                out var targetIndex))
+                        {
+                            arguments = call.Arguments;
+                            argumentParameterIndices
+                                = call.ArgumentParameterIndices;
+                        }
+                        else
+                        {
+                            target = program.Functions[targetIndex];
+                            arguments = call.Arguments;
+                            argumentParameterIndices
+                                = call.ArgumentParameterIndices;
+                        }
+                        break;
+
+                    default:
+                        return;
+                }
+
+                if (target is null)
+                {
+                    if (arguments.Any(argument =>
+                            argument is BoundNativeStorageAddress address
+                            && nestedBackingVariables.Contains(
+                                address.Variable)))
+                    {
+                        valid = false;
+                        failure = "a nested address call target is out of range";
+                    }
+                    return;
+                }
+
+                if (!argumentParameterIndices.IsDefault
+                    && argumentParameterIndices.Length != arguments.Length)
+                {
+                    valid = false;
+                    failure = "a nested address call has an invalid parameter map";
+                    return;
+                }
+
+                for (var argumentIndex = 0;
+                    argumentIndex < arguments.Length; argumentIndex++)
+                {
+                    if (arguments[argumentIndex]
+                        is not BoundNativeStorageAddress address
+                        || !nestedBackingVariables.Contains(
+                            address.Variable))
+                    {
+                        continue;
+                    }
+
+                    var parameter = DirectNativeImportContract
+                        .ParameterForParameter(target,
+                            argumentParameterIndices.IsDefault
+                                ? argumentIndex
+                                : argumentParameterIndices[argumentIndex]);
+                    if (target.DirectNativeImport is null
+                        || parameter is not DirectNativeParameter nativeParameter
+                        || nativeParameter.Retention
+                            != NativeParameterRetention.NoEscape
+                        || address.Projections.IsDefaultOrEmpty
+                        || address.Projections.Length < 2
+                        || address.Index
+                            != address.Projections[^1].Index
+                        || NativeFixedArrayTypes.IsType(address.ElementType)
+                        || !DirectNativeImportContract.MatchesAddress(
+                            address, nativeParameter, function, program)
+                        || !NativeFixedArrayContract.MatchesPath(
+                            function.Variables[address.Variable].Type,
+                            address.Projections, program, out _,
+                            out var leafLayout)
+                        || leafLayout != address.Projections[^1].Layout
+                        || !IsRevision100RuntimeArrayLayout(leafLayout,
+                            program.Structures,
+                            program.NativeFixedArrayTypes,
+                            program.NativePointerTypes,
+                            program.NativeFunctionPointerSignatures))
+                    {
+                        valid = false;
+                        failure
+                            = "a nested address is not a direct NoEscape NativeParameter";
+                        continue;
+                    }
+
+                    permittedAddressUses[address.Variable]
+                        = permittedAddressUses.TryGetValue(
+                            address.Variable, out var count)
+                            ? count + 1 : 1;
+                }
+            }))
+        {
+            reason = "the function expression traversal exceeds the analysis limit";
+            return false;
+        }
+
+        if (!valid)
+        {
+            reason = failure;
+            return false;
+        }
+
+        var addressOccurrences = new Dictionary<int, int>(
+            nestedBackingVariables.Count);
+        if (!BoundTreeTraversal.VisitExpressions(function.Body, expression =>
+            {
+                switch (expression)
+                {
+                    case BoundNativeStorageAddress address
+                        when nestedBackingVariables.Contains(
+                            address.Variable):
+                        addressOccurrences[address.Variable]
+                            = addressOccurrences.TryGetValue(
+                                address.Variable, out var addressCount)
+                                ? addressCount + 1 : 1;
+                        break;
+
+                    case BoundRead read when nestedBackingVariables.Contains(
+                        read.Variable):
+                    case BoundMove move when nestedBackingVariables.Contains(
+                        move.Variable):
+                    case BoundOutArgument output
+                        when nestedBackingVariables.Contains(
+                            output.Variable):
+                    case BoundNativeFixedArrayElement arrayElement
+                        when nestedBackingVariables.Contains(
+                            arrayElement.Variable):
+                    case BoundNativeFixedArrayPathElement pathElement
+                        when nestedBackingVariables.Contains(
+                            pathElement.Variable):
+                    case BoundNativeFixedArrayPointerAddress pointerAddress
+                        when nestedBackingVariables.Contains(
+                            pointerAddress.Variable):
+                    case BoundNativeFixedArrayWrite arrayWrite
+                        when nestedBackingVariables.Contains(
+                            arrayWrite.Variable):
+                    case BoundNativeFixedArrayPathWrite pathWrite
+                        when nestedBackingVariables.Contains(
+                            pathWrite.Variable):
+                        valid = false;
+                        failure
+                            = "a nested array is used outside address adaptation";
+                        break;
+                }
+            }))
+        {
+            reason = "the function expression traversal exceeds the analysis limit";
+            return false;
+        }
+
+        if (!valid)
+        {
+            reason = failure;
+            return false;
+        }
+
+        foreach (var variable in nestedBackingVariables)
+        {
+            var addressCount
+                = addressOccurrences.TryGetValue(variable, out var currentAddressCount)
+                    ? currentAddressCount : 0;
+            var permittedCount
+                = permittedAddressUses.TryGetValue(variable,
+                    out var currentPermittedCount)
+                    ? currentPermittedCount : 0;
+            if (permittedCount != addressCount)
+            {
+                valid = false;
+                reason = $"nested local {variable} has {addressCount} address nodes but {permittedCount} direct native arguments";
+                break;
+            }
+        }
+
+        return valid;
+    }
+
+    private static void ValidateAddressOnlyNestedBacking(Module module)
+    {
+        var functions = ImmutableArray.CreateBuilder<BoundFunction>(
+            module.Functions.Length);
+        foreach (var item in module.Functions)
+        {
+            functions.Add(item.Function
+                ?? new BoundFunction(item.Name, PrimitiveType.Void, [], 0,
+                    new BoundBlock([], default), default) {
+                    IsExternal = true,
+                });
+        }
+
+        var program = new BoundProgram(functions.MoveToImmutable(),
+            module.EntryPoint) {
+            Structures = module.Structures,
+            Classes = module.Classes,
+            NativeFunctionPointerSignatures
+                = module.NativeFunctionPointerSignatures,
+            NativePointerTypes = module.NativePointerTypes,
+            NativeFixedArrayTypes = module.NativeFixedArrayTypes,
+            RuntimePolicy = module.RuntimePolicy,
+        };
+        if (!TryValidateAddressOnlyNestedBacking(program,
+                out var functionName, out var reason))
+        {
+            throw new ModuleFormatException(
+                $"Module function '{functionName}' has nested fixed-array backing outside the revision-101 address-only profile: {reason}.");
+        }
+    }
+
+    private static void ValidateAddressOnlyNestedBacking(
+        BoundProgram program)
+    {
+        if (!TryValidateAddressOnlyNestedBacking(program,
+                out var functionName, out var reason))
+        {
+            throw new ModuleContractException(
+                $"Function '{functionName}' has nested fixed-array backing outside the revision-101 address-only profile: {reason}.");
+        }
+    }
+
+    private static bool TryValidateAddressOnlyNestedBacking(
+        BoundProgram program, out string functionName, out string reason)
+    {
+        foreach (var function in program.Functions)
+        {
+            if (!TryGetAddressOnlyNestedBackingVariables(program, function,
+                    out _, out reason))
+            {
+                functionName = function.Name;
+                return false;
+            }
+        }
+
+        functionName = string.Empty;
+        reason = string.Empty;
+        return true;
     }
 }

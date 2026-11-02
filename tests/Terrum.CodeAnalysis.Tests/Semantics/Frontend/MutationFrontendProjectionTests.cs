@@ -129,7 +129,7 @@ public sealed class MutationFrontendProjectionTests
         var update = ((global::System.Func<BoundUpdate>)(() => { var __nunitActual2 = ((global::System.Func<BoundReturn>)(() => { var __nunitActual1 = statements[2]; Assert.That(__nunitActual1, Is.TypeOf<BoundReturn>()); return (BoundReturn)__nunitActual1!; }))().Value; Assert.That(__nunitActual2, Is.TypeOf<BoundUpdate>()); return (BoundUpdate)__nunitActual2!; }))();
         Assert.That(update.IsPrefix, Is.False);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var client = Compilation.Create(SyntaxTree.Parse("int32 Main() { return Value(); }"),
             ModuleCompiler.CreateReference(producer));
         Assert.That(client.HasErrors, Is.False, string.Join(Environment.NewLine, client.Diagnostics));

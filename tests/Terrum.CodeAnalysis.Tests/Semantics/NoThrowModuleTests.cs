@@ -163,7 +163,7 @@ public sealed class NoThrowModuleTests
             ["Compute"], "Effects", NativeRuntimePolicy.FailFast))!;
         var artifact = Producer("public int32 Compute() { return 42; }");
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(artifact.AsSpan(sizeof(int))),
-            Is.EqualTo(92));
+            Is.EqualTo(101));
         var serialized = Encoding.UTF8.GetString(artifact);
         Assert.That(serialized, Does.Not.Contain("|NoThrow"));
         Assert.That(serialized, Does.Not.Contain("|MayThrow"));

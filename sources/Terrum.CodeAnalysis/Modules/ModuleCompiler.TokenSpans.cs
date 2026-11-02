@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.IO;
 using System.Linq;
@@ -10,9 +11,33 @@ public static partial class ModuleCompiler
 {
     private const int PrivateSpanVersion = 77;
 
+    private sealed class ModuleWriter(Stream stream)
+        : BinaryWriter(stream, StrictUtf8, leaveOpen: true)
+    {
+        internal ImmutableArray<BoundStruct> Structures { get; init; } = [];
+        internal ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            NativeFunctionPointerSignatures { get; init; } = [];
+        internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; init; } = [];
+        internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; init; } = [];
+        internal ImmutableArray<BoundVariable> CurrentVariables { get; set; } = [];
+        internal int CurrentParameterCount { get; set; }
+        internal bool CurrentIsConstructor { get; set; }
+        internal HashSet<int> AddressOnlyNestedBackingVariables { get; set; } = [];
+        internal int CurrentNestedBackingVariable { get; set; } = -1;
+    }
+
     private sealed class ModuleReader(Stream stream) : BinaryReader(stream, StrictUtf8, leaveOpen: true)
     {
         internal int FormatVersion { get; set; }
+        internal ImmutableArray<BoundStruct> Structures { get; set; } = [];
+        internal ImmutableArray<NativeFunctionPointerSignatureDefinition>
+            NativeFunctionPointerSignatures { get; set; } = [];
+        internal ImmutableArray<BoundNativeFixedArrayType> NativeFixedArrayTypes { get; set; } = [];
+        internal ImmutableArray<NativePointerTypeDefinition> NativePointerTypes { get; set; } = [];
+        internal ImmutableArray<BoundVariable> CurrentVariables { get; set; } = [];
+        internal int CurrentParameterCount { get; set; }
+        internal bool CurrentIsConstructor { get; set; }
+        internal int CurrentNestedBackingVariable { get; set; } = -1;
     }
 
     private static void RequirePrivateSpanRevision(BinaryReader reader)
@@ -43,6 +68,7 @@ public static partial class ModuleCompiler
             Structures = module.Structures,
             NativeFunctionPointerSignatures = module.NativeFunctionPointerSignatures,
             NativePointerTypes = module.NativePointerTypes,
+            NativeFixedArrayTypes = module.NativeFixedArrayTypes,
             RequiresSourceGrant = module.RequiresSourceGrant,
             InvocationProfileId = module.InvocationProfileId,
         };

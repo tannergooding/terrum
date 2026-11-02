@@ -88,15 +88,25 @@ their selected-use Module binding. Windows x64 materialization maps all 24
 provisional fixed-scalar carriers through `ScalarBits`, checks the selected
 Module target and exact native size/alignment, and preserves raw payload bits.
 The standard scalar loader executes an int32 ConstantMap load/return through
-JIT and PE emission. Private semantic modules now select exact revision 100:
-the revision-92 payload, three u64 tag-35 storage-address extents, and the
+JIT and PE emission. Private semantic modules now select exact revision 101:
+the revision-92 payload, three u64 tag-35 storage-address extents, the
 mandatory structural array table with flat direct-local operations in tags
-43-46. The unapproved
+43-46, and the mandatory tag-35 ancestor-path count/list. The unapproved
 [fixed-array private-persistence proposal](../proposals/native-fixed-array-private-persistence.md)
 remains provisional; current evidence covers source-free flat scalar/unit
 JIT/AOT, set/graph packages, and CLI module run/link. Nested array values and
-ptr-to-array runtime carriers reject; nested and pointer-array recipes remain
-metadata-only. Full revision-100 artifacts now preserve descriptive nominal
+ptr-to-array runtime carriers reject. The unapproved
+[nested storage-address-path proposal](../proposals/native-storage-address-path-private-persistence.md)
+owns the tag-35 path extension; the separate unapproved
+[address-only backing companion](../proposals/native-storage-address-address-only-backing.md)
+provisionally admits recursively initialized positive nested local backing
+only when every retained use is a direct NoEscape `NativeParameter` address
+argument. The p=1/p=2 path is covered through private producer/reader,
+source-free consumer/re-emission, JIT/AOT and native package-set/graph
+execution. This does not admit ordinary nested value operations, vacant
+backing, escapes or pointer-to-array carriers. Nested and pointer-array
+recipes not rooted by this exact backing role remain metadata-only.
+Full revision-101 artifacts now preserve descriptive nominal
 array fields and their nested/pointer/fnptr closure through writing, reading,
 ordinary linking, sets, graphs and source-free execution; bodyless provider
 references prune recipes not rooted by an admitted runtime contract. The
@@ -175,7 +185,7 @@ Candidate revision 89 adds one checked/wrapping mode byte to unary, binary,
 update and compound-assignment arithmetic records. This private schema is
 provisionally implemented under the unapproved
 [private-persistence proposal](../proposals/source-arithmetic-private-persistence.md):
-the current exact revision 100 carries those operation modes, while revision
+the current exact revision 101 carries those operation modes, while revision
 89 is not selected independently. Candidate revision 92 composes the
 unapproved NoThrow-retirement delta on 89
 with the aggregate-output collection and reservation tag 41 described by the
@@ -183,10 +193,11 @@ separate [output persistence proposal](../proposals/aggregate-native-output-priv
 The retirement delta is specified in the unapproved
 [private NoThrow persistence proposal](../proposals/no-throw-private-persistence.md).
 This exact-schema implementation remains provisional: the current structured
-writer and reader select only 100, which inherits revision 99's tag-35
+writer and reader select only 101, which composes revision 100's tag-35
 storage-address extents and revision 92's NoThrow/output contracts, then adds
-the selected fixed-array table and flat-operation records. Every other private
-revision rejects and requires regeneration; proposed
+the selected fixed-array table, flat-operation records and mandatory
+ancestor-path count/list for tag 35. Every other private revision rejects and
+requires regeneration; proposed
 revisions 93–98 are not implicitly composed. Revision 99 omits the general
 NoThrow field and contract tokens, persists direct-import NativeOutput
 declarations and output-specific dependency rows, and rejects general
@@ -194,8 +205,9 @@ Dependency contracts it cannot represent. NativeCallable Captures and other
 general dependency contracts require the candidate revision 93 described in
 the [provenance proposal](../proposals/reference-provenance-carriers.md);
 standard TRRM and register-Body output persistence remain separate gaps. A
-The provisional revision-100 schema inherits revision 99's amendment assigning
-expression tag 42 to typed `BoundFieldMove` field-place paths and carries them through serialization,
+The provisional revision-101 schema composes revision 100 and inherits
+revision 99's amendment assigning expression tag 42 to typed `BoundFieldMove`
+field-place paths, carrying them through serialization,
 resolution, call traversal, linked verification and type-table remapping. This
 is private-only support under the unapproved
 [owning-field move persistence proposal](../proposals/owning-field-move-private-persistence.md),
@@ -214,8 +226,9 @@ validated six-byte IAT leaf thunk. TNPK, TNSP and TNGP consumers preserve the
 selected provider DLL route and compare the retained descriptor/output
 contracts on replacement. AOT is qualified for packages and sets; graphs also
 exercise root-only JIT, including a graph-owned direct-import export. This
-provisional path does not amend revision 100, source syntax or standard TRRM,
-and remains subject to the proposal's unapproved status. Ordinary
+provisional path does not further amend revision 101, source syntax or
+standard TRRM; the separate storage-address-path proposal owns its tag-35
+extension. Ordinary
 private-module replacement remains slot-flexible. These private
 formats preserve verified, typed, source-mapped structured IR and the
 supported declaration, layout, initialization, cleanup, and runtime contracts
@@ -764,7 +777,7 @@ transitively and remapped across artifact-local type indexes. Every imported
 nested layout participates in replacement checking, including field types,
 order, access and declared mutation authority. The current format retains the checked `IsMutable` flag per field; changing it
 in either direction changes the published value contract and is rejected
-during replacement. Structured-module revision 100 retains `DoesNotReturn` but
+during replacement. Structured-module revision 101 retains `DoesNotReturn` but
 does not persist a general `IsNoThrow` declaration or compare that retired
 promise during replacement. It still rejects weakening `DoesNotReturn`
 without inferring effects from replacement bodies. Native graph package and

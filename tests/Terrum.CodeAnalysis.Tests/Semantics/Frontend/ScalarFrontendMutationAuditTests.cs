@@ -43,7 +43,7 @@ public sealed class ScalarFrontendMutationAuditTests
         var (source, bytes) = ShiftFixture(false);
         var program = ScalarFrontendHost.BindLibrary(source, bytes, (BoundRuntimePolicy)policy);
         var producer = ModuleCompiler.CreateProducer(program, ["Value"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4)), Is.EqualTo(101));
         var obsolete = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(obsolete.AsSpan(4), 44);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(obsolete));

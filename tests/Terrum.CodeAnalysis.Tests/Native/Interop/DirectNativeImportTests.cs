@@ -1735,7 +1735,7 @@ public sealed class DirectNativeImportTests
 
         var artifact = ModuleCompiler.CreateProducer(compilation.Program!, ["ReadValue"]);
         Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
-            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(92));
+            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(101));
         var reference = ModuleCompiler.CreateReference(artifact);
         var import = reference.Functions.Single(static function =>
             function.Name == "ReadValue").DirectNativeImport!;
@@ -1759,6 +1759,72 @@ public sealed class DirectNativeImportTests
             malformed.AsSpan(parameterOrdinalOffset, sizeof(int)), 1);
 
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(malformed));
+    }
+
+    [Test]
+    public void PrivateRevision101EncodesStorageAddressExtentsAndEmptyPath()
+    {
+        const string source = """
+            [Terrum.Interop.NativeImport("example.dll", "ReadValue")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern unsafe int32 ReadValue(ptr<int32> value);
+
+            public int32 Exercise() {
+                mut int32 value = 1;
+                unsafe { return ReadValue(&value); }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = ModuleCompiler.CreateProducer(compilation.Program!,
+            ["Exercise"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            artifact.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(101));
+        var oldRevision = (byte[])artifact.Clone();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            oldRevision.AsSpan(sizeof(int), sizeof(int)), 100);
+        Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(oldRevision));
+
+        var addressOffset = -1;
+        for (var offset = sizeof(int) * 2; offset <= artifact.Length - 75; offset++)
+        {
+            if (artifact[offset] == 35
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    artifact.AsSpan(offset + 1, sizeof(int)))
+                    == (int)PrimitiveType.NativeStorageAddress
+                && BinaryPrimitives.ReadUInt64LittleEndian(
+                    artifact.AsSpan(offset + 25, sizeof(ulong))) == 1
+                && BinaryPrimitives.ReadUInt64LittleEndian(
+                    artifact.AsSpan(offset + 33, sizeof(ulong))) == sizeof(int)
+                && BinaryPrimitives.ReadUInt64LittleEndian(
+                    artifact.AsSpan(offset + 41, sizeof(ulong))) == sizeof(int)
+                && artifact[offset + 49] == 1
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    artifact.AsSpan(offset + 50, sizeof(int))) == 0
+                && artifact[offset + 54] == 1)
+            {
+                addressOffset = offset;
+                break;
+            }
+        }
+        Assert.That(addressOffset, Is.GreaterThanOrEqualTo(0));
+        Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(
+            artifact.AsSpan(addressOffset + 25, sizeof(ulong))), Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(
+            artifact.AsSpan(addressOffset + 33, sizeof(ulong))),
+            Is.EqualTo(sizeof(int)));
+        Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(
+            artifact.AsSpan(addressOffset + 41, sizeof(ulong))),
+            Is.EqualTo(sizeof(int)));
+        Assert.That(ModuleCompiler.CreateReference(artifact), Is.Not.Null);
+
+        var highCount = artifact.ToArray();
+        highCount[addressOffset + 32] = 0x80;
+        Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(highCount));
     }
 
     [TestCase(2, false)]

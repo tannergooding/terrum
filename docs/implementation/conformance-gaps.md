@@ -355,8 +355,10 @@ ownership contract.
 The current prototype still exposes a `checked-exceptions` runtime-policy
 switch and private `NoThrow` facts. Source `NoThrow` uses are now rejected
 provisionally. The structured semantic-module reader/writer now selects only
-provisional revision 100, which inherits revision 92's omission of the general
-NoThrow field/tokens and persists direct-import aggregate outputs with their supported output-specific
+provisional revision 101, which composes revision 100's tag-35 extents and
+array records, adds an ancestor-path count/list, retains revision 92's
+omission of the general NoThrow field/tokens, and persists direct-import
+aggregate outputs with their supported output-specific
 dependency rows. It rejects unsupported general Dependency contracts rather
 than dropping them; candidate revision 93 remains required for general
 Captures/provenance persistence. Native graph packages and consumer sets now
@@ -739,18 +741,25 @@ require exact `uint64` and transparent aliases evaluate eligible scalar
 `ConstEval` calls through the existing bounded required-constant path; struct
 field layout derives from the array row. Whole-array function signatures
 continue to reject because no call ABI is selected.
-Private semantic revision 100 is a separate unapproved provisional schema
-that inherits revision 99's u64 tag-35 storage-address extents and adds
-structural array rows and flat direct-local operations. Nested and
-ptr-to-array runtime forms, and managed-class fields whose pointer or
-nested-class graph reaches array metadata, remain excluded as runtime carriers.
-This private path does not select or substitute for Standard A2. Full
-private artifacts preserve metadata-only nested/pointer/fnptr recipes and
-descriptive nominal array fields through ordinary, set and graph remapping;
-bodyless references prune unrooted recipes. The separate unapproved
+Private semantic revision 101 is a separate unapproved provisional schema
+that composes revision 100's u64 tag-35 storage-address extents, structural
+array rows and flat direct-local operations, and adds a mandatory ancestor
+path count/list to tag 35. Its separate unapproved
+[address-only backing companion](../proposals/native-storage-address-address-only-backing.md)
+provisionally admits recursively initialized, positive nested locals only as
+backing for direct NoEscape NativeParameter address arguments. The selected
+private producer/reader, source-free consumer/re-emission, JIT/AOT, set and
+graph routes are exercised for one and two ancestors. Ordinary nested array
+values, vacant backing, escapes and ptr-to-array runtime forms remain
+excluded, as do managed-class fields whose pointer or nested-class graph
+reaches array metadata. This private path does not select or substitute for
+Standard A2. Full private artifacts preserve descriptive nominal array fields
+and unrelated metadata-only nested/pointer/fnptr recipes through ordinary,
+set and graph remapping; bodyless references prune unrooted recipes. The
+separate unapproved
 [artifact-local metadata boundary companion](../proposals/native-fixed-array-private-metadata-boundary.md)
 records that provisional boundary without adding type-only exports or
-relaxing runtime exclusions.
+relaxing other runtime exclusions.
 
 **Routes/gate:** migrate declaration producers/readers, structural signature
 identity, unsafe regions, pointer/dependency facts, dependency materialization

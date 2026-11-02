@@ -149,7 +149,7 @@ public sealed partial class GenericControlFlowModuleTests
             """, policy, ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(Compile(source, policy), ["PowerProbe"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.That(reference.Structures, Is.Empty);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Name, Is.EqualTo("PowerProbe"));

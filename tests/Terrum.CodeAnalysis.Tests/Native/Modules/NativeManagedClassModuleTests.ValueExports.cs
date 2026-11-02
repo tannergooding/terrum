@@ -77,7 +77,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(ValueExportSource, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(program, ["Echo"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(producer, false), Is.EqualTo("native-19"));
         Assert.That(global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(producer).Functions).Name, Is.EqualTo("Echo"));
         var native = NativeModuleCompiler.CreateProducer(program, ["Echo"], "NodeB",
@@ -99,7 +99,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, NativeRuntimePolicy.FailFast);
         var original = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(original.AsSpan(4, 4)), Is.EqualTo(101));
         _ = ModuleCompiler.CreateReference(original);
         var forged = (byte[])original.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(forged.AsSpan(4, 4), 31);
@@ -214,7 +214,7 @@ public sealed partial class NativeManagedClassModuleTests
         var program = Compile(source.ToString(), policy);
         string[] exports = ["Make", "Echo", "CollectGarbage"];
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(reference.Structures.Length, Is.EqualTo(21));
         {var __nunitItems0 = reference.Structures;        Assert.Multiple(() => { foreach (var __nunitItem0 in __nunitItems0) { Assert.That(__nunitItem0.Size, Is.EqualTo(4)); } });}
@@ -281,7 +281,7 @@ public sealed partial class NativeManagedClassModuleTests
         var consumerHash = SHA256.HashData(consumer);
         var replacementProgram = Compile(replacementSource, policy);
         var replacement = ModuleCompiler.CreateProducer(replacementProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
         var reference = ModuleCompiler.CreateReference(replacement);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).Name, Is.EqualTo("PublicPair"));
         var downgraded = (byte[])replacement.Clone();
@@ -377,7 +377,7 @@ public sealed partial class NativeManagedClassModuleTests
         var originalProducer = ModuleCompiler.CreateProducer(originalProgram, exports);
         var program = Compile(ConditionalValueSource, policy);
         var producer = ModuleCompiler.CreateProducer(program, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var consumer = ModuleCompiler.CreateConsumer(Compile(consumerSource, policy,
             ModuleCompiler.CreateReference(originalProducer), library: false), originalProducer);
         var consumerHash = SHA256.HashData(consumer);
@@ -633,7 +633,7 @@ public sealed partial class NativeManagedClassModuleTests
             ModuleCompiler.CreateReference(original), library: false), original);
         var hash = SHA256.HashData(consumer);
         var replacement = ModuleCompiler.CreateProducer(managedProgram, exports);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(replacement.AsSpan(4, 4)), Is.EqualTo(101));
         var publicStructure = global::System.Linq.Enumerable.Single(ModuleCompiler.CreateReference(replacement).Structures);
         Assert.That(publicStructure.Name, Is.EqualTo("Snapshot"));
         Assert.That(publicStructure.Size, Is.EqualTo(12));

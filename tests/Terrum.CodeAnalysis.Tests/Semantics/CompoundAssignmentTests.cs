@@ -107,7 +107,7 @@ public sealed class CompoundAssignmentTests
             $"public int64 Shift(int64 value, int32 count) {{ return value {operation} count; }}",
             NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(library, ["Shift"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var stale = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(stale.AsSpan(4, 4), 63);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(stale));
@@ -466,7 +466,7 @@ public sealed class CompoundAssignmentTests
             public int32 Next() { mut int32 value = 40; value += 2; return value; }
             """, NativeRuntimePolicy.FailFast);
         var producer = ModuleCompiler.CreateProducer(library, ["Next"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(92));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var old = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(old.AsSpan(4, 4), 44);
         Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(old));

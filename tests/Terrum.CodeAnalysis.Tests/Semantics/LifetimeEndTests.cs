@@ -210,7 +210,7 @@ public sealed class LifetimeEndTests
         Assert.That(compilation.HasErrors, Is.False, string.Join(Environment.NewLine, compilation.Diagnostics));
         var program = ((global::System.Func<BoundProgram>)(() => { var __nunitActual2 = compilation.Program; Assert.That(__nunitActual2, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual2!; }))();
         var producer = ModuleCompiler.CreateProducer(program, ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var retiredRevision = (byte[])producer.Clone();
         BinaryPrimitives.WriteInt32LittleEndian(retiredRevision.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.CreateReference(retiredRevision))!;
@@ -248,7 +248,7 @@ public sealed class LifetimeEndTests
             public int32 Read() { int32 value = 1; return 42; }
             """));
         var producer = ModuleCompiler.CreateProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual5 = scalar.Program; Assert.That(__nunitActual5, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual5!; }))(), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         _ = ModuleCompiler.CreateReference(producer);
     }
     [TestCase(NativeRuntimePolicy.FailFast)]
@@ -278,7 +278,7 @@ public sealed class LifetimeEndTests
             ModuleCompiler.CreateReference(producer), (BoundRuntimePolicy)policy);
         Assert.That(consumerCompilation.HasErrors, Is.False, string.Join(Environment.NewLine, consumerCompilation.Diagnostics));
         var consumer = ModuleCompiler.CreateConsumer(((global::System.Func<BoundProgram>)(() => { var __nunitActual7 = consumerCompilation.Program; Assert.That(__nunitActual7, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual7!; }))(), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
         Assert.That(NativeJit.Execute(ModuleCompiler.Link(consumer, producer), policy), Is.EqualTo(42));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 46);
         _ = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer))!;

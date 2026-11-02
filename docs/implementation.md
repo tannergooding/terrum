@@ -574,14 +574,133 @@ are not part of the accepted native schema. The declarations do not select a
 compiler-owned Win32, DX11 or native-import catalog.
 `build-native-import` explicitly selects the Windows x64 native-import emitter;
 ordinary `build` does not emit source imports. Fixed-array local storage is
-admitted by ordinary source compilation for fixed-width scalar or committed
-Blittable Windows x64 elements,
-with a positive extent and 4096-byte total limit. It does not depend on
-native-import emission mode. The carrier is local-only and initializers must
-fully initialize each element, except empty scalar arrays which zero-initialize.
-Checked element addresses retain their extent bounds. Current lowering remains
-limited to the native import AOT emitter; private semantic modules, native
-modules, JIT, and standard TRRM continue to reject fixed-array expressions.
+provisionally admitted by ordinary source compilation as structural `[E; N]`,
+independent of native-import mode. Local initializers require exactly `N`
+ordered elements; `[]` is valid only for `N = 0`. The bound type table retains
+normalized element identity and a `uint64` count, and layout checks use
+Windows x64 stride, extent, alignment and target-`nuint` overflow rules rather
+than the retired `InlineArray` identifier and 4096-byte limit. Current element
+support is limited to scalar, pointer/code-pointer and committed Copy aggregate
+storage plus zero-payload unit elements with exact N-expression initialization;
+nested scalar/unit local initialization preserves dimensions and source order,
+and nested rows support replacement/copy. Scalar/unit nested selection,
+read/write, and positive-payload scalar element addresses check each dimension
+in order. Each array's `PrimitiveType` identity resolves to a canonical row
+carrying normalized element identity, exact count and checked geometry; locals
+no longer carry a duplicate layout sidecar. Function-local and struct-field
+fixed-array extents and transparent aliases now evaluate eligible scalar
+`ConstEval` calls under the existing bounded required-constant evaluator
+without persisting call identities. Struct fields also derive width and
+alignment from their structural array rows. Pointer-bearing nested arrays
+remain rejected until nested storage provenance is represented; whole-array
+function signatures remain rejected because no call ABI is selected, and
+field initialization/access, full-width local frame offsets and several
+source-type contexts remain unfinished.
+The uniqueness-amended A3 selector
+`trrm/1-draft-foreign-invocation-storage-fixed-arrays-3-unique-1` is wired
+through Standard emission, loading, reference creation and CLI selection;
+the flag-free `...-3` identity is not an alias or fallback. Its unapproved,
+provisionally actionable [proposal](proposals/standard-trrm-a3-positive-unique-type-evidence.md)
+adds A3-only TypeDef `DeclaredUnique=0x40`,
+exclusive with A2's positive `DeclaredCopy=0x20`; either fact requires
+Feature `2/1`, and A3 Cleanup clauses require positive Unique evidence. A2
+semantics remain unchanged.
+
+The A3 structural validator admits type-only generic TypeDef metadata,
+checks earlier-formal defaults and only the assigned Blittable constraint,
+and rejects constant formals, unsupported constraints, existential values
+and generic method specialization. Closed actual substitution now checks
+ownership/nullability domains, full qualifier positions and Blittable
+requirements through nested generic fields before deriving local Sequential
+geometry and RootlessCopy closure. Regressions cover unique nominal structs
+without Cleanup, Copy/Unique conflicts, pointer-cell and phantom actuals,
+nullable forms, Span `init`, unsupported writes, open recipes and A2
+rejection. A3 provider binding compares generic formals/defaults/constraints,
+flags and layouts, ordered field templates, nested constructed identities and
+selected Unique actual origins; it requires A3 for generic or Unique
+dependencies and retains A2 for supported nongeneric providers. Direct
+generic values and generic TypeDefs/imports in Body TypeMaps are rejected;
+the selected fixed-array TypeSpec route remains separate. Constructed layout
+cycle detection compares normalized closed identities, so finite repeated
+generic definitions are accepted while a direct inline instance cycle rejects.
+The layout matrix also covers nested closed arrays, Transparent-over-void,
+packing, explicit alignment, zero extents and checked aggregate overflow.
+Provider geometry cases bind matching packed A3 declarations and reject a
+selected provider whose layout produces a different array alignment. A
+compatible replacement provider with its TypeDef relocated to another row
+also binds through the same export key. The binding-plan regression
+revalidates the retained type binding, but reaches the current
+no-`NativeImport` lowering boundary; it is not public source-free provider
+execution evidence.
+Growing generic expansions still lack a deterministic, stack-safe resource
+boundary. The unapproved
+[A3 failure-class proposal](proposals/standard-trrm-a3-layout-failure-classes.md)
+defines a provisional A3-only exception/diagnostic and work/depth recipe; it
+is not implemented. A2's existing failure behavior remains unchanged.
+
+The combined A3 layout/provider/Body-map/TypeSpec/emission and selected-schema
+CLI matrix passed **159/159 with zero skips** at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-10-31_04_31_06_net11.0.trx`.
+Its three A3 CLI cases exercise inherited nongeneric run/build/PE operations,
+not constructed generic array execution. Generic source production,
+source-free reconstruction/CLI JIT/AOT, compatible replacement/remapping and
+end-to-end array runtime evidence remain open; the A3 proposal is not accepted
+conformance or general generic execution/export.
+Element indexing preserves signed and unsigned 8/16/32/64/128-bit types through
+JIT access and pointer formation, with checked bounds and unsafe obligations.
+Zero-extent arrays do not provide borrowable element storage.
+Native JIT/AOT lowering now probes large stack frames and has
+supervised coverage above the former ceiling. Provisional private semantic
+revision 101 composes revision 100's u64 tag-35 storage-address extents and
+array table/flat-operation records, then adds a mandatory ancestor-path
+count/list to tag 35. Its separate
+[storage-address-path proposal](proposals/native-storage-address-path-private-persistence.md)
+remains unapproved. The separate
+[address-only backing companion](proposals/native-storage-address-address-only-backing.md)
+provisionally amends this exact 101 selection: recursively initialized,
+positive nested local backing is admitted only when every retained use is a
+direct NoEscape `NativeParameter` address argument. Private producer/reader,
+source-free consumer/re-emission, JIT and AOT tests cover one and two
+ancestors; native package-set and graph routes also execute those addresses.
+Ordinary nested array values, vacant backing, escapes and ptr-to-array runtime
+carriers remain excluded; nominal zero-payload operations and remaining
+replacement/body fixtures stay gated. Standard A2 declaration production
+remains type-only for local Blittable Copy types; it emits TypeSpec form
+`0x11` and FixedArrayLayout rows for scalar, unit, and nested array fields.
+The source-free type-only route reconstructs local non-generic DeclaredCopy
+TypeDefs and those array fields, including acyclic arrays whose elements are
+local nominal Copy structs.
+Separately, the bounded F+S/A2 executable path emits positive-count local
+arrays initialized by source-ordered scalar stores and indexed EC/RegisterPlace
+addresses. Nested PlaceSelection chains now reach scalar-leaf PlaceLoad, and
+the selected Standard LoadStandard route reconstructs/re-emits that Body;
+source-free JIT/AOT reads initialized nested leaves. Direct-source JIT/AOT
+also exercise nested NativeParameter addresses with an actual four-byte native
+copy. Provisional A2E adds explicit N=0 Home initialization and nested empty
+children without zeroing or creating backing. These are bounded profile
+results, not general array-runtime or private nested-value admission. The
+private address-only backing exception does not select or substitute for
+Standard A2 contracts.
+Positive zero-payload non-array element values, general initializer
+effects/failures, provider Body-row remapping and broader native array
+contracts remain open.
+Under the separate unapproved A2 selector, mandatory Body-map validation now
+propagates typed PlaceHandle origins and declared value types across blocks,
+branch joins and loop back-edges. It rejects missing or incompatible
+predecessor states, including a register index whose incoming value type
+differs from its BlockEntryState declaration. The focused fixed-array
+layout/body-map class passed 120/120 with no skips, including incompatible
+place-authority merge rejection and max-u32 Q against an array count above
+u32. The combined fixed-array and register-body reader selection passed
+198/198. This verifies selected metadata flow only;
+dynamic `0 <= i < N` and `Q <= N-i`,
+initialization/publication, actual address/alignment execution and source-free
+reconstruction/remapping remain open outside the selected nested scalar-read
+and NativeParameter cases. The final private/A2 nested-address selection
+passed 35/35 with zero skips at
+`artifacts\\tst\\Debug\\tagoo_GOODING-ZEN4_2026-11-01_18_25_47_net11.0.trx`;
+its bounded private address-only backing cases do not discharge the wider A2
+or overall source/runtime gates.
 The `MessageBoxW` sample is authored using the same direct import form as any
 other native function; its unattended CLI test
 checks the emitted import without invoking the modal API. This demonstrates

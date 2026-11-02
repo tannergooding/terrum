@@ -128,7 +128,7 @@ public sealed partial class NativeManagedClassModuleTests
             }
             """, policy);
         var contract = ModuleCompiler.CreateProducer(program, ["Proof"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-19"));
         var reference = ModuleCompiler.CreateReference(contract);
         Assert.That(reference.Structures, Is.Empty);
@@ -177,7 +177,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var contract = ModuleCompiler.CreateProducer(Compile(Sample("managed-copy-class-leaf"),
             NativeRuntimePolicy.FailFast), ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
         var formatVersion = BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
@@ -284,7 +284,7 @@ public sealed partial class NativeManagedClassModuleTests
     {
         var program = Compile(Sample("managed-class-leaf"), NativeRuntimePolicy.FailFast);
         var contract = ModuleCompiler.CreateProducer(program, ["Leaf"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(contract.AsSpan(4, 4)), Is.EqualTo(101));
         Assert.That(ModuleCompiler.GetNativeProfileVersion(contract, false), Is.EqualTo("native-20"));
         using var reader = new BinaryReader(new MemoryStream(contract));
         reader.BaseStream.Position = 8;
@@ -443,7 +443,7 @@ public sealed partial class NativeManagedClassModuleTests
         Assert.That(imported.HasErrors, Is.False, string.Join(Environment.NewLine, imported.Diagnostics));
         var graph = NativeModuleCompiler.CreateGraphProducer(((global::System.Func<BoundProgram>)(() => { var __nunitActual0 = imported.Program; Assert.That(__nunitActual0, Is.TypeOf<BoundProgram>()); return (BoundProgram)__nunitActual0!; }))(),
             ["Leaf"], "NodeB", [dependency], policy);
-        Assert.That(GraphSemanticVersion(graph), Is.EqualTo(89));
+        Assert.That(GraphSemanticVersion(graph), Is.EqualTo(101));
         var root = NativeModuleCompiler.CreateGraphConsumer(Compile("int32 Main() { return Leaf(); }",
             policy, NativeModuleCompiler.CreateGraphReference([graph]), library: false), [graph], policy);
         Assert.That(await NativeModuleCompiler.RunGraphAsync(root, [graph, dependency],

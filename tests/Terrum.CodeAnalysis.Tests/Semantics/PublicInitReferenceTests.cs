@@ -37,7 +37,7 @@ public sealed class PublicInitReferenceTests
         var boundPolicy = (BoundRuntimePolicy)policy;
         var program = CompileLibrary(ScalarLibrary, policy);
         var producer = ModuleCompiler.CreateProducer(program, ["TryFill"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Functions).Variables[1].IsInit, Is.True);
         var consumerProgram = CompileConsumer(ScalarConsumer, reference, policy);
@@ -166,7 +166,7 @@ public sealed class PublicInitReferenceTests
             CompileLibrary(ScalarLibrary, NativeRuntimePolicy.FailFast), ["TryFill"]);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(ScalarConsumer,
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(consumer.AsSpan(4, 4)), Is.EqualTo(101));
         BinaryPrimitives.WriteInt32LittleEndian(consumer.AsSpan(4, 4), 32);
         var error = Assert.Throws<ModuleFormatException>(() => ModuleCompiler.Link(consumer, producer))!;
         Assert.That(error.Message, Is.EqualTo("Unknown module format or version."));

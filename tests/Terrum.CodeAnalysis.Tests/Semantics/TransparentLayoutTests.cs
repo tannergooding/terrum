@@ -33,7 +33,7 @@ public sealed class TransparentLayoutTests
         Assert.That(structure.IsTransparent, Is.True);
         Assert.That(structure.Size, Is.EqualTo(4));
         var producer = ModuleCompiler.CreateProducer(program, ["Wrap", "Unwrap"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         var reference = ModuleCompiler.CreateReference(producer);
         Assert.That(global::System.Linq.Enumerable.Single(reference.Structures).IsTransparent, Is.True);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer(Consumer, reference, policy), producer);
@@ -124,7 +124,7 @@ public sealed class TransparentLayoutTests
             public int32 Read() { Hidden value = new Hidden(42); return value.Read(); }
             """;
         var producer = ModuleCompiler.CreateProducer(CompileLibrary(Source, NativeRuntimePolicy.FailFast), ["Read"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(89));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(producer.AsSpan(4, 4)), Is.EqualTo(101));
         Assert.That(ModuleCompiler.CreateReference(producer).Structures, Is.Empty);
         var consumer = ModuleCompiler.CreateConsumer(CompileConsumer("int32 Main() { return Read(); }",
             ModuleCompiler.CreateReference(producer), NativeRuntimePolicy.FailFast), producer);

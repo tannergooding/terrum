@@ -32,7 +32,7 @@ public static partial class ModuleCompiler
     private const int ArithmeticOperationVersion = 89;
     private const int NativeOutputContractVersion = 92;
     private const int NativeStorageAddressExtentVersion = 99;
-    private const int NativeFixedArrayVersion = 100;
+    private const int NativeFixedArrayVersion = 101;
     private const int MaximumBytes = 4 * 1024 * 1024;
     private const int MaximumFunctions = 1024;
     private const int MaximumSlots = 256;
@@ -220,7 +220,7 @@ public static partial class ModuleCompiler
                                 functionPointerSignatures)))))
             {
                 throw new ModuleContractException(
-                    $"Private revision 100 cannot expose array-derived runtime contract '{function.Name}'.");
+                    $"Private revision 101 cannot expose array-derived runtime contract '{function.Name}'.");
             }
             moduleFunctions.Add(new ModuleFunction(function.Name,
                 Contract(function, structures, functionPointerSignatures,
@@ -1087,6 +1087,7 @@ public static partial class ModuleCompiler
                 SemanticVerifier.Verify(program);
             }
         });
+        ValidateAddressOnlyNestedBacking(program);
         if (BoundEnumTypes.UsesAny(program))
         {
             throw new ModuleContractException(
@@ -1309,6 +1310,7 @@ public static partial class ModuleCompiler
         }
         ArgumentNullException.ThrowIfNull(referenceProducer);
         VerifyModuleBoundProgram(() => SemanticVerifier.VerifyReferences(program));
+        ValidateAddressOnlyNestedBacking(program);
         if (BoundEnumTypes.UsesAny(program))
         {
             throw new ModuleContractException(
@@ -4209,8 +4211,6 @@ public static partial class ModuleCompiler
                 : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = RemapNativePointerType(variable.Type, mapping),
-                NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
-                    ? RemapNativeFixedArrayLayout(layout, RemapType) : null,
             })],
         };
     }
@@ -4277,11 +4277,6 @@ public static partial class ModuleCompiler
                     : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = RemapFixedArrayType(variable.Type),
-                NativeFixedArrayLayout = variable.NativeFixedArrayLayout
-                    is BoundNativeFixedArrayLayout layout
-                        ? RemapNativeFixedArrayLayout(layout,
-                            RemapFixedArrayType)
-                        : null,
             })],
         };
     }
@@ -4451,6 +4446,12 @@ public static partial class ModuleCompiler
                 CarrierType = remapType(address.CarrierType),
                 ElementType = remapType(address.ElementType),
                 AddressType = remapType(address.AddressType),
+                Projections = address.Projections.IsDefaultOrEmpty ? [] : [
+                    .. address.Projections.Select(projection =>
+                        projection with {
+                            Layout = RemapNativeFixedArrayLayout(
+                                projection.Layout, remapType),
+                        })],
             },
             BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
                 Type = type,
@@ -4740,8 +4741,6 @@ public static partial class ModuleCompiler
                 : null,
             Variables = [.. function.Variables.Select(variable => variable with {
                 Type = RemapType(variable.Type, source, destination, classOffset, destinationTypes),
-                NativeFixedArrayLayout = variable.NativeFixedArrayLayout is BoundNativeFixedArrayLayout layout
-                    ? RemapNativeFixedArrayLayout(layout, source, destination, classOffset, destinationTypes) : null,
             })],
             Body = (BoundBlock)RemapStatement(function.Body, source, destination, classOffset, destinationTypes),
         };
@@ -4870,6 +4869,15 @@ public static partial class ModuleCompiler
                 ElementType = RemapType(address.ElementType, source, destination, classOffset, destinationTypes),
                 AddressType = RemapType(address.AddressType, source, destination, classOffset, destinationTypes),
                 Index = RemapExpression(address.Index, source, destination, classOffset, destinationTypes),
+                Projections = address.Projections.IsDefaultOrEmpty ? [] : [
+                    .. address.Projections.Select(projection =>
+                        projection with {
+                            Layout = RemapNativeFixedArrayLayout(
+                                projection.Layout, source, destination,
+                                classOffset, destinationTypes),
+                            Index = RemapExpression(projection.Index, source,
+                                destination, classOffset, destinationTypes),
+                        })],
             },
             BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
                 Type = RemapType(fixedArray.Type, source, destination, classOffset, destinationTypes),
@@ -5066,7 +5074,7 @@ public static partial class ModuleCompiler
                 module.NativeFunctionPointerSignatures))
         {
             throw new ModuleContractException(
-                "Private revision 100 cannot persist array-derived managed-class fields.");
+                "Private revision 101 cannot persist array-derived managed-class fields.");
         }
         if (program.Functions.Any(static function =>
             function.NoFailureProof && !IsRoleNoFailureIntrinsic(function.Intrinsic)))
@@ -5401,7 +5409,7 @@ public static partial class ModuleCompiler
                                 module.NativeFunctionPointerSignatures)))))
             {
                 throw new ModuleContractException(
-                    "Private revision 100 cannot persist array-derived declaration contracts.");
+                    "Private revision 101 cannot persist array-derived declaration contracts.");
             }
             PutString(writer, item.Name);
             PutString(writer, item.Contract);
@@ -5440,7 +5448,8 @@ public static partial class ModuleCompiler
                     module.FormatVersion >= NativeVTableVersion,
                     module.FormatVersion >= NativeVTableOffsetVersion,
                     module.Structures,
-                    module.NativeFunctionPointerSignatures, module.NativePointerTypes);
+                    module.NativeFunctionPointerSignatures,
+                    module.NativePointerTypes, program);
             }
         }
         if (stream.Length > MaximumBytes)
@@ -5523,6 +5532,7 @@ public static partial class ModuleCompiler
                 InvocationBuffers = invocationBuffers,
                 RuntimePolicy = policy,
             };
+            ValidateAddressOnlyNestedBacking(module);
             if (module.FormatVersion is DirectNativeImportVersion or DirectNativeParameterVersion
                 && !module.Functions.Any(static item =>
                     item.Function?.DirectNativeImport is not null))
@@ -5747,7 +5757,7 @@ public static partial class ModuleCompiler
             || !NativeFixedArrayTypes.IsType(arrayType))
         {
             throw new ModuleFormatException(
-                "Fixed-array types require private semantic revision 100.");
+                "Fixed-array types require private semantic revision 101.");
         }
 
         var index = NativeFixedArrayTypes.Index(arrayType);
@@ -5807,9 +5817,9 @@ public static partial class ModuleCompiler
         if (variable < writer.CurrentParameterCount
                 + (writer.CurrentIsConstructor ? 1 : 0)
             || (uint)variable >= (uint)writer.CurrentVariables.Length
-            || writer.CurrentVariables[variable].Type != layout.CarrierType
-            || writer.CurrentVariables[variable].NativeFixedArrayLayout
-                != layout
+            || !NativeFixedArrayContract.MatchesType(
+                writer.CurrentVariables[variable].Type, layout,
+                writer.Structures, writer.NativeFixedArrayTypes)
             || (requireMutable && !writer.CurrentVariables[variable].IsMutable))
         {
             throw new ModuleContractException(
@@ -5823,9 +5833,9 @@ public static partial class ModuleCompiler
         if (variable < reader.CurrentParameterCount
                 + (reader.CurrentIsConstructor ? 1 : 0)
             || (uint)variable >= (uint)reader.CurrentVariables.Length
-            || reader.CurrentVariables[variable].Type != layout.CarrierType
-            || reader.CurrentVariables[variable].NativeFixedArrayLayout
-                != layout
+            || !NativeFixedArrayContract.MatchesType(
+                reader.CurrentVariables[variable].Type, layout,
+                reader.Structures, reader.NativeFixedArrayTypes)
             || (requireMutable && !reader.CurrentVariables[variable].IsMutable))
         {
             throw new ModuleFormatException(
@@ -6507,13 +6517,28 @@ public static partial class ModuleCompiler
         bool supportsNativeVTableOffsets,
         ImmutableArray<BoundStruct> structures,
         ImmutableArray<NativeFunctionPointerSignatureDefinition> nativeFunctionPointerSignatures,
-        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes)
+        ImmutableArray<NativePointerTypeDefinition> nativePointerTypes,
+        BoundProgram program)
     {
         if (writer is not ModuleWriter moduleWriter)
         {
             throw new ModuleContractException(
                 "Structured-module function encoding requires its selected type tables.");
         }
+        var sourceFunction = program.Functions.FirstOrDefault(candidate =>
+            candidate.Name == function.Name)
+            ?? throw new ModuleContractException(
+                "Structured-module function has no source-program match.");
+        if (!TryGetAddressOnlyNestedBackingVariables(program,
+                sourceFunction, out var addressOnlyNestedBackingVariables,
+                out var addressOnlyBackingFailure))
+        {
+            throw new ModuleContractException(
+                $"Private revision 101 cannot persist this nested backing role: {addressOnlyBackingFailure}");
+        }
+        moduleWriter.AddressOnlyNestedBackingVariables
+            = addressOnlyNestedBackingVariables;
+        moduleWriter.CurrentNestedBackingVariable = -1;
         if (!IsRevision100RuntimeType(function.ReturnType,
                 moduleWriter.Structures, moduleWriter.NativeFixedArrayTypes,
                 moduleWriter.NativePointerTypes,
@@ -6527,7 +6552,7 @@ public static partial class ModuleCompiler
                     moduleWriter.NativeFunctionPointerSignatures)))
         {
             throw new ModuleContractException(
-                "Private revision 100 cannot persist a runtime array-derived function type.");
+                "Private revision 101 cannot persist a runtime array-derived function type.");
         }
         if (function.NativeVTableMethod is NativeVTableMethodDefinition vtableMethod
             && (vtableMethod.Parameters.Any(parameter =>
@@ -6544,7 +6569,7 @@ public static partial class ModuleCompiler
                         moduleWriter.NativeFunctionPointerSignatures))))
         {
             throw new ModuleContractException(
-                "Private revision 100 cannot persist array-derived vtable contracts.");
+                "Private revision 101 cannot persist array-derived vtable contracts.");
         }
         if (function.DirectNativeImport is DirectNativeImport directImport
             && (directImport.Parameters.Any(parameter =>
@@ -6561,7 +6586,7 @@ public static partial class ModuleCompiler
                         moduleWriter.NativeFunctionPointerSignatures))))
         {
             throw new ModuleContractException(
-                "Private revision 100 cannot persist array-derived native imports.");
+                "Private revision 101 cannot persist array-derived native imports.");
         }
         for (var variableIndex = 0;
             variableIndex < function.Variables.Length;
@@ -6577,16 +6602,20 @@ public static partial class ModuleCompiler
                     || variable.IsOut
                     || variable.IsInit
                     || variable.IsInitializationLocal
-                    || variable.NativeFixedArrayLayout
-                        is not BoundNativeFixedArrayLayout layout
-                    || !IsRevision100RuntimeArrayLayout(layout,
-                        moduleWriter.Structures,
+                    || !NativeFixedArrayContract.TryGetLayout(
+                        variable.Type, moduleWriter.Structures,
                         moduleWriter.NativeFixedArrayTypes,
-                        moduleWriter.NativePointerTypes,
-                        moduleWriter.NativeFunctionPointerSignatures))
+                        out var layout)
+                    || (!IsRevision100RuntimeArrayLayout(layout,
+                            moduleWriter.Structures,
+                            moduleWriter.NativeFixedArrayTypes,
+                            moduleWriter.NativePointerTypes,
+                            moduleWriter.NativeFunctionPointerSignatures)
+                        && !addressOnlyNestedBackingVariables.Contains(
+                            variableIndex)))
                 {
                     throw new ModuleContractException(
-                        "Private revision 100 cannot persist this fixed-array local.");
+                        "Private revision 101 cannot persist this fixed-array local.");
                 }
             }
             else if (!IsRevision100RuntimeType(variable.Type,
@@ -6596,7 +6625,7 @@ public static partial class ModuleCompiler
                          moduleWriter.NativeFunctionPointerSignatures))
             {
                 throw new ModuleContractException(
-                    "Private revision 100 cannot persist an array-derived runtime local.");
+                    "Private revision 101 cannot persist an array-derived runtime local.");
             }
         }
         moduleWriter.CurrentVariables = function.Variables;
@@ -6746,7 +6775,7 @@ public static partial class ModuleCompiler
                     typeReader.NativeFunctionPointerSignatures)))
         {
             throw new ModuleFormatException(
-                "Private revision 100 does not admit array-derived function contracts.");
+                "Private revision 101 does not admit array-derived function contracts.");
         }
         var constructor = GetBool(reader);
         var isPrivate = GetBool(reader);
@@ -6778,7 +6807,7 @@ public static partial class ModuleCompiler
                     typeReader.NativeFunctionPointerSignatures))
             {
                 throw new ModuleFormatException(
-                    "Private revision 100 does not admit this native callable type.");
+                    "Private revision 101 does not admit this native callable type.");
             }
         }
         var nativeCallableEntryName = reader is ModuleReader {
@@ -6814,7 +6843,7 @@ public static partial class ModuleCompiler
                         typeReader.NativeFunctionPointerSignatures)))
             {
                 throw new ModuleFormatException(
-                    "Private revision 100 does not admit array-derived vtable contracts.");
+                    "Private revision 101 does not admit array-derived vtable contracts.");
             }
         }
         if (reader is ModuleReader { FormatVersion: >= DirectNativeImportVersion })
@@ -6853,7 +6882,7 @@ public static partial class ModuleCompiler
                             typeReader.NativeFunctionPointerSignatures)))
                 {
                     throw new ModuleFormatException(
-                        "Private revision 100 does not admit array-derived native imports.");
+                        "Private revision 101 does not admit array-derived native imports.");
                 }
             }
             if (directNativeImport is not null && !isExternal)
@@ -6889,7 +6918,7 @@ public static partial class ModuleCompiler
                     typeReader.NativeFunctionPointerSignatures))
             {
                 throw new ModuleFormatException(
-                    "Private revision 100 does not admit an array-derived runtime local.");
+                    "Private revision 101 does not admit an array-derived runtime local.");
             }
             if (NativeFixedArrayTypes.IsType(variableType))
             {
@@ -6901,18 +6930,20 @@ public static partial class ModuleCompiler
                 var fixedArrayLayout = GetPrivateFixedArrayLayout(reader,
                     variableType);
                 if (reader is not ModuleReader layoutReader
-                    || !IsRevision100RuntimeArrayLayout(fixedArrayLayout,
-                        layoutReader.Structures,
-                        layoutReader.NativeFixedArrayTypes,
-                        layoutReader.NativePointerTypes,
-                        layoutReader.NativeFunctionPointerSignatures))
+                    || (!IsRevision100RuntimeArrayLayout(
+                            fixedArrayLayout, layoutReader.Structures,
+                            layoutReader.NativeFixedArrayTypes,
+                            layoutReader.NativePointerTypes,
+                            layoutReader.NativeFunctionPointerSignatures)
+                        && !IsAddressOnlyNestedBackingType(variableType,
+                            layoutReader.Structures,
+                            layoutReader.NativeFixedArrayTypes,
+                            layoutReader.NativePointerTypes,
+                            layoutReader.NativeFunctionPointerSignatures)))
                 {
                     throw new ModuleFormatException(
                         "Revision-100 local uses an excluded fixed-array row.");
                 }
-                variable = variable with {
-                    NativeFixedArrayLayout = fixedArrayLayout,
-                };
             }
             variables.Add(variable);
         }
@@ -7014,7 +7045,30 @@ public static partial class ModuleCompiler
                 break;
             case BoundLocal local:
                 writer.Write(local.Variable);
-                PutExpression(writer, local.Initializer, names, ref remaining, depth + 1, inUnsafe);
+                if (writer is ModuleWriter moduleWriter
+                    && moduleWriter.AddressOnlyNestedBackingVariables
+                        .Contains(local.Variable))
+                {
+                    var previousVariable
+                        = moduleWriter.CurrentNestedBackingVariable;
+                    moduleWriter.CurrentNestedBackingVariable
+                        = local.Variable;
+                    try
+                    {
+                        PutExpression(writer, local.Initializer, names,
+                            ref remaining, depth + 1, inUnsafe);
+                    }
+                    finally
+                    {
+                        moduleWriter.CurrentNestedBackingVariable
+                            = previousVariable;
+                    }
+                }
+                else
+                {
+                    PutExpression(writer, local.Initializer, names,
+                        ref remaining, depth + 1, inUnsafe);
+                }
                 break;
             case BoundViewScope view:
                 writer.Write(view.Variable);
@@ -7187,7 +7241,35 @@ public static partial class ModuleCompiler
                     RetiredManagedLocals = slots.MoveToImmutable(),
                 };
             case 2:
-                return new BoundLocal(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
+                var localVariable = reader.ReadInt32();
+                if (reader is ModuleReader moduleReader
+                    && (uint)localVariable
+                        < (uint)moduleReader.CurrentVariables.Length
+                    && IsAddressOnlyNestedBackingType(
+                        moduleReader.CurrentVariables[localVariable].Type,
+                        moduleReader.Structures,
+                        moduleReader.NativeFixedArrayTypes,
+                        moduleReader.NativePointerTypes,
+                        moduleReader.NativeFunctionPointerSignatures))
+                {
+                    var previousVariable
+                        = moduleReader.CurrentNestedBackingVariable;
+                    moduleReader.CurrentNestedBackingVariable
+                        = localVariable;
+                    try
+                    {
+                        return new BoundLocal(localVariable,
+                            GetExpression(reader, ref remaining,
+                                depth + 1), span);
+                    }
+                    finally
+                    {
+                        moduleReader.CurrentNestedBackingVariable
+                            = previousVariable;
+                    }
+                }
+                return new BoundLocal(localVariable,
+                    GetExpression(reader, ref remaining, depth + 1), span);
             case 3:
                 return new BoundAssignment(reader.ReadInt32(), GetExpression(reader, ref remaining, depth + 1), span);
             case 25:
@@ -7326,7 +7408,7 @@ public static partial class ModuleCompiler
                     privateFixedArrayWriter.NativeFunctionPointerSignatures)))
         {
             throw new ModuleContractException(
-                "Private revision 100 cannot persist an array-derived runtime expression.");
+                "Private revision 101 cannot persist an array-derived runtime expression.");
         }
         writer.Write(expression switch {
             BoundConstant => (byte)1,
@@ -7377,7 +7459,7 @@ public static partial class ModuleCompiler
             BoundNativeFixedArrayWrite => (byte)46,
             BoundNativeFixedArrayPathElement or BoundNativeFixedArrayPathWrite =>
                 throw new ModuleContractException(
-                    "Nested fixed-array element paths are excluded from private revision 100."),
+                    "Nested fixed-array element paths are excluded from private revision 101."),
             _ => throw new ModuleFormatException("Unknown expression kind."),
         });
         WritePrivateType(writer, expression.Type);
@@ -7409,6 +7491,62 @@ public static partial class ModuleCompiler
                 writer.Write(bufferLength.Buffer);
                 break;
             case BoundNativeStorageAddress address:
+                var pathProjectionCount
+                    = address.Projections.IsDefaultOrEmpty
+                        ? 0 : address.Projections.Length;
+                var ancestorCount = Math.Max(0,
+                    pathProjectionCount - 1);
+                if (ancestorCount > 127
+                    || depth + ancestorCount + 1 > MaximumDepth)
+                {
+                    throw new ModuleContractException(
+                        "Private revision 101 cannot persist this storage-address path depth.");
+                }
+
+                if (pathProjectionCount == 1)
+                {
+                    var singleProjection = address.Projections[0];
+                    if (singleProjection.Index != address.Index
+                        || singleProjection.Layout.CarrierType
+                            != address.CarrierType
+                        || !NativeFixedArrayContract.MatchesLayout(
+                            singleProjection.Layout,
+                            privateFixedArrayWriter.Structures,
+                            privateFixedArrayWriter.NativeFixedArrayTypes)
+                        || singleProjection.Layout.ElementType
+                            != address.ElementType
+                        || singleProjection.Layout.ElementCount
+                            != address.ElementCount
+                        || singleProjection.Layout.ElementStride
+                            != address.ElementStride)
+                    {
+                        throw new ModuleContractException(
+                            "A flat storage address has inconsistent projection facts.");
+                    }
+                }
+                else if (ancestorCount != 0
+                    && (!NativeFixedArrayContract.MatchesPath(
+                            address.CarrierType, address.Projections,
+                            privateFixedArrayWriter.Structures,
+                            privateFixedArrayWriter.NativeFixedArrayTypes,
+                            out _, out var leafLayout)
+                        || address.Index
+                            != address.Projections[^1].Index
+                        || leafLayout.ElementType != address.ElementType
+                        || leafLayout.ElementCount != address.ElementCount
+                        || leafLayout.ElementStride
+                            != address.ElementStride))
+                {
+                    throw new ModuleContractException(
+                        "A nested storage address has inconsistent projection facts.");
+                }
+
+                if (ancestorCount > remaining)
+                {
+                    throw new ModuleContractException(
+                        "The private expression exceeds its nested storage-address work budget.");
+                }
+
                 writer.Write(address.Variable);
                 WritePrivateType(writer, address.CarrierType);
                 WritePrivateType(writer, address.ElementType);
@@ -7416,16 +7554,36 @@ public static partial class ModuleCompiler
                 writer.Write(address.ElementStride);
                 writer.Write(address.ByteExtent);
                 writer.Write(address.IsReadonly);
-                PutExpression(writer, address.Index, names, ref remaining, depth + 1, inUnsafe);
+                writer.Write(ancestorCount);
+                remaining -= ancestorCount;
+                for (var projectionIndex = 0;
+                    projectionIndex < ancestorCount; projectionIndex++)
+                {
+                    var projection = address.Projections[projectionIndex];
+                    WritePrivateType(writer,
+                        projection.Layout.CarrierType);
+                    PutExpression(writer, projection.Index, names,
+                        ref remaining, depth + projectionIndex + 1,
+                        inUnsafe);
+                }
+                PutExpression(writer, address.Index, names, ref remaining,
+                    depth + ancestorCount + 1, inUnsafe);
                 break;
             case BoundNativeFixedArrayInitialization fixedArray:
                 if (writer is not ModuleWriter moduleWriter
                     || fixedArray.Type != fixedArray.Layout.CarrierType
-                    || !IsRevision100RuntimeArrayLayout(fixedArray.Layout,
-                        moduleWriter.Structures,
-                        moduleWriter.NativeFixedArrayTypes,
-                        moduleWriter.NativePointerTypes,
-                        moduleWriter.NativeFunctionPointerSignatures)
+                    || (!IsRevision100RuntimeArrayLayout(
+                            fixedArray.Layout, moduleWriter.Structures,
+                            moduleWriter.NativeFixedArrayTypes,
+                            moduleWriter.NativePointerTypes,
+                            moduleWriter.NativeFunctionPointerSignatures)
+                        && (moduleWriter.CurrentNestedBackingVariable < 0
+                            || fixedArray.Layout.ElementCount == 0
+                            || fixedArray.Layout.ElementStride == 0
+                            || fixedArray.Layout.ByteExtent == 0
+                            || !NativeFixedArrayContract.MatchesLayout(
+                                fixedArray.Layout, moduleWriter.Structures,
+                                moduleWriter.NativeFixedArrayTypes)))
                     || fixedArray.Elements.IsDefault
                     || (ulong)fixedArray.Elements.Length
                         != fixedArray.Layout.ElementCount
@@ -7435,7 +7593,7 @@ public static partial class ModuleCompiler
                         || element.Type != fixedArray.Layout.ElementType))
                 {
                     throw new ModuleContractException(
-                        "Private revision 100 cannot persist this fixed-array initializer.");
+                        "Private revision 101 cannot persist this fixed-array initializer.");
                 }
                 writer.Write(fixedArray.Elements.Length);
                 foreach (var element in fixedArray.Elements)
@@ -7455,7 +7613,7 @@ public static partial class ModuleCompiler
                     || !IsRevision100IndexType(element.Index.Type))
                 {
                     throw new ModuleContractException(
-                        "Private revision 100 cannot persist this fixed-array read.");
+                        "Private revision 101 cannot persist this fixed-array read.");
                 }
                 ValidatePrivateFixedArrayLocal(elementWriter, element.Variable,
                     element.Layout, requireMutable: false);
@@ -7480,7 +7638,7 @@ public static partial class ModuleCompiler
                         != address.Layout.ElementType)
                 {
                     throw new ModuleContractException(
-                        "Private revision 100 cannot persist this fixed-array element address.");
+                        "Private revision 101 cannot persist this fixed-array element address.");
                 }
                 ValidatePrivateFixedArrayLocal(addressWriter,
                     address.Variable, address.Layout,
@@ -7503,7 +7661,7 @@ public static partial class ModuleCompiler
                     || !IsRevision100IndexType(write.Index.Type))
                 {
                     throw new ModuleContractException(
-                        "Private revision 100 cannot persist this fixed-array write.");
+                        "Private revision 101 cannot persist this fixed-array write.");
                 }
                 ValidatePrivateFixedArrayLocal(writeWriter, write.Variable,
                     write.Layout, requireMutable: true);
@@ -7763,7 +7921,7 @@ public static partial class ModuleCompiler
                     typeReader.NativeFunctionPointerSignatures)))
         {
             throw new ModuleFormatException(
-                "Private revision 100 cannot decode an array-derived runtime expression.");
+                "Private revision 101 cannot decode an array-derived runtime expression.");
         }
         switch (kind)
         {
@@ -7869,10 +8027,19 @@ public static partial class ModuleCompiler
                         initializationReader.Structures,
                         initializationReader.NativeFixedArrayTypes,
                         initializationReader.NativePointerTypes,
-                        initializationReader.NativeFunctionPointerSignatures))
+                        initializationReader.NativeFunctionPointerSignatures)
+                    && (initializationReader
+                            .CurrentNestedBackingVariable < 0
+                        || initializationLayout.ElementCount == 0
+                        || initializationLayout.ElementStride == 0
+                        || initializationLayout.ByteExtent == 0
+                        || !NativeFixedArrayContract.MatchesLayout(
+                            initializationLayout,
+                            initializationReader.Structures,
+                            initializationReader.NativeFixedArrayTypes)))
                 {
                     throw new ModuleFormatException(
-                        "Fixed-array initialization uses an excluded revision-100 row.");
+                        "Fixed-array initialization uses an excluded revision-101 row.");
                 }
                 var initializerCount = Count(reader, MaximumNodes);
                 if ((ulong)initializerCount
@@ -8073,12 +8240,16 @@ public static partial class ModuleCompiler
                 return new BoundSpanRead(spanView, GetExpression(reader, ref remaining, depth + 1), type, span);
             case 35:
                 if (reader is not ModuleReader {
-                        FormatVersion: NativeStorageAddressExtentVersion
-                            or NativeFixedArrayVersion
-                    })
+                        FormatVersion: NativeFixedArrayVersion,
+                    } storageAddressReader)
                 {
                     throw new ModuleFormatException(
                         "Native storage addresses require the selected private revision.");
+                }
+                if (type != PrimitiveType.NativeStorageAddress)
+                {
+                    throw new ModuleFormatException(
+                        "A private storage address has the wrong result type.");
                 }
                 var storageVariable = reader.ReadInt32();
                 var carrierType = GetType(reader);
@@ -8087,10 +8258,174 @@ public static partial class ModuleCompiler
                 var elementStride = reader.ReadUInt64();
                 var byteExtent = reader.ReadUInt64();
                 var isReadonly = GetBool(reader);
-                var storageIndex = GetExpression(reader, ref remaining, depth + 1);
-                return new BoundNativeStorageAddress(storageVariable, storageIndex,
+                var ancestorCount = reader.ReadInt32();
+                var remainingBytes = reader.BaseStream.CanSeek
+                    ? reader.BaseStream.Length - reader.BaseStream.Position
+                    : long.MaxValue;
+                var minimumPathBytes = ancestorCount is >= 0 and <= 127
+                    ? checked(((long)ancestorCount * 17) + 13)
+                    : long.MaxValue;
+                if (ancestorCount is < 0 or > 127
+                    || ancestorCount > remaining
+                    || minimumPathBytes > remainingBytes
+                    || depth + ancestorCount + 1 > MaximumDepth)
+                {
+                    throw new ModuleFormatException(
+                        "The private storage-address path count or extent is invalid.");
+                }
+
+                remaining -= ancestorCount;
+                var ancestorProjections
+                    = ImmutableArray.CreateBuilder<
+                        BoundNativeFixedArrayProjection>(ancestorCount);
+                var nextParentType = carrierType;
+                for (var projectionIndex = 0;
+                    projectionIndex < ancestorCount; projectionIndex++)
+                {
+                    var parentArrayType = GetType(reader);
+                    if (parentArrayType != nextParentType)
+                    {
+                        throw new ModuleFormatException(
+                            "A private storage-address ancestor differs from its immediate parent type.");
+                    }
+
+                    var parentLayout = GetPrivateFixedArrayLayout(reader,
+                        parentArrayType);
+                    if (parentLayout.ElementCount == 0
+                        || parentLayout.ElementStride == 0
+                        || parentLayout.ByteExtent == 0)
+                    {
+                        throw new ModuleFormatException(
+                            "A private storage-address ancestor has no positive backing.");
+                    }
+
+                    var parentIndex = GetExpression(reader, ref remaining,
+                        depth + projectionIndex + 1);
+                    if (!NativeFixedArrayContract.IsIndexType(
+                            parentIndex.Type)
+                        || (parentIndex is BoundConstant
+                            && !NativeFixedArrayContract
+                                .IsConstantIndexInRange(parentIndex,
+                                    parentLayout.ElementCount)))
+                    {
+                        throw new ModuleFormatException(
+                            "A private storage-address ancestor index is invalid.");
+                    }
+
+                    ancestorProjections.Add(
+                        new BoundNativeFixedArrayProjection(parentLayout,
+                            parentIndex));
+                    nextParentType = parentLayout.ElementType;
+                }
+
+                var storageIndex = GetExpression(reader, ref remaining,
+                    depth + ancestorCount + 1);
+                if ((uint)storageVariable
+                        >= (uint)storageAddressReader.CurrentVariables.Length
+                    || storageVariable
+                        < storageAddressReader.CurrentParameterCount
+                            + (storageAddressReader.CurrentIsConstructor ? 1 : 0)
+                    || storageAddressReader.CurrentVariables[storageVariable].Type
+                        != carrierType
+                    || !NativeFixedArrayContract.IsIndexType(
+                        storageIndex.Type)
+                    || (storageIndex is BoundConstant constantIndex
+                        && !NativeFixedArrayContract
+                            .IsConstantIndexInRange(constantIndex,
+                                ancestorCount == 0
+                                    && NativeFixedArrayTypes.IsType(
+                                        carrierType)
+                                        ? GetPrivateFixedArrayLayout(
+                                            storageAddressReader,
+                                            carrierType).ElementCount
+                                        : ancestorCount == 0 ? 1
+                                            : GetPrivateFixedArrayLayout(
+                                                storageAddressReader,
+                                                nextParentType)
+                                                .ElementCount))
+                    || elementCount == 0 || elementStride == 0
+                    || byteExtent == 0 || byteExtent % elementStride != 0)
+                {
+                    throw new ModuleFormatException(
+                        "A private storage address has invalid local or extent facts.");
+                }
+
+                var projections = ImmutableArray<BoundNativeFixedArrayProjection>.Empty;
+                if (ancestorCount > 0)
+                {
+                    var finalLayout = GetPrivateFixedArrayLayout(
+                        storageAddressReader,
+                        nextParentType);
+                    projections = [.. ancestorProjections,
+                        new BoundNativeFixedArrayProjection(finalLayout,
+                            storageIndex)];
+                    if (!NativeFixedArrayContract.MatchesPath(carrierType,
+                            projections, storageAddressReader.Structures,
+                            storageAddressReader.NativeFixedArrayTypes,
+                            out _, out var leafLayout)
+                        || leafLayout.ElementType != elementType
+                        || leafLayout.ElementCount != elementCount
+                        || leafLayout.ElementStride != elementStride
+                        || byteExtent > leafLayout.ByteExtent)
+                    {
+                        throw new ModuleFormatException(
+                            "A private storage address differs from its final array layout.");
+                    }
+
+                    var requiredElementCount = byteExtent / elementStride;
+                    if (storageIndex is BoundConstant nestedIndex
+                        && !NativeFixedArrayContract.IsConstantIndexInRange(
+                            nestedIndex, elementCount
+                                - requiredElementCount + 1))
+                    {
+                        throw new ModuleFormatException(
+                            "A private storage address exceeds the final array suffix.");
+                    }
+                }
+                else if (NativeFixedArrayTypes.IsType(carrierType))
+                {
+                    var finalLayout = GetPrivateFixedArrayLayout(
+                        storageAddressReader,
+                        carrierType);
+                    if (finalLayout.ElementType != elementType
+                        || finalLayout.ElementCount != elementCount
+                        || finalLayout.ElementStride != elementStride
+                        || byteExtent > finalLayout.ByteExtent)
+                    {
+                        throw new ModuleFormatException(
+                            "A private flat storage address differs from its array layout.");
+                    }
+
+                    var requiredElementCount = byteExtent / elementStride;
+                    if (storageIndex is BoundConstant flatIndex
+                        && !NativeFixedArrayContract.IsConstantIndexInRange(
+                            flatIndex, elementCount - requiredElementCount + 1))
+                    {
+                        throw new ModuleFormatException(
+                            "A private storage address exceeds the final array suffix.");
+                    }
+                }
+                else
+                {
+                    var extent = ValueLayout.Size(carrierType,
+                        storageAddressReader.Structures);
+                    if (carrierType != elementType || elementCount != 1
+                        || extent <= 0 || elementStride != (ulong)extent
+                        || byteExtent != elementStride
+                        || !NativeFixedArrayContract.IsConstantIndex(
+                            storageIndex, 0))
+                    {
+                        throw new ModuleFormatException(
+                            "A private scalar storage address has invalid geometry.");
+                    }
+                }
+
+                return new BoundNativeStorageAddress(storageVariable,
+                    storageIndex,
                     carrierType, elementType, type, elementCount,
-                    elementStride, byteExtent, isReadonly, span);
+                    elementStride, byteExtent, isReadonly, span) {
+                        Projections = projections,
+                    };
             case 36:
                 if (reader is not ModuleReader { FormatVersion: >= NativeFunctionPointerVersion })
                 {
@@ -8416,6 +8751,13 @@ public static partial class ModuleCompiler
             BoundNativeStorageAddress address => address with {
                 Index = ResolveExpression(address.Index, names, functions, structures,
                     valueTypes, inUnsafe, inUnsafeExpression),
+                Projections = address.Projections.IsDefaultOrEmpty ? [] : [
+                    .. address.Projections.Select(projection =>
+                        projection with {
+                            Index = ResolveExpression(projection.Index, names,
+                                functions, structures, valueTypes, inUnsafe,
+                                inUnsafeExpression),
+                        })],
             },
             BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
                 Elements = [.. fixedArray.Elements.Select(element =>

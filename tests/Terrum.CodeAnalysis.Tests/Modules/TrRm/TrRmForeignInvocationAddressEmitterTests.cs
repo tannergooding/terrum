@@ -3475,49 +3475,1056 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
+    [TestCase(0, 0, 0, 0)]
+    [TestCase(0, 0, 1, -1)]
+    [TestCase(0, 1, 0, -1)]
+    [TestCase(0, 1, 1, 0)]
+    [TestCase(1, 0, 0, -1)]
+    [TestCase(1, 0, 1, 0)]
+    [TestCase(1, 1, 0, 0)]
+    [TestCase(1, 1, 1, -1)]
+    public void StandardA2NestedArrayJitReadsInitializedRows(
+        int outerIndex, int middleIndex, int innerIndex, int expected)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var moduleIdentity
+            = $"a2-nested-array-read-{outerIndex}-{middleIndex}-{innerIndex}";
+        var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+            outerIndex, middleIndex, innerIndex, out _);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+
+        var result = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2 nested source-free JIT row read: module={moduleIdentity}; expected={expected}; actual={result}; policy=FailFast.");
+        Assert.That(result, Is.EqualTo(expected));
+    }
+
+    [TestCase(0, 0, 0, 42)]
+    [TestCase(0, 0, 1, -1)]
+    [TestCase(0, 1, 0, -1)]
+    [TestCase(0, 1, 1, 0)]
+    [TestCase(1, 0, 0, -1)]
+    [TestCase(1, 0, 1, 0)]
+    [TestCase(1, 1, 0, 0)]
+    [TestCase(1, 1, 1, -1)]
+    public void NestedArrayNativeParameterJitReadsInitializedRows(
+        int outerIndex, int middleIndex, int innerIndex, int expected)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = CreateNativeNestedArrayReadbackSource(outerIndex,
+            middleIndex, innerIndex);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var actual = NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"Nested NativeParameter source JIT: expected={expected}; actual={actual}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}.");
+        Assert.That(actual, Is.EqualTo(expected));
+    }
+
+    [Test]
+    public async Task NestedArrayNativeParameterAotReadsInitializedRow()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = CreateNativeNestedArrayReadbackSource(0, 0, 1);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var image = NativeEmitter.EmitWithNativeImports(
+            compilation.Program!,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image, Is.Not.Empty);
+        var imagePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-nested-native-parameter-{Guid.NewGuid():N}.exe");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            process = Process.Start(new ProcessStartInfo(imagePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException(
+                "The nested NativeParameter executable was not started.");
+            var processId = process.Id;
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"The nested NativeParameter executable exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            var output = await stdout.ConfigureAwait(true);
+            var error = await stderr.ConfigureAwait(true);
+            TestContext.WriteLine(
+                $"Nested NativeParameter source AOT: pid={processId}; expected=-1; actual={process.ExitCode}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+            Assert.That(output, Is.Empty);
+            Assert.That(error, Is.Empty);
+            Assert.That(process.ExitCode, Is.EqualTo(-1));
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [TestCase(2, 1)]
+    [TestCase(3, 2)]
+    public async Task PrivateRevision101AddressOnlyBackingRoundTripsAndExecutes(
+        int dimensionCount, int ancestorCount)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = CreatePrivateNestedAddressSource(dimensionCount);
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            producer.AsSpan(sizeof(int), sizeof(int))), Is.EqualTo(101));
+        var addressOffset = FindPrivateStorageAddressWithAncestorCount(
+            producer, ancestorCount);
+        var excessiveAncestorCount = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            excessiveAncestorCount.AsSpan(addressOffset + 50,
+                sizeof(int)), 128);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(excessiveAncestorCount));
+        var mismatchedParent = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mismatchedParent.AsSpan(addressOffset + 54, sizeof(int)),
+            (int)PrimitiveType.Int32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(mismatchedParent));
+        var truncatedPath = producer
+            .AsSpan(0, addressOffset + 56).ToArray();
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(truncatedPath));
+        var initializerOffset
+            = FindPrivateNestedArrayInitializerOffset(producer);
+        var shortInitializer = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            shortInitializer.AsSpan(initializerOffset + 13, sizeof(int)), 1);
+        Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(shortInitializer));
+        var mismatchedChild = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            mismatchedChild.AsSpan(initializerOffset + 18, sizeof(int)),
+            (int)PrimitiveType.Int32);
+        Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(mismatchedChild));
+
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerSource = CreatePrivateNestedAddressSource(
+            dimensionCount, "ConsumerBacking", "RtlMoveMemoryConsumer",
+            "RtlMoveMemory")
+            + Environment.NewLine
+            + "int32 Main() { return Exercise() + ConsumerBacking(); }";
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource), reference,
+            BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        var reemittedProducer = ModuleCompiler.CreateProducer(
+            linked with { EntryPoint = -1 }, ["Exercise"]);
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(
+            reemittedProducer.AsSpan(sizeof(int), sizeof(int))),
+            Is.EqualTo(101));
+        _ = FindPrivateStorageAddressWithAncestorCount(reemittedProducer,
+            ancestorCount);
+
+        var reemittedReference
+            = ModuleCompiler.CreateReference(reemittedProducer);
+        var reemittedConsumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource), reemittedReference,
+            BoundRuntimePolicy.FailFast);
+        Assert.That(reemittedConsumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                reemittedConsumerCompilation.Diagnostics));
+        var reemittedConsumer = ModuleCompiler.CreateConsumer(
+            reemittedConsumerCompilation.Program!, reemittedProducer);
+        var reemittedLinked = ModuleCompiler.Link(reemittedConsumer,
+            reemittedProducer);
+
+        Assert.That(NativeJit.Execute(linked,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(156));
+        Assert.That(NativeJit.Execute(reemittedLinked,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(156));
+        await AssertPrivateNestedBackingAotAsync(linked,
+            $"private-nested-address-{dimensionCount}-first", 156)
+            .ConfigureAwait(true);
+        await AssertPrivateNestedBackingAotAsync(reemittedLinked,
+            $"private-nested-address-{dimensionCount}-reemitted", 156)
+            .ConfigureAwait(true);
+    }
+
+    private static string CreatePrivateNestedAddressSource(int dimensionCount)
+        => CreatePrivateNestedAddressSource(dimensionCount, "Exercise",
+            "RtlMoveMemory");
+
+    private static string CreatePrivateNestedAddressSource(
+        int dimensionCount, string functionName, string importName,
+        string importExportName = "RtlMoveMemory")
+    {
+        var nextValue = 1;
+        var arrayType = "int32";
+        for (var dimension = 0; dimension < dimensionCount; dimension++)
+        {
+            arrayType = $"[{arrayType}; 2]";
+        }
+
+        var initializer
+            = CreatePrivateNestedArrayInitializer(dimensionCount,
+                ref nextValue);
+        var selectedPath = string.Concat(
+            Enumerable.Repeat("[selectedIndex]", dimensionCount));
+        var untouchedPath = string.Concat(
+            Enumerable.Repeat("[zeroIndex]", dimensionCount));
+        return $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "{{importExportName}}")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void {{importName}}(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 {{functionName}}() {
+                mut {{arrayType}} values = {{initializer}};
+                int32 selectedIndex = 1;
+                int32 zeroIndex = 0;
+                mut int32 replacement = 77;
+                mut int32 observed = 0;
+                mut int32 untouched = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    {{importName}}(&values{{selectedPath}},
+                        &replacement, byteCount);
+                    {{importName}}(&observed,
+                        &values{{selectedPath}}, byteCount);
+                    {{importName}}(&untouched,
+                        &values{{untouchedPath}}, byteCount);
+                }
+                return observed + untouched;
+            }
+            """;
+    }
+
+    private static string CreatePrivateNestedArrayInitializer(
+        int dimensionCount, ref int nextValue)
+    {
+        if (dimensionCount == 0)
+        {
+            return (nextValue++).ToString(
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        var first = CreatePrivateNestedArrayInitializer(
+            dimensionCount - 1, ref nextValue);
+        var second = CreatePrivateNestedArrayInitializer(
+            dimensionCount - 1, ref nextValue);
+        return $"[{first}, {second}]";
+    }
+
+    private static int FindPrivateStorageAddressWithAncestorCount(
+        byte[] artifact, int ancestorCount)
+    {
+        for (var offset = sizeof(int) * 2;
+            offset <= artifact.Length - 54; offset++)
+        {
+            if (artifact[offset] == 35
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    artifact.AsSpan(offset + 1, sizeof(int)))
+                    == (int)PrimitiveType.NativeStorageAddress
+                && BinaryPrimitives.ReadUInt64LittleEndian(
+                    artifact.AsSpan(offset + 25, sizeof(ulong))) == 2
+                && BinaryPrimitives.ReadUInt64LittleEndian(
+                    artifact.AsSpan(offset + 33, sizeof(ulong)))
+                    == sizeof(int)
+                && BinaryPrimitives.ReadUInt64LittleEndian(
+                    artifact.AsSpan(offset + 41, sizeof(ulong)))
+                    == sizeof(int)
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    artifact.AsSpan(offset + 50, sizeof(int)))
+                    == ancestorCount)
+            {
+                return offset;
+            }
+        }
+
+        Assert.Fail(
+            $"The private storage-address path with {ancestorCount} ancestors was not encoded.");
+        return -1;
+    }
+
+    private static int FindPrivateNestedArrayInitializerOffset(
+        byte[] artifact)
+    {
+        for (var offset = sizeof(int) * 2;
+            offset <= artifact.Length - 18; offset++)
+        {
+            if (artifact[offset] == 43
+                && NativeFixedArrayTypes.IsType(
+                    (PrimitiveType)BinaryPrimitives.ReadInt32LittleEndian(
+                        artifact.AsSpan(offset + 1, sizeof(int))))
+                && BinaryPrimitives.ReadInt32LittleEndian(
+                    artifact.AsSpan(offset + 13, sizeof(int))) == 2
+                && artifact[offset + 17] == 43)
+            {
+                return offset;
+            }
+        }
+
+        Assert.Fail("The nested fixed-array initializer was not encoded.");
+        return -1;
+    }
+
+    private static async Task AssertPrivateNestedBackingAotAsync(
+        BoundProgram program, string filePrefix, int expectedExitCode)
+    {
+        var image = NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.FailFast);
+        Assert.That(image, Is.Not.Empty);
+        var imagePath = Path.Combine(Path.GetTempPath(),
+            $"terrum-{filePrefix}-{Guid.NewGuid():N}.exe");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(imagePath, image)
+                .ConfigureAwait(true);
+            process = Process.Start(new ProcessStartInfo(imagePath) {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            }) ?? throw new InvalidOperationException(
+                "The private nested-address executable was not started.");
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"The private nested-address executable exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            Assert.That(await stdout.ConfigureAwait(true), Is.Empty);
+            Assert.That(await stderr.ConfigureAwait(true), Is.Empty);
+            Assert.That(process.ExitCode, Is.EqualTo(expectedExitCode));
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(imagePath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    private static async Task<(int ExitCode, string Output, string Error)>
+        RunPrivateModuleJitWorkerAsync(byte[] consumer, byte[] producer)
+    {
+        var consumerPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-private-consumer-{Guid.NewGuid():N}.trm");
+        var producerPath = Path.Combine(Path.GetTempPath(),
+            $"terrum-private-producer-{Guid.NewGuid():N}.trm");
+        Process? process = null;
+        try
+        {
+            await File.WriteAllBytesAsync(consumerPath, consumer)
+                .ConfigureAwait(true);
+            await File.WriteAllBytesAsync(producerPath, producer)
+                .ConfigureAwait(true);
+            var framework = new DirectoryInfo(AppContext.BaseDirectory);
+            var configuration = framework.Parent?.Name
+                ?? throw new InvalidOperationException(
+                    "The test output has no configuration directory.");
+            var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+                "..", "..", "..", "..", "..", ".."));
+            var cliPath = Path.Combine(root, "artifacts", "bin", "sources",
+                "terrumc", configuration, framework.Name, "terrumc.dll");
+            if (!File.Exists(cliPath))
+            {
+                throw new FileNotFoundException(
+                    "The Terrum CLI was not built.", cliPath);
+            }
+
+            var start = new ProcessStartInfo("dotnet") {
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            };
+            start.ArgumentList.Add(cliPath);
+            start.ArgumentList.Add("run-module");
+            start.ArgumentList.Add(consumerPath);
+            start.ArgumentList.Add(producerPath);
+            start.ArgumentList.Add("--runtime");
+            start.ArgumentList.Add("fail-fast");
+            process = Process.Start(start) ?? throw new InvalidOperationException(
+                "The private module JIT worker was not started.");
+            var stdout = process.StandardOutput.ReadToEndAsync();
+            var stderr = process.StandardError.ReadToEndAsync();
+            try
+            {
+                await process.WaitForExitAsync()
+                    .WaitAsync(TimeSpan.FromSeconds(10))
+                    .ConfigureAwait(true);
+            }
+            catch (TimeoutException exception)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                throw new TimeoutException(
+                    $"The private module JIT worker exceeded its 10-second deadline. {await stdout.ConfigureAwait(true)}{Environment.NewLine}{await stderr.ConfigureAwait(true)}",
+                    exception);
+            }
+
+            return (process.ExitCode, await stdout.ConfigureAwait(true),
+                await stderr.ConfigureAwait(true));
+        }
+        finally
+        {
+            if (process is not null)
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                    await process.WaitForExitAsync().ConfigureAwait(true);
+                }
+
+                process.Dispose();
+            }
+
+            await TestFileCleanup.DeleteWithRetryAsync(consumerPath)
+                .ConfigureAwait(true);
+            await TestFileCleanup.DeleteWithRetryAsync(producerPath)
+                .ConfigureAwait(true);
+        }
+    }
+
+    [TestCase("return values[1][1];")]
+    [TestCase("values[1][1] = 77; return values[1][1];")]
+    public void PrivateRevision101StillRejectsNestedArrayValueOperations(
+        string operations)
+    {
+        var source = $$"""
+            public int32 Exercise() {
+                mut [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                {{operations}}
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compilation.Diagnostics));
+
+        Assert.Throws<ModuleContractException>(() =>
+            ModuleCompiler.CreateProducer(compilation.Program!,
+                ["Exercise"]));
+    }
+
+    [Test]
+    public void PrivateRevision101DoesNotTreatWriteAsNestedBackingInitialization()
+    {
+        const string source = """
+            [Terrum.Interop.NativeImport("example.dll", "WriteValue")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            internal extern void WriteValue(write ptr<int32> value);
+
+            public void Exercise() {
+                init mut [[int32; 2]; 2] values;
+                unsafe { WriteValue(&values[1][1]); }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void MayEscapeNativeParameterIsRejectedAtSourceBoundary()
+    {
+        const string source = """
+            [Terrum.Interop.NativeImport("example.dll", "RetainValue")]
+            [Terrum.Interop.NativeParameter(1, Write, MayEscape, 1)]
+            internal extern void RetainValue(write ptr<int32> value);
+
+            public void Exercise() {
+                mut [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                unsafe { RetainValue(&values[1][1]); }
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public void NestedNativeParameterExtentCannotCrossTheImmediateRow()
+    {
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                mut [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                mut int32 observed = 0;
+                uint64 byteCount = 8;
+                unsafe {
+                    RtlMoveMemory(&observed, &values[1][1], byteCount);
+                }
+                return observed;
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True);
+    }
+
+    [Test]
+    public async Task PrivateRevision101AddressOnlyBackingSurvivesNativePackageSet()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var arrayCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(CreatePrivateNestedAddressSource(3)),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(arrayCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                arrayCompilation.Diagnostics));
+        var arrayProvider = NativeModuleCompiler.CreateProducer(
+            arrayCompilation.Program!, ["Exercise"], "NestedAddressArray",
+            NativeRuntimePolicy.FailFast);
+
+        var biasCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Bias() { return 1; }
+            """), BoundRuntimePolicy.FailFast);
+        Assert.That(biasCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                biasCompilation.Diagnostics));
+        var biasProvider = NativeModuleCompiler.CreateProducer(
+            biasCompilation.Program!, ["Bias"], "NestedAddressBias",
+            NativeRuntimePolicy.FailFast);
+
+        var providers = new[] { arrayProvider, biasProvider };
+        var reference = NativeModuleCompiler.CreateReferenceSet(providers);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise() + Bias(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = NativeModuleCompiler.CreateConsumerSet(
+            consumerCompilation.Program!, providers,
+            NativeRuntimePolicy.FailFast);
+
+        var result = await NativeModuleCompiler.RunConsumerSetAsync(
+            consumer, providers, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.That(result, Is.EqualTo(79));
+    }
+
+    [Test]
+    public async Task PrivateRevision101AddressOnlyBackingSurvivesGraphPackage()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var biasCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
+            public int32 Bias() { return 1; }
+            """), BoundRuntimePolicy.FailFast);
+        Assert.That(biasCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                biasCompilation.Diagnostics));
+        var biasProvider = NativeModuleCompiler.CreateProducer(
+            biasCompilation.Program!, ["Bias"], "GraphAddressBias",
+            NativeRuntimePolicy.FailFast);
+
+        var graphReference
+            = NativeModuleCompiler.CreateGraphReference([biasProvider]);
+        var graphProviderSource = CreatePrivateNestedAddressSource(3)
+            .Replace("return observed + untouched;",
+                "return observed + untouched + Bias();",
+                StringComparison.Ordinal);
+        var graphProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(graphProviderSource), graphReference,
+            BoundRuntimePolicy.FailFast);
+        Assert.That(graphProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                graphProviderCompilation.Diagnostics));
+        var graphProvider = NativeModuleCompiler.CreateGraphProducer(
+            graphProviderCompilation.Program!, ["Exercise"],
+            "GraphAddressArray", [biasProvider],
+            NativeRuntimePolicy.FailFast);
+
+        var dependencies = new[] { graphProvider, biasProvider };
+        var rootReference
+            = NativeModuleCompiler.CreateGraphReference(dependencies);
+        var rootCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise() + Bias(); }"),
+            rootReference, BoundRuntimePolicy.FailFast);
+        Assert.That(rootCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                rootCompilation.Diagnostics));
+        var graphConsumer = NativeModuleCompiler.CreateGraphConsumer(
+            rootCompilation.Program!, dependencies,
+            NativeRuntimePolicy.FailFast);
+        NativeModuleCompiler.ValidateGraph(graphConsumer, dependencies);
+
+        var result = await NativeModuleCompiler.RunGraphAsync(graphConsumer,
+            dependencies, TimeSpan.FromSeconds(10),
+            NativeRuntimePolicy.FailFast).ConfigureAwait(true);
+        Assert.That(result, Is.EqualTo(80));
+    }
+
+    [Test]
+    public async Task PrivateRevision101NestedConstructionFailurePreventsAddressUse()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Denominator() { return 0; }
+
+            public int32 Exercise() {
+                mut [[int32; 2]; 2] values = [
+                    [1, 2],
+                    [3, 1 / Denominator()]];
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    RtlMoveMemory(&observed, &values[1][1], byteCount);
+                }
+                return observed;
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        const int expectedStatus = unchecked((int)0xE0540002);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(expectedStatus));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-address-failure", expectedStatus)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PrivateRevision101NestedBoundsFailurePreventsNativeCall()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                mut [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                int32 outerIndex = 2;
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    RtlMoveMemory(&observed,
+                        &values[outerIndex][0], byteCount);
+                }
+                return observed;
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var expectedStatus = unchecked((int)0xE0540004);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(expectedStatus));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-bounds-failure", expectedStatus)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PrivateRevision101NestedSuffixFailurePreventsNativeCall()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 2)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 2)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                mut [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                mut [int32; 2] copied = [0, 0];
+                int32 selectedIndex = 1;
+                uint64 byteCount = 8;
+                unsafe {
+                    RtlMoveMemory(&copied[0],
+                        &values[0][selectedIndex], byteCount);
+                }
+                return copied[0];
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        const int expectedStatus = unchecked((int)0xE0540004);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(expectedStatus));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-suffix-failure", expectedStatus)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PrivateRevision101EffectfulNestedIndicesExecuteOnceInPathOrder()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                mut [[[int32; 2]; 2]; 2] values = [
+                    [[1, 2], [3, 4]],
+                    [[5, 6], [7, 8]]];
+                mut int32 index = 0;
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    RtlMoveMemory(&observed,
+                        &values[index++][index++][0], byteCount);
+                }
+                return observed + index * 100;
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        _ = FindPrivateStorageAddressWithAncestorCount(producer, 2);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(203));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-index-order", 203).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PrivateRevision101ReadOnlyNestedBackingExecutes()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    RtlMoveMemory(&observed, &values[1][1], byteCount);
+                }
+                return observed;
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        _ = FindPrivateStorageAddressWithAncestorCount(producer, 1);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(4));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-readonly-backing", 4)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PrivateRevision101LaterArgumentFailureSuppressesNativeCall()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                mut [[int32; 2]; 2] values = [[1, 2], [3, 4]];
+                mut int32 observed = 0;
+                unsafe {
+                    RtlMoveMemory(&values[1][1], &observed,
+                        uint64(1 / 0));
+                }
+                return observed;
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        const int expectedStatus = unchecked((int)0xE0540002);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(expectedStatus));
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-later-argument-failure", expectedStatus)
+            .ConfigureAwait(true);
+    }
+
     [Test]
     public async Task StandardA2NestedArraySourceFreeJitAndAotExecute()
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
         const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
         const string moduleIdentity = "a2-nested-array-runtime";
-        var options = new CompilationOptions {
-            RuntimePolicy = BoundRuntimePolicy.FailFast,
-            NativeCoreRegistration
-                = NativeCoreRegistrationTests.CreateRegistration(),
-        };
-        const string source = """
-            [Terrum.Interop.NativeImport(
-                "kernel32.dll",
-                "IsBadReadPtr",
-                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
-            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
-            internal extern bool IsBadReadPtr(
-                ptr<int32> memory,
-                uint64 byteCount);
-
-            int32 Main() {
-                int32 zeroIndex = 0;
-                mut [[[int32; 2]; 2]; 2] values = [
-                    [[0, -1], [-1, 0]],
-                    [[-1, 0], [0, -1]]];
-                mut int32 output = 0;
-                uint64 byteCount = 0;
-                unsafe {
-                    var callback = &IsBadReadPtr;
-                    callback(&output, byteCount);
-                }
-                return output;
-            }
-            """;
-        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
-        Assert.That(compilation.HasErrors, Is.False,
-            string.Join(Environment.NewLine, compilation.Diagnostics));
-        var artifact = TrRmExecutableCompiler.EmitStandard(
-            compilation.Program!, moduleIdentity, schemaIdentity, 1);
-        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+            0, 0, 1, out var source);
+        var artifact = input.Artifact.ToArray();
         var loaded = TrRmExecutableCompiler.LoadStandard(input,
             moduleIdentity, []);
         var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
@@ -3528,11 +4535,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var importPath = Path.Combine(Environment.SystemDirectory,
             "kernel32.dll");
         TestContext.WriteLine(
-            $"A2 nested source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!IsBadReadPtr; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
+            $"A2 nested source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!RtlMoveMemory; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
         var jitResult = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
         TestContext.WriteLine(
-            $"A2 nested source-free JIT: policy=FailFast; expected=0; actual={jitResult}.");
-        Assert.That(jitResult, Is.Zero);
+            $"A2 nested source-free JIT leaf read: policy=FailFast; expected=-1; actual={jitResult}.");
+        Assert.That(jitResult, Is.EqualTo(-1));
 
         var image = NativeModuleCompiler.EmitStandardExecutable(input,
             moduleIdentity, [], NativeRuntimePolicy.FailFast);
@@ -3576,10 +4583,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             var output = await stdout.ConfigureAwait(true);
             var error = await stderr.ConfigureAwait(true);
             TestContext.WriteLine(
-                $"A2 nested source-free AOT: policy=FailFast; pid={processId}; expected=0; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+                $"A2 nested source-free AOT leaf read: policy=FailFast; pid={processId}; expected=-1; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
-            Assert.That(process.ExitCode, Is.Zero);
+            Assert.That(process.ExitCode, Is.EqualTo(-1));
         }
         finally
         {
@@ -3597,6 +4604,95 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             await TestFileCleanup.DeleteWithRetryAsync(imagePath)
                 .ConfigureAwait(true);
         }
+    }
+
+    private static TrRmStandardArtifactInput
+        CreateA2NestedArrayReadbackInput(string moduleIdentity,
+            int outerIndex, int middleIndex, int innerIndex, out string source)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.FailFast,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var outerIndexExpression = outerIndex == 0
+            ? "0" : "minusOne / minusOne";
+        var middleIndexExpression = middleIndex == 0
+            ? "0" : "minusOne / minusOne";
+        var innerIndexExpression = innerIndex == 0
+            ? "0" : "minusOne / minusOne";
+        source = $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                int32 minusOne = -1;
+                mut [[[int32; 2]; 2]; 2] values = [
+                    [[0, -1], [-1, 0]],
+                    [[-1, 0], [0, -1]]];
+                int32 outer = {{outerIndexExpression}};
+                int32 middle = {{middleIndexExpression}};
+                int32 inner = {{innerIndexExpression}};
+                mut int32 observed = values[outer][middle][inner];
+                uint64 copyByteCount = 0;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&observed,
+                        &values[outer][middle][inner], copyByteCount);
+                }
+                return observed;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        return new TrRmStandardArtifactInput(schemaIdentity, artifact);
+    }
+
+    private static string CreateNativeNestedArrayReadbackSource(
+        int outerIndex, int middleIndex, int innerIndex)
+    {
+        return $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                mut [[[int32; 2]; 2]; 2] values = [
+                    [[42, -1], [-1, 0]],
+                    [[-1, 0], [0, -1]]];
+                mut int32 observed = 0;
+                int32 outer = {{outerIndex}};
+                int32 middle = {{middleIndex}};
+                int32 inner = {{innerIndex}};
+                uint64 copyByteCount = 4;
+                unsafe {
+                    RtlMoveMemory(&observed,
+                        &values[outer][middle][inner], copyByteCount);
+                }
+                return observed;
+            }
+            """;
     }
 
     [Test]

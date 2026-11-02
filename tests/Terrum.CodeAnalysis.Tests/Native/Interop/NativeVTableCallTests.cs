@@ -215,7 +215,7 @@ public sealed class NativeVTableCallTests
         Assert.Throws<InvalidDataException>(() => TrRmExecutableCompiler.Load(missingVTableFeatures));
 
         var privateArtifact = ModuleCompiler.CreateProducer(offsetLoaded, ["Invoke"]);
-        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(92));
+        Assert.That(BinaryPrimitives.ReadInt32LittleEndian(privateArtifact.AsSpan(4)), Is.EqualTo(101));
         var privateReference = ModuleCompiler.CreateReference(privateArtifact);
         var privateConsumer = Compilation.Create(SyntaxTree.Parse("""
             int32 Main() {
