@@ -2202,6 +2202,10 @@ public static partial class TrRmExecutableCompiler
                         ReadForeignInvocationBodyTypeSpec(body, localMapType),
                         nativePointerTypeDefinitions,
                         signatureIndexByAnchorMethod, structureTypeByTypeDef);
+                    var isArrayIndexType
+                        = body.Schema.UsesForeignInvocationStorageFixedArrays()
+                            && NativeFixedArrayContract.IsIndexType(
+                                localType);
                     if (instruction.Opcode == 0xD6
                         && localInitializedByHome[localHome])
                     {
@@ -2239,6 +2243,7 @@ public static partial class TrRmExecutableCompiler
                     {
                         if (copiedHomeExpression.Type != localType
                             || (!DirectNativeImportContract.IsScalar(localType)
+                                && !isArrayIndexType
                                 && !NativePointerTypes.IsType(localType)))
                         {
                             throw Invalid(
@@ -2250,6 +2255,7 @@ public static partial class TrRmExecutableCompiler
                     else
                     {
                         if ((!DirectNativeImportContract.IsScalar(localType)
+                                && !isArrayIndexType
                                 && !(localType == PrimitiveType.Void
                                     && body.Schema
                                         .UsesForeignInvocationStorageFixedArrayUnitInitialization()))
@@ -2260,8 +2266,12 @@ public static partial class TrRmExecutableCompiler
                                 "The F+S Home store has no admitted typed source.");
                         }
 
-                        localValue = new BoundConstant(initialValue,
-                            localType, default);
+                        localValue = PrimitiveTypeFacts.ScalarWidth(localType)
+                            > sizeof(ulong)
+                            ? new BoundConstant(new ScalarBits(0, 0),
+                                localType, default)
+                            : new BoundConstant(initialValue, localType,
+                                default);
                         localConstantByHome.Add(localHome, initialValue);
                     }
 
@@ -2344,20 +2354,16 @@ public static partial class TrRmExecutableCompiler
                         || updatePlaceExpression is not BoundRead indexUpdatePlace
                         || !NativeFixedArrayContract.IsIndexType(
                             indexUpdatePlace.Type)
-                        || !variables[indexUpdatePlace.Variable].IsMutable
-                        || ((updateControl is 0x01 or 0x02)
-                            && (indexUpdatePlace.Type is PrimitiveType.UInt8
-                                or PrimitiveType.UInt16 or PrimitiveType.UInt32
-                                or PrimitiveType.UInt64)))
+                        || !variables[indexUpdatePlace.Variable].IsMutable)
                     {
                         throw Unsupported(
-                            "The F+S arithmetic does not match an admitted prefix index update.");
+                            "The F+S arithmetic does not match an admitted nested index update.");
                     }
 
                     var updateOperator = updateControl switch
                     {
-                        0x01 or 0x05 => TokenKind.MinusMinus,
-                        0x02 or 0x06 => TokenKind.PlusPlus,
+                        0x01 or 0x05 => TokenKind.PlusPlus,
+                        0x02 or 0x06 => TokenKind.MinusMinus,
                         _ => throw Invalid(
                             "The F+S index update has an unsupported arithmetic control."),
                     };
@@ -4461,7 +4467,9 @@ public static partial class TrRmExecutableCompiler
 
         if (sourceRegister == 14)
         {
-            return DirectNativeImportContract.IsScalar(type);
+            return DirectNativeImportContract.IsScalar(type)
+                || (schema.UsesForeignInvocationStorageFixedArrays()
+                    && NativeFixedArrayContract.IsIndexType(type));
         }
 
         if (sourceRegister != 15 || !DirectNativeImportContract.IsScalar(type))

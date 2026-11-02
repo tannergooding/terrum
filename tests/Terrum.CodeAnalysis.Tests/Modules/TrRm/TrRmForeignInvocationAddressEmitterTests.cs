@@ -4845,6 +4845,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
             0, 0, 1, out var source, effectfulIndices: true,
             returnSequence: true, effectfulPostfix: true);
+        Assert.That(GetA2IndexUpdateControls(input),
+            Is.EqualTo(new byte[] { 0x01, 0x01, 0x01 }));
         await AssertStandardA2SourceFreeJitAndAotAsync(
             moduleIdentity, input, source, 3, "nested index count/order")
             .ConfigureAwait(true);
@@ -4852,10 +4854,138 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var prefixInput = CreateA2NestedArrayReadbackInput(
             "a2-nested-array-prefix-index", 0, 0, 1, out _,
             effectfulIndices: true, returnSequence: true);
+        Assert.That(GetA2IndexUpdateControls(prefixInput),
+            Is.EqualTo(new byte[] { 0x01, 0x01, 0x01 }));
         var prefixLoaded = TrRmExecutableCompiler.LoadStandard(prefixInput,
             "a2-nested-array-prefix-index", []);
         Assert.That(NativeJit.Execute(prefixLoaded,
             NativeRuntimePolicy.FailFast), Is.EqualTo(2));
+    }
+
+    [Test]
+    public async Task StandardA2CheckedUnsignedAddressIndexUpdatesExecuteOnce()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var incrementInput = CreateA2NestedArrayReadbackInput(
+            "a2-uint64-postfix-index", 0, 0, 1, out var incrementSource,
+            effectfulIndices: true,
+            unsignedIndexUpdates: true,
+            effectfulPostfix: true);
+        Assert.That(GetA2IndexUpdateControls(incrementInput),
+            Is.EqualTo(new byte[] { 0x01, 0x01, 0x01 }));
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            "a2-uint64-postfix-index", incrementInput, incrementSource,
+            0x00FF_FFFF, "checked uint64 postfix increment")
+            .ConfigureAwait(true);
+
+        var decrementInput = CreateA2NestedArrayReadbackInput(
+            "a2-uint64-postfix-decrement", 0, 0, 1, out var decrementSource,
+            effectfulIndices: true,
+            unsignedIndexUpdates: true,
+            effectfulPostfix: true, effectfulDecrement: true);
+        Assert.That(GetA2IndexUpdateControls(decrementInput),
+            Is.EqualTo(new byte[] { 0x01, 0x01, 0x02 }));
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            "a2-uint64-postfix-decrement", decrementInput, decrementSource,
+            0xFF, "checked uint64 postfix decrement")
+            .ConfigureAwait(true);
+
+        foreach (var unsignedIndexType in new[] {
+            PrimitiveType.UInt8,
+            PrimitiveType.UInt16,
+            PrimitiveType.UInt32,
+            PrimitiveType.UInt64,
+            PrimitiveType.UInt128,
+        })
+        {
+            var moduleIdentity
+                = $"a2-{unsignedIndexType.ToString().ToLowerInvariant()}-prefix-index";
+            var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+                0, 0, 1, out var source, effectfulIndices: true,
+                counterObservedIndexUpdates: true,
+                unsignedIndexType: unsignedIndexType);
+            Assert.That(GetA2IndexUpdateControls(input),
+                Is.EqualTo(new byte[] { 0x01, 0x01, 0x01 }));
+            await AssertStandardA2SourceFreeJitAndAotAsync(
+                moduleIdentity, input, source, 0xFFFF,
+                $"checked {unsignedIndexType} prefix increment",
+                runJit: false).ConfigureAwait(true);
+        }
+    }
+
+    [Test]
+    public void SourceWideIndexReadAddressExecutesInJit()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                mut [[[int32; 4]; 3]; 2] values = [
+                    [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+                    [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]];
+                uint128 index = 0;
+                mut int32 observed = 0;
+                uint64 byteCount = 0;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, &values[index][index][index],
+                        byteCount);
+                }
+                return observed;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public async Task StandardA2WrappingAddressIndexUpdatesUseAssignedControls()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var incrementInput = CreateA2NestedArrayReadbackInput(
+            "a2-wrapping-postfix-index", 0, 0, 1, out var incrementSource,
+            effectfulIndices: true, returnSequence: true,
+            effectfulPostfix: true,
+            arithmeticProfile: SourceArithmeticProfile.Release);
+        Assert.That(GetA2IndexUpdateControls(incrementInput),
+            Is.EqualTo(new byte[] { 0x05, 0x05, 0x05 }));
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            "a2-wrapping-postfix-index", incrementInput, incrementSource,
+            3, "wrapping postfix increment")
+            .ConfigureAwait(true);
+
+        var decrementInput = CreateA2NestedArrayReadbackInput(
+            "a2-wrapping-postfix-decrement", 0, 0, 1, out var decrementSource,
+            effectfulIndices: true, returnSequence: true,
+            effectfulPostfix: true, effectfulDecrement: true,
+            arithmeticProfile: SourceArithmeticProfile.Release);
+        Assert.That(GetA2IndexUpdateControls(decrementInput),
+            Is.EqualTo(new byte[] { 0x06, 0x05 }));
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            "a2-wrapping-postfix-decrement", decrementInput, decrementSource,
+            -1, "wrapping postfix decrement")
+            .ConfigureAwait(true);
     }
 
     private static async Task AssertStandardA2SourceFreeJitAndAotAsync(
@@ -4863,7 +4993,8 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         TrRmStandardArtifactInput input,
         string source,
         int expectedResult,
-        string scenario)
+        string scenario,
+        bool runJit = true)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
@@ -4879,10 +5010,14 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             "kernel32.dll");
         TestContext.WriteLine(
             $"A2 nested source-free runtime input: scenario={scenario}; schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!RtlMoveMemory; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
-        var jitResult = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
-        TestContext.WriteLine(
-            $"A2 nested source-free JIT {scenario}: policy=FailFast; expected={expectedResult}; actual={jitResult}.");
-        Assert.That(jitResult, Is.EqualTo(expectedResult));
+        if (runJit)
+        {
+            var jitResult = NativeJit.Execute(loaded,
+                NativeRuntimePolicy.FailFast);
+            TestContext.WriteLine(
+                $"A2 nested source-free JIT {scenario}: policy=FailFast; expected={expectedResult}; actual={jitResult}.");
+            Assert.That(jitResult, Is.EqualTo(expectedResult));
+        }
 
         var image = NativeModuleCompiler.EmitStandardExecutable(input,
             moduleIdentity, [], NativeRuntimePolicy.FailFast);
@@ -4949,11 +5084,61 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }
     }
 
-    private static TrRmStandardArtifactInput
+    private static byte[] GetA2IndexUpdateControls(
+        TrRmStandardArtifactInput input)
+    {
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                input.Artifact.Span);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                index);
+        var methodRow = 0;
+        for (var row = 1; row <= tables.Methods.Count; row++)
+        {
+            if (tables.Methods.GetName(row) == "Main")
+            {
+                methodRow = row;
+                break;
+            }
+        }
+
+        Assert.That(methodRow, Is.GreaterThan(0));
+        var body = tables.Bodies.GetRegisterBody(
+            tables.Methods.GetBodyRow(methodRow), tables.Contracts.Count);
+        var controls = new List<byte>();
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var code = body.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var opcode = code[position];
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        opcode, body.Schema);
+                if (opcode == 0xC0
+                    && code[position + 1] is 0x01 or 0x02 or 0x05 or 0x06)
+                {
+                    controls.Add(code[position + 1]);
+                }
+
+                position += instructionLength;
+            }
+        }
+
+        return controls.ToArray();
+    }
+
+    internal static TrRmStandardArtifactInput
         CreateA2NestedArrayReadbackInput(string moduleIdentity,
             int outerIndex, int middleIndex, int innerIndex, out string source,
             bool effectfulIndices = false, bool returnSequence = false,
-            bool effectfulPostfix = false)
+            bool effectfulPostfix = false, bool unsignedIndexUpdates = false,
+            bool effectfulDecrement = false,
+            bool counterObservedIndexUpdates = false,
+            PrimitiveType unsignedIndexType = PrimitiveType.UInt64,
+            SourceArithmeticProfile arithmeticProfile
+                = SourceArithmeticProfile.Development)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
@@ -4961,6 +5146,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             RuntimePolicy = BoundRuntimePolicy.FailFast,
             NativeCoreRegistration
                 = NativeCoreRegistrationTests.CreateRegistration(),
+            SourceArithmeticProfile = arithmeticProfile,
         };
         var outerIndexExpression = outerIndex == 0
             ? "0" : "minusOne / minusOne";
@@ -4968,14 +5154,52 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             ? "0" : "minusOne / minusOne";
         var innerIndexExpression = innerIndex == 0
             ? "0" : "minusOne / minusOne";
-        var effectfulCopyByteCount = returnSequence ? 0 : 4;
+        var effectfulCopyByteCount
+            = returnSequence || unsignedIndexUpdates
+                || counterObservedIndexUpdates ? 0 : 4;
         var effectfulDestination = returnSequence
             ? "&sequence" : "&observed";
-        var effectfulInitialSequence = effectfulPostfix ? "0" : "-1";
-        var effectfulIndexExpression = effectfulPostfix
-            ? "sequence++" : "++sequence";
-        var effectfulIndexPath
-            = $"[{effectfulIndexExpression}]"
+        var effectfulByteCount = counterObservedIndexUpdates
+            ? "counter"
+            : unsignedIndexUpdates ? "sequence" : "copyByteCount";
+        var effectfulSequenceType = counterObservedIndexUpdates
+            ? unsignedIndexType switch
+            {
+                PrimitiveType.UInt8 => "uint8",
+                PrimitiveType.UInt16 => "uint16",
+                PrimitiveType.UInt32 => "uint32",
+                PrimitiveType.UInt64 => "uint64",
+                PrimitiveType.UInt128 => "uint128",
+                _ => throw new ArgumentOutOfRangeException(
+                    nameof(unsignedIndexType)),
+            }
+            : unsignedIndexUpdates ? "uint64" : "int32";
+        var usesSingleDecrementArray
+            = effectfulDecrement && !unsignedIndexUpdates
+                && !counterObservedIndexUpdates;
+        var effectfulArrayType = usesSingleDecrementArray
+            ? "[[[int32; 1]; 2]; 3]"
+            : "[[[int32; 4]; 3]; 2]";
+        var effectfulArrayInitializer = usesSingleDecrementArray
+            ? "[[[0], [0]], [[0], [0]], [[0], [0]]]"
+            : counterObservedIndexUpdates
+                ? "[[[0, 0, 0, 0], [0, -1, 0, 0], [0, 0, 0, 0]], "
+                    + "[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]]"
+                : "[[[0, 0, 0, 0], [0, 0, -1, 0], [0, 0, 0, 0]], "
+                    + "[[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]]";
+        var effectfulInitialSequence = counterObservedIndexUpdates
+            ? "0"
+            : effectfulDecrement ? "0" : effectfulPostfix ? "0" : "-1";
+        var effectfulIndexExpression = effectfulDecrement
+            ? "sequence--"
+            : effectfulPostfix ? "sequence++" : "++sequence";
+        var effectfulIndexPath = counterObservedIndexUpdates
+            ? "[counter++][++sequence][counter++]"
+            : effectfulDecrement
+            ? unsignedIndexUpdates
+                ? "[sequence++][sequence++][sequence--]"
+                : $"[{effectfulIndexExpression}][++oneIndex][zeroIndex]"
+            : $"[{effectfulIndexExpression}]"
                 + $"[{effectfulIndexExpression}]"
                 + $"[{effectfulIndexExpression}]";
         source = effectfulIndices ? $$"""
@@ -4992,17 +5216,19 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
             int32 Main() {
                 int32 zeroIndex = 0;
-                mut [[[int32; 4]; 3]; 2] values = [
-                    [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
-                    [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]];
-                mut int32 sequence = {{effectfulInitialSequence}};
+                mut {{effectfulSequenceType}} oneIndex = 0;
+                {{(counterObservedIndexUpdates ? "mut uint64 counter = 0;" : "")}}
+                mut {{effectfulArrayType}} values =
+                    {{effectfulArrayInitializer}};
+                mut {{effectfulSequenceType}} sequence =
+                    {{effectfulInitialSequence}};
                 mut int32 observed = 0;
                 uint64 copyByteCount = {{effectfulCopyByteCount}};
                 unsafe {
                     var callback = &RtlMoveMemory;
                     callback({{effectfulDestination}},
                         &values{{effectfulIndexPath}},
-                        copyByteCount);
+                        {{effectfulByteCount}});
                 }
                 return {{(returnSequence ? "sequence" : "observed")}};
             }
@@ -5062,13 +5288,48 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             var indexUpdates = addresses[0].Projections
                 .Select(static projection => projection.Index)
                 .OfType<BoundUpdate>().ToArray();
-            Assert.That(indexUpdates, Has.Length.EqualTo(3));
+            Assert.That(indexUpdates, Has.Length.EqualTo(
+                usesSingleDecrementArray ? 2 : 3));
+            var expectedIndexTypes = counterObservedIndexUpdates
+                ? new[] {
+                    PrimitiveType.UInt64,
+                    unsignedIndexType,
+                    PrimitiveType.UInt64,
+                }
+                : Enumerable.Repeat(
+                    unsignedIndexUpdates ? PrimitiveType.UInt64
+                        : PrimitiveType.Int32,
+                    indexUpdates.Length).ToArray();
+            var expectedUpdates = counterObservedIndexUpdates
+                ? new[] {
+                    (TokenKind.PlusPlus, false),
+                    (TokenKind.PlusPlus, true),
+                    (TokenKind.PlusPlus, false),
+                }
+                : usesSingleDecrementArray
+                ? new[] {
+                    (TokenKind.MinusMinus, false),
+                    (TokenKind.PlusPlus, true),
+                }
+                : effectfulDecrement
+                    ? new[] {
+                        (TokenKind.PlusPlus, false),
+                        (TokenKind.PlusPlus, false),
+                        (TokenKind.MinusMinus, false),
+                    }
+                : Enumerable.Repeat(
+                    (TokenKind.PlusPlus, !effectfulPostfix), 3).ToArray();
+            var expectedOverflowBehavior
+                = arithmeticProfile == SourceArithmeticProfile.Release
+                    ? BoundIntegerOverflowBehavior.Wrapping
+                    : BoundIntegerOverflowBehavior.Checked;
+            Assert.That(indexUpdates.Select(static update =>
+                (update.Operator, update.IsPrefix)),
+                Is.EqualTo(expectedUpdates));
+            Assert.That(indexUpdates.Select(static update => update.Type),
+                Is.EqualTo(expectedIndexTypes));
             Assert.That(indexUpdates.All(update =>
-                update.Operator == TokenKind.PlusPlus
-                && update.Type == PrimitiveType.Int32
-                && update.OverflowBehavior
-                    == BoundIntegerOverflowBehavior.Checked
-                && update.IsPrefix != effectfulPostfix), Is.True);
+                update.OverflowBehavior == expectedOverflowBehavior), Is.True);
         }
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, schemaIdentity, 1);

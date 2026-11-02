@@ -3677,6 +3677,14 @@ public static partial class TrRmExecutableCompiler
         {
             throw Invalid("Unsupported qualified or constructed TypeSpec.");
         }
+        if (bytes[2] == 0x0A)
+        {
+            return PrimitiveType.Int128;
+        }
+        if (bytes[2] == 0x0F)
+        {
+            return PrimitiveType.UInt128;
+        }
         var index = Array.IndexOf(s_codes, bytes[2]);
         return index >= 0 ? s_types[index] : throw Invalid("Unsupported scalar TypeSpec.");
     }

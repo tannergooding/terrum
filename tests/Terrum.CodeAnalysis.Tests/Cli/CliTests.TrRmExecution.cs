@@ -374,6 +374,52 @@ public sealed partial class CliTests
     }
 
     [Test]
+    public async Task RunTrRmExecutesUnsignedNestedIndexUpdatesInChildWorkerAsync()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        foreach (var unsignedIndexType in new[] {
+            PrimitiveType.UInt8,
+            PrimitiveType.UInt16,
+            PrimitiveType.UInt32,
+            PrimitiveType.UInt64,
+            PrimitiveType.UInt128,
+        })
+        {
+            var moduleIdentity
+                = $"a2-{unsignedIndexType.ToString().ToLowerInvariant()}-cli-worker";
+            var artifactPath = Path.Combine(TestArtifactPaths.DirectoryPath,
+                $"trrm-{unsignedIndexType.ToString().ToLowerInvariant()}-index-{Guid.NewGuid():N}.trrm");
+            try
+            {
+                var input = TrRmForeignInvocationAddressEmitterTests
+                    .CreateA2NestedArrayReadbackInput(moduleIdentity,
+                        0, 0, 1, out _, effectfulIndices: true,
+                        counterObservedIndexUpdates: true,
+                        unsignedIndexType: unsignedIndexType);
+                await File.WriteAllBytesAsync(artifactPath,
+                    input.Artifact.ToArray()).ConfigureAwait(true);
+
+                var (exit, output, error) = await RunAsync([], "run-trrm",
+                    artifactPath, "--runtime", "fail-fast",
+                    "--trrm-schema", schemaIdentity, "--trrm-module",
+                    moduleIdentity, "--json").ConfigureAwait(true);
+                Assert.That(exit, Is.EqualTo(0xFFFF),
+                    $"{unsignedIndexType}: {output}{Environment.NewLine}{error}");
+                Assert.That(output, Is.Empty);
+                Assert.That(error, Is.Empty);
+            }
+            finally
+            {
+                await TestFileCleanup.DeleteWithRetryAsync(artifactPath)
+                    .ConfigureAwait(true);
+            }
+        }
+    }
+
+    [Test]
     public async Task RegisterExceptionRegionsStandardProfileRunsAndBuildsScalarBodiesAsync()
     {
         const string schemaIdentity

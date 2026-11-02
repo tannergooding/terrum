@@ -357,15 +357,23 @@ public static partial class TrRmExecutableCompiler
             else
             {
                 var scalarIndex = Array.IndexOf(s_types, type);
-                if (scalarIndex <= 0 || !DirectNativeImportContract.IsScalar(type))
+                var typeCode = type switch
                 {
-                    throw Unsupported(
-                        $"The NativeAddress producer does not support signature type {type}.");
-                }
-
+                    PrimitiveType.Int128
+                        when schema.UsesForeignInvocationStorageFixedArrays()
+                            => (byte)0x0A,
+                    PrimitiveType.UInt128
+                        when schema.UsesForeignInvocationStorageFixedArrays()
+                            => (byte)0x0F,
+                    _ when scalarIndex > 0
+                        && DirectNativeImportContract.IsScalar(type)
+                            => s_codes[scalarIndex],
+                    _ => throw Unsupported(
+                        $"The NativeAddress producer does not support signature type {type}."),
+                };
                 a3LayoutResourceLedger?.ConsumeWork(4);
                 typeSpecBytes
-                    = TrRmTypeSpecTableWriter.Builtin(s_codes[scalarIndex]);
+                    = TrRmTypeSpecTableWriter.Builtin(typeCode);
             }
 
             typeSpecRef = checked((uint)typeSpecRows.Count + 1);
@@ -3078,7 +3086,9 @@ public static partial class TrRmExecutableCompiler
             return true;
         }
 
-        if (!DirectNativeImportContract.IsScalar(type))
+        if (!DirectNativeImportContract.IsScalar(type)
+            && !(schema.UsesForeignInvocationStorageFixedArrays()
+                && NativeFixedArrayContract.IsIndexType(type)))
         {
             return false;
         }
@@ -3650,17 +3660,13 @@ public static partial class TrRmExecutableCompiler
             var operation = (update.Operator, update.OverflowBehavior) switch
             {
                 (TokenKind.PlusPlus, BoundIntegerOverflowBehavior.Checked)
-                    when update.Type is PrimitiveType.Int8
-                        or PrimitiveType.Int16 or PrimitiveType.Int32
-                        or PrimitiveType.Int64 => (byte)0x02,
+                    => (byte)0x01,
                 (TokenKind.MinusMinus, BoundIntegerOverflowBehavior.Checked)
-                    when update.Type is PrimitiveType.Int8
-                        or PrimitiveType.Int16 or PrimitiveType.Int32
-                        or PrimitiveType.Int64 => (byte)0x01,
+                    => (byte)0x02,
                 (TokenKind.PlusPlus, BoundIntegerOverflowBehavior.Wrapping)
-                    => (byte)0x06,
-                (TokenKind.MinusMinus, BoundIntegerOverflowBehavior.Wrapping)
                     => (byte)0x05,
+                (TokenKind.MinusMinus, BoundIntegerOverflowBehavior.Wrapping)
+                    => (byte)0x06,
                 _ => throw Unsupported(
                     "The A2 storage-address index update has an unsupported overflow policy."),
             };

@@ -74,6 +74,12 @@ public sealed partial class JitTests
                 mut int128 decrement = int128(10);
                 int128 oldDecrement = decrement--;
                 decrement -= int128(2);
+                mut uint128 unsignedCurrent = uint128(10);
+                uint128 unsignedPrevious = unsignedCurrent++;
+                unsignedCurrent += uint128(2);
+                mut uint128 unsignedDecrement = uint128(10);
+                uint128 unsignedOldDecrement = unsignedDecrement--;
+                unsignedDecrement -= uint128(2);
                 mut uint128 compound = uint128(10);
                 compound *= uint128(3);
                 compound /= uint128(2);
@@ -101,6 +107,10 @@ public sealed partial class JitTests
                     && logical == int128(170141183460469231731687303715884105727)
                     && previous == int128(10) && current == int128(13)
                     && oldDecrement == int128(10) && decrement == int128(7)
+                    && unsignedPrevious == uint128(10)
+                    && unsignedCurrent == uint128(13)
+                    && unsignedOldDecrement == uint128(10)
+                    && unsignedDecrement == uint128(7)
                     && compound == uint128(1) && bitwise == uint128(6)
                     && compoundShift == uint128(1)
                     && SignedLess(int128(-1), int128(0))
