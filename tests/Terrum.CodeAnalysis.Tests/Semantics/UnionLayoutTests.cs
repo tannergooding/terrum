@@ -220,6 +220,15 @@ internal sealed class UnionLayoutTests
                     Word = word;
                 }
             }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct WideEnvelope {
+                public mut RawWord Word;
+                public WideEnvelope(uint64 value) {
+                    unsafe { Word.Wide = value; }
+                }
+            }
             """;
 
         var constructionOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
@@ -242,6 +251,58 @@ internal sealed class UnionLayoutTests
                 """), BoundRuntimePolicy.FailFast);
         Assert.That(storedWideOnly.HasErrors, Is.False,
             string.Join(Environment.NewLine, storedWideOnly.Diagnostics));
+
+        var constructedNestedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ConstructNestedWide() {
+                    mut WideEnvelope value = new WideEnvelope(7);
+                    unsafe { return value.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(constructedNestedWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                constructedNestedWide.Diagnostics));
+
+        var vacantNestedConstruction = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 InitializeNestedUnionAlternative() {
+                    init mut WideEnvelope value;
+                    unsafe {
+                        value.Word.Wide = 7;
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(vacantNestedConstruction.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                vacantNestedConstruction.Diagnostics));
+
+        var repeatedNestedInitialization = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectSecondNestedUnionInitialization() {
+                    init mut WideEnvelope value;
+                    unsafe {
+                        value.Word.Wide = 7;
+                        value.Word.Padded = new Sparse(1, 2);
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(repeatedNestedInitialization.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                repeatedNestedInitialization.Diagnostics));
+
+        var partialNestedChild = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public int32 RejectPartialNestedUnionConstruction() {
+                    init mut WideEnvelope value;
+                    unsafe { value.Word.Padded.First = 1; }
+                    return 0;
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(partialNestedChild.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                partialNestedChild.Diagnostics));
 
         var storedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
             prefix + """
@@ -283,6 +344,165 @@ internal sealed class UnionLayoutTests
                 """), BoundRuntimePolicy.FailFast);
         Assert.That(copiedWide.HasErrors, Is.False,
             string.Join(Environment.NewLine, copiedWide.Diagnostics));
+
+        var joinedNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterConditionalStore(bool widen) {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        value.Word.Padded = new Sparse(1, 2);
+                        if (widen) {
+                            value.Word.Wide = 7;
+                        }
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(joinedNarrow.HasErrors, Is.True,
+            string.Join(Environment.NewLine, joinedNarrow.Diagnostics));
+
+        var joinedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterBothBranches(bool widen) {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        value.Word.Padded = new Sparse(1, 2);
+                        if (widen) {
+                            value.Word.Wide = 7;
+                        } else {
+                            value.Word.Wide = 9;
+                        }
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(joinedWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine, joinedWide.Diagnostics));
+
+        var loopNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterOptionalLoop(
+                    bool shouldWrite) {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    mut bool write = shouldWrite;
+                    unsafe {
+                        value.Word.Padded = new Sparse(1, 2);
+                        while (write) {
+                            value.Word.Wide = 7;
+                            write = false;
+                        }
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(loopNarrow.HasErrors, Is.True,
+            string.Join(Environment.NewLine, loopNarrow.Diagnostics));
+
+        var finallyNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterFinallyStore() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    try {
+                        unsafe { value.Word.Wide = 7; }
+                    } finally {
+                        unsafe {
+                            value.Word.Padded = new Sparse(1, 2);
+                        }
+                    }
+                    unsafe { return value.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(finallyNarrow.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                finallyNarrow.Diagnostics));
+
+        var failureWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterCheckedFailure() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        try {
+                            value.Word.Wide = 7;
+                            require false;
+                        } catch {
+                            return value.Word.Wide;
+                        }
+                    }
+                    return 0;
+                }
+                """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(failureWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine, failureWide.Diagnostics));
+
+        var failureNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectNestedWideAfterCheckedFailure() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        try {
+                            value.Word.Padded = new Sparse(1, 2);
+                            require false;
+                        } catch {
+                            return value.Word.Wide;
+                        }
+                    }
+                    return 0;
+                }
+                """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(failureNarrow.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                failureNarrow.Diagnostics));
+
+        var selfCopy = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterSelfCopy() {
+                    mut Envelope value = new Envelope(new RawWord(1));
+                    unsafe {
+                        value.Word.Wide = 7;
+                        value.Word = value.Word;
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(selfCopy.HasErrors, Is.False,
+            string.Join(Environment.NewLine, selfCopy.Diagnostics));
+
+        var conditionalFull = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedWideAfterFullConditional(bool choose) {
+                    mut RawWord first = new RawWord(0);
+                    mut RawWord second = new RawWord(0);
+                    unsafe {
+                        first.Wide = 7;
+                        second.Wide = 9;
+                    }
+                    RawWord selected = choose ? first : second;
+                    mut Envelope value = new Envelope(selected);
+                    unsafe { return value.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(conditionalFull.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                conditionalFull.Diagnostics));
+
+        var conditionalPartial = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectNestedWideAfterPartialConditional(
+                    bool choose) {
+                    mut RawWord first = new RawWord(0);
+                    mut RawWord second = new RawWord(0);
+                    unsafe {
+                        first.Wide = 7;
+                        second.Padded = new Sparse(1, 2);
+                    }
+                    RawWord selected = choose ? first : second;
+                    mut Envelope value = new Envelope(selected);
+                    unsafe { return value.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(conditionalPartial.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                conditionalPartial.Diagnostics));
     }
 
     [Test]

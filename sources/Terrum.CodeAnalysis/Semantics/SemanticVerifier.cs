@@ -3549,17 +3549,52 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var ownerType = function.Variables[fieldAssignment.Variable].Type;
+                if (!TryGetFieldAssignmentProjectionPath(fieldAssignment,
+                    ownerType, program, out var fieldProjectionPath))
+                {
+                    throw Invalid();
+                }
+                var fieldSegments = fieldProjectionPath.Segments;
                 var initializesVacantUnion = IsRawUnionType(program, ownerType)
-                    && fieldAssignment.NestedFields.IsEmpty
+                    && fieldSegments.Length == 1
                     && function.Variables[fieldAssignment.Variable]
                         .IsInitializationLocal
                     && initialized.IsVacant(fieldAssignment.Variable);
+                var initializesVacantNestedUnion = false;
+                if (fieldSegments.Length > 1
+                    && IsRawUnionType(program,
+                        fieldSegments[^1].OwnerType)
+                    && function.Variables[fieldAssignment.Variable]
+                        .IsInitializationLocal
+                    && initialized.IsVacant(fieldAssignment.Variable))
+                {
+                    var nestedUnionOwnerPath = FieldPathPrefix(
+                        fieldProjectionPath, fieldSegments.Length - 1);
+                    var (nestedUnionDefinite, nestedUnionPossible)
+                        = FieldPathOwnerMasks(fieldAssignment.Variable,
+                            nestedUnionOwnerPath,
+                            fieldSegments[^1].OwnerType, initialized,
+                            fieldMasks, program);
+                    initializesVacantNestedUnion
+                        = (nestedUnionDefinite | nestedUnionPossible) == 0;
+                }
+                var initializesVacantNestedRawUnion
+                    = initializesVacantUnion || initializesVacantNestedUnion;
+                var initializesNestedRawUnionInConstructor
+                    = fieldSegments.Length > 1
+                    && IsRawUnionType(program,
+                        fieldSegments[^1].OwnerType)
+                    && function.IsConstructor
+                    && fieldAssignment.Variable == 0;
+                var initializesNestedRawUnionPath
+                    = initializesVacantNestedUnion
+                        || initializesNestedRawUnionInConstructor;
                 if (!HasFields(program, ownerType)
                     || fieldAssignment.Field < 0 || fieldAssignment.Field >= Fields(program, ownerType).Length
                     || !CanAccessField(function, program, ownerType, fieldAssignment.Field)
                     || (!initialized[fieldAssignment.Variable]
                         && !initialized.HasPartialValue(fieldAssignment.Variable)
-                        && !initializesVacantUnion
+                        && !initializesVacantNestedRawUnion
                         && (!(function.IsConstructor || function.IsClassConstructor)
                             || fieldAssignment.Variable != 0)))
                 {
@@ -3569,6 +3604,15 @@ public static partial class SemanticVerifier
                     && function.Variables[fieldAssignment.Variable]
                         .IsInitializationLocal
                     && !initializesVacantUnion)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                if (fieldSegments.Length > 1
+                    && IsRawUnionType(program,
+                        fieldSegments[^1].OwnerType)
+                    && function.Variables[fieldAssignment.Variable]
+                        .IsInitializationLocal
+                    && !initializesVacantNestedUnion)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
@@ -3629,18 +3673,8 @@ public static partial class SemanticVerifier
                 {
                     throw Invalid();
                 }
-                var fieldProjectionPath = new FieldProjectionPath()
-                    .Append(ownerType, fieldAssignment.Field);
-                var projectionOwnerType = Fields(program, ownerType)[fieldAssignment.Field].Type;
-                foreach (var nestedField in fieldAssignment.NestedFields)
-                {
-                    fieldProjectionPath = fieldProjectionPath.Append(
-                        projectionOwnerType, nestedField);
-                    projectionOwnerType = Fields(program, projectionOwnerType)[nestedField].Type;
-                }
                 var fieldPlaceProjection = StorageProjection.ForFieldPath(
                     fieldProjectionPath);
-                var fieldSegments = fieldProjectionPath.Segments;
                 var normalBackingPartialReferenceAggregate =
                     program.NativeLoweringAgreement
                         == CompilationOptions.WindowsX64NormalBackingAgreement
@@ -3709,13 +3743,15 @@ public static partial class SemanticVerifier
                         var (_, ownerPossible) = FieldPathOwnerMasks(fieldAssignment.Variable,
                             ownerPath, segment.OwnerType, initialized, fieldMasks, program);
                         if ((ownerPossible & (1u << segment.Field)) == 0
-                            && !(normalBackingPartialReferenceAggregate && index == 0))
+                            && !(normalBackingPartialReferenceAggregate && index == 0)
+                            && !initializesNestedRawUnionPath)
                         {
                             throw InvalidEffect(fieldAssignment.Span, "Ownership");
                         }
                     }
                     if (!fieldPathIsUnique
                         && !normalBackingPartialReferenceAggregate
+                        && !initializesNestedRawUnionPath
                         && (fieldMasks[fieldAssignment.Variable] & rootFieldBit) == 0)
                     {
                         throw InvalidEffect(fieldAssignment.Span, "Ownership");
@@ -3934,7 +3970,9 @@ public static partial class SemanticVerifier
                     {
                         initialized[fieldAssignment.Variable] = true;
                     }
-                    else if (IsUnique(program, ownerType)
+                    else if (!IsRawUnionType(program, ownerType)
+                        && (IsUnique(program, ownerType)
+                            || CarriesRawUnionPayloadFacts(program, ownerType))
                         && (initialized.PossibleFieldMask(fieldAssignment.Variable) != 0
                             || initialized.HasPartialValue(fieldAssignment.Variable)))
                     {
@@ -3945,6 +3983,14 @@ public static partial class SemanticVerifier
                 {
                     initialized.ResetNestedOwnerSubtree(fieldAssignment.Variable,
                         fieldProjectionPath);
+                    SetNestedFieldLiveness(fieldAssignment.Variable,
+                        fieldProjectionPath, live: true, initialized, fieldMasks,
+                        function, program, fieldAssignment.Span);
+                }
+                else if (fieldSegments.Length > 1
+                    && IsRawUnionType(program,
+                        fieldSegments[^1].OwnerType))
+                {
                     SetNestedFieldLiveness(fieldAssignment.Variable,
                         fieldProjectionPath, live: true, initialized, fieldMasks,
                         function, program, fieldAssignment.Span);
@@ -5675,6 +5721,7 @@ public static partial class SemanticVerifier
         private bool SupportsNestedOwnerFieldState(PrimitiveType type) =>
             HasFields(Program, type) && !ManagedClassTypes.IsClass(type)
             && (IsUnique(Program, type)
+                || CarriesRawUnionPayloadFacts(Program, type)
                 || (Program.NativeLoweringAgreement
                         == CompilationOptions.WindowsX64NormalBackingAgreement
                     && (int)type >= 100
@@ -6581,6 +6628,42 @@ public static partial class SemanticVerifier
         return prefix;
     }
 
+    private static bool TryGetFieldAssignmentProjectionPath(
+        BoundFieldAssignment assignment, PrimitiveType rootType,
+        BoundProgram program, out FieldProjectionPath fieldPath)
+    {
+        fieldPath = default;
+        if (assignment is null || assignment.NestedFields.IsDefault
+            || assignment.NestedFields.Length > MaximumDepth)
+        {
+            return false;
+        }
+
+        var ownerType = rootType;
+        var field = assignment.Field;
+        for (var nestedIndex = -1;
+            nestedIndex < assignment.NestedFields.Length;
+            nestedIndex++)
+        {
+            if (!HasFields(program, ownerType)
+                || (uint)field >= (uint)Fields(program, ownerType).Length)
+            {
+                fieldPath = default;
+                return false;
+            }
+
+            var fieldType = Fields(program, ownerType)[field].Type;
+            fieldPath = fieldPath.Append(ownerType, field);
+            ownerType = fieldType;
+            if (nestedIndex + 1 < assignment.NestedFields.Length)
+            {
+                field = assignment.NestedFields[nestedIndex + 1];
+            }
+        }
+
+        return !fieldPath.Segments.IsEmpty;
+    }
+
     private static (uint Definite, uint Possible) FieldPathOwnerMasks(
         int rootVariable, FieldProjectionPath ownerPath, PrimitiveType ownerType,
         InitializationState initialized, uint[] fieldMasks, BoundProgram program)
@@ -6592,6 +6675,19 @@ public static partial class SemanticVerifier
         if (IsUnique(program, ownerType) && HasFields(program, ownerType))
         {
             var fields = initialized.NestedOwnerFields(rootVariable, ownerPath, ownerType);
+            return (fields.DefiniteMask, fields.PossibleMask);
+        }
+        if (CarriesRawUnionPayloadFacts(program, ownerType)
+            && IsInlineStructStorage(ownerType, program))
+        {
+            var initialMask = FullMask(program, ownerType);
+            var rootSegment = ownerPath.Segments[0];
+            if ((fieldMasks[rootVariable] & (1u << rootSegment.Field)) == 0)
+            {
+                initialMask = 0;
+            }
+            var fields = initialized.NestedOwnerFields(rootVariable,
+                ownerPath, ownerType, initialMask);
             return (fields.DefiniteMask, fields.PossibleMask);
         }
         if (program.NativeLoweringAgreement
@@ -6655,7 +6751,6 @@ public static partial class SemanticVerifier
         {
             throw Invalid(span);
         }
-
         var leaf = segments[^1];
         var ownerPath = FieldPathPrefix(fieldPath, segments.Length - 1);
         var (ownerDefinite, ownerPossible) = FieldPathOwnerMasks(
@@ -6665,11 +6760,14 @@ public static partial class SemanticVerifier
             leaf.OwnerType, FullMask(program, leaf.OwnerType),
             ownerDefinite, ownerPossible);
         var fieldBit = 1u << leaf.Field;
+        var unionAlternative = IsRawUnionType(program, leaf.OwnerType);
         var definite = live
-            ? ownerState.DefiniteMask | fieldBit
+            ? unionAlternative ? ownerState.FullMask
+                : ownerState.DefiniteMask | fieldBit
             : ownerState.DefiniteMask & ~fieldBit;
         var possible = live
-            ? ownerState.PossibleMask | fieldBit
+            ? unionAlternative ? ownerState.FullMask
+                : ownerState.PossibleMask | fieldBit
             : ownerState.PossibleMask & ~fieldBit;
         initialized.SetNestedOwnerFields(rootVariable, ownerPath,
             ownerState with { DefiniteMask = definite, PossibleMask = possible });
@@ -6799,7 +6897,8 @@ public static partial class SemanticVerifier
                 {
                     initialized[rootVariable] = true;
                 }
-                else if (IsUnique(program, rootType))
+                else if (IsUnique(program, rootType)
+                    || CarriesRawUnionPayloadFacts(program, rootType))
                 {
                     initialized.MarkPartialValue(rootVariable);
                 }
@@ -6808,6 +6907,7 @@ public static partial class SemanticVerifier
 
             var parentType = ownerSegment.OwnerType;
             if ((!IsUnique(program, parentType)
+                    && !CarriesRawUnionPayloadFacts(program, parentType)
                     && !(program.NativeLoweringAgreement
                             == CompilationOptions.WindowsX64NormalBackingAgreement
                         && IsInlineStructStorage(parentType, program)))
@@ -10732,6 +10832,25 @@ public static partial class SemanticVerifier
                 out var moveBytes))
         {
             return moveBytes;
+        }
+        if (expression is BoundConditional conditional
+            && conditional.Type == type
+            && conditional.WhenTrue.Type == type
+            && conditional.WhenFalse.Type == type)
+        {
+            var whenTrue = InitializedPayloadBytesOfExpression(
+                conditional.WhenTrue, type, initialized, function, program);
+            var whenFalse = InitializedPayloadBytesOfExpression(
+                conditional.WhenFalse, type, initialized, function, program);
+            if (whenTrue.Length != whenFalse.Length)
+            {
+                throw Invalid(conditional.Span);
+            }
+            for (var index = 0; index < whenTrue.Length; index++)
+            {
+                whenTrue[index] &= whenFalse[index];
+            }
+            return whenTrue;
         }
         if (expression is BoundFieldRead fieldRead
             && fieldRead.Type == type
