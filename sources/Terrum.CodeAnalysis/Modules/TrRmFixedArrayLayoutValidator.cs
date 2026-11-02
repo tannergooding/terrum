@@ -3,12 +3,17 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Globalization;
 using System.IO;
+using System.Numerics;
 using System.Text;
 using Terrum.CodeAnalysis.Semantics;
 
 namespace Terrum.CodeAnalysis.Modules;
+
+internal readonly record struct TrRmReturnCoverageSubjectGeometry(
+    ulong Size, ImmutableArray<TrRmReturnCoverageRegion> PossiblePayloads);
 
 internal static class TrRmFixedArrayLayoutValidator
 {
@@ -140,6 +145,171 @@ internal static class TrRmFixedArrayLayoutValidator
         }
     }
 
+    internal static void ValidateReturnCoverageSubjects(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables)
+    {
+        if (!tables.Schema.UsesRawUnionValueCoverage())
+        {
+            return;
+        }
+
+        var hasReturnCoverage = false;
+        for (var method = 1; method <= tables.Methods.Count; method++)
+        {
+            if (!tables.Contracts.GetReturnCoverageContracts(method).IsEmpty)
+            {
+                hasReturnCoverage = true;
+                break;
+            }
+        }
+        if (!hasReturnCoverage)
+        {
+            return;
+        }
+
+        if (!tables.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw InvalidLayout();
+        }
+
+        var validator = new ValidationContext(tables.FixedArrayLayouts,
+            tables.TypeSpecs, tables.TypeDefs, tables.Fields, tables.Layouts,
+            tables.LayoutFields, profileRow, tables.Imports, tables.Contracts,
+            tables.GenericParams, tables.Constraints, tables.Schema,
+            tables.A3LayoutResourceLedger);
+        try
+        {
+            validator.ValidateReturnCoverageSubjects(tables.Methods,
+                tables.Signatures, tables.Contracts);
+        }
+        catch (TrRmResourceLimitException)
+        {
+            throw;
+        }
+        catch (OverflowException exception)
+        {
+            var resourceLedger = tables.A3LayoutResourceLedger;
+            if (resourceLedger is not null
+                && TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
+                    out var kind)
+                && kind == TrRmA3AdmissionFailureKind.TargetLayoutOverflow)
+            {
+                throw;
+            }
+
+            var invalid = InvalidLayout(exception);
+            resourceLedger?.AdmissionScope.Mark(invalid,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw invalid;
+        }
+        catch (InvalidDataException exception)
+            when (tables.A3LayoutResourceLedger is { } resourceLedger)
+        {
+            resourceLedger.AdmissionScope.Mark(exception,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw;
+        }
+        catch (NotSupportedException exception)
+            when (tables.A3LayoutResourceLedger is { } resourceLedger)
+        {
+            resourceLedger.AdmissionScope.Mark(exception,
+                TrRmA3AdmissionFailureKind.UnsupportedAdmission);
+            throw;
+        }
+    }
+
+    internal static TrRmReturnCoverageSubjectGeometry
+        CalculateReturnCoverageSubjectGeometry(
+            TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+            uint resultTypeSpecRef, int ownerModule)
+    {
+        if (!tables.Schema.UsesRawUnionValueCoverage()
+            || !tables.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw InvalidLayout();
+        }
+
+        var validator = new ValidationContext(tables.FixedArrayLayouts,
+            tables.TypeSpecs, tables.TypeDefs, tables.Fields, tables.Layouts,
+            tables.LayoutFields, profileRow, tables.Imports, tables.Contracts,
+            tables.GenericParams, tables.Constraints, tables.Schema,
+            tables.A3LayoutResourceLedger);
+        try
+        {
+            return validator.CalculateReturnCoverageSubjectGeometry(
+                resultTypeSpecRef, ownerModule);
+        }
+        catch (TrRmResourceLimitException)
+        {
+            throw;
+        }
+        catch (OverflowException exception)
+        {
+            var resourceLedger = tables.A3LayoutResourceLedger;
+            if (resourceLedger is not null
+                && TrRmExecutableCompiler.TryGetA3AdmissionFailure(exception,
+                    out var kind)
+                && kind == TrRmA3AdmissionFailureKind.TargetLayoutOverflow)
+            {
+                throw;
+            }
+
+            var invalid = InvalidLayout(exception);
+            resourceLedger?.AdmissionScope.Mark(invalid,
+                TrRmA3AdmissionFailureKind.InvalidArtifact);
+            throw invalid;
+        }
+    }
+
+    internal static void ValidateReturnCoverageSubjectAndRegions(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        uint resultTypeSpecRef, int ownerModule,
+        ImmutableArray<TrRmReturnCoverageRegion> regions)
+    {
+        if (!tables.Schema.UsesRawUnionValueCoverage()
+            || !tables.TargetProfiles.TryGetProfile(
+                TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                TrRmTargetProfileTableReader
+                    .WindowsX64NativeProfileRuleRevision,
+                out var profileRow))
+        {
+            throw InvalidLayout();
+        }
+
+        var validator = new ValidationContext(tables.FixedArrayLayouts,
+            tables.TypeSpecs, tables.TypeDefs, tables.Fields, tables.Layouts,
+            tables.LayoutFields, profileRow, tables.Imports, tables.Contracts,
+            tables.GenericParams, tables.Constraints, tables.Schema,
+            tables.A3LayoutResourceLedger);
+        validator.ValidateReturnCoverageSubjectAndRegions(resultTypeSpecRef,
+            ownerModule, regions);
+    }
+
+    internal static bool IsReturnCoverageSubjectAndRegionsValid(
+        TrRmStructuralMetadataValidator.ValidatedExecutionTables tables,
+        uint resultTypeSpecRef, int ownerModule,
+        ImmutableArray<TrRmReturnCoverageRegion> regions)
+    {
+        try
+        {
+            ValidateReturnCoverageSubjectAndRegions(tables,
+                resultTypeSpecRef, ownerModule, regions);
+            return true;
+        }
+        catch (InvalidDataException)
+        {
+            return false;
+        }
+    }
+
     private static ulong RoundUp(ulong value, ulong alignment,
         TrRmA3LayoutResourceLedger? resourceLedger)
     {
@@ -176,6 +346,7 @@ internal static class TrRmFixedArrayLayoutValidator
             => new TypeLayout(8, 8, 1),
         0x0A or 0x0F or 0x16 or 0x19
             => new TypeLayout(16, 16, 1),
+        0x8C => new TypeLayout(sizeof(ulong), sizeof(ulong), 1),
         _ => throw InvalidLayout(),
     };
 
@@ -185,10 +356,14 @@ internal static class TrRmFixedArrayLayoutValidator
 
     private readonly record struct ArrayLayout(
         ulong Stride, ulong Extent, ulong Alignment,
-        ulong RequiredAlignment);
+        ulong RequiredAlignment,
+        ImmutableArray<TrRmReturnCoverageRegion> PossiblePayloads = default,
+        bool ContainsRawUnion = false);
 
     private readonly record struct TypeLayout(
-        ulong Size, ulong Alignment, ulong RequiredAlignment);
+        ulong Size, ulong Alignment, ulong RequiredAlignment,
+        ImmutableArray<TrRmReturnCoverageRegion> PossiblePayloads = default,
+        bool ContainsRawUnion = false);
 
     private readonly record struct GenericActualFacts(
         bool CopyCapable, bool Unique, bool Nullable, bool Blittable);
@@ -348,8 +523,12 @@ internal static class TrRmFixedArrayLayoutValidator
                 var alignment = Math.Max(1UL, element.Alignment);
                 var stride = RoundUpTargetLayout(element.Size, alignment);
                 var extent = MultiplyTargetLayout(elementCount, stride);
+                var payloads = CanonicalizePayloadRanges(
+                    AddArrayRepetition(element.PossiblePayloads,
+                        elementCount, stride));
                 return new ArrayLayout(stride, extent, alignment,
-                    element.RequiredAlignment);
+                    element.RequiredAlignment, payloads,
+                    element.ContainsRawUnion);
             }
             finally
             {
@@ -383,14 +562,14 @@ internal static class TrRmFixedArrayLayoutValidator
             TypeLayout result;
             if (!reference.IsRow)
             {
-                result = GetInlineLayout(reference);
+                result = AddAtomicPayload(GetInlineLayout(reference));
             }
             else
             {
                 var row = _typeSpecs.GetRow(reference.Row);
                 result = reference.Form switch
                 {
-                    0x01 => GetAtomicLayout(row[2]),
+                    0x01 => AddAtomicPayload(GetAtomicLayout(row[2])),
                     0x02 or 0x03 => CalculateNonGenericTypeDefLayout(
                         context.Reference),
                     0x05 when _schema
@@ -398,10 +577,13 @@ internal static class TrRmFixedArrayLayoutValidator
                         => CalculateConstructedTypeLayout(context),
                     0x0C when reference.TypeCode == 0x8C
                         && (reference.Qualifiers & ~1) == 0
-                        => new TypeLayout(sizeof(ulong), sizeof(ulong), 1),
-                    0x0D => new TypeLayout(sizeof(ulong), sizeof(ulong), 1),
+                        => AddAtomicPayload(new TypeLayout(sizeof(ulong),
+                            sizeof(ulong), 1)),
+                    0x0D => AddAtomicPayload(new TypeLayout(sizeof(ulong),
+                        sizeof(ulong), 1)),
                     0x08 when (reference.Qualifiers & ~1) == 0
-                        => new TypeLayout(sizeof(ulong), sizeof(ulong), 1),
+                        => AddAtomicPayload(new TypeLayout(sizeof(ulong),
+                            sizeof(ulong), 1)),
                     0x0A when _schema
                         == TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                         => CalculateTypeLayout(new TypeSpecContext(
@@ -1585,7 +1767,89 @@ internal static class TrRmFixedArrayLayoutValidator
             }
 
             return new TypeLayout(array.Extent, array.Alignment,
-                array.RequiredAlignment);
+                array.RequiredAlignment, array.PossiblePayloads,
+                array.ContainsRawUnion);
+        }
+
+        internal void ValidateReturnCoverageSubjects(
+            TrRmMethodDefTableReader methods,
+            TrRmMethodSigTableReader signatures,
+            TrRmContractTableReader contracts)
+        {
+            for (var method = 1; method <= methods.Count; method++)
+            {
+                ConsumeWork();
+                var coverageContracts
+                    = contracts.GetReturnCoverageContracts(method);
+                if (coverageContracts.IsEmpty)
+                {
+                    continue;
+                }
+
+                var signature = methods.GetSignature(method);
+                var resultType = signatures.GetResultTypeSpec(signature);
+                var ownerModule = methods.GetOwnerModule(method);
+                foreach (var coverage in coverageContracts)
+                {
+                    ValidateReturnCoverageSubjectAndRegions(resultType,
+                        ownerModule, coverage.Regions);
+                }
+            }
+        }
+
+        internal TrRmReturnCoverageSubjectGeometry
+            CalculateReturnCoverageSubjectGeometry(
+                uint resultTypeSpecRef, int ownerModule)
+        {
+            if (!_schema.UsesRawUnionValueCoverage()
+                || ownerModule <= 0 || resultTypeSpecRef == 0)
+            {
+                throw InvalidLayout();
+            }
+
+            TypeLayout layout;
+            try
+            {
+                layout = CalculateTypeLayout(resultTypeSpecRef, ownerModule);
+            }
+            catch (NotSupportedException exception)
+            {
+                throw InvalidLayout(exception);
+            }
+
+            if (!layout.ContainsRawUnion)
+            {
+                throw InvalidLayout();
+            }
+
+            return new TrRmReturnCoverageSubjectGeometry(layout.Size,
+                layout.PossiblePayloads.IsDefault
+                    ? ImmutableArray<TrRmReturnCoverageRegion>.Empty
+                    : layout.PossiblePayloads);
+        }
+
+        internal void ValidateReturnCoverageSubjectAndRegions(
+            uint resultTypeSpecRef, int ownerModule,
+            ImmutableArray<TrRmReturnCoverageRegion> regions)
+        {
+            var geometry = CalculateReturnCoverageSubjectGeometry(
+                resultTypeSpecRef, ownerModule);
+            if (!IsCoverageSubsetOfPossiblePayloads(regions,
+                    geometry.PossiblePayloads))
+            {
+                throw InvalidLayout();
+            }
+
+            foreach (var region in regions)
+            {
+                ConsumeWork();
+                var span = GetRegionSpan(region);
+                if (region.Offset > geometry.Size
+                    || span > geometry.Size - region.Offset)
+                {
+                    throw InvalidLayout();
+                }
+            }
         }
 
         internal (ulong Size, ulong Alignment, ulong RequiredAlignment)
@@ -1593,6 +1857,492 @@ internal static class TrRmFixedArrayLayoutValidator
         {
             var layout = CalculateTypeDefLayout(typeDef);
             return (layout.Size, layout.Alignment, layout.RequiredAlignment);
+        }
+
+        private TypeLayout AddAtomicPayload(TypeLayout layout)
+        {
+            if (!_schema.UsesRawUnionValueCoverage() || layout.Size == 0)
+            {
+                return layout;
+            }
+
+            ConsumeWork(2);
+            return layout with
+            {
+                PossiblePayloads = [
+                    new TrRmReturnCoverageRegion(0, layout.Size, []),
+                ],
+            };
+        }
+
+        private ImmutableArray<TrRmReturnCoverageRegion> AddArrayRepetition(
+            ImmutableArray<TrRmReturnCoverageRegion> payloads,
+            ulong count, ulong stride)
+        {
+            if (!_schema.UsesRawUnionValueCoverage()
+                || payloads.IsDefaultOrEmpty)
+            {
+                return ImmutableArray<TrRmReturnCoverageRegion>.Empty;
+            }
+            if (count == 0)
+            {
+                return ImmutableArray<TrRmReturnCoverageRegion>.Empty;
+            }
+            if (count == 1)
+            {
+                return payloads;
+            }
+
+            ConsumeWork(checked((ulong)payloads.Length + 1UL));
+            var result
+                = ImmutableArray.CreateBuilder<TrRmReturnCoverageRegion>(
+                    payloads.Length);
+            foreach (var payload in payloads)
+            {
+                ConsumeWork();
+                var repetitions = payload.Repetitions.IsDefault
+                    ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                    : payload.Repetitions;
+                result.Add(payload with
+                {
+                    Repetitions = repetitions.Add(
+                        new TrRmReturnCoverageRepetition(count, stride)),
+                });
+            }
+
+            return result.ToImmutable();
+        }
+
+        private ImmutableArray<TrRmReturnCoverageRegion>
+            CanonicalizePayloadRanges(
+                ImmutableArray<TrRmReturnCoverageRegion> payloads)
+        {
+            if (payloads.IsDefaultOrEmpty)
+            {
+                return ImmutableArray<TrRmReturnCoverageRegion>.Empty;
+            }
+
+            ConsumeWork(checked((ulong)payloads.Length + 1UL));
+            var ordered = new TrRmReturnCoverageRegion[payloads.Length];
+            for (var index = 0; index < ordered.Length; index++)
+            {
+                ConsumeWork();
+                ordered[index] = NormalizePayloadRegion(payloads[index]);
+            }
+
+            var resourceLedger = _a3ResourceLedger;
+            Array.Sort(ordered, (left, right) =>
+            {
+                resourceLedger?.ConsumeWork();
+                return ComparePayloadRegions(left, right);
+            });
+            ConsumeWork(checked((ulong)ordered.Length + 1UL));
+            var result
+                = ImmutableArray.CreateBuilder<TrRmReturnCoverageRegion>(
+                    ordered.Length);
+            foreach (var region in ordered)
+            {
+                ConsumeWork();
+                if (result.Count == 0
+                    || !SamePayloadRepetitions(result[^1], region))
+                {
+                    result.Add(region);
+                    continue;
+                }
+
+                var previousIndex = result.Count - 1;
+                var previous = result[previousIndex];
+                var previousEnd = checked(previous.Offset + previous.Length);
+                var regionEnd = checked(region.Offset + region.Length);
+                if (region.Offset > previousEnd)
+                {
+                    result.Add(region);
+                }
+                else if (regionEnd > previousEnd)
+                {
+                    result[previousIndex] = previous with
+                    {
+                        Length = regionEnd - previous.Offset,
+                    };
+                }
+            }
+
+            ConsumeWork(checked((ulong)result.Count + 1UL));
+            return result.ToImmutable();
+        }
+
+        private TrRmReturnCoverageRegion NormalizePayloadRegion(
+            TrRmReturnCoverageRegion region)
+        {
+            var sourceRepetitions = region.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : region.Repetitions;
+            if (sourceRepetitions.IsEmpty)
+            {
+                return region with { Repetitions = sourceRepetitions };
+            }
+
+            ConsumeWork(checked((ulong)sourceRepetitions.Length + 1UL));
+            var repetitions
+                = ImmutableArray.CreateBuilder<TrRmReturnCoverageRepetition>(
+                    sourceRepetitions.Length);
+            var length = region.Length;
+            var span = length;
+            foreach (var repetition in sourceRepetitions)
+            {
+                ConsumeWork();
+                if (repetition.Stride == span)
+                {
+                    length = checked(length * repetition.Count);
+                    span = length;
+                }
+                else
+                {
+                    repetitions.Add(repetition);
+                    span = checked(((repetition.Count - 1)
+                        * repetition.Stride) + span);
+                }
+            }
+
+            return region with
+            {
+                Length = length,
+                Repetitions = repetitions.ToImmutable(),
+            };
+        }
+
+        private static bool SamePayloadRepetitions(
+            TrRmReturnCoverageRegion left, TrRmReturnCoverageRegion right)
+        {
+            var leftRepetitions = left.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : left.Repetitions;
+            var rightRepetitions = right.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : right.Repetitions;
+            if (leftRepetitions.Length != rightRepetitions.Length)
+            {
+                return false;
+            }
+
+            for (var index = 0; index < leftRepetitions.Length; index++)
+            {
+                if (leftRepetitions[index] != rightRepetitions[index])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static int ComparePayloadRegions(
+            TrRmReturnCoverageRegion left, TrRmReturnCoverageRegion right)
+        {
+            var leftRepetitions = left.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : left.Repetitions;
+            var rightRepetitions = right.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : right.Repetitions;
+            var comparison = leftRepetitions.Length.CompareTo(
+                rightRepetitions.Length);
+            for (var index = 0;
+                comparison == 0 && index < leftRepetitions.Length;
+                index++)
+            {
+                comparison = leftRepetitions[index].Count.CompareTo(
+                    rightRepetitions[index].Count);
+                if (comparison == 0)
+                {
+                    comparison = leftRepetitions[index].Stride.CompareTo(
+                        rightRepetitions[index].Stride);
+                }
+            }
+
+            if (comparison == 0)
+            {
+                comparison = left.Offset.CompareTo(right.Offset);
+            }
+            if (comparison == 0)
+            {
+                comparison = left.Length.CompareTo(right.Length);
+            }
+
+            return comparison;
+        }
+
+        private bool IsCoverageSubsetOfPossiblePayloads(
+            ImmutableArray<TrRmReturnCoverageRegion> coverage,
+            ImmutableArray<TrRmReturnCoverageRegion> possiblePayloads)
+        {
+            if (coverage.IsDefaultOrEmpty)
+            {
+                return true;
+            }
+
+            var normalizedCoverage = CanonicalizePayloadRanges(coverage);
+            var normalizedPayloads
+                = CanonicalizePayloadRanges(possiblePayloads);
+            foreach (var region in normalizedCoverage)
+            {
+                ConsumeWork();
+                var isContained = false;
+                foreach (var payload in normalizedPayloads)
+                {
+                    ConsumeWork();
+                    if (ContainsPayloadRegion(payload, region))
+                    {
+                        isContained = true;
+                        break;
+                    }
+                }
+
+                if (!isContained)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool ContainsPayloadRegion(
+            TrRmReturnCoverageRegion payload,
+            TrRmReturnCoverageRegion coverage)
+        {
+            var coverageSpan = GetRegionSpan(coverage);
+            if (payload.Repetitions.IsDefaultOrEmpty)
+            {
+                return coverage.Offset >= payload.Offset
+                    && coverage.Offset - payload.Offset <= payload.Length
+                    && coverageSpan <= payload.Length
+                        - (coverage.Offset - payload.Offset);
+            }
+
+            if (!TryGetPayloadPosition(payload, coverage.Offset,
+                    out var coordinates, out var localOffset)
+                || localOffset > payload.Length
+                || coverage.Length > payload.Length - localOffset)
+            {
+                return false;
+            }
+
+            if (coverageSpan <= payload.Length - localOffset)
+            {
+                return true;
+            }
+
+            var payloadRepetitions = payload.Repetitions;
+            var coverageRepetitions = coverage.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : coverage.Repetitions;
+            if (TryMapCoverageRepetitions(payloadRepetitions,
+                    coverageRepetitions, coordinates))
+            {
+                return true;
+            }
+
+            return payloadRepetitions.Length == 1
+                && coverageRepetitions.Length == 1
+                && IsRankOneCoverageSubset(payload, coverage,
+                    coordinates[0], localOffset);
+        }
+
+        private bool TryMapCoverageRepetitions(
+            ImmutableArray<TrRmReturnCoverageRepetition> payloadRepetitions,
+            ImmutableArray<TrRmReturnCoverageRepetition> coverageRepetitions,
+            ulong[] coordinates)
+        {
+            if (coverageRepetitions.IsEmpty)
+            {
+                return false;
+            }
+
+            var maximumIncrements = new ulong[payloadRepetitions.Length];
+            ConsumeWork(checked((ulong)maximumIncrements.Length + 1UL));
+            foreach (var coverageRepetition in coverageRepetitions)
+            {
+                ConsumeWork(checked((ulong)payloadRepetitions.Length + 1UL));
+                var remainingStride = coverageRepetition.Stride;
+                for (var dimension = payloadRepetitions.Length - 1;
+                    dimension >= 0;
+                    dimension--)
+                {
+                    ConsumeWork();
+                    var payloadStride
+                        = payloadRepetitions[dimension].Stride;
+                    var step = remainingStride / payloadStride;
+                    remainingStride -= step * payloadStride;
+                    maximumIncrements[dimension] = checked(
+                        maximumIncrements[dimension]
+                        + ((coverageRepetition.Count - 1) * step));
+                }
+
+                if (remainingStride != 0)
+                {
+                    return false;
+                }
+            }
+
+            for (var dimension = 0;
+                dimension < payloadRepetitions.Length;
+                dimension++)
+            {
+                ConsumeWork();
+                if (maximumIncrements[dimension]
+                    >= payloadRepetitions[dimension].Count
+                        - coordinates[dimension])
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool IsRankOneCoverageSubset(
+            TrRmReturnCoverageRegion payload,
+            TrRmReturnCoverageRegion coverage,
+            ulong payloadIndex, ulong localOffset)
+        {
+            var payloadRepetition = payload.Repetitions[0];
+            var coverageRepetition = coverage.Repetitions[0];
+            if (coverage.Length > payload.Length)
+            {
+                return false;
+            }
+
+            var payloadExtent = checked(
+                ((payloadRepetition.Count - 1) * payloadRepetition.Stride)
+                + payload.Length);
+            var coverageOffset = checked(
+                (payloadIndex * payloadRepetition.Stride) + localOffset);
+            var coverageSpan = GetRegionSpan(coverage);
+            if (coverageOffset > payloadExtent
+                || coverageSpan > payloadExtent - coverageOffset)
+            {
+                return false;
+            }
+
+            var residueLimit = checked(
+                payload.Length - coverage.Length + 1UL);
+            if (residueLimit >= payloadRepetition.Stride)
+            {
+                return true;
+            }
+
+            var count = new BigInteger(coverageRepetition.Count);
+            var modulus = new BigInteger(payloadRepetition.Stride);
+            var stride = new BigInteger(
+                coverageRepetition.Stride % payloadRepetition.Stride);
+            var start = new BigInteger(localOffset);
+            var residuesAtOrAboveLimit
+                = FloorSum(count, modulus, stride,
+                    start + modulus - residueLimit)
+                    - FloorSum(count, modulus, stride, start);
+            return count - residuesAtOrAboveLimit == count;
+        }
+
+        private BigInteger FloorSum(BigInteger count, BigInteger modulus,
+            BigInteger stride, BigInteger start)
+        {
+            var sum = BigInteger.Zero;
+            while (true)
+            {
+                ConsumeWork();
+                if (stride >= modulus)
+                {
+                    sum += (count - 1) * count * (stride / modulus) / 2;
+                    stride %= modulus;
+                }
+                if (start >= modulus)
+                {
+                    sum += count * (start / modulus);
+                    start %= modulus;
+                }
+
+                var maximum = (stride * count) + start;
+                if (maximum < modulus)
+                {
+                    return sum;
+                }
+
+                count = maximum / modulus;
+                start = maximum % modulus;
+                (modulus, stride) = (stride, modulus);
+            }
+        }
+
+        private static ulong GetRegionSpan(
+            TrRmReturnCoverageRegion region)
+        {
+            var span = region.Length;
+            if (!region.Repetitions.IsDefault)
+            {
+                foreach (var repetition in region.Repetitions)
+                {
+                    span = checked(((repetition.Count - 1)
+                        * repetition.Stride) + span);
+                }
+            }
+
+            return span;
+        }
+
+        private bool TryGetPayloadPosition(
+            TrRmReturnCoverageRegion payload, ulong offset,
+            out ulong[] coordinates, out ulong localOffset)
+        {
+            var repetitions = payload.Repetitions;
+            if (offset < payload.Offset || repetitions.IsDefaultOrEmpty)
+            {
+                coordinates = [];
+                localOffset = 0;
+                return false;
+            }
+
+            ConsumeWork(checked((ulong)repetitions.Length + 1UL));
+            coordinates = new ulong[repetitions.Length];
+            localOffset = offset - payload.Offset;
+            for (var dimension = repetitions.Length - 1;
+                dimension >= 0;
+                dimension--)
+            {
+                ConsumeWork();
+                var repetition = repetitions[dimension];
+                var index = localOffset / repetition.Stride;
+                if (index >= repetition.Count)
+                {
+                    return false;
+                }
+
+                coordinates[dimension] = index;
+                localOffset -= index * repetition.Stride;
+            }
+
+            return true;
+        }
+
+        private void AppendPayloadRanges(
+            List<TrRmReturnCoverageRegion> destination,
+            ImmutableArray<TrRmReturnCoverageRegion> payloads,
+            ulong offset)
+        {
+            if (payloads.IsDefaultOrEmpty)
+            {
+                return;
+            }
+
+            ConsumeWork(checked((ulong)payloads.Length + 1UL));
+            foreach (var payload in payloads)
+            {
+                ConsumeWork();
+                destination.Add(payload with
+                {
+                    Offset = checked(payload.Offset + offset),
+                });
+            }
         }
 
         private TypeLayout CalculateTypeDefLayout(int typeDef)
@@ -1680,6 +2430,9 @@ internal static class TrRmFixedArrayLayoutValidator
                 var aggregateAlignment = 1UL;
                 ConsumeWork();
                 var requiredAlignment = Math.Max(1UL, explicitAlignment);
+                var payloads = _schema.UsesRawUnionValueCoverage()
+                    ? new List<TrRmReturnCoverageRegion>() : null;
+                var containsRawUnion = kind == 2;
                 for (var ordinal = 0; ordinal < fieldCount; ordinal++)
                 {
                     ConsumeWork();
@@ -1688,6 +2441,7 @@ internal static class TrRmFixedArrayLayoutValidator
                         new TypeSpecContext(_fields.GetTypeSpecRef(field),
                             typeDefModule,
                             genericCount == 0 ? null : substitutions));
+                    containsRawUnion |= fieldLayout.ContainsRawUnion;
                     ConsumeWork();
                     requiredAlignment = Math.Max(requiredAlignment,
                         fieldLayout.RequiredAlignment);
@@ -1707,11 +2461,16 @@ internal static class TrRmFixedArrayLayoutValidator
                     var placementAlignment = Math.Max(
                         Math.Min(fieldLayout.Alignment, pack),
                         fieldLayout.RequiredAlignment);
+                    var fieldOffset = kind == 2 ? 0
+                        : RoundUpTargetLayout(end, placementAlignment);
                     end = kind == 2
                         ? Math.Max(end, fieldLayout.Size)
-                        : AddTargetLayout(
-                            RoundUpTargetLayout(end, placementAlignment),
-                            fieldLayout.Size);
+                        : AddTargetLayout(fieldOffset, fieldLayout.Size);
+                    if (payloads is not null)
+                    {
+                        AppendPayloadRanges(payloads,
+                            fieldLayout.PossiblePayloads, fieldOffset);
+                    }
                     ConsumeWork();
                     aggregateAlignment = Math.Max(aggregateAlignment,
                         placementAlignment);
@@ -1735,8 +2494,12 @@ internal static class TrRmFixedArrayLayoutValidator
                 ConsumeWork();
                 requiredAlignment = Math.Max(requiredAlignment,
                     explicitAlignment);
+                var canonicalPayloads = payloads is null ? default
+                    : CanonicalizePayloadRanges(
+                        ImmutableArray.CreateRange(payloads));
                 return new TypeLayout(size, aggregateAlignment,
-                    requiredAlignment);
+                    requiredAlignment, canonicalPayloads,
+                    containsRawUnion);
             }
             catch (OverflowException exception)
             {

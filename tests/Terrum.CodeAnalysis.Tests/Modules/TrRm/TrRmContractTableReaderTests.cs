@@ -728,6 +728,17 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void A2R1StructuralReaderRejectsCoverageForAResultWithoutRawUnion()
+    {
+        Assert.Throws<InvalidDataException>(() => Create(
+            Section(ReturnCoverageContract()),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, a2r1ReturnCoverageDraft: true,
+            frameArtifact: true));
+    }
+
+    [Test]
     public void CopyOriginDraftWriterSortsOriginsByLogicalSourceIdentity()
     {
         var written = Create(Section(CopyOriginContractWithOrigins(1, 0)),
@@ -959,7 +970,18 @@ public sealed class TrRmContractTableReaderTests
         }
         var types = new TrRmTypeDefTableReader(type, typeRows, names, modules,
             0, 0, typeRows, declaredCount);
-        var targetProfiles = new TrRmTargetProfileTableReader([], 0);
+        var targetProfileRows = a2r1ReturnCoverageDraft && frameArtifact
+            ? [
+                new TrRmTargetProfileRow(
+                    TrRmTargetProfileTableReader.WindowsX64NativeProfileId,
+                    TrRmTargetProfileTableReader
+                        .WindowsX64NativeProfileRuleRevision),
+            ]
+            : Array.Empty<TrRmTargetProfileRow>();
+        var targetProfileBytes = targetProfileRows.Length == 0 ? []
+            : TrRmTargetProfileTableWriter.Encode(targetProfileRows, schema);
+        var targetProfiles = new TrRmTargetProfileTableReader(
+            targetProfileBytes, targetProfileRows.Length, schema);
         var layoutRows = new TrRmLayoutRow[typeRows];
         for (var index = 0; index < typeRows; index++)
         {
@@ -1174,6 +1196,11 @@ public sealed class TrRmContractTableReaderTests
             }
             artifactSections.Add(new TrRmSection(0x001B, 0,
                 (uint)recordCount, section));
+            if (targetProfileRows.Length != 0)
+            {
+                artifactSections.Add(new TrRmSection(0x0048, 0,
+                    (uint)targetProfileRows.Length, targetProfileBytes));
+            }
             if (generalPredicateGraphsDraft
                 && !contractReader.GetEvaluationFormContracts(1).IsEmpty)
             {

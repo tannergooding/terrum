@@ -169,6 +169,20 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             public struct Envelope {
                 public [RawWord; 2] Values;
             }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct PaddedEnvelope {
+                public uint8 Prefix;
+                public RawWord Word;
+                public uint8 Suffix;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct PaddedArrayHolder {
+                public [PaddedEnvelope; 4] Values;
+            }
             """;
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
@@ -203,13 +217,153 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var rawWordLayout = tables.Layouts.GetLayoutForProfile(rawWordRow, 1);
         Assert.That(tables.Layouts.GetLayoutKind(rawWordLayout),
             Is.EqualTo(2));
-        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(1));
-        var arrayLayout = tables.FixedArrayLayouts.GetRow(1);
-        Assert.That(arrayLayout.OwnerModuleRow, Is.EqualTo(1));
-        Assert.That(arrayLayout.TargetProfileRef, Is.EqualTo(1));
-        Assert.That(arrayLayout.ElementStride, Is.EqualTo(8));
-        Assert.That(arrayLayout.ByteExtent, Is.EqualTo(16));
-        Assert.That(arrayLayout.Alignment, Is.EqualTo(8));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(2));
+        if (isA2R1)
+        {
+            var envelopeTypeDef = 0;
+            var paddedArrayHolderTypeDef = 0;
+            for (var typeDef = 1; typeDef <= tables.TypeDefs.Count;
+                typeDef++)
+            {
+                if (tables.TypeDefs.GetName(typeDef) == "Envelope")
+                {
+                    envelopeTypeDef = typeDef;
+                }
+                else if (tables.TypeDefs.GetName(typeDef)
+                    == "PaddedArrayHolder")
+                {
+                    paddedArrayHolderTypeDef = typeDef;
+                }
+            }
+            Assert.That(envelopeTypeDef, Is.GreaterThan(0));
+            Assert.That(paddedArrayHolderTypeDef, Is.GreaterThan(0));
+
+            var (envelopeFirstField, envelopeEndField)
+                = tables.TypeDefs.GetFieldRange(envelopeTypeDef);
+            Assert.That(envelopeEndField - envelopeFirstField, Is.EqualTo(1));
+            var arrayTypeSpecRef = tables.Fields.GetTypeSpecRef(
+                envelopeFirstField);
+            var arrayLayoutRow = tables.FixedArrayLayouts.FindRow(1,
+                arrayTypeSpecRef, 1);
+            Assert.That(arrayLayoutRow, Is.GreaterThan(0));
+            var arrayLayout = tables.FixedArrayLayouts.GetRow(arrayLayoutRow);
+            Assert.That(arrayLayout.OwnerModuleRow, Is.EqualTo(1));
+            Assert.That(arrayLayout.TargetProfileRef, Is.EqualTo(1));
+            Assert.That(arrayLayout.ElementStride, Is.EqualTo(8));
+            Assert.That(arrayLayout.ByteExtent, Is.EqualTo(16));
+            Assert.That(arrayLayout.Alignment, Is.EqualTo(8));
+            Assert.That(tables.TypeSpecs.TryGetFixedInlineArray(
+                arrayTypeSpecRef, out var rawWordTypeSpecRef,
+                out var arrayCount), Is.True);
+            Assert.That(arrayCount, Is.EqualTo(2));
+
+            var arrayGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        arrayTypeSpecRef, 1);
+            Assert.That(arrayGeometry.Size, Is.EqualTo(16));
+            Assert.That(arrayGeometry.PossiblePayloads,
+                Has.Length.EqualTo(1));
+            Assert.That(arrayGeometry.PossiblePayloads[0].Offset,
+                Is.Zero);
+            Assert.That(arrayGeometry.PossiblePayloads[0].Length,
+                Is.EqualTo(16));
+            Assert.That(arrayGeometry.PossiblePayloads[0].Repetitions,
+                Is.Empty);
+
+            var rawWordGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        rawWordTypeSpecRef, 1);
+            Assert.That(rawWordGeometry.Size, Is.EqualTo(8));
+            Assert.That(rawWordGeometry.PossiblePayloads,
+                Has.Length.EqualTo(1));
+            Assert.That(rawWordGeometry.PossiblePayloads[0].Offset,
+                Is.Zero);
+            Assert.That(rawWordGeometry.PossiblePayloads[0].Length,
+                Is.EqualTo(8));
+            Assert.That(rawWordGeometry.PossiblePayloads[0].Repetitions,
+                Is.Empty);
+
+            var (rawWordFirstField, rawWordEndField)
+                = tables.TypeDefs.GetFieldRange(rawWordRow);
+            Assert.That(rawWordEndField - rawWordFirstField, Is.EqualTo(2));
+            var pointerTypeSpecRef = tables.Fields.GetTypeSpecRef(
+                rawWordFirstField + 1);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    pointerTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 8, []))),
+                Is.False);
+
+            var (paddedArrayField, paddedArrayEndField)
+                = tables.TypeDefs.GetFieldRange(paddedArrayHolderTypeDef);
+            Assert.That(paddedArrayEndField - paddedArrayField,
+                Is.EqualTo(1));
+            var paddedArrayTypeSpecRef = tables.Fields.GetTypeSpecRef(
+                paddedArrayField);
+            var paddedLayoutRow = tables.FixedArrayLayouts.FindRow(1,
+                paddedArrayTypeSpecRef, 1);
+            Assert.That(paddedLayoutRow, Is.GreaterThan(0));
+            var paddedLayout = tables.FixedArrayLayouts.GetRow(paddedLayoutRow);
+            Assert.That(paddedLayout.ElementStride, Is.EqualTo(24));
+            Assert.That(paddedLayout.ByteExtent, Is.EqualTo(96));
+            Assert.That(tables.TypeSpecs.TryGetFixedInlineArray(
+                paddedArrayTypeSpecRef, out var paddedElementTypeSpecRef,
+                out var paddedArrayCount), Is.True);
+            Assert.That(paddedArrayCount, Is.EqualTo(4));
+
+            var paddedGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        paddedElementTypeSpecRef, 1);
+            Assert.That(paddedGeometry.Size, Is.EqualTo(24));
+            Assert.That(paddedGeometry.PossiblePayloads,
+                Has.Length.EqualTo(2));
+            Assert.That(paddedGeometry.PossiblePayloads[0].Offset,
+                Is.Zero);
+            Assert.That(paddedGeometry.PossiblePayloads[0].Length,
+                Is.EqualTo(1));
+            Assert.That(paddedGeometry.PossiblePayloads[1].Offset,
+                Is.EqualTo(8));
+            Assert.That(paddedGeometry.PossiblePayloads[1].Length,
+                Is.EqualTo(9));
+
+            TrRmFixedArrayLayoutValidator
+                .ValidateReturnCoverageSubjectAndRegions(tables,
+                    paddedArrayTypeSpecRef, 1, ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 1,
+                            [new TrRmReturnCoverageRepetition(4, 24)]),
+                        new TrRmReturnCoverageRegion(8, 9,
+                            [new TrRmReturnCoverageRepetition(4, 24)])));
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    paddedArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(8, 1,
+                            [new TrRmReturnCoverageRepetition(2, 48)]))),
+                Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    paddedArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(8, 1,
+                            [new TrRmReturnCoverageRepetition(3, 25)]))),
+                Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    paddedArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 96, []))),
+                Is.False);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    paddedArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(1, 7, []))),
+                Is.False);
+        }
 
         var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
         var loaded = TrRmExecutableCompiler.LoadStandard(input,

@@ -2238,6 +2238,11 @@ public static class TrRmStructuralMetadataValidator
             nativeVTables, imports, exports,
             index.Schema, selectedA3LayoutResourceLedger);
         executionTables.ValidateNonBodyTypeSpecModuleContexts();
+        if (index.Schema.UsesRawUnionValueCoverage())
+        {
+            TrRmFixedArrayLayoutValidator
+                .ValidateReturnCoverageSubjects(executionTables);
+        }
         if (index.Schema.UsesGeneralPredicateGraphs())
         {
             TrRmConstantExecutionFeatureUseValidator.Validate(
