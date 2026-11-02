@@ -455,6 +455,133 @@ internal sealed class UnionLayoutTests
     }
 
     [Test]
+    public void RawUnionNestedPayloadFactsForwardThroughByValueCalls()
+    {
+        const string prefix = """
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+                public Sparse(uint8 first, uint32 last) {
+                    First = first;
+                    Last = last;
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct RawWord {
+                public mut uint64 Wide;
+                public mut Sparse Padded;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Envelope {
+                public mut RawWord Word;
+                public Envelope(RawWord word) {
+                    Word = word;
+                }
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Holder {
+                public uint32 Tag;
+                public mut RawWord Value;
+                public Holder(uint32 tag, RawWord value) {
+                    Tag = tag;
+                    Value = value;
+                }
+            }
+
+            public Envelope Wrap(RawWord value, int32 ignored) {
+                return new Envelope(value);
+            }
+
+            public Envelope WrapField(Holder value, int32 ignored) {
+                return new Envelope(value.Value);
+            }
+
+            public Envelope Identity(Envelope value) { return value; }
+
+            public int32 Replace(out RawWord value) {
+                value = new RawWord(0);
+                unsafe { value.Padded = new Sparse(1, 2); }
+                return 0;
+            }
+            """;
+
+        var forwarded = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ForwardWideThroughCalls() {
+                    mut RawWord word = new RawWord(0);
+                    unsafe { word.Wide = 7; }
+                    Envelope envelope = Wrap(word, 0);
+                    Envelope copy = Identity(envelope);
+                    unsafe { return copy.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(forwarded.HasErrors, Is.False,
+            string.Join(Environment.NewLine, forwarded.Diagnostics));
+
+        var staged = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 PreserveStagedWideAcrossLaterArgument() {
+                    mut RawWord word = new RawWord(0);
+                    unsafe { word.Wide = 9; }
+                    Envelope envelope = Wrap(word, Replace(out word));
+                    unsafe { return envelope.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(staged.HasErrors, Is.False,
+            string.Join(Environment.NewLine, staged.Diagnostics));
+
+        var nestedPath = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ForwardWideThroughNestedField() {
+                    mut RawWord word = new RawWord(0);
+                    unsafe { word.Wide = 11; }
+                    Holder holder = new Holder(1, word);
+                    Envelope envelope = WrapField(holder, 0);
+                    unsafe { return envelope.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(nestedPath.HasErrors, Is.False,
+            string.Join(Environment.NewLine, nestedPath.Diagnostics));
+
+        var narrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectPaddedWideThroughConstructor() {
+                    mut RawWord word = new RawWord(0);
+                    unsafe { word.Padded = new Sparse(1, 2); }
+                    Envelope envelope = Wrap(word, 0);
+                    unsafe { return envelope.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(narrow.HasErrors, Is.True,
+            string.Join(Environment.NewLine, narrow.Diagnostics));
+
+        var nestedNarrow = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectPaddedWideThroughNestedField() {
+                    mut RawWord word = new RawWord(0);
+                    unsafe { word.Padded = new Sparse(1, 2); }
+                    Holder holder = new Holder(1, word);
+                    Envelope envelope = WrapField(holder, 0);
+                    unsafe { return envelope.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(nestedNarrow.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                nestedNarrow.Diagnostics));
+    }
+
+    [Test]
     public void RawUnionAlternativeStoreInvalidatesPaddingCoverage()
     {
         var partialCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""

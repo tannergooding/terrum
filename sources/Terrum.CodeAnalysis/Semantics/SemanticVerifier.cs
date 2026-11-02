@@ -1032,7 +1032,8 @@ public static partial class SemanticVerifier
             = program.Functions.Any(function => !function.IsExternal
                 && function.Intrinsic == BoundIntrinsic.None
                 && function.IndexedBody is null
-                && IsRawUnionType(program, function.ReturnType));
+                && CarriesRawUnionPayloadFacts(
+                    program, function.ReturnType));
         var functionOrder = deriveCopyOriginSummaries
                 || hasRawUnionReturnCoverageCandidates
             ? CopyOriginSummaryVerificationOrder(program,
@@ -1054,7 +1055,8 @@ public static partial class SemanticVerifier
             {
                 continue;
             }
-            if (IsRawUnionType(program, function.ReturnType))
+            if (CarriesRawUnionPayloadFacts(
+                program, function.ReturnType))
             {
                 rawUnionReturnCoverage[functionIndex] = [];
             }
@@ -1073,10 +1075,13 @@ public static partial class SemanticVerifier
                 throw;
             }
             var rawUnionReturnCoverageBuilder
-                = IsRawUnionType(program, function.ReturnType)
+                = CarriesRawUnionPayloadFacts(
+                    program, function.ReturnType)
                     ? new RawUnionReturnCoverageBuilder(
-                        program.Structures[
-                            (int)function.ReturnType - 100].Size)
+                        ValueLayout.Size(function.ReturnType,
+                            program.Structures,
+                            program.CheckedReferenceTypes,
+                            program.NativeLoweringAgreement))
                     : null;
             var initialized = new InitializationState(program, function.Variables.Length,
                 hasNativeOutputContracts, hasDoesNotReturnFunctions) {
@@ -4641,7 +4646,8 @@ public static partial class SemanticVerifier
                 }
                 var rawUnionReturnBytes
                     = result.Value is BoundExpression rawUnionReturnValue
-                        && IsRawUnionType(program, function.ReturnType)
+                        && CarriesRawUnionPayloadFacts(
+                            program, function.ReturnType)
                             ? InitializedPayloadBytesOfExpression(
                                 rawUnionReturnValue, function.ReturnType,
                                 initialized, function, program)
@@ -9136,6 +9142,7 @@ public static partial class SemanticVerifier
                     copyOriginDependencies.ClearBackingCallResult(call);
                     copyOriginDependencies.ClearReferenceFieldCallResult(call);
                     copyOriginDependencies.ClearNativePointerCallResult(call);
+                    copyOriginDependencies.ClearRawUnionCallCoverageResult(call);
                 }
                 if (target.IsCleanup || target.IsClassConstructor)
                 {
@@ -9263,6 +9270,7 @@ public static partial class SemanticVerifier
                             preMoveNativePointerSnapshot = null;
                         Dictionary<StorageProjection, ReferenceFieldValue>?
                             preMoveReferenceSnapshot = null;
+                        byte[]? preMoveRawUnionInitializedBytes = null;
                         if (argumentsComplete && argument is BoundMove or BoundFieldMove
                             && copyOriginInputViews?.ContainsKey(parameterIndex) == true)
                         {
@@ -9290,6 +9298,14 @@ public static partial class SemanticVerifier
                                     NativePointerFieldValueSnapshotOfExpression(preMoveValue,
                                         argument.Type, copyOriginState, function, program,
                                         ref remaining, depth + 1);
+                            }
+                            if (CarriesRawUnionPayloadFacts(
+                                program, argument.Type))
+                            {
+                                preMoveRawUnionInitializedBytes
+                                    = InitializedPayloadBytesOfExpression(
+                                        preMoveValue, argument.Type, initialized,
+                                        function, program);
                             }
                         }
                         if (target.Variables[parameterSlot].IsImplicitRef)
@@ -9657,10 +9673,18 @@ public static partial class SemanticVerifier
                                         function, program, ref remaining, depth + 1,
                                         fieldMasks)
                                 : null;
+                            var rawUnionInitializedBytes = snapshotEntryValue
+                                && CarriesRawUnionPayloadFacts(
+                                    program, argument.Type)
+                                    ? preMoveRawUnionInitializedBytes
+                                        ?? InitializedPayloadBytesOfExpression(
+                                            argument, argument.Type, initialized,
+                                            function, program)
+                                    : null;
                             if (!stagedCopyOriginInputs.TryAdd(parameterIndex,
                                 new StagedCopyOriginInput(sourceView, argument, snapshot,
                                     backingSnapshot, nativePointerSnapshot,
-                                    referenceSnapshot)))
+                                    referenceSnapshot, rawUnionInitializedBytes)))
                             {
                                 throw Invalid(argument.Span);
                             }
@@ -9693,6 +9717,20 @@ public static partial class SemanticVerifier
                             stagedCopyOriginInputs, copyOriginResultDependencies,
                             function, program, ref remaining, depth + 1)
                         : null;
+                    if (CarriesRawUnionPayloadFacts(program, call.Type)
+                        && initialized.Dependencies
+                            is BackingDependencies rawUnionCallDependencies)
+                    {
+                        var rawUnionCallCoverage
+                            = RawUnionInitializedPayloadBytesForCall(
+                                call, target, copyOriginSummary,
+                                stagedCopyOriginInputs,
+                                initialized.RawUnionReturnCoverageSummaries,
+                                program);
+                        rawUnionCallDependencies
+                            .SetRawUnionCallCoverageResult(call,
+                                rawUnionCallCoverage);
+                    }
                     var backingCallResult =
                         initialized.Dependencies is BackingDependencies backingResultDependencies
                         ? CreateBackingCallResult(call, target, copyOriginSummary,
@@ -10504,6 +10542,152 @@ public static partial class SemanticVerifier
         return true;
     }
 
+    private static byte[] RawUnionInitializedPayloadBytesForCall(
+        BoundCall call, BoundFunction target,
+        BoundCopyOriginSummary? copyOriginSummary,
+        IReadOnlyDictionary<int, StagedCopyOriginInput> stagedInputs,
+        ImmutableArray<byte>[] returnCoverageSummaries,
+        BoundProgram program)
+    {
+        if (call.Type != target.ReturnType)
+        {
+            throw Invalid(call.Span);
+        }
+
+        var resultSize = ValueLayout.Size(call.Type, program.Structures,
+            program.CheckedReferenceTypes, program.NativeLoweringAgreement);
+        if (resultSize < 0)
+        {
+            throw Invalid(call.Span);
+        }
+
+        var initializedBytes = GuaranteedInitializedPayloadBytes(
+            call.Type, program);
+        if ((uint)call.Function < (uint)returnCoverageSummaries.Length)
+        {
+            var returnCoverage = returnCoverageSummaries[call.Function];
+            if (!returnCoverage.IsDefaultOrEmpty)
+            {
+                if (returnCoverage.Length != resultSize)
+                {
+                    throw Invalid(call.Span);
+                }
+                initializedBytes = [.. returnCoverage];
+            }
+        }
+        if (copyOriginSummary is null)
+        {
+            return initializedBytes;
+        }
+
+        ValidateCopyOriginSummary(target, copyOriginSummary, program);
+        foreach (var fact in copyOriginSummary.Facts)
+        {
+            if (!TryResolveCopyOriginFieldPath(target.ReturnType,
+                    fact.DestinationPath, program,
+                    out var destinationType)
+                || !CarriesRawUnionPayloadFacts(program, destinationType))
+            {
+                continue;
+            }
+
+            if (!TryGetCopyOriginPathByteOffset(target.ReturnType,
+                    fact.DestinationPath, program, out var destinationOffset))
+            {
+                throw Invalid(call.Span);
+            }
+
+            var destinationSize = ValueLayout.Size(destinationType,
+                program.Structures, program.CheckedReferenceTypes,
+                program.NativeLoweringAgreement);
+            if (destinationSize < 0
+                || destinationOffset > initializedBytes.Length
+                || destinationSize > initializedBytes.Length - destinationOffset)
+            {
+                throw Invalid(call.Span);
+            }
+
+            byte[]? commonSourceBytes = null;
+            var canForwardCoverage = true;
+            foreach (var origin in fact.Origins)
+            {
+                var parameterIndex = CopyOriginCallParameterIndex(target,
+                    origin);
+                if (origin.SourceKind != BoundCopyOriginSourceKind.Formal
+                    || origin.SourceView
+                        != BoundCopyOriginSourceView.EntryValue
+                    || !stagedInputs.TryGetValue(parameterIndex,
+                        out var stagedInput)
+                    || stagedInput.SourceView != origin.SourceView
+                    || stagedInput.RawUnionInitializedBytes is not { } sourceBytes
+                    || !TryGetCopyOriginSourceType(target, origin, program,
+                        out var sourceRootType)
+                    || stagedInput.Argument.Type != sourceRootType
+                    || !TryResolveCopyOriginFieldPath(sourceRootType,
+                        origin.SourcePath, program, out var sourceType)
+                    || sourceType != destinationType)
+                {
+                    canForwardCoverage = false;
+                    break;
+                }
+
+                var sourceSize = ValueLayout.Size(sourceRootType,
+                    program.Structures, program.CheckedReferenceTypes,
+                    program.NativeLoweringAgreement);
+                if (sourceSize < 0 || sourceBytes.Length != sourceSize
+                    || !TryGetCopyOriginPathByteOffset(sourceRootType,
+                        origin.SourcePath, program, out var sourceOffset)
+                    || sourceOffset > sourceBytes.Length
+                    || destinationSize > sourceBytes.Length - sourceOffset)
+                {
+                    throw Invalid(call.Span);
+                }
+
+                var currentSourceBytes = sourceBytes.AsSpan(sourceOffset,
+                    destinationSize);
+                if (commonSourceBytes is null)
+                {
+                    commonSourceBytes = currentSourceBytes.ToArray();
+                }
+                else
+                {
+                    for (var index = 0; index < commonSourceBytes.Length; index++)
+                    {
+                        commonSourceBytes[index] &= currentSourceBytes[index];
+                    }
+                }
+            }
+
+            if (canForwardCoverage && commonSourceBytes is not null)
+            {
+                for (var index = 0; index < commonSourceBytes.Length; index++)
+                {
+                    if (commonSourceBytes[index] != 0)
+                    {
+                        initializedBytes[destinationOffset + index] = 1;
+                    }
+                }
+            }
+        }
+
+        return initializedBytes;
+    }
+
+    private static bool TryGetCopyOriginPathByteOffset(
+        PrimitiveType rootType, BoundCopyOriginFieldPath path,
+        BoundProgram program, out int byteOffset)
+    {
+        byteOffset = 0;
+        var fieldPath = default(FieldProjectionPath);
+        foreach (var step in path.Steps)
+        {
+            fieldPath = fieldPath.Append(step.OwnerType, step.FieldOrdinal);
+        }
+        return path.Steps.IsEmpty
+            || TryGetFieldPathByteOffset(rootType, fieldPath, program,
+                out byteOffset);
+    }
+
     private static byte[] InitializedPayloadBytesOfExpression(
         BoundExpression expression, PrimitiveType type,
         InitializationState initialized, BoundFunction function,
@@ -10515,15 +10699,26 @@ public static partial class SemanticVerifier
         }
 
         if (expression is BoundCall call
-            && IsRawUnionType(program, type)
-            && call.Type == type
-            && (uint)call.Function
-                < (uint)initialized.RawUnionReturnCoverageSummaries.Length
-            && initialized.RawUnionReturnCoverageSummaries[call.Function].Length
-                == ValueLayout.Size(type, program.Structures))
+            && call.Type == type)
         {
-            return [.. initialized.RawUnionReturnCoverageSummaries[
-                call.Function]];
+            if (initialized.Dependencies is BackingDependencies
+                    callDependencies
+                && callDependencies.TryGetRawUnionCallCoverageResult(
+                    call, out var callInitializedBytes))
+            {
+                return callInitializedBytes;
+            }
+            if ((uint)call.Function
+                    < (uint)initialized.RawUnionReturnCoverageSummaries.Length
+                && initialized.RawUnionReturnCoverageSummaries[
+                    call.Function].Length
+                    == ValueLayout.Size(type, program.Structures,
+                        program.CheckedReferenceTypes,
+                        program.NativeLoweringAgreement))
+            {
+                return [.. initialized.RawUnionReturnCoverageSummaries[
+                    call.Function]];
+            }
         }
 
         if (expression is BoundRead read && read.Type == type

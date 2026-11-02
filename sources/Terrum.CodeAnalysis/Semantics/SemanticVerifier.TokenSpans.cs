@@ -349,7 +349,10 @@ public static partial class SemanticVerifier
 
         internal CopyOriginFact Get(BoundCopyOriginFieldPath path)
             => _fields.TryGetValue(path, out var fact)
-                ? fact.Clone() : CopyOriginFact.Unavailable();
+                ? fact.Clone()
+                : _fields.TryGetValue(default, out var root)
+                    ? root.Project(CopyOriginStorageProjection(path).FieldPath)
+                    : CopyOriginFact.Unavailable();
 
         internal void Set(BoundCopyOriginFieldPath path, CopyOriginFact fact)
         {
@@ -385,7 +388,8 @@ public static partial class SemanticVerifier
         CopyOriginValue? Snapshot,
         Dictionary<StorageProjection, BackingFieldValue>? BackingSnapshot,
         Dictionary<StorageProjection, NativePointerFieldValue>? NativePointerSnapshot,
-        Dictionary<StorageProjection, ReferenceFieldValue>? ReferenceSnapshot);
+        Dictionary<StorageProjection, ReferenceFieldValue>? ReferenceSnapshot,
+        byte[]? RawUnionInitializedBytes);
 
     private sealed class CopyOriginSummaryBuilder
     {
@@ -1452,6 +1456,8 @@ public static partial class SemanticVerifier
         private Dictionary<BoundExpression,
             Dictionary<StorageProjection, NativePointerFieldValue>> NativePointerCallResults { get; }
             = new(ReferenceEqualityComparer.Instance);
+        private Dictionary<BoundExpression, byte[]> RawUnionCallCoverageResults { get; }
+            = new(ReferenceEqualityComparer.Instance);
         private CopyOriginFact[] CopyOriginRoots { get; }
         private Dictionary<StorageKey, CopyOriginFact> CopyOriginFieldValues { get; } = [];
         private Dictionary<BoundExpression, CopyOriginValue> CopyOriginCallResults { get; }
@@ -1623,6 +1629,12 @@ public static partial class SemanticVerifier
                     values.ToDictionary(static pair => pair.Key,
                         static pair => pair.Value.Clone()));
             }
+            destination.RawUnionCallCoverageResults.Clear();
+            foreach (var (expression, bytes) in RawUnionCallCoverageResults)
+            {
+                destination.RawUnionCallCoverageResults.Add(expression,
+                    [.. bytes]);
+            }
             destination.CopyOriginFieldValues.Clear();
             foreach (var (key, value) in CopyOriginFieldValues)
             {
@@ -1668,6 +1680,84 @@ public static partial class SemanticVerifier
                 else
                 {
                     CopyOriginCallResults.Add(call, value.Clone());
+                    changed = true;
+                }
+            }
+            return changed;
+        }
+
+        internal void ClearRawUnionCallCoverageResult(
+            BoundExpression expression)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            _ = RawUnionCallCoverageResults.Remove(expression);
+        }
+
+        internal void SetRawUnionCallCoverageResult(
+            BoundExpression expression, byte[] initializedBytes)
+        {
+            if (expression is null || initializedBytes is null
+                || initializedBytes.Length == 0)
+            {
+                throw Invalid();
+            }
+            RawUnionCallCoverageResults[expression] = [.. initializedBytes];
+        }
+
+        internal bool TryGetRawUnionCallCoverageResult(
+            BoundExpression expression, out byte[] initializedBytes)
+        {
+            if (expression is null)
+            {
+                throw Invalid();
+            }
+            if (RawUnionCallCoverageResults.TryGetValue(
+                expression, out var storedBytes))
+            {
+                initializedBytes = [.. storedBytes];
+                return true;
+            }
+            initializedBytes = [];
+            return false;
+        }
+
+        internal bool MergeRawUnionCallCoverageResults(
+            BackingDependencies other)
+        {
+            if (other.Sources.Length != Sources.Length
+                || other.FunctionActivation != FunctionActivation
+                || !ReferenceEquals(other.CopyOriginSummaries,
+                    CopyOriginSummaries))
+            {
+                throw Invalid();
+            }
+
+            var changed = false;
+            foreach (var (call, otherBytes) in other.RawUnionCallCoverageResults)
+            {
+                if (!RawUnionCallCoverageResults.TryGetValue(
+                    call, out var currentBytes))
+                {
+                    RawUnionCallCoverageResults.Add(call, [.. otherBytes]);
+                    changed = true;
+                    continue;
+                }
+                if (currentBytes.Length != otherBytes.Length)
+                {
+                    throw Invalid(call.Span);
+                }
+                for (var index = 0; index < currentBytes.Length; index++)
+                {
+                    var mergedByte = currentBytes[index] != 0
+                        && otherBytes[index] != 0 ? (byte)1 : (byte)0;
+                    if (currentBytes[index] == mergedByte)
+                    {
+                        continue;
+                    }
+                    currentBytes[index] = mergedByte;
                     changed = true;
                 }
             }
@@ -2306,6 +2396,7 @@ public static partial class SemanticVerifier
                 changed = true;
             }
             changed |= MergeCopyOriginCallResults(other);
+            changed |= MergeRawUnionCallCoverageResults(other);
             changed |= MergeNativePointerCallResults(other);
             changed |= MergeBackingCallResults(other);
             changed |= MergeReferenceFieldCallResults(other);
@@ -5748,6 +5839,7 @@ public static partial class SemanticVerifier
             if (IsNativePointerValue(current, program)
                 || NativeFunctionPointerTypes.IsType(current)
                 || current == PrimitiveType.TokenSpan
+                || IsRawUnionType(program, current)
                 || IsOrdinaryStoredReferenceType(current, program))
             {
                 return true;
@@ -5868,7 +5960,7 @@ public static partial class SemanticVerifier
                                 recursiveCopyOriginFunctions[
                                     recursiveFunction] = true;
                             }
-                            if (IsRawUnionType(program,
+                            if (CarriesRawUnionPayloadFacts(program,
                                     program.Functions[recursiveFunction]
                                         .ReturnType))
                             {
@@ -5996,6 +6088,11 @@ public static partial class SemanticVerifier
         HashSet<PrimitiveType> activeTypes, ref int remaining, int depth)
     {
         Count(ref remaining, depth);
+        if (IsRawUnionType(program, type))
+        {
+            result.Add((projection, type));
+            return;
+        }
         if (IsNativePointerValue(type, program)
             || NativeFunctionPointerTypes.IsType(type)
             || type == PrimitiveType.TokenSpan
@@ -6892,6 +6989,27 @@ public static partial class SemanticVerifier
             ref int remaining, int depth)
     {
         var result = new Dictionary<BoundCopyOriginFieldPath, HashSet<BoundCopyOrigin>>();
+        if (CarriesRawUnionPayloadFacts(program, type))
+        {
+            var rootFact = CopyOriginOfExpression(expression, type,
+                StorageProjection.WholeObject, facts, function, program,
+                ref remaining, depth + 1);
+            if (rootFact.IsAvailable && rootFact.Origins.Count != 0)
+            {
+                var rootOrigins = new HashSet<BoundCopyOrigin>();
+                foreach (var origin in rootFact.Origins)
+                {
+                    _ = rootOrigins.Add(new BoundCopyOrigin(
+                        (BoundCopyOriginSourceKind)origin.SourceKind,
+                        (BoundCopyOriginSourceView)origin.SourceView,
+                        origin.SourceOrdinal,
+                        BoundCopyOriginPath(origin.SourcePath)));
+                }
+                result.Add(default, rootOrigins);
+                return result;
+            }
+        }
+
         var leaves = CopyOriginFieldLeaves(type, program, ref remaining, depth + 1);
         foreach (var leaf in leaves)
         {
@@ -6925,6 +7043,13 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program, ref int remaining, int depth)
     {
         var result = new CopyOriginValue();
+        if (CarriesRawUnionPayloadFacts(program, type)
+            && !IsRawUnionType(program, type))
+        {
+            result.Set(default, CopyOriginOfExpression(expression, type,
+                StorageProjection.WholeObject, facts, function, program,
+                ref remaining, depth + 1));
+        }
         foreach (var leaf in CopyOriginFieldLeaves(type, program, ref remaining, depth + 1))
         {
             Count(ref remaining, depth + 1);
@@ -7152,6 +7277,33 @@ public static partial class SemanticVerifier
                     fact.DestinationPath, program, out var destinationType))
             {
                 throw Invalid(call.Span);
+            }
+            if (fact.DestinationPath.Steps.IsEmpty
+                && CarriesRawUnionPayloadFacts(program, destinationType))
+            {
+                var rootValueFact = CopyOriginFact.KnownEmpty();
+                foreach (var origin in fact.Origins)
+                {
+                    var parameterIndex = CopyOriginCallParameterIndex(
+                        target, origin);
+                    if (!stagedInputs.TryGetValue(parameterIndex,
+                            out var stagedInput)
+                        || stagedInput.SourceView != origin.SourceView
+                        || !inputValues.TryGetValue(parameterIndex,
+                            out var sourceValue)
+                        || !TryGetCopyOriginSourceType(target, origin,
+                            program, out var sourceRootType)
+                        || !TryResolveCopyOriginFieldPath(sourceRootType,
+                            origin.SourcePath, program, out var sourceType)
+                        || sourceType != destinationType)
+                    {
+                        throw Invalid(call.Span);
+                    }
+
+                    _ = rootValueFact.Merge(sourceValue.Get(
+                        origin.SourcePath));
+                }
+                result.Set(default, rootValueFact);
             }
             foreach (var leaf in CopyOriginFieldLeaves(destinationType, program,
                 ref remaining, depth + 1))
