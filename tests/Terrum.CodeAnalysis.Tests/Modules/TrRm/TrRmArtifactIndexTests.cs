@@ -256,6 +256,69 @@ public sealed class TrRmArtifactIndexTests
     }
 
     [Test]
+    public void A2R1RawUnionFeatureIsExactAndRequiresRootlessNativeValues()
+    {
+        var schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft;
+        var candidateFeatures = new[]
+        {
+            TrRmFeatureRow.RawUnionValueCoverageCandidate,
+            new TrRmFeatureRow(
+                TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId, 1),
+            TrRmFeatureRow.TypedFrozenValues,
+        };
+        var featureBytes = TrRmFeatureTableWriter.Encode(candidateFeatures, schema);
+
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode(candidateFeatures));
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmFeatureTableWriter.Encode(
+                [TrRmFeatureRow.RawUnionValueCoverageCandidate],
+                TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft));
+        Assert.That(TrRmFeatureTableReader.TryGetRuleRevision(
+            TrRmFeatureTableReader.RawUnionValueCoverageFeatureId,
+            TrRmArtifactSchema.Standard, out _), Is.False);
+
+        var artifact = FeatureArtifact(1, 3, featureBytes);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmStructuralMetadataValidator.Validate(artifact));
+        var index
+            = TrRmArtifactIndex.ForForeignInvocationStorageFixedArrayCopyReturnCoverageDraft(
+                artifact);
+        Assert.That(index.Schema, Is.EqualTo(schema));
+
+        Assert.That(index.TryGetSection(0x0002, out var stringBytes,
+            out var stringCount), Is.True);
+        var strings = new TrRmStringTableReader(stringBytes, stringCount);
+        Assert.That(index.TryGetSection(0x0001, out var moduleBytes,
+            out var moduleCount), Is.True);
+        var modules = new TrRmModuleTableReader(moduleBytes, moduleCount,
+            strings, 0, 0, 0, 0, 3);
+        var features = new TrRmFeatureTableReader(featureBytes, 3, schema);
+        TrRmFeatureManifestValidator.Validate(features, modules, schema);
+
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.RawUnionValueCoverageFeatureId, schema),
+            Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.CopyOriginContractsCandidateFeatureId,
+            schema), Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.TypedFrozenValuesFeatureId, schema),
+            Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.RootlessNativeValuesFeatureId, schema),
+            Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.NativeBoundaryContractsFeatureId, schema),
+            Is.True);
+        Assert.That(TrRmFeatureManifestValidator.Requires(features, modules,
+            1, TrRmFeatureTableReader.NominalUnionMetadataFeatureId, schema),
+            Is.False);
+    }
+
+    [Test]
     public void ForeignInvocationFeatureIsSelectedOutOfBandAndComposesOutputClosure()
     {
         var featureBytes = TrRmFeatureTableWriter.Encode([

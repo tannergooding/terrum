@@ -83,6 +83,8 @@ public readonly record struct TrRmFeatureRow(uint FeatureId, uint RuleRevision)
         => new(TrRmFeatureTableReader.FixedInlineArrayStorageFeatureId, 1);
     internal static TrRmFeatureRow RegisterExceptionRegionsCandidate
         => new(TrRmFeatureTableReader.RegisterExceptionRegionsFeatureId, 1);
+    internal static TrRmFeatureRow RawUnionValueCoverageCandidate
+        => new(TrRmFeatureTableReader.RawUnionValueCoverageFeatureId, 1);
 }
 
 /// <summary>Structurally validates eight-byte Feature rows without assuming row order.</summary>
@@ -121,6 +123,7 @@ public readonly ref struct TrRmFeatureTableReader
     internal const uint ImmutableDataIdentitiesFeatureId = 19;
     internal const uint FixedInlineArrayStorageFeatureId = 20;
     internal const uint RegisterExceptionRegionsFeatureId = 21;
+    internal const uint RawUnionValueCoverageFeatureId = 22;
     /// <summary>The assigned Feature rule revision shared by currently assigned features.</summary>
     public const uint RuleRevision = 1;
 
@@ -158,6 +161,7 @@ public readonly ref struct TrRmFeatureTableReader
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+                or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
                 or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
                 or TrRmArtifactSchema.ScalarFrozenValuesDraft
                 or TrRmArtifactSchema.NominalEnumsDraft
@@ -232,6 +236,13 @@ public readonly ref struct TrRmFeatureTableReader
     internal static bool TryGetRuleRevision(uint featureId,
         TrRmArtifactSchema schema, out uint ruleRevision)
     {
+        if (schema.UsesRawUnionValueCoverage()
+            && featureId == RawUnionValueCoverageFeatureId)
+        {
+            ruleRevision = 1;
+            return true;
+        }
+
         if (schema.UsesForeignInvocationStorageFixedArrays()
             && featureId == FixedInlineArrayStorageFeatureId)
         {
@@ -239,7 +250,7 @@ public readonly ref struct TrRmFeatureTableReader
             return true;
         }
 
-        if (schema == TrRmArtifactSchema.CopyOriginDraft
+        if (schema.UsesCopyOrigin()
             && featureId == CopyOriginContractsCandidateFeatureId)
         {
             ruleRevision = TrRmProvisionalFeatureRevisions.CopyOriginContractsRuleRevision;
@@ -298,6 +309,7 @@ public readonly ref struct TrRmFeatureTableReader
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
@@ -350,6 +362,7 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
@@ -360,8 +373,8 @@ internal static class TrRmFeatureManifestValidator
             throw InvalidManifest();
         }
         resourceLedger?.ConsumeWork(1UL
-            + (22UL * (1UL + sizeof(uint))));
-        Span<uint> revisions = stackalloc uint[22];
+            + (23UL * (1UL + sizeof(uint))));
+        Span<uint> revisions = stackalloc uint[23];
         for (var module = 1; module <= modules.Count; module++)
         {
             resourceLedger?.ConsumeWork();
@@ -388,6 +401,7 @@ internal static class TrRmFeatureManifestValidator
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft
+            or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyReturnCoverageDraft
             or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayGenericCopyDraft
             or TrRmArtifactSchema.ScalarFrozenValuesDraft
             or TrRmArtifactSchema.NominalEnumsDraft
@@ -404,8 +418,8 @@ internal static class TrRmFeatureManifestValidator
         }
 
         resourceLedger?.ConsumeWork(1UL
-            + (22UL * (1UL + sizeof(uint))));
-        Span<uint> revisions = stackalloc uint[22];
+            + (23UL * (1UL + sizeof(uint))));
+        Span<uint> revisions = stackalloc uint[23];
         ExpandModuleRequirements(features, modules, module, revisions, schema);
         resourceLedger?.ConsumeWork(sizeof(uint) + 2);
         return revisions[(int)featureId] != 0;
@@ -416,7 +430,7 @@ internal static class TrRmFeatureManifestValidator
         TrRmArtifactSchema schema)
     {
         var resourceLedger = features.ResourceLedger;
-        resourceLedger?.ConsumeWork(1UL + (22UL * sizeof(uint)));
+        resourceLedger?.ConsumeWork(1UL + (23UL * sizeof(uint)));
         revisions.Clear();
         resourceLedger?.ConsumeWork((2UL * sizeof(uint)) + 1);
         var (first, count) = modules.GetFeatureRange(module);
@@ -500,6 +514,7 @@ internal static class TrRmFeatureManifestValidator
             19 when schema.UsesGeneralPredicateGraphs() => 0,
             14 when schema.UsesRootPinRuntime() => 0,
             20 when schema.UsesForeignInvocationStorageFixedArrays() => 1,
+            22 when schema.UsesRawUnionValueCoverage() => 1,
             _ => 0,
         };
 
@@ -524,6 +539,7 @@ internal static class TrRmFeatureManifestValidator
             17 when schema.UsesGeneralPredicateGraphs() => 10,
             18 when schema.SupportsNominalEnums() => 11,
             20 when schema.UsesForeignInvocationStorageFixedArrays() => 2,
+            22 when schema.UsesRawUnionValueCoverage() => 2,
             _ => throw InvalidManifest(),
         };
 
