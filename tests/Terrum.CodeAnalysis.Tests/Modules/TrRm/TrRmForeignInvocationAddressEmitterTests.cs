@@ -4591,9 +4591,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerCompilation.Program!, consumerIdentity, schemaIdentity,
             1);
-        var remappedProviderArtifact = ReverseA2BodyTypeMapRows(
+        var remappedProviderArtifact = PermuteA2BodyLocalMaps(
             providerArtifact, "ProviderBody");
-        var remappedConsumerArtifact = ReverseA2BodyTypeMapRows(
+        var remappedConsumerArtifact = PermuteA2BodyLocalMaps(
             consumerArtifact, "Main");
         Assert.That(remappedProviderArtifact, Is.Not.EqualTo(providerArtifact));
         Assert.That(remappedConsumerArtifact, Is.Not.EqualTo(consumerArtifact));
@@ -4603,9 +4603,16 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             combinedArtifact);
         var loaded = TrRmExecutableCompiler.LoadStandard(input,
             consumerIdentity, []);
-        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
-            consumerIdentity, schemaIdentity, 1),
-            Is.EqualTo(consumerArtifact));
+        var reemitted = TrRmExecutableCompiler.EmitStandard(loaded,
+            consumerIdentity, schemaIdentity, 1);
+        var reemittedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            reemitted);
+        var reemittedLoaded = TrRmExecutableCompiler.LoadStandard(
+            reemittedInput, consumerIdentity,
+            [new TrRmStandardArtifactInput(schemaIdentity,
+                remappedProviderArtifact)]);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(reemittedLoaded,
+            consumerIdentity, schemaIdentity, 1), Is.EqualTo(reemitted));
         Assert.That(NativeModuleCompiler.ExecuteStandard(input,
             consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.Zero);
 
@@ -4613,7 +4620,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             input, providerSource + Environment.NewLine + consumerSource,
             0, "nested pointer-cell TypeSpec provider remapping",
             runJit: false,
-            expectedReemitted: consumerArtifact).ConfigureAwait(true);
+            expectedReemitted: reemitted).ConfigureAwait(true);
 
         var reversedArtifact = CombinePopulatedNativeAddressModules(
             remappedConsumerArtifact, remappedProviderArtifact, schema);
@@ -4653,16 +4660,25 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             reversedArtifact);
         var reversedLoaded = TrRmExecutableCompiler.LoadStandard(
             reversedInput, consumerIdentity, []);
-        Assert.That(TrRmExecutableCompiler.EmitStandard(reversedLoaded,
-            consumerIdentity, schemaIdentity, 1),
-            Is.EqualTo(consumerArtifact));
+        var reversedReemitted = TrRmExecutableCompiler.EmitStandard(
+            reversedLoaded, consumerIdentity, schemaIdentity, 1);
+        Assert.That(reversedReemitted, Is.EqualTo(reemitted));
+        var reversedReemittedInput = new TrRmStandardArtifactInput(
+            schemaIdentity, reversedReemitted);
+        var reversedReemittedLoaded = TrRmExecutableCompiler.LoadStandard(
+            reversedReemittedInput, consumerIdentity,
+            [new TrRmStandardArtifactInput(schemaIdentity,
+                remappedProviderArtifact)]);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(
+            reversedReemittedLoaded, consumerIdentity, schemaIdentity, 1),
+            Is.EqualTo(reversedReemitted));
         Assert.That(NativeModuleCompiler.ExecuteStandard(reversedInput,
             consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.Zero);
         await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
             reversedInput,
             providerSource + Environment.NewLine + consumerSource,
             0, "consumer-before-provider Body and TypeMap row remapping",
-            runJit: false, expectedReemitted: consumerArtifact)
+            runJit: false, expectedReemitted: reversedReemitted)
             .ConfigureAwait(true);
     }
 
@@ -4816,7 +4832,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         return TrRmArtifactWriter.Encode(sections, schema);
     }
 
-    private static byte[] ReverseA2BodyTypeMapRows(byte[] artifact,
+    private static byte[] PermuteA2BodyLocalMaps(byte[] artifact,
         string methodName)
     {
         const TrRmArtifactSchema schema
@@ -4839,9 +4855,18 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var bodyRow = tables.Methods.GetBodyRow(methodRow);
         var body = tables.Bodies.GetRegisterBody(bodyRow,
             tables.Contracts.Count);
+        Assert.That(body.HomeCount, Is.GreaterThan(3));
+        Assert.That(body.HasExceptionDirectory, Is.False);
         var typeMapCount = body.TypeMap.Length / sizeof(uint);
         Assert.That(typeMapCount, Is.GreaterThan(1));
         var newTypeMapIndexByOld = new ushort[typeMapCount];
+        var newHomeIndexByOld = new ushort[body.HomeCount];
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            newHomeIndexByOld[homeIndex] = checked((ushort)homeIndex);
+        }
+        newHomeIndexByOld[2] = 3;
+        newHomeIndexByOld[3] = 2;
         var typeMap = new byte[body.TypeMap.Length];
         for (var oldIndex = 0; oldIndex < typeMapCount; oldIndex++)
         {
@@ -4862,10 +4887,27 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             return newTypeMapIndexByOld[oldIndex];
         }
 
-        var homeMap = body.HomeMap.ToArray();
+        ushort RemapHomeIndex(ushort oldIndex)
+        {
+            if (oldIndex >= newHomeIndexByOld.Length)
+            {
+                throw new InvalidOperationException(
+                    "The A2 HomeMap permutation found an invalid local index.");
+            }
+
+            return newHomeIndexByOld[oldIndex];
+        }
+
+        var homeMap = new byte[body.HomeMap.Length];
         for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
         {
-            var offset = homeIndex * 8 + 2;
+            var newHomeIndex = newHomeIndexByOld[homeIndex];
+            body.HomeMap.Slice(homeIndex * 8, 8)
+                .CopyTo(homeMap.AsSpan(newHomeIndex * 8));
+        }
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            var offset = (homeIndex * 8) + 2;
             var oldIndex = BinaryPrimitives.ReadUInt16LittleEndian(
                 homeMap.AsSpan(offset));
             BinaryPrimitives.WriteUInt16LittleEndian(
@@ -4903,14 +4945,83 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 }
 
                 case 0x04:
+                {
+                    var placePayload = record.AsSpan(4);
+                    if (placePayload[3] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            placePayload[6..],
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    placePayload[6..])));
+                    }
+                    if (placePayload[8] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            placePayload[10..],
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    placePayload[10..])));
+                    }
+                    if (placePayload[0] == 1
+                        && placePayload[9] == 0)
+                    {
+                        var oldHomeIndex
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                placePayload[12..]);
+                        if (oldHomeIndex > ushort.MaxValue)
+                        {
+                            throw new InvalidOperationException(
+                                "The A2 PlaceSelection has an invalid HomeMap index.");
+                        }
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            placePayload[12..],
+                            RemapHomeIndex((ushort)oldHomeIndex));
+                    }
                     BinaryPrimitives.WriteUInt16LittleEndian(
                         record.AsSpan(20),
                         RemapTypeMapIndex(
                             BinaryPrimitives.ReadUInt16LittleEndian(
                                 record.AsSpan(20))));
                     break;
+                }
 
-                case 0x0D when record.Length == 12:
+                case 0x02:
+                {
+                    if (record[5] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(10),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(10))));
+                    }
+                    var inputCount = BinaryPrimitives.ReadUInt32LittleEndian(
+                        record.AsSpan(12));
+                    for (var input = 0; input < inputCount; input++)
+                    {
+                        var inputOffset = 20 + checked((int)input * 4);
+                        if (record[inputOffset] == 2)
+                        {
+                            BinaryPrimitives.WriteUInt16LittleEndian(
+                                record.AsSpan(inputOffset + 2),
+                                RemapHomeIndex(
+                                    BinaryPrimitives.ReadUInt16LittleEndian(
+                                        record.AsSpan(inputOffset + 2))));
+                        }
+                    }
+                    break;
+                }
+
+                case 0x0D:
+                    if (record[4] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(6),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(6))));
+                    }
                     BinaryPrimitives.WriteUInt16LittleEndian(
                         record.AsSpan(10),
                         RemapTypeMapIndex(
@@ -4919,6 +5030,22 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     break;
 
                 case 0x0E:
+                    if (record[4] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(6),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(6))));
+                    }
+                    if (record[5] == 2)
+                    {
+                        BinaryPrimitives.WriteUInt16LittleEndian(
+                            record.AsSpan(8),
+                            RemapHomeIndex(
+                                BinaryPrimitives.ReadUInt16LittleEndian(
+                                    record.AsSpan(8))));
+                    }
                     BinaryPrimitives.WriteUInt16LittleEndian(
                         record.AsSpan(10),
                         RemapTypeMapIndex(
@@ -4953,6 +5080,38 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     BinaryPrimitives.WriteUInt16LittleEndian(
                         code.AsSpan(mapOffset),
                         RemapTypeMapIndex(oldIndex));
+                }
+
+                if (opcode is 0xD5 or 0xD6 or 0xD7)
+                {
+                    var homeOffset = codeOffset + position + 2;
+                    var oldIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            code.AsSpan(homeOffset));
+                    BinaryPrimitives.WriteUInt16LittleEndian(
+                        code.AsSpan(homeOffset), RemapHomeIndex(oldIndex));
+                }
+                else if (opcode == 0x14)
+                {
+                    var operandOffset = codeOffset + position + 1;
+                    var operand = code[operandOffset];
+                    var oldIndex = (ushort)(operand & 0x0F);
+                    code[operandOffset] = (byte)((operand & 0xF0)
+                        | RemapHomeIndex(oldIndex));
+                }
+                else if (opcode is 0x13 or 0x15 or 0x60)
+                {
+                    var operandOffset = codeOffset + position + 1;
+                    var operand = code[operandOffset];
+                    var oldIndex = (ushort)(operand >> 4);
+                    code[operandOffset] = (byte)((operand & 0x0F)
+                        | (RemapHomeIndex(oldIndex) << 4));
+                }
+                else if (opcode == 0xB8)
+                {
+                    var operandOffset = codeOffset + position + 1;
+                    code[operandOffset] = checked((byte)RemapHomeIndex(
+                        code[operandOffset]));
                 }
 
                 position += TrRmRegisterBodyReader.InstructionLength(
