@@ -1288,9 +1288,18 @@ public sealed record BoundNativeFixedArrayInitialization(BoundNativeFixedArrayLa
 public sealed record BoundNativeFixedArrayElement(int Variable, BoundNativeFixedArrayLayout Layout,
     BoundExpression Index, TextSpan Span) : BoundExpression(Layout.ElementType, Span)
 {
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal BoundExpression? FieldPlace { get; init; }
+    internal override bool HasValidNestedExpressions =>
+        Index is not null
+        && (FieldPlace is null || FieldPlace.HasValidNestedExpressions);
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        FieldPlace is { } fieldPlace ? [fieldPlace, Index] : [Index];
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+        Func<BoundExpression, BoundExpression> rewrite) => this with {
+            FieldPlace = FieldPlace is { } fieldPlace
+                ? rewrite(fieldPlace) : null,
+            Index = rewrite(Index),
+        };
 }
 
 internal readonly record struct BoundNativeFixedArrayProjection(
@@ -1301,15 +1310,24 @@ internal sealed record BoundNativeFixedArrayPathElement(int Variable,
     ImmutableArray<BoundNativeFixedArrayProjection> Projections,
     PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
+    internal BoundExpression? FieldPlace { get; init; }
     internal override bool HasValidNestedExpressions =>
         !Projections.IsDefaultOrEmpty
-        && Projections.All(static projection => projection.Index is not null);
+        && Projections.All(static projection => projection.Index is not null)
+        && (FieldPlace is null || FieldPlace.HasValidNestedExpressions);
     internal override ImmutableArray<BoundExpression> NestedExpressions =>
         Projections.IsDefault
-            ? [] : [.. Projections.Select(static projection => projection.Index)];
+            ? FieldPlace is null ? [] : [FieldPlace]
+            : FieldPlace is { } fieldPlace
+                ? [fieldPlace, .. Projections.Select(static projection => projection.Index)]
+                : [.. Projections.Select(static projection => projection.Index)];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => Projections.IsDefault
-            ? this : this with {
+            ? FieldPlace is { } fieldPlace
+                ? this with { FieldPlace = rewrite(fieldPlace) } : this
+            : this with {
+                FieldPlace = FieldPlace is { } fieldBase
+                    ? rewrite(fieldBase) : null,
                 Projections = [.. Projections.Select(projection => projection with {
                     Index = rewrite(projection.Index),
                 })],
@@ -1322,16 +1340,30 @@ public sealed record BoundNativeFixedArrayPointerAddress(int Variable, BoundNati
 {
     internal bool IsUnsafeAuthorized { get; init; }
     internal ImmutableArray<BoundNativeFixedArrayProjection> Projections { get; init; } = [];
+    internal BoundExpression? FieldPlace { get; init; }
+    internal override bool HasValidNestedExpressions =>
+        Index is not null
+        && (FieldPlace is null || FieldPlace.HasValidNestedExpressions)
+        && (Projections.IsDefault
+            || Projections.All(static projection => projection.Index is not null));
 
     internal override ImmutableArray<BoundExpression> NestedExpressions =>
         Projections.IsDefaultOrEmpty
-            ? [Index] : [.. Projections.Select(static projection => projection.Index)];
+            ? FieldPlace is { } pointerArrayFieldPlace
+                ? [pointerArrayFieldPlace, Index] : [Index]
+            : FieldPlace is { } pointerArrayFieldBase
+                ? [pointerArrayFieldBase, .. Projections.Select(static projection => projection.Index)]
+                : [.. Projections.Select(static projection => projection.Index)];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite)
     {
         if (Projections.IsDefaultOrEmpty)
         {
-            return this with { Index = rewrite(Index) };
+            return this with {
+                FieldPlace = FieldPlace is { } flatPointerArrayFieldPlace
+                    ? rewrite(flatPointerArrayFieldPlace) : null,
+                Index = rewrite(Index),
+            };
         }
 
         var projections = ImmutableArray.CreateBuilder<BoundNativeFixedArrayProjection>(
@@ -1346,6 +1378,8 @@ public sealed record BoundNativeFixedArrayPointerAddress(int Variable, BoundNati
         return this with {
             Index = rewrittenProjections[^1].Index,
             Projections = rewrittenProjections,
+            FieldPlace = FieldPlace is { } nestedPointerArrayFieldPlace
+                ? rewrite(nestedPointerArrayFieldPlace) : null,
         };
     }
 }
@@ -1354,9 +1388,17 @@ public sealed record BoundNativeFixedArrayPointerAddress(int Variable, BoundNati
 public sealed record BoundNativeFixedArrayWrite(int Variable, BoundNativeFixedArrayLayout Layout,
     BoundExpression Index, BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Void, Span)
 {
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index, Value];
+    internal BoundExpression? FieldPlace { get; init; }
+    internal override bool HasValidNestedExpressions =>
+        Index is not null && Value is not null
+        && (FieldPlace is null || FieldPlace.HasValidNestedExpressions);
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        FieldPlace is { } fieldPlace
+            ? [fieldPlace, Index, Value] : [Index, Value];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => this with {
+            FieldPlace = FieldPlace is { } fieldPlace
+                ? rewrite(fieldPlace) : null,
             Index = rewrite(Index),
             Value = rewrite(Value),
         };
@@ -1368,18 +1410,31 @@ internal sealed record BoundNativeFixedArrayPathWrite(int Variable,
     BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Void,
         Span)
 {
+    internal BoundExpression? FieldPlace { get; init; }
     internal override bool HasValidNestedExpressions =>
         !Projections.IsDefaultOrEmpty
         && Projections.All(static projection => projection.Index is not null)
-        && Value is not null;
+        && Value is not null
+        && (FieldPlace is null || FieldPlace.HasValidNestedExpressions);
     internal override ImmutableArray<BoundExpression> NestedExpressions =>
         Projections.IsDefault
-            ? [Value] : [.. Projections.Select(static projection => projection.Index),
-                Value];
+            ? FieldPlace is { } flatPathWriteFieldPlace
+                ? [flatPathWriteFieldPlace, Value] : [Value]
+            : FieldPlace is { } pathWriteFieldBase
+                ? [pathWriteFieldBase, .. Projections.Select(static projection => projection.Index),
+                    Value]
+                : [.. Projections.Select(static projection => projection.Index),
+                    Value];
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite) => Projections.IsDefault
-            ? this with { Value = rewrite(Value) }
+            ? this with {
+                FieldPlace = FieldPlace is { } flatPathWriteFieldPlace
+                    ? rewrite(flatPathWriteFieldPlace) : null,
+                Value = rewrite(Value),
+            }
             : this with {
+                FieldPlace = FieldPlace is { } nestedPathWriteFieldPlace
+                    ? rewrite(nestedPathWriteFieldPlace) : null,
                 Projections = [.. Projections.Select(projection => projection with {
                     Index = rewrite(projection.Index),
                 })],
@@ -1401,17 +1456,31 @@ public sealed record BoundNativeStorageAddress(
     TextSpan Span) : BoundExpression(AddressType, Span)
 {
     internal ImmutableArray<BoundNativeFixedArrayProjection> Projections { get; init; } = [];
+    internal BoundExpression? FieldPlace { get; init; }
+    internal override bool HasValidNestedExpressions =>
+        Index is not null
+        && (FieldPlace is null || FieldPlace.HasValidNestedExpressions)
+        && (Projections.IsDefault
+            || Projections.All(static projection => projection.Index is not null));
 
     internal override ImmutableArray<BoundExpression> NestedExpressions =>
         Projections.IsDefaultOrEmpty
-            ? [Index] : [.. Projections.Select(static projection => projection.Index)];
+            ? FieldPlace is { } storageFieldPlace
+                ? [storageFieldPlace, Index] : [Index]
+            : FieldPlace is { } storageFieldBase
+                ? [storageFieldBase, .. Projections.Select(static projection => projection.Index)]
+                : [.. Projections.Select(static projection => projection.Index)];
 
     internal override BoundExpression RewriteNestedExpressions(
         Func<BoundExpression, BoundExpression> rewrite)
     {
         if (Projections.IsDefaultOrEmpty)
         {
-            return this with { Index = rewrite(Index) };
+            return this with {
+                FieldPlace = FieldPlace is { } flatStorageFieldPlace
+                    ? rewrite(flatStorageFieldPlace) : null,
+                Index = rewrite(Index),
+            };
         }
 
         var projections = ImmutableArray.CreateBuilder<BoundNativeFixedArrayProjection>(
@@ -1424,6 +1493,8 @@ public sealed record BoundNativeStorageAddress(
         return this with {
             Index = projections[^1].Index,
             Projections = projections.MoveToImmutable(),
+            FieldPlace = FieldPlace is { } nestedStorageFieldPlace
+                ? rewrite(nestedStorageFieldPlace) : null,
         };
     }
 }

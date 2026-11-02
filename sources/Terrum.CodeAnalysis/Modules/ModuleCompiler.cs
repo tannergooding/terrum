@@ -4448,6 +4448,9 @@ public static partial class ModuleCompiler
                 CarrierType = remapType(address.CarrierType),
                 ElementType = remapType(address.ElementType),
                 AddressType = remapType(address.AddressType),
+                FieldPlace = address.FieldPlace is null ? null
+                    : RemapNativeTypeIdentities(address.FieldPlace,
+                        remapType),
                 Projections = address.Projections.IsDefaultOrEmpty ? [] : [
                     .. address.Projections.Select(projection =>
                         projection with {
@@ -4462,14 +4465,47 @@ public static partial class ModuleCompiler
             BoundNativeFixedArrayElement fixedArrayElement => fixedArrayElement with {
                 Type = type,
                 Layout = RemapNativeFixedArrayLayout(fixedArrayElement.Layout, remapType),
+                FieldPlace = fixedArrayElement.FieldPlace is null ? null
+                    : RemapNativeTypeIdentities(
+                        fixedArrayElement.FieldPlace, remapType),
+            },
+            BoundNativeFixedArrayPathElement pathElement => pathElement with {
+                Type = type,
+                FieldPlace = pathElement.FieldPlace is null ? null
+                    : RemapNativeTypeIdentities(pathElement.FieldPlace,
+                        remapType),
+                Projections = pathElement.Projections.IsDefaultOrEmpty ? [] : [
+                    .. pathElement.Projections.Select(projection =>
+                        projection with {
+                            Layout = RemapNativeFixedArrayLayout(
+                                projection.Layout, remapType),
+                        })],
             },
             BoundNativeFixedArrayPointerAddress pointerAddress => pointerAddress with {
                 Type = type,
                 Layout = RemapNativeFixedArrayLayout(pointerAddress.Layout, remapType),
+                FieldPlace = pointerAddress.FieldPlace is null ? null
+                    : RemapNativeTypeIdentities(
+                        pointerAddress.FieldPlace, remapType),
             },
             BoundNativeFixedArrayWrite fixedArrayWrite => fixedArrayWrite with {
                 Type = type,
                 Layout = RemapNativeFixedArrayLayout(fixedArrayWrite.Layout, remapType),
+                FieldPlace = fixedArrayWrite.FieldPlace is null ? null
+                    : RemapNativeTypeIdentities(
+                        fixedArrayWrite.FieldPlace, remapType),
+            },
+            BoundNativeFixedArrayPathWrite pathWrite => pathWrite with {
+                Type = type,
+                FieldPlace = pathWrite.FieldPlace is null ? null
+                    : RemapNativeTypeIdentities(pathWrite.FieldPlace,
+                        remapType),
+                Projections = pathWrite.Projections.IsDefaultOrEmpty ? [] : [
+                    .. pathWrite.Projections.Select(projection =>
+                        projection with {
+                            Layout = RemapNativeFixedArrayLayout(
+                                projection.Layout, remapType),
+                        })],
             },
             _ => expression with { Type = type },
         };
@@ -4871,6 +4907,9 @@ public static partial class ModuleCompiler
                 ElementType = RemapType(address.ElementType, source, destination, classOffset, destinationTypes),
                 AddressType = RemapType(address.AddressType, source, destination, classOffset, destinationTypes),
                 Index = RemapExpression(address.Index, source, destination, classOffset, destinationTypes),
+                FieldPlace = address.FieldPlace is null ? null
+                    : RemapExpression(address.FieldPlace, source,
+                        destination, classOffset, destinationTypes),
                 Projections = address.Projections.IsDefaultOrEmpty ? [] : [
                     .. address.Projections.Select(projection =>
                         projection with {
@@ -4894,6 +4933,25 @@ public static partial class ModuleCompiler
                     classOffset, destinationTypes),
                 Index = RemapExpression(fixedArrayElement.Index, source, destination, classOffset,
                     destinationTypes),
+                FieldPlace = fixedArrayElement.FieldPlace is null ? null
+                    : RemapExpression(fixedArrayElement.FieldPlace, source,
+                        destination, classOffset, destinationTypes),
+            },
+            BoundNativeFixedArrayPathElement pathElement => pathElement with {
+                Type = RemapType(pathElement.Type, source, destination,
+                    classOffset, destinationTypes),
+                FieldPlace = pathElement.FieldPlace is null ? null
+                    : RemapExpression(pathElement.FieldPlace, source,
+                        destination, classOffset, destinationTypes),
+                Projections = pathElement.Projections.IsDefaultOrEmpty ? [] : [
+                    .. pathElement.Projections.Select(projection =>
+                        projection with {
+                            Layout = RemapNativeFixedArrayLayout(
+                                projection.Layout, source, destination,
+                                classOffset, destinationTypes),
+                            Index = RemapExpression(projection.Index, source,
+                                destination, classOffset, destinationTypes),
+                        })],
             },
             BoundNativeFixedArrayPointerAddress pointerAddress => pointerAddress with {
                 Type = RemapType(pointerAddress.Type, source, destination, classOffset, destinationTypes),
@@ -4901,6 +4959,9 @@ public static partial class ModuleCompiler
                     classOffset, destinationTypes),
                 Index = RemapExpression(pointerAddress.Index, source, destination, classOffset,
                     destinationTypes),
+                FieldPlace = pointerAddress.FieldPlace is null ? null
+                    : RemapExpression(pointerAddress.FieldPlace, source,
+                        destination, classOffset, destinationTypes),
             },
             BoundNativeFixedArrayWrite fixedArrayWrite => fixedArrayWrite with {
                 Type = RemapType(fixedArrayWrite.Type, source, destination, classOffset, destinationTypes),
@@ -4910,6 +4971,25 @@ public static partial class ModuleCompiler
                     destinationTypes),
                 Value = RemapExpression(fixedArrayWrite.Value, source, destination, classOffset,
                     destinationTypes),
+                FieldPlace = fixedArrayWrite.FieldPlace is null ? null
+                    : RemapExpression(fixedArrayWrite.FieldPlace, source,
+                        destination, classOffset, destinationTypes),
+            },
+            BoundNativeFixedArrayPathWrite pathWrite => pathWrite with {
+                Type = RemapType(pathWrite.Type, source, destination,
+                    classOffset, destinationTypes),
+                FieldPlace = pathWrite.FieldPlace is null ? null
+                    : RemapExpression(pathWrite.FieldPlace, source,
+                        destination, classOffset, destinationTypes),
+                Projections = pathWrite.Projections.IsDefaultOrEmpty ? [] : [
+                    .. pathWrite.Projections.Select(projection =>
+                        projection with {
+                            Layout = RemapNativeFixedArrayLayout(
+                                projection.Layout, source, destination,
+                                classOffset, destinationTypes),
+                            Index = RemapExpression(projection.Index, source,
+                                destination, classOffset, destinationTypes),
+                        })],
             },
             BoundNativePointerAddress address => address with {
                 Type = RemapType(address.Type, source, destination, classOffset, destinationTypes),
@@ -7493,6 +7573,11 @@ public static partial class ModuleCompiler
                 writer.Write(bufferLength.Buffer);
                 break;
             case BoundNativeStorageAddress address:
+                if (address.FieldPlace is not null)
+                {
+                    throw new ModuleContractException(
+                        "Private revision 101 excludes field-rooted fixed-array addresses.");
+                }
                 var pathProjectionCount
                     = address.Projections.IsDefaultOrEmpty
                         ? 0 : address.Projections.Length;
@@ -7606,6 +7691,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeFixedArrayElement element:
                 if (writer is not ModuleWriter elementWriter
+                    || element.FieldPlace is not null
                     || !IsRevision100RuntimeArrayLayout(element.Layout,
                         elementWriter.Structures,
                         elementWriter.NativeFixedArrayTypes,
@@ -7626,6 +7712,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeFixedArrayPointerAddress address:
                 if (writer is not ModuleWriter addressWriter
+                    || address.FieldPlace is not null
                     || !address.IsUnsafeAuthorized || !inUnsafe
                     || !IsRevision100RuntimeArrayLayout(address.Layout,
                         addressWriter.Structures,
@@ -7653,6 +7740,7 @@ public static partial class ModuleCompiler
                 break;
             case BoundNativeFixedArrayWrite write:
                 if (writer is not ModuleWriter writeWriter
+                    || write.FieldPlace is not null
                     || write.Type != PrimitiveType.Void
                     || !IsRevision100RuntimeArrayLayout(write.Layout,
                         writeWriter.Structures,

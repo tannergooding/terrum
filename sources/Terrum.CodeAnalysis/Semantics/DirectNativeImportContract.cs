@@ -431,53 +431,99 @@ internal static class DirectNativeImportContract
     internal static bool MatchesAddress(BoundNativeStorageAddress address, DirectNativeParameter parameter,
         BoundFunction caller, BoundProgram program)
     {
+        var hasFieldPlace = address.FieldPlace is not null;
         if (address.Type != PrimitiveType.NativeStorageAddress
             || address.AddressType != PrimitiveType.NativeStorageAddress
             || address.IsReadonly != (parameter.Access == NativeParameterAccess.Read)
             || (uint)address.Variable >= (uint)caller.Variables.Length
-            || caller.Variables[address.Variable].Type != address.CarrierType
-            || caller.Variables[address.Variable].IsInitializationLocal
+            || (!hasFieldPlace
+                && caller.Variables[address.Variable].Type
+                    != address.CarrierType)
+            || (hasFieldPlace
+                && address.FieldPlace!.Type != address.CarrierType)
+            || (hasFieldPlace
+                && !NativeFixedArrayContract.IsCarrier(
+                    address.CarrierType))
             || (parameter.Access != NativeParameterAccess.Read
-                && !caller.Variables[address.Variable].IsMutable))
+                && (hasFieldPlace
+                    ? !MatchesNativeFixedArrayFieldPlace(
+                        address.Variable, address.FieldPlace,
+                        address.CarrierType, caller, program,
+                        requireWritable: true)
+                    : !caller.Variables[address.Variable].IsMutable)))
         {
             return false;
         }
 
         if (NativeFixedArrayContract.IsCarrier(address.CarrierType))
         {
-            if (!NativeFixedArrayContract.TryGetLayout(
-                    caller.Variables[address.Variable].Type, program.Structures,
-                    program.NativeFixedArrayTypes, out var layout)
-                || !NativeFixedArrayContract.MatchesType(
-                    address.CarrierType, layout, program)
-                || address.ElementType != layout.ElementType
+            var hasNestedPath = !address.Projections.IsDefaultOrEmpty;
+            bool TryGetLayouts(out BoundNativeFixedArrayLayout rootLayout,
+                out BoundNativeFixedArrayLayout leafLayout)
+            {
+                if (hasNestedPath)
+                {
+                    if (!NativeFixedArrayContract.MatchesPath(
+                            address.CarrierType, address.Projections,
+                            program, out rootLayout, out leafLayout)
+                        || address.Index
+                            != address.Projections[^1].Index)
+                    {
+                        return false;
+                    }
+                    return true;
+                }
+
+                if (!NativeFixedArrayContract.TryGetLayout(
+                        address.CarrierType, program.Structures,
+                        program.NativeFixedArrayTypes, out rootLayout)
+                    || !NativeFixedArrayContract.MatchesType(
+                        address.CarrierType, rootLayout, program))
+                {
+                    leafLayout = default;
+                    return false;
+                }
+                leafLayout = rootLayout;
+                return true;
+            }
+
+            if (!TryGetLayouts(out var rootLayout, out var leafLayout)
+                || (hasFieldPlace
+                    && !MatchesNativeFixedArrayFieldPlace(
+                        address.Variable, address.FieldPlace,
+                        address.CarrierType, caller, program,
+                        requireWritable: parameter.Access
+                            != NativeParameterAccess.Read))
+                || address.ElementType != leafLayout.ElementType
                 || (parameter.PointeeType != PrimitiveType.Void
-                    && parameter.PointeeType != layout.ElementType)
-                || address.ElementCount != layout.ElementCount
-                || address.ElementStride != layout.ElementStride
-                || layout.ElementCount == 0
-                || layout.ElementStride == 0
-                || layout.ByteExtent == 0
+                    && parameter.PointeeType != leafLayout.ElementType)
+                || address.ElementCount != leafLayout.ElementCount
+                || address.ElementStride != leafLayout.ElementStride
+                || leafLayout.ElementCount == 0
+                || leafLayout.ElementStride == 0
+                || leafLayout.ByteExtent == 0
                 || !NativeFixedArrayContract.IsIndexType(address.Index.Type)
                 || (parameter.PointeeType == PrimitiveType.Void
                     && !DirectNativeImportContract.IsInputPointee(
-                        layout.ElementType, program.Structures))
+                        leafLayout.ElementType, program.Structures))
                 || (parameter.Access != NativeParameterAccess.Read
-                    && !NativeFixedArrayContract.AllowsMutableLocal(layout)))
+                    && !NativeFixedArrayContract.AllowsMutableLocal(
+                        rootLayout)))
             {
                 return false;
             }
 
             var requiredElementCount = parameter.Extent == 0
                 ? 1UL : parameter.Extent;
-            if (requiredElementCount > layout.ElementCount
+            if (requiredElementCount > leafLayout.ElementCount
                 || address.ByteExtent != checked(requiredElementCount
-                    * layout.ElementStride))
+                    * leafLayout.ElementStride))
             {
                 return false;
             }
 
-            var indexCount = layout.ElementCount - requiredElementCount + 1;
+            var indexCount = leafLayout.ElementCount
+                - requiredElementCount + 1;
             return address.Index is not BoundConstant
                 || NativeFixedArrayContract.IsConstantIndexInRange(
                     address.Index, indexCount);
@@ -494,5 +540,67 @@ internal static class DirectNativeImportContract
             && elementExtent > 0
             && address.ElementStride == (ulong)elementExtent
             && address.ByteExtent == (ulong)elementExtent;
+    }
+
+    private static bool MatchesNativeFixedArrayFieldPlace(int variable,
+        BoundExpression? fieldPlace, PrimitiveType arrayType,
+        BoundFunction caller, BoundProgram program, bool requireWritable)
+    {
+        if (fieldPlace is not BoundFieldRead place
+            || (uint)variable >= (uint)caller.Variables.Length
+            || place.Type != arrayType
+            || (requireWritable && !caller.Variables[variable].IsMutable)
+            || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                caller.Variables[variable].Type, program.Structures,
+                program.NativeFixedArrayTypes))
+        {
+            return false;
+        }
+
+        var receiverCount = (caller.IsConstructor
+            || (caller.DeclaringStruct is not null && !caller.IsStatic))
+                ? 1 : 0;
+        if (variable < caller.ParameterCount + receiverCount)
+        {
+            return false;
+        }
+
+        var fields = new Stack<BoundFieldRead>();
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            fields.Push(field);
+            receiver = field.Receiver;
+        }
+        if (receiver is not BoundRead root || root.Variable != variable
+            || root.Type != caller.Variables[variable].Type)
+        {
+            return false;
+        }
+
+        var ownerType = root.Type;
+        while (fields.TryPop(out var field))
+        {
+            var ownerIndex = (int)ownerType - 100;
+            if ((uint)ownerIndex >= (uint)program.Structures.Length
+                || field.Receiver.Type != ownerType
+                || program.Structures[ownerIndex].IsUnique
+                || (uint)field.Field
+                    >= (uint)program.Structures[ownerIndex].Fields.Length)
+            {
+                return false;
+            }
+
+            var definition = program.Structures[ownerIndex].Fields[
+                field.Field];
+            if (definition.Type != field.Type
+                || (requireWritable && !definition.IsMutable))
+            {
+                return false;
+            }
+            ownerType = definition.Type;
+        }
+
+        return ownerType == arrayType;
     }
 }

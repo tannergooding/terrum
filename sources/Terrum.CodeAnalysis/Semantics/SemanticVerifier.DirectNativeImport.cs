@@ -1001,18 +1001,53 @@ public static partial class SemanticVerifier
         var firstLocal = function.ParameterCount + (function.IsConstructor ? 1 : 0);
         if (!DirectNativeImportContract.MatchesAddress(address, parameter, function, program)
             || address.Variable < firstLocal || !declarations.Contains(address.Variable)
-            || !initialized[address.Variable])
+            || (address.FieldPlace is null
+                && !initialized[address.Variable]))
         {
             throw InvalidEffect(address.Span, "NativeImport");
         }
 
         if (NativeFixedArrayContract.IsCarrier(address.CarrierType))
         {
-            VerifyNativeFixedArrayPlace(address.Variable, address.Index,
-                address.CarrierType,
-                parameter.Access == NativeParameterAccess.Read,
-                initialized, fieldMasks, declarations, function, program,
-                ref remaining, depth + 1, failures);
+            if (address.Projections.IsDefaultOrEmpty)
+            {
+                VerifyNativeFixedArrayPlace(address.Variable,
+                    address.FieldPlace, address.Index, address.CarrierType,
+                    parameter.Access == NativeParameterAccess.Read,
+                    initialized, fieldMasks, declarations, function, program,
+                    ref remaining, depth + 1, failures);
+            }
+            else
+            {
+                if (!declarations.Contains(address.Variable)
+                    || (address.FieldPlace is null
+                        && !initialized[address.Variable])
+                    || !IsValidNativeFixedArrayPath(address.Variable,
+                        address.Projections, function, program, out _,
+                        address.FieldPlace))
+                {
+                    throw InvalidEffect(address.Span, "NativeImport");
+                }
+
+                if (address.FieldPlace is not null
+                    && !EvaluateExpression(address.FieldPlace, initialized,
+                        fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures))
+                {
+                    foreach (var projection in address.Projections)
+                    {
+                        ValidateUnreachableExpression(projection.Index,
+                            initialized, fieldMasks, declarations, function,
+                            program, ref remaining, depth + 1);
+                    }
+                    return;
+                }
+
+                _ = EvaluateNativeFixedArrayPathIndices(
+                    address.Projections, initialized, fieldMasks,
+                    declarations, function, program, ref remaining,
+                    depth + 1, failures);
+            }
             return;
         }
 

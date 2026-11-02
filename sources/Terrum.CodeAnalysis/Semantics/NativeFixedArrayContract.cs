@@ -2,6 +2,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Numerics;
 
 namespace Terrum.CodeAnalysis.Semantics;
@@ -93,6 +94,54 @@ internal static class NativeFixedArrayContract
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
         => IsSupportedElement(type, structures, fixedArrays, [],
             allowEnums: true);
+
+    internal static bool HasInlineFixedArrayFieldStorage(
+        PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays)
+        => HasInlineFixedArrayFieldStorage(type, structures, fixedArrays, [],
+            0);
+
+    private static bool HasInlineFixedArrayFieldStorage(
+        PrimitiveType type, IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        HashSet<PrimitiveType> visiting, int depth)
+    {
+        if (depth > SemanticVerifier.MaximumDepth)
+        {
+            return true;
+        }
+        if (NativeFixedArrayTypes.IsType(type))
+        {
+            return true;
+        }
+
+        var typeValue = (int)type;
+        if (typeValue < 100
+            || typeValue >= 100 + structures.Count
+            || !visiting.Add(type))
+        {
+            return false;
+        }
+
+        var index = typeValue - 100;
+        try
+        {
+            foreach (var field in structures[index].Fields)
+            {
+                if (field is not null
+                    && HasInlineFixedArrayFieldStorage(field.Type,
+                        structures, fixedArrays, visiting, depth + 1))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        finally
+        {
+            _ = visiting.Remove(type);
+        }
+    }
 
     internal static bool TryCreateType(PrimitiveType elementType,
         ulong elementCount, IReadOnlyList<BoundStruct> structures,
@@ -224,6 +273,61 @@ internal static class NativeFixedArrayContract
         => MatchesProgram(program)
             && MatchesLayout(layout, program.Structures,
                 program.NativeFixedArrayTypes);
+
+    internal static bool MatchesPath(PrimitiveType rootType,
+        ImmutableArray<BoundNativeFixedArrayProjection> projections,
+        BoundProgram program, out BoundNativeFixedArrayLayout rootLayout,
+        out BoundNativeFixedArrayLayout leafLayout)
+    {
+        rootLayout = default;
+        leafLayout = default;
+        return MatchesProgram(program)
+            && MatchesPath(rootType, projections, program.Structures,
+                program.NativeFixedArrayTypes, out rootLayout,
+                out leafLayout);
+    }
+
+    internal static bool MatchesPath(PrimitiveType rootType,
+        ImmutableArray<BoundNativeFixedArrayProjection> projections,
+        IReadOnlyList<BoundStruct> structures,
+        IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
+        out BoundNativeFixedArrayLayout rootLayout,
+        out BoundNativeFixedArrayLayout leafLayout)
+    {
+        rootLayout = default;
+        leafLayout = default;
+        if (projections.IsDefaultOrEmpty
+            || projections.Length < 2
+            || projections.Length > SemanticVerifier.MaximumDepth
+            || !IsValidTable(structures, fixedArrays)
+            || !TryGetLayout(rootType, structures, fixedArrays,
+                out rootLayout)
+            || projections[0].Layout != rootLayout)
+        {
+            return false;
+        }
+
+        var expectedCarrier = rootType;
+        foreach (var projection in projections)
+        {
+            if (projection.Index is null
+                || projection.Layout.CarrierType != expectedCarrier
+                || !MatchesLayout(projection.Layout, structures,
+                    fixedArrays)
+                || !IsIndexType(projection.Index.Type)
+                || (projection.Index is BoundConstant
+                    && !IsConstantIndexInRange(projection.Index,
+                        projection.Layout.ElementCount)))
+            {
+                return false;
+            }
+
+            expectedCarrier = projection.Layout.ElementType;
+        }
+
+        leafLayout = projections[^1].Layout;
+        return true;
+    }
 
     internal static bool IsRevision100RuntimeArrayLayout(
         BoundNativeFixedArrayLayout layout,
@@ -579,9 +683,13 @@ internal static class NativeFixedArrayContract
         IReadOnlyList<BoundNativeFixedArrayType> fixedArrays,
         HashSet<PrimitiveType> visiting, bool allowEnums)
     {
+        if (BoundEnumTypes.IsType(type))
+        {
+            return allowEnums;
+        }
+
         if (type == PrimitiveType.Void
-            || (PrimitiveTypeFacts.ScalarWidth(type) > 0
-                && !BoundEnumTypes.IsType(type))
+            || PrimitiveTypeFacts.ScalarWidth(type) > 0
             || type is PrimitiveType.NativeUtf16ZPointer
                 or PrimitiveType.NativeUtf8ZPointer
             || type == PrimitiveType.NativeRawPointer
@@ -607,8 +715,7 @@ internal static class NativeFixedArrayContract
             }
 
             var structureIndex = (int)type - 100;
-            if (BoundEnumTypes.IsType(type)
-                || structureIndex < 0 || structureIndex >= structures.Count)
+            if (structureIndex < 0 || structureIndex >= structures.Count)
             {
                 return false;
             }
@@ -635,11 +742,6 @@ internal static class NativeFixedArrayContract
             }
 
             return true;
-        if (BoundEnumTypes.IsType(type))
-        {
-            return allowEnums;
-        }
-
         }
         finally
         {

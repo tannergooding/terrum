@@ -95,12 +95,19 @@ public static partial class SemanticVerifier
         var newValues = NativePointerFieldValueSnapshotOfExpression(
             write.Value, write.Layout.ElementType, facts, function,
             program, ref remaining, depth + 1);
+        if (!TryGetNativeFixedArrayArrayPrefix(write.Variable,
+                write.FieldPlace, write.Layout, function, program,
+                out var arrayPrefix))
+        {
+            throw Invalid(write.Span);
+        }
         var isDynamic = !NativeFixedArrayContract.TryGetUnsignedIndex(
             write.Index, out var selectedIndex);
-        var destination = isDynamic
-            ? StorageProjection.ForArrayRange(0,
-                write.Layout.ElementCount)
-            : StorageProjection.ForArrayIndex(selectedIndex);
+        var destination = StorageProjection.Combine(arrayPrefix,
+            isDynamic
+                ? StorageProjection.ForArrayRange(0,
+                    write.Layout.ElementCount)
+                : StorageProjection.ForArrayIndex(selectedIndex));
         ApplyNativeFixedArrayWriteValues(write.Variable, destination,
             isDynamic, newValues, facts, write.Span);
     }
@@ -114,7 +121,13 @@ public static partial class SemanticVerifier
         var newValues = NativePointerFieldValueSnapshotOfExpression(
             write.Value, leafLayout.ElementType, facts, function, program,
             ref remaining, depth + 1);
-        ApplyPath(0, StorageProjection.WholeObject, false, ref remaining);
+        if (!TryGetNativeFixedArrayArrayPrefix(write.Variable,
+                write.FieldPlace, write.Projections[0].Layout, function,
+                program, out var arrayPrefix))
+        {
+            throw Invalid(write.Span);
+        }
+        ApplyPath(0, arrayPrefix, false, ref remaining);
 
         void ApplyPath(int pathIndex, StorageProjection prefix, bool maySelect,
             ref int workRemaining)
@@ -202,12 +215,14 @@ public static partial class SemanticVerifier
         }
     }
 
-    private static void VerifyNativeFixedArrayPlace(int variable, BoundExpression index,
+    private static void VerifyNativeFixedArrayPlace(int variable,
+        BoundExpression? fieldPlace, BoundExpression index,
         PrimitiveType carrierType, bool isReadonly,
         InitializationState initialized, uint[] fieldMasks, HashSet<int> declarations,
         BoundFunction function, BoundProgram program, ref int remaining, int depth, FailureEdges? failures)
     {
         Count(ref remaining, depth);
+        var hasFieldPlace = fieldPlace is not null;
         if (RequiresNoFailureProof(function)
             && program.RuntimePolicy == BoundRuntimePolicy.CheckedExceptions
             && index is not BoundConstant)
@@ -216,16 +231,25 @@ public static partial class SemanticVerifier
         }
         if (!NativeFixedArrayContract.MatchesProgram(program)
             || !NativeFixedArrayContract.IsCarrier(carrierType)
+            || !NativeFixedArrayContract.TryGetLayout(carrierType,
+                program.Structures, program.NativeFixedArrayTypes,
+                out var layout)
             || variable < function.ParameterCount + (function.IsConstructor ? 1 : 0)
-            || variable >= function.Variables.Length || !declarations.Contains(variable) || !initialized[variable]
-            || function.Variables[variable].Type != carrierType
-            || !NativeFixedArrayContract.TryGetLayout(
-                function.Variables[variable].Type, program.Structures,
-                program.NativeFixedArrayTypes, out var layout)
+            || variable >= function.Variables.Length
+            || !declarations.Contains(variable)
+            || (!hasFieldPlace
+                && (!initialized[variable]
+                    || function.Variables[variable].Type != carrierType))
+            || !TryGetNativeFixedArrayArrayPrefix(variable, fieldPlace,
+                layout, function, program, out _)
             || layout.CarrierType != carrierType
             || !NativeFixedArrayContract.MatchesLayout(layout, program)
-            || (!isReadonly && (!function.Variables[variable].IsMutable
-                || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
+            || (!isReadonly
+                && ((hasFieldPlace
+                        ? !IsWritableNativeFixedArrayFieldPlace(variable,
+                            fieldPlace, function, program)
+                        : !function.Variables[variable].IsMutable)
+                    || !NativeFixedArrayContract.AllowsMutableLocal(layout)))
             || index is null
             || !NativeFixedArrayContract.IsIndexType(index.Type)
             || (index is BoundConstant
@@ -233,6 +257,15 @@ public static partial class SemanticVerifier
                     layout.ElementCount)))
         {
             throw InvalidEffect(index?.Span ?? default, "NativeImport");
+        }
+        if (fieldPlace is not null
+            && !EvaluateExpression(fieldPlace, initialized, fieldMasks,
+                declarations, function, program, ref remaining,
+                depth + 1, failures))
+        {
+            ValidateUnreachableExpression(index, initialized, fieldMasks,
+                declarations, function, program, ref remaining, depth + 1);
+            return;
         }
         _ = EvaluateExpression(index, initialized, fieldMasks, declarations, function, program,
             ref remaining, depth + 1, failures);

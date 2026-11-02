@@ -21,6 +21,25 @@ internal sealed partial class PeCompiler
         _code.Bytes(0x48, 0x01, 0xD0);
     }
 
+    private void EmitNativeFixedArrayElementAddress(int variable,
+        BoundExpression? fieldPlace, BoundExpression index, int spill,
+        ulong elementCount, ulong elementStride,
+        ulong requiredElementCount = 1)
+    {
+        if (fieldPlace is null)
+        {
+            EmitNativeArrayElementAddress(variable, index, spill,
+                elementCount, elementStride, requiredElementCount);
+            return;
+        }
+
+        _ = UpdateAddress(fieldPlace, spill + 1);
+        _code.Store64(Spill(spill));
+        EmitNativeArrayElementAddressFromBase(Spill(spill), index,
+            spill + 1, elementCount, elementStride,
+            requiredElementCount);
+    }
+
     private void EmitNativeArrayElementAddressFromBase(int baseAddressSlot,
         BoundExpression index, int spill, ulong elementCount,
         ulong elementStride, ulong requiredElementCount = 1)
@@ -34,7 +53,8 @@ internal sealed partial class PeCompiler
 
     private void EmitNativeFixedArrayPathAddress(int variable,
         ImmutableArray<BoundNativeFixedArrayProjection> projections, int spill,
-        ulong requiredElementCount = 1)
+        ulong requiredElementCount = 1,
+        BoundExpression? fieldPlace = null)
     {
         if (projections.IsDefaultOrEmpty)
         {
@@ -43,7 +63,8 @@ internal sealed partial class PeCompiler
         }
 
         var first = projections[0];
-        EmitNativeArrayElementAddress(variable, first.Index, spill,
+        EmitNativeFixedArrayElementAddress(variable, fieldPlace,
+            first.Index, spill,
             first.Layout.ElementCount, first.Layout.ElementStride,
             projections.Length == 1 ? requiredElementCount : 1);
         for (var index = 1; index < projections.Length; index++)
@@ -147,7 +168,28 @@ internal sealed partial class PeCompiler
         {
             throw new InvalidOperationException("The native storage address exceeds its carrier.");
         }
-        if (address.Projections.IsDefaultOrEmpty
+        if (address.FieldPlace is not null)
+        {
+            if (address.Projections.IsDefaultOrEmpty)
+            {
+                EmitNativeFixedArrayElementAddress(address.Variable,
+                    address.FieldPlace, address.Index, spill,
+                    address.ElementCount, address.ElementStride,
+                    requiredElementCount);
+            }
+            else
+            {
+                if (address.Index != address.Projections[^1].Index)
+                {
+                    throw new InvalidOperationException(
+                        "The native storage address has an invalid field projection.");
+                }
+                EmitNativeFixedArrayPathAddress(address.Variable,
+                    address.Projections, spill, requiredElementCount,
+                    address.FieldPlace);
+            }
+        }
+        else if (address.Projections.IsDefaultOrEmpty
             && NativeFixedArrayContract.IsConstantIndex(address.Index, 0))
         {
             _code.Address(Slot(address.Variable));
@@ -325,10 +367,14 @@ internal sealed partial class PeCompiler
             case BoundNativeFixedArrayElement element:
                 if ((uint)element.Variable
                     >= (uint)_program.Functions[_currentFunction].Variables.Length
-                    || _program.Functions[_currentFunction].Variables[element.Variable].Type
-                        != element.Layout.CarrierType
+                    || (element.FieldPlace is null
+                        && _program.Functions[_currentFunction].Variables[element.Variable].Type
+                            != element.Layout.CarrierType)
+                    || (element.FieldPlace is not null
+                        && element.FieldPlace.Type
+                            != element.Layout.CarrierType)
                     || !NativeFixedArrayContract.MatchesType(
-                        _program.Functions[_currentFunction].Variables[element.Variable].Type,
+                        element.Layout.CarrierType,
                         element.Layout, _program)
                     || !NativeFixedArrayContract.MatchesLayout(element.Layout, _program)
                     || element.Type != element.Layout.ElementType)
@@ -336,8 +382,10 @@ internal sealed partial class PeCompiler
                     throw new InvalidOperationException(
                         "The checked-reference array element place is invalid.");
                 }
-                EmitNativeArrayElementAddress(element.Variable, element.Index, spill,
-                    element.Layout.ElementCount, element.Layout.ElementStride);
+                EmitNativeFixedArrayElementAddress(element.Variable,
+                    element.FieldPlace, element.Index, spill,
+                    element.Layout.ElementCount,
+                    element.Layout.ElementStride);
                 break;
             case BoundFieldRead field:
                 if (ManagedClassTypes.IsClass(field.Receiver.Type))
@@ -703,7 +751,8 @@ internal sealed partial class PeCompiler
 
     private void EmitNativeFixedArrayElement(BoundNativeFixedArrayElement element, int spill)
     {
-        EmitNativeArrayElementAddress(element.Variable, element.Index, spill,
+        EmitNativeFixedArrayElementAddress(element.Variable,
+            element.FieldPlace, element.Index, spill,
             element.Layout.ElementCount, element.Layout.ElementStride);
         if (Size(element.Type) == 0)
         {
@@ -737,7 +786,7 @@ internal sealed partial class PeCompiler
         BoundNativeFixedArrayPathElement element, int spill)
     {
         EmitNativeFixedArrayPathAddress(element.Variable,
-            element.Projections, spill);
+            element.Projections, spill, fieldPlace: element.FieldPlace);
         if (Size(element.Type) == 0)
         {
             _code.Bytes(0x31, 0xC0);
@@ -773,20 +822,23 @@ internal sealed partial class PeCompiler
     {
         if (address.Projections.IsDefaultOrEmpty)
         {
-            EmitNativeArrayElementAddress(address.Variable, address.Index,
-                spill, address.Layout.ElementCount,
+            EmitNativeFixedArrayElementAddress(address.Variable,
+                address.FieldPlace, address.Index, spill,
+                address.Layout.ElementCount,
                 address.Layout.ElementStride);
         }
         else
         {
             EmitNativeFixedArrayPathAddress(address.Variable,
-                address.Projections, spill);
+                address.Projections, spill,
+                fieldPlace: address.FieldPlace);
         }
     }
 
     private void EmitNativeFixedArrayWrite(BoundNativeFixedArrayWrite write, int spill)
     {
-        EmitNativeArrayElementAddress(write.Variable, write.Index, spill,
+        EmitNativeFixedArrayElementAddress(write.Variable,
+            write.FieldPlace, write.Index, spill,
             write.Layout.ElementCount, write.Layout.ElementStride);
         _code.Store64(Spill(spill));
         if (write.Value is BoundNativeFixedArrayInitialization initialization)
@@ -840,7 +892,7 @@ internal sealed partial class PeCompiler
         BoundNativeFixedArrayPathWrite write, int spill)
     {
         EmitNativeFixedArrayPathAddress(write.Variable, write.Projections,
-            spill);
+            spill, fieldPlace: write.FieldPlace);
         _code.Store64(Spill(spill));
         if (write.Value is BoundNativeFixedArrayInitialization initialization)
         {

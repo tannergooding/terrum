@@ -319,6 +319,376 @@ public sealed class NativeFixedArrayStorageTests
                 dynamicOuterPathWrite.Diagnostics));
     }
 
+    [Test]
+    public void FixedArrayFieldPlaceBindsOnAnInitializedLocalCopyAggregate()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            public struct Holder {
+                public mut [uint32; 2] Values;
+            }
+
+            public uint32 ReadFieldElement() {
+                init mut Holder holder;
+                holder.Values = [1, 2];
+                return holder.Values[1];
+            }
+            """;
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [Test]
+    public void FixedArrayFieldPlaceCanTraverseNestedCopyFields()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            public struct Inner {
+                public mut [uint32; 2] Values;
+            }
+
+            [Blittable] [Layout(Sequential)]
+            public struct Outer {
+                public mut Inner Inner;
+                public mut uint32 Tail;
+            }
+
+            int32 Main() {
+                init mut Outer outer;
+                outer.Inner.Values = [11, 42];
+                outer.Tail = 5;
+                Outer copy = outer;
+                return int32(copy.Inner.Values[1])
+                    + int32(copy.Tail);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(
+            compilation.Program
+                ?? throw new AssertionException(
+                    "Expected the nested field-array program."),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(47));
+    }
+
+    [Test]
+    public void RawUnionPayloadCoverageRemainsPerFixedArrayFieldElement()
+    {
+        const string prefix = """
+            [Blittable] [Layout(Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+                public Sparse(uint8 first, uint32 last) {
+                    First = first;
+                    Last = last;
+                }
+            }
+
+            [Blittable] [Layout(Union)]
+            public struct RawWord {
+                public mut uint64 Wide;
+                public mut Sparse Padded;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
+            }
+
+            public RawWord MakePadded() {
+                mut RawWord value = new RawWord(0);
+                unsafe { value.Padded = new Sparse(1, 2); }
+                return value;
+            }
+
+            [Blittable] [Layout(Sequential)]
+            public struct Envelope {
+                public mut [RawWord; 2] Values;
+            }
+            """;
+
+        var fullField = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadFieldArrayElement() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    unsafe { return envelope.Values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fullField.HasErrors, Is.False,
+            string.Join(Environment.NewLine, fullField.Diagnostics));
+
+        var dynamicFullField = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 ReadDynamicFieldArrayElement(int32 index) {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    unsafe { return envelope.Values[index].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicFullField.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                dynamicFullField.Diagnostics));
+
+        var dynamicMixedField = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectDynamicMixedFieldArrayElement(
+                    int32 index) {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), MakePadded()];
+                    unsafe { return envelope.Values[index].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicMixedField.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                dynamicMixedField.Diagnostics));
+
+        var mixedField = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectMixedFieldArrayElement() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), MakePadded()];
+                    unsafe { return envelope.Values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(mixedField.HasErrors, Is.True,
+            string.Join(Environment.NewLine, mixedField.Diagnostics));
+
+        var fieldCopy = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 PreserveFieldArrayCopySnapshot() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    Envelope copy = envelope;
+                    envelope.Values[0] = MakePadded();
+                    unsafe { return copy.Values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fieldCopy.HasErrors, Is.False,
+            string.Join(Environment.NewLine, fieldCopy.Diagnostics));
+
+        var fieldCopyFromLocal = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 CopyLocalArrayIntoField() {
+                    [RawWord; 2] source = [
+                        new RawWord(1), new RawWord(2)];
+                    init mut Envelope envelope;
+                    envelope.Values = source;
+                    unsafe { return envelope.Values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fieldCopyFromLocal.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                fieldCopyFromLocal.Diagnostics));
+
+        var fieldWriteKeepsSibling = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 KeepFieldArraySiblingAfterWrite() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    envelope.Values[1] = MakePadded();
+                    unsafe { return envelope.Values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fieldWriteKeepsSibling.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                fieldWriteKeepsSibling.Diagnostics));
+
+        var fieldElementExecution = Compilation.Create(
+            SyntaxTree.Parse(prefix + """
+                int32 Main() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(13), new RawWord(42)];
+                    envelope.Values[1] = MakePadded();
+                    unsafe { return int32(envelope.Values[0].Wide); }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fieldElementExecution.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                fieldElementExecution.Diagnostics));
+        Assert.That(NativeJit.Execute(
+            fieldElementExecution.Program
+                ?? throw new AssertionException(
+                    "Expected the array-field execution program."),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(13));
+
+        var failedFieldReplacement = Compilation.Create(
+            SyntaxTree.Parse(prefix + """
+                uint64 FailElement() {
+                    require false;
+                    return 0;
+                }
+
+                int32 Main() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(13), new RawWord(42)];
+                    unsafe {
+                        try {
+                            envelope.Values = [
+                                new RawWord(99),
+                                new RawWord(FailElement())];
+                        } catch {
+                        }
+                    }
+                    unsafe {
+                        return int32(envelope.Values[0].Wide
+                            + envelope.Values[1].Wide);
+                    }
+                }
+                """), BoundRuntimePolicy.CheckedExceptions);
+        Assert.That(failedFieldReplacement.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                failedFieldReplacement.Diagnostics));
+        Assert.That(NativeJit.Execute(
+            failedFieldReplacement.Program
+                ?? throw new AssertionException(
+                    "Expected the failed field-replacement program."),
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(55));
+
+        var fieldWriteInvalidatesElement = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectFieldArrayElementAfterWrite() {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    envelope.Values[1] = MakePadded();
+                    unsafe { return envelope.Values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fieldWriteInvalidatesElement.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                fieldWriteInvalidatesElement.Diagnostics));
+
+        var dynamicFieldWriteInvalidatesAll = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectFieldArrayElementAfterDynamicWrite(
+                    int32 index) {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    envelope.Values[index] = MakePadded();
+                    unsafe { return envelope.Values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicFieldWriteInvalidatesAll.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                dynamicFieldWriteInvalidatesAll.Diagnostics));
+
+        var branchFieldWriteKeepsSibling = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 KeepFieldArraySiblingAfterBranchWrite(
+                    bool replace) {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    if (replace) {
+                        envelope.Values[0] = MakePadded();
+                    }
+                    unsafe { return envelope.Values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(branchFieldWriteKeepsSibling.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                branchFieldWriteKeepsSibling.Diagnostics));
+
+        var branchFieldWriteInvalidatesElement = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectFieldArrayElementAfterBranchWrite(
+                    bool replace) {
+                    init mut Envelope envelope;
+                    envelope.Values = [
+                        new RawWord(1), new RawWord(2)];
+                    if (replace) {
+                        envelope.Values[0] = MakePadded();
+                    }
+                    unsafe { return envelope.Values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(branchFieldWriteInvalidatesElement.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                branchFieldWriteInvalidatesElement.Diagnostics));
+    }
+
+    [Test]
+    public void RawUnionPayloadCoverageRemainsPerNestedFixedArrayFieldElement()
+    {
+        const string prefix = """
+            [Blittable] [Layout(Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+                public Sparse(uint8 first, uint32 last) {
+                    First = first;
+                    Last = last;
+                }
+            }
+
+            [Blittable] [Layout(Union)]
+            public struct RawWord {
+                public mut uint64 Wide;
+                public mut Sparse Padded;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
+            }
+
+            public RawWord MakePadded() {
+                mut RawWord value = new RawWord(0);
+                unsafe { value.Padded = new Sparse(1, 2); }
+                return value;
+            }
+
+            [Blittable] [Layout(Sequential)]
+            public struct NestedEnvelope {
+                public mut [[RawWord; 2]; 2] Rows;
+            }
+            """;
+
+        var fullNestedField = Compilation.Create(
+            SyntaxTree.Parse(prefix + """
+                int32 Main() {
+                    init mut NestedEnvelope envelope;
+                    envelope.Rows = [
+                        [new RawWord(1), MakePadded()],
+                        [new RawWord(3), new RawWord(4)]];
+                    unsafe { return int32(envelope.Rows[1][0].Wide); }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(fullNestedField.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                fullNestedField.Diagnostics));
+        Assert.That(NativeJit.Execute(
+            fullNestedField.Program
+                ?? throw new AssertionException(
+                    "Expected the nested field-array program."),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(3));
+
+        var mixedNestedField = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectMixedNestedFieldElement() {
+                    init mut NestedEnvelope envelope;
+                    envelope.Rows = [
+                        [new RawWord(1), MakePadded()],
+                        [new RawWord(3), new RawWord(4)]];
+                    unsafe { return envelope.Rows[0][1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(mixedNestedField.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                mixedNestedField.Diagnostics));
+    }
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void RequiredConstEvalCallsDetermineFixedArrayExtents(
@@ -555,6 +925,67 @@ public sealed class NativeFixedArrayStorageTests
     }
 
     [Test]
+    public void TypedNativePointerCanAddressACheckedFixedArrayFieldElement()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            struct Envelope {
+                public mut [uint32; 3] Values;
+            }
+
+            int32 Main() {
+                init mut Envelope envelope;
+                envelope.Values = [4, 5, 6];
+                int32 index = 1;
+                unsafe {
+                    write ptr<uint32> selected = &envelope.Values[index];
+                    *selected = 42;
+                    return int32(envelope.Values[1]);
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.CheckedExceptions);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        Assert.That(NativeEmitter.EmitWithNativeImports(program,
+            NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
+        Assert.That(NativeJit.Execute(program,
+            NativeRuntimePolicy.CheckedExceptions), Is.EqualTo(42));
+    }
+
+    [Test]
+    public void CheckedReferenceCanAddressFixedArrayFieldElement()
+    {
+        const string source = """
+            [Blittable] [Layout(Sequential)]
+            struct Envelope {
+                public mut [uint32; 3] Values;
+            }
+
+            int32 Main() {
+                init mut Envelope envelope;
+                envelope.Values = [4, 5, 6];
+                write ref<uint32> selected = ref envelope.Values[1];
+                *selected = 42;
+                return int32(envelope.Values[1]);
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(
+            compilation.Program
+                ?? throw new AssertionException(
+                    "Expected the array-field reference program."),
+            NativeRuntimePolicy.FailFast), Is.EqualTo(42));
+    }
+
+    [Test]
     public void TypedNativePointerRetainsItsEvaluatedFixedArrayProjection()
     {
         Assume.That(OperatingSystem.IsWindows()
@@ -630,6 +1061,67 @@ public sealed class NativeFixedArrayStorageTests
             NativeRuntimePolicy.CheckedExceptions);
         TestContext.WriteLine(
             $"NativeParameter suffix JIT result: policy=CheckedExceptions; expected={expectedResult}; actual={actualResult}.");
+        Assert.That(actualResult, Is.EqualTo(expectedResult));
+    }
+
+    [TestCase(2, 1, 99)]
+    [TestCase(2, 2, 3)]
+    public void NativeParameterAddressChecksFixedArrayFieldSuffix(
+        int elementExtent, int index, int expectedResult)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var source = $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "IsBadReadPtr",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, {{elementExtent}})]
+            internal extern bool IsBadReadPtr(
+                ptr<uint32> memory,
+                uint64 byteCount);
+
+            [Blittable] [Layout(Sequential)]
+            struct Envelope {
+                public mut [uint32; 3] Values;
+            }
+
+            int32 Main() {
+                init mut Envelope envelope;
+                envelope.Values = [10, 20, 30];
+                mut int32 selectedIndex = {{index}};
+                uint64 byteCount = {{(ulong)elementExtent * sizeof(uint)}};
+                unsafe {
+                    try {
+                        bool isBad = IsBadReadPtr(
+                            &envelope.Values[selectedIndex++], byteCount);
+                        return selectedIndex + 97;
+                    } catch {
+                        return selectedIndex;
+                    }
+                }
+                return 100;
+            }
+            """;
+        var options = new CompilationOptions {
+            RuntimePolicy = BoundRuntimePolicy.CheckedExceptions,
+            NativeCoreRegistration
+                = NativeCoreRegistrationTests.CreateRegistration(),
+        };
+        var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var program = compilation.Program
+            ?? throw new AssertionException("Expected a bound program.");
+        var compilerPath = typeof(NativeJit).Assembly.Location;
+        var kernel32Path = Path.Combine(Environment.SystemDirectory,
+            "kernel32.dll");
+        TestContext.WriteLine(
+            $"NativeParameter fixed-array field suffix input: extent={elementExtent}; index-expression=selectedIndex++; starting-index={index}; byte-count={(ulong)elementExtent * sizeof(uint)}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={kernel32Path}!IsBadReadPtr; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(kernel32Path)))}.");
+        var actualResult = NativeJit.Execute(program,
+            NativeRuntimePolicy.CheckedExceptions);
+        TestContext.WriteLine(
+            $"NativeParameter fixed-array field suffix result: policy=CheckedExceptions; expected={expectedResult}; actual={actualResult}.");
         Assert.That(actualResult, Is.EqualTo(expectedResult));
     }
 

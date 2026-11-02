@@ -368,7 +368,8 @@ public static class NativeEmitter
     }
 
     private static bool HasNativeFixedArrayStorage(BoundProgram program) =>
-        program.Functions.Any(static function =>
+        !program.NativeFixedArrayTypes.IsDefaultOrEmpty
+        || program.Functions.Any(static function =>
             function.Variables.Any(static variable =>
                 NativeFixedArrayTypes.IsType(variable.Type)));
 
@@ -2366,14 +2367,26 @@ internal sealed partial class PeCompiler
                 }
                 return fixedArraySpills;
             case BoundNativeFixedArrayElement fixedArrayElement:
-                return ExpressionSpills(fixedArrayElement.Index, ref maximumArguments);
+                return fixedArrayElement.FieldPlace is null
+                    ? ExpressionSpills(fixedArrayElement.Index,
+                        ref maximumArguments)
+                    : Math.Max(1 + ExpressionSpills(
+                            fixedArrayElement.FieldPlace,
+                            ref maximumArguments),
+                        1 + ExpressionSpills(fixedArrayElement.Index,
+                            ref maximumArguments));
             case BoundNativeFixedArrayPathElement pathElement:
-                var pathElementSpills = 0;
+                var pathElementSpills = pathElement.FieldPlace is null
+                    ? 0
+                    : 1 + ExpressionSpills(pathElement.FieldPlace,
+                        ref maximumArguments);
                 for (var index = 0; index < pathElement.Projections.Length;
                      index++)
                 {
                     pathElementSpills = Math.Max(pathElementSpills,
-                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                        (index == 0
+                            ? pathElement.FieldPlace is null ? 0 : 1
+                            : 1) + ExpressionSpills(
                             pathElement.Projections[index].Index,
                             ref maximumArguments));
                 }
@@ -2381,29 +2394,50 @@ internal sealed partial class PeCompiler
             case BoundNativeFixedArrayPointerAddress pointerAddress:
                 if (pointerAddress.Projections.IsDefaultOrEmpty)
                 {
-                    return ExpressionSpills(pointerAddress.Index,
-                        ref maximumArguments);
+                    return pointerAddress.FieldPlace is null
+                        ? ExpressionSpills(pointerAddress.Index,
+                            ref maximumArguments)
+                        : Math.Max(1 + ExpressionSpills(
+                                pointerAddress.FieldPlace,
+                                ref maximumArguments),
+                            1 + ExpressionSpills(pointerAddress.Index,
+                                ref maximumArguments));
                 }
-                var pointerPathSpills = 0;
+                var pointerPathSpills = pointerAddress.FieldPlace is null
+                    ? 0
+                    : 1 + ExpressionSpills(pointerAddress.FieldPlace,
+                        ref maximumArguments);
                 for (var index = 0;
                      index < pointerAddress.Projections.Length; index++)
                 {
                     pointerPathSpills = Math.Max(pointerPathSpills,
-                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                        (index == 0
+                            ? pointerAddress.FieldPlace is null ? 0 : 1
+                            : 1) + ExpressionSpills(
                             pointerAddress.Projections[index].Index,
                             ref maximumArguments));
                 }
                 return pointerPathSpills;
             case BoundNativeFixedArrayWrite fixedArrayWrite:
-                return Math.Max(2, Math.Max(1 + ExpressionSpills(fixedArrayWrite.Index, ref maximumArguments),
-                    1 + ExpressionSpills(fixedArrayWrite.Value, ref maximumArguments)));
+                return Math.Max(2, Math.Max(
+                    fixedArrayWrite.FieldPlace is null ? 0
+                        : 1 + ExpressionSpills(fixedArrayWrite.FieldPlace,
+                            ref maximumArguments),
+                    Math.Max(1 + ExpressionSpills(fixedArrayWrite.Index,
+                            ref maximumArguments),
+                        1 + ExpressionSpills(fixedArrayWrite.Value,
+                            ref maximumArguments))));
             case BoundNativeFixedArrayPathWrite pathWrite:
-                var pathWriteSpills = 0;
+                var pathWriteSpills = pathWrite.FieldPlace is null
+                    ? 0 : 1 + ExpressionSpills(pathWrite.FieldPlace,
+                        ref maximumArguments);
                 for (var index = 0; index < pathWrite.Projections.Length;
                      index++)
                 {
                     pathWriteSpills = Math.Max(pathWriteSpills,
-                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                        (index == 0
+                            ? pathWrite.FieldPlace is null ? 0 : 1
+                            : 1) + ExpressionSpills(
                             pathWrite.Projections[index].Index,
                             ref maximumArguments));
                 }
@@ -2411,17 +2445,28 @@ internal sealed partial class PeCompiler
                     1 + ExpressionSpills(pathWrite.Value,
                         ref maximumArguments)));
             case BoundNativeStorageAddress address:
-                if (address.Projections.IsDefaultOrEmpty)
+                if (address.Projections.IsDefaultOrEmpty
+                    && address.FieldPlace is null)
                 {
                     return ExpressionSpills(address.Index,
                         ref maximumArguments);
                 }
-                var storagePathSpills = 0;
+                var storagePathSpills = address.FieldPlace is null
+                    ? 0 : 1 + ExpressionSpills(address.FieldPlace,
+                        ref maximumArguments);
+                if (address.Projections.IsDefaultOrEmpty)
+                {
+                    return Math.Max(storagePathSpills,
+                        1 + ExpressionSpills(address.Index,
+                            ref maximumArguments));
+                }
                 for (var index = 0;
                      index < address.Projections.Length; index++)
                 {
                     storagePathSpills = Math.Max(storagePathSpills,
-                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                        (index == 0
+                            ? address.FieldPlace is null ? 0 : 1
+                            : 1) + ExpressionSpills(
                             address.Projections[index].Index,
                             ref maximumArguments));
                 }
@@ -2798,9 +2843,17 @@ internal sealed partial class PeCompiler
                     }
                     break;
                 case BoundNativeFixedArrayElement fixedArrayElement:
+                    if (fixedArrayElement.FieldPlace is not null)
+                    {
+                        VisitExpression(fixedArrayElement.FieldPlace);
+                    }
                     VisitExpression(fixedArrayElement.Index);
                     break;
                 case BoundNativeFixedArrayPathElement pathElement:
+                    if (pathElement.FieldPlace is not null)
+                    {
+                        VisitExpression(pathElement.FieldPlace);
+                    }
                     foreach (var projection in pathElement.Projections)
                     {
                         VisitExpression(projection.Index);
@@ -2808,6 +2861,10 @@ internal sealed partial class PeCompiler
                     break;
                 case BoundNativeFixedArrayPointerAddress pointerAddress:
                     _ = variables.Add(pointerAddress.Variable);
+                    if (pointerAddress.FieldPlace is not null)
+                    {
+                        VisitExpression(pointerAddress.FieldPlace);
+                    }
                     if (pointerAddress.Projections.IsDefaultOrEmpty)
                     {
                         VisitExpression(pointerAddress.Index);
@@ -2821,10 +2878,18 @@ internal sealed partial class PeCompiler
                     }
                     break;
                 case BoundNativeFixedArrayWrite fixedArrayWrite:
+                    if (fixedArrayWrite.FieldPlace is not null)
+                    {
+                        VisitExpression(fixedArrayWrite.FieldPlace);
+                    }
                     VisitExpression(fixedArrayWrite.Index);
                     VisitExpression(fixedArrayWrite.Value);
                     break;
                 case BoundNativeFixedArrayPathWrite pathWrite:
+                    if (pathWrite.FieldPlace is not null)
+                    {
+                        VisitExpression(pathWrite.FieldPlace);
+                    }
                     foreach (var projection in pathWrite.Projections)
                     {
                         VisitExpression(projection.Index);
@@ -2832,6 +2897,10 @@ internal sealed partial class PeCompiler
                     VisitExpression(pathWrite.Value);
                     break;
                 case BoundNativeStorageAddress address:
+                    if (address.FieldPlace is not null)
+                    {
+                        VisitExpression(address.FieldPlace);
+                    }
                     if (address.Projections.IsDefaultOrEmpty)
                     {
                         VisitExpression(address.Index);

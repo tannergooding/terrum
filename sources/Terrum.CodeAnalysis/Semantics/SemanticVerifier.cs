@@ -691,7 +691,10 @@ public static partial class SemanticVerifier
                                         variable.Type, program.Structures,
                                         program.NativeFixedArrayTypes,
                                         program.NativePointerTypes,
-                                        program.NativeFunctionPointerSignatures))
+                                        program.NativeFunctionPointerSignatures)
+                                    && !IsSupportedLocalFixedArrayFieldAggregate(
+                                        variableIndex, variable.Type, function,
+                                        program))
                                 || (variable.Type is PrimitiveType.NativeUtf16ZPointer or PrimitiveType.NativeUtf8ZPointer
                             && (!function.IsExternal || variableIndex >= function.ParameterCount)
                                     && !(function.RequiresUnsafeCaller
@@ -2762,7 +2765,9 @@ public static partial class SemanticVerifier
                             variable.Type, program.Structures,
                             program.NativeFixedArrayTypes,
                             program.NativePointerTypes,
-                            program.NativeFunctionPointerSignatures))
+                            program.NativeFunctionPointerSignatures)
+                        && !IsSupportedLocalFixedArrayFieldAggregate(
+                            variableIndex, variable.Type, function, program))
                     {
                         return true;
                     }
@@ -2789,6 +2794,21 @@ public static partial class SemanticVerifier
                 && program.Classes.Any(static @class =>
                     @class.Fields.Any(static field =>
                         NativeFixedArrayContract.IsCarrier(field.Type)));
+    }
+
+    private static bool IsSupportedLocalFixedArrayFieldAggregate(
+        int variable, PrimitiveType type, BoundFunction function,
+        BoundProgram program)
+    {
+        var firstLocal = function.ParameterCount
+            + (function.IsConstructor
+                || (function.DeclaringStruct is not null
+                    && !function.IsStatic) ? 1 : 0);
+        return variable >= firstLocal
+            && IsInlineStructStorage(type, program)
+            && !IsUnique(program, type)
+            && NativeFixedArrayContract.IsRootlessCopyFieldType(type,
+                program.Structures, program.NativeFixedArrayTypes);
     }
 
     internal static bool TryVerifySource(BoundProgram program, out int functionIndex, out TextSpan span, out bool exceededWorkLimit,
@@ -2991,6 +3011,12 @@ public static partial class SemanticVerifier
                 var nativeOutputResult = NativeOutputResultForValue(
                     local.Initializer, initialized, local.Variable);
                 initialized.MarkAssigned(local.Variable);
+                if (local.Initializer is BoundRead localAggregateRead
+                    && IsInlineStructStorage(local.Initializer.Type, program))
+                {
+                    _ = initialized.CopyRawUnionArrayFacts(local.Variable,
+                        localAggregateRead.Variable);
+                }
                 if (CarriesRawUnionPayloadFacts(
                         program, local.Initializer.Type))
                 {
@@ -3340,6 +3366,13 @@ public static partial class SemanticVerifier
                         assignment.Variable, fieldMasks[assignment.Variable]);
                 }
                 initialized.MarkAssigned(assignment.Variable);
+                if (assignment.Value is BoundRead assignmentAggregateRead
+                    && IsInlineStructStorage(assignment.Value.Type, program))
+                {
+                    _ = initialized.CopyRawUnionArrayFacts(
+                        assignment.Variable,
+                        assignmentAggregateRead.Variable);
+                }
                 if (CarriesRawUnionPayloadFacts(
                         program, assignment.Value.Type))
                 {
@@ -3557,6 +3590,27 @@ public static partial class SemanticVerifier
                 var fieldSegments = fieldProjectionPath.Segments;
                 var rootField = Fields(program, ownerType)[
                     fieldAssignment.Field];
+                var fixedArrayFieldOwner = fieldSegments[^1].OwnerType;
+                var fixedArrayLeafField = Fields(program,
+                    fixedArrayFieldOwner)[fieldSegments[^1].Field];
+                var fixedArrayFieldPathIsCopy = !IsUnique(program,
+                    ownerType)
+                    && fieldSegments.All(segment =>
+                        !IsUnique(program, segment.OwnerType)
+                        && IsInlineStructStorage(segment.OwnerType, program)
+                        && program.Structures[
+                            (int)segment.OwnerType - 100]
+                            .CleanupMethod is null
+                        && Fields(program, segment.OwnerType)[
+                            segment.Field].IsMutable);
+                var initializesVacantArrayAggregateField =
+                    function.Variables[fieldAssignment.Variable]
+                        .IsInitializationLocal
+                    && NativeFixedArrayContract
+                        .HasInlineFixedArrayFieldStorage(ownerType,
+                            program.Structures,
+                            program.NativeFixedArrayTypes)
+                    && fixedArrayFieldPathIsCopy;
                 var initializesVacantCarrierField =
                     fieldSegments.Length == 1
                     && function.Variables[fieldAssignment.Variable]
@@ -3591,7 +3645,8 @@ public static partial class SemanticVerifier
                 }
                 var initializesVacantNestedRawUnion
                     = initializesVacantUnion || initializesVacantNestedUnion
-                        || initializesVacantCarrierField;
+                        || initializesVacantCarrierField
+                        || initializesVacantArrayAggregateField;
                 var initializesNestedRawUnionInConstructor
                     = fieldSegments.Length > 1
                     && IsRawUnionType(program,
@@ -3709,6 +3764,9 @@ public static partial class SemanticVerifier
                 var fieldMayBeLiveBefore =
                     ((fieldOwnerDefinite | fieldOwnerPossible) & leafFieldBit) != 0;
                 var fieldIsDefinitelyVacantBefore = !fieldMayBeLiveBefore;
+                var isVacantArrayAggregateFieldInitialization
+                    = initializesVacantArrayAggregateField
+                        && fieldIsDefinitelyVacantBefore;
                 var fieldPathIsUnique = IsUnique(program, ownerType);
                 var pathOwnerType = ownerType;
                 foreach (var segment in fieldSegments)
@@ -3750,6 +3808,8 @@ public static partial class SemanticVerifier
                     && ownerPathCanBePartial
                     && (fieldSegments.Length > 1 || fieldAssignment.Variable != 0))
                     || (isCarrierFieldInitialization
+                        && ownerPlaceIsPartial)
+                    || (isVacantArrayAggregateFieldInitialization
                         && ownerPlaceIsPartial);
                 var isLiveFieldReplacementCandidate =
                     fieldPathIsUnique
@@ -3768,7 +3828,8 @@ public static partial class SemanticVerifier
                             ownerPath, segment.OwnerType, initialized, fieldMasks, program);
                         if ((ownerPossible & (1u << segment.Field)) == 0
                             && !(normalBackingPartialReferenceAggregate && index == 0)
-                            && !initializesNestedRawUnionPath)
+                            && !initializesNestedRawUnionPath
+                            && !isVacantArrayAggregateFieldInitialization)
                         {
                             throw InvalidEffect(fieldAssignment.Span, "Ownership");
                         }
@@ -3776,6 +3837,7 @@ public static partial class SemanticVerifier
                     if (!fieldPathIsUnique
                         && !normalBackingPartialReferenceAggregate
                         && !initializesNestedRawUnionPath
+                        && !isVacantArrayAggregateFieldInitialization
                         && (fieldMasks[fieldAssignment.Variable] & rootFieldBit) == 0)
                     {
                         throw InvalidEffect(fieldAssignment.Span, "Ownership");
@@ -3785,7 +3847,8 @@ public static partial class SemanticVerifier
                     && fieldIsDefinitelyVacantBefore
                     && !isPartialFieldRepairBefore
                     && !isConstructorFieldInitializationBefore
-                    && !initializesNestedRawUnionPath)
+                    && !initializesNestedRawUnionPath
+                    && !isVacantArrayAggregateFieldInitialization)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
@@ -3801,6 +3864,59 @@ public static partial class SemanticVerifier
                 if (fieldAssignment.Value.Type != targetField.Type)
                 {
                     throw Invalid();
+                }
+                var fixedArrayField = NativeFixedArrayTypes.IsType(
+                    targetField.Type);
+                var fixedArrayFieldPrefix
+                    = StorageProjection.WholeObject;
+                if (fixedArrayField)
+                {
+                    if (!NativeFixedArrayContract.TryGetLayout(
+                            targetField.Type, program.Structures,
+                            program.NativeFixedArrayTypes,
+                            out var fixedArrayLayout)
+                        || !NativeFixedArrayContract.MatchesLayout(
+                            fixedArrayLayout, program)
+                        || !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                            function.Variables[
+                                fieldAssignment.Variable].Type,
+                            program.Structures,
+                            program.NativeFixedArrayTypes)
+                        || targetField.Size < 0
+                        || fixedArrayLayout.ByteExtent
+                            != (ulong)targetField.Size)
+                    {
+                        throw InvalidEffect(fieldAssignment.Span,
+                            "NativeImport");
+                    }
+
+                    var arrayOwnerType
+                        = function.Variables[
+                            fieldAssignment.Variable].Type;
+                    foreach (var segment in fieldSegments)
+                    {
+                        if (segment.OwnerType != arrayOwnerType
+                            || IsUnique(program, arrayOwnerType)
+                            || !IsInlineStructStorage(arrayOwnerType, program)
+                            || !HasFields(program, arrayOwnerType)
+                            || (uint)segment.Field
+                                >= (uint)Fields(program,
+                                    arrayOwnerType).Length)
+                        {
+                            throw InvalidEffect(fieldAssignment.Span,
+                                "NativeImport");
+                        }
+                        arrayOwnerType = Fields(program, arrayOwnerType)[
+                            segment.Field].Type;
+                    }
+                    if (arrayOwnerType != targetField.Type)
+                    {
+                        throw InvalidEffect(fieldAssignment.Span,
+                            "NativeImport");
+                    }
+
+                    fixedArrayFieldPrefix = StorageProjection.ForFieldPath(
+                        fieldProjectionPath);
                 }
                 // A nested value place remains usable only while its live owner remains complete.
                 var preserveValueOwner = initialized[fieldAssignment.Variable]
@@ -3818,8 +3934,16 @@ public static partial class SemanticVerifier
                 {
                     CheckBackingInvalidation(fieldAssignment.Variable, initialized, fieldAssignment.Span);
                 }
-                if (!EvaluateExpression(fieldAssignment.Value, initialized, fieldMasks, declarations,
-                    function, program, ref remaining, depth + 1, failures))
+                var fieldValueCompletes = fixedArrayField
+                    ? VerifyNativeFixedArrayFieldCopy(
+                        fieldAssignment.Value, fieldAssignment.Variable,
+                        fixedArrayFieldPrefix, targetField.Type,
+                        initialized, declarations, function, program,
+                        ref remaining, depth + 1)
+                    : EvaluateExpression(fieldAssignment.Value, initialized,
+                        fieldMasks, declarations, function, program,
+                        ref remaining, depth + 1, failures);
+                if (!fieldValueCompletes)
                 {
                     return true;
                 }
@@ -3857,6 +3981,8 @@ public static partial class SemanticVerifier
                         || (!function.IsConstructor && !function.IsClassConstructor
                             && fieldAssignment.Variable != 0)))
                     || (isCarrierFieldInitialization
+                        && ownerPlaceIsPartialAfter)
+                    || (isVacantArrayAggregateFieldInitialization
                         && ownerPlaceIsPartialAfter);
                 var isLiveFieldReplacement = fieldPathIsUnique
                     && IsUnique(program, targetField.Type)
@@ -4001,7 +4127,11 @@ public static partial class SemanticVerifier
                     }
                     else if (!IsRawUnionType(program, ownerType)
                         && (IsUnique(program, ownerType)
-                            || CarriesRawUnionPayloadFacts(program, ownerType))
+                            || CarriesRawUnionPayloadFacts(program, ownerType)
+                            || NativeFixedArrayContract
+                                .HasInlineFixedArrayFieldStorage(ownerType,
+                                    program.Structures,
+                                    program.NativeFixedArrayTypes))
                         && (initialized.PossibleFieldMask(fieldAssignment.Variable) != 0
                             || initialized.HasPartialValue(fieldAssignment.Variable)))
                     {
@@ -4023,6 +4153,17 @@ public static partial class SemanticVerifier
                     SetNestedFieldLiveness(fieldAssignment.Variable,
                         fieldProjectionPath, live: true, initialized, fieldMasks,
                         function, program, fieldAssignment.Span);
+                }
+                else if (fieldSegments.Length > 1
+                    && (fixedArrayField
+                        || initializesVacantArrayAggregateField))
+                {
+                    initialized.ResetNestedOwnerSubtree(
+                        fieldAssignment.Variable, fieldProjectionPath);
+                    SetNestedFieldLiveness(fieldAssignment.Variable,
+                        fieldProjectionPath, live: true, initialized,
+                        fieldMasks, function, program,
+                        fieldAssignment.Span);
                 }
                 else if (normalBackingPartialReferenceAggregate)
                 {
@@ -5883,6 +6024,9 @@ public static partial class SemanticVerifier
             HasFields(Program, type) && !ManagedClassTypes.IsClass(type)
             && (IsUnique(Program, type)
                 || CarriesRawUnionPayloadFacts(Program, type)
+                || NativeFixedArrayContract
+                    .HasInlineFixedArrayFieldStorage(type, Program.Structures,
+                        Program.NativeFixedArrayTypes)
                 || (Program.NativeLoweringAgreement
                         == CompilationOptions.WindowsX64NormalBackingAgreement
                     && (int)type >= 100
@@ -6304,13 +6448,20 @@ public static partial class SemanticVerifier
         }
 
         internal void ClearRawUnionArrayFacts(int variable)
+            => ClearRawUnionArrayFacts(variable,
+                StorageProjection.WholeObject);
+
+        internal void ClearRawUnionArrayFacts(int variable,
+            StorageProjection prefix)
         {
             if ((uint)variable >= (uint)Length)
             {
                 throw Invalid();
             }
             foreach (var key in _rawUnionArrayElementBytes.Keys
-                .Where(key => key.Variable == variable).ToArray())
+                .Where(key => key.Variable == variable
+                    && prefix.ProjectionPath.IsPrefixOf(
+                        key.ArrayPrefix.ProjectionPath)).ToArray())
             {
                 _ = _rawUnionArrayElementBytes.Remove(key);
             }
@@ -6318,34 +6469,64 @@ public static partial class SemanticVerifier
 
         internal bool CopyRawUnionArrayFacts(int destination,
             int source)
+            => CopyRawUnionArrayFacts(destination,
+                StorageProjection.WholeObject, source,
+                StorageProjection.WholeObject);
+
+        internal bool CopyRawUnionArrayFacts(int destination,
+            StorageProjection destinationPrefix, int source,
+            StorageProjection sourcePrefix)
         {
             if ((uint)destination >= (uint)Length
                 || (uint)source >= (uint)Length)
             {
                 throw Invalid();
             }
-            if (destination == source)
+            if (destination == source
+                && destinationPrefix == sourcePrefix)
             {
                 return false;
             }
 
             var prior = _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == destination)
+                .Where(pair => pair.Key.Variable == destination
+                    && destinationPrefix.ProjectionPath.IsPrefixOf(
+                        pair.Key.ArrayPrefix.ProjectionPath))
                 .ToDictionary(static pair => pair.Key.ArrayPrefix,
                     static pair => pair.Value.Clone());
-            ClearRawUnionArrayFacts(destination);
-            foreach (var (key, state) in _rawUnionArrayElementBytes
-                .Where(pair => pair.Key.Variable == source).ToArray())
+            var incoming = _rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == source
+                    && sourcePrefix.ProjectionPath.IsPrefixOf(
+                        pair.Key.ArrayPrefix.ProjectionPath))
+                .Select(pair => (
+                    Prefix: StorageProjection.Rebase(
+                        destinationPrefix, sourcePrefix,
+                        pair.Key.ArrayPrefix),
+                    State: pair.Value.Clone()))
+                .ToArray();
+            if (incoming.Any(static item =>
+                    item.Prefix.Kind == StorageProjectionKind.UnknownElement))
             {
-                _rawUnionArrayElementBytes.Add(
-                    new RawUnionArrayStateKey(destination,
-                        key.ArrayPrefix), state.Clone());
+                throw Invalid();
+            }
+
+            ClearRawUnionArrayFacts(destination, destinationPrefix);
+            foreach (var (prefix, state) in incoming)
+            {
+                if (!_rawUnionArrayElementBytes.TryAdd(
+                        new RawUnionArrayStateKey(destination, prefix),
+                        state))
+                {
+                    throw Invalid();
+                }
             }
             return !RawUnionArrayStatesEqual(prior,
                 _rawUnionArrayElementBytes
-                    .Where(pair => pair.Key.Variable == destination)
+                    .Where(pair => pair.Key.Variable == destination
+                        && destinationPrefix.ProjectionPath.IsPrefixOf(
+                            pair.Key.ArrayPrefix.ProjectionPath))
                     .ToDictionary(static pair => pair.Key.ArrayPrefix,
-                        static pair => pair.Value));
+                        static pair => pair.Value.Clone()));
         }
 
         internal void SetRawUnionArrayElementBytes(int variable,
@@ -7169,6 +7350,24 @@ public static partial class SemanticVerifier
                 ownerPath, ownerType, initialMask);
             return (fields.DefiniteMask, fields.PossibleMask);
         }
+        if (IsInlineStructStorage(ownerType, program)
+            && NativeFixedArrayContract
+                .HasInlineFixedArrayFieldStorage(ownerType,
+                    program.Structures, program.NativeFixedArrayTypes))
+        {
+            var parentSegment = ownerPath.Segments[^1];
+            var parentPath = FieldPathPrefix(ownerPath,
+                ownerPath.Segments.Length - 1);
+            var (parentDefinite, _) = FieldPathOwnerMasks(rootVariable,
+                parentPath, parentSegment.OwnerType, initialized,
+                fieldMasks, program);
+            var initialMask = (parentDefinite
+                    & (1u << parentSegment.Field)) != 0
+                ? FullMask(program, ownerType) : 0;
+            var fields = initialized.NestedOwnerFields(rootVariable,
+                ownerPath, ownerType, initialMask);
+            return (fields.DefiniteMask, fields.PossibleMask);
+        }
         if (program.NativeLoweringAgreement
                 == CompilationOptions.WindowsX64NormalBackingAgreement
             && IsInlineStructStorage(ownerType, program))
@@ -7195,7 +7394,10 @@ public static partial class SemanticVerifier
         Count(ref remaining, depth);
         if (!TryGetFieldProjectionPath(place, function, program,
                 out var rootVariable, out var fieldPath)
-            || !IsUnique(program, function.Variables[rootVariable].Type)
+            || (!IsUnique(program,
+                    function.Variables[rootVariable].Type)
+                && !IsInlineStructStorage(
+                    function.Variables[rootVariable].Type, program))
             || (!initialized[rootVariable] && !initialized.HasPartialValue(rootVariable)))
         {
             throw InvalidEffect(place?.Span ?? default, "Ownership");
@@ -7377,7 +7579,11 @@ public static partial class SemanticVerifier
                     initialized[rootVariable] = true;
                 }
                 else if (IsUnique(program, rootType)
-                    || CarriesRawUnionPayloadFacts(program, rootType))
+                    || CarriesRawUnionPayloadFacts(program, rootType)
+                    || NativeFixedArrayContract
+                        .HasInlineFixedArrayFieldStorage(rootType,
+                            program.Structures,
+                            program.NativeFixedArrayTypes))
                 {
                     initialized.MarkPartialValue(rootVariable);
                 }
@@ -7387,6 +7593,10 @@ public static partial class SemanticVerifier
             var parentType = ownerSegment.OwnerType;
             if ((!IsUnique(program, parentType)
                     && !CarriesRawUnionPayloadFacts(program, parentType)
+                    && !NativeFixedArrayContract
+                        .HasInlineFixedArrayFieldStorage(parentType,
+                            program.Structures,
+                            program.NativeFixedArrayTypes)
                     && !(program.NativeLoweringAgreement
                             == CompilationOptions.WindowsX64NormalBackingAgreement
                         && IsInlineStructStorage(parentType, program)))
@@ -8760,10 +8970,14 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(fieldRead.Span, "UnsafeCaller");
                 }
-                var hasUniqueRootPath = TryGetFieldProjectionPath(fieldRead,
+                var hasTrackedRootPath = TryGetFieldProjectionPath(fieldRead,
                     function, program, out var fieldRootVariable, out _)
-                    && IsUnique(program, function.Variables[fieldRootVariable].Type);
-                if (hasUniqueRootPath)
+                    && (IsUnique(program,
+                            function.Variables[fieldRootVariable].Type)
+                        || IsInlineStructStorage(
+                            function.Variables[fieldRootVariable].Type,
+                            program));
+                if (hasTrackedRootPath)
                 {
                     _ = VerifyFieldPathLeafLive(fieldRead, initialized, fieldMasks,
                         function, program, ref remaining, depth + 1);
@@ -11334,13 +11548,20 @@ public static partial class SemanticVerifier
         if (expression is BoundNativeFixedArrayElement fixedArrayElement
             && fixedArrayElement.Type == type)
         {
+            if (!TryGetNativeFixedArrayArrayPrefix(
+                    fixedArrayElement.Variable,
+                    fixedArrayElement.FieldPlace,
+                    fixedArrayElement.Layout, function, program,
+                    out var arrayPrefix))
+            {
+                throw Invalid(fixedArrayElement.Span);
+            }
             var elementIndex
                 = NativeFixedArrayContract.TryGetUnsignedIndex(
                     fixedArrayElement.Index, out var selectedIndex)
                     ? selectedIndex : (ulong?)null;
             return initialized.RawUnionArrayElementBytes(
-                fixedArrayElement.Variable,
-                StorageProjection.WholeObject,
+                fixedArrayElement.Variable, arrayPrefix,
                 fixedArrayElement.Layout, elementIndex);
         }
         if (expression is BoundNativeFixedArrayPathElement pathElement
@@ -11350,8 +11571,15 @@ public static partial class SemanticVerifier
             var parentProjections = pathElement.Projections.Length == 1
                 ? [] : pathElement.Projections.RemoveAt(
                     pathElement.Projections.Length - 1);
-            var arrayPrefix = StorageProjection.ForNativeFixedArrayPath(
-                parentProjections);
+            if (!TryGetNativeFixedArrayArrayPrefix(
+                    pathElement.Variable, pathElement.FieldPlace,
+                    pathElement.Projections[0].Layout, function, program,
+                    out var fieldArrayPrefix))
+            {
+                throw Invalid(pathElement.Span);
+            }
+            var arrayPrefix = GetNativeFixedArrayPathPrefix(
+                fieldArrayPrefix, parentProjections);
             var leafProjection = pathElement.Projections[^1];
             var elementIndex
                 = NativeFixedArrayContract.TryGetUnsignedIndex(

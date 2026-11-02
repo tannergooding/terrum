@@ -4981,7 +4981,10 @@ internal sealed partial class Binder
         var place = BindExpression(placeNodes[0], expectedDefinition?.ReferentType);
         if (!TryGetCheckedReferencePlace(place, out _, out var isWritable))
         {
-            Report("TRM3030", "Reference formation requires a live addressable place in this source profile.",
+            var detail = place is BoundNativeFixedArrayElement element
+                ? $" Type={place.Type}, Variable={element.Variable}, Carrier={element.Layout.CarrierType}, Field={element.FieldPlace?.Type}."
+                : $" Bound={place.GetType().Name}, Type={place.Type}.";
+            Report("TRM3030", "Reference formation requires a live addressable place in this source profile." + detail,
                 node.Span);
             return ErrorExpression(node.Span);
         }
@@ -5057,6 +5060,40 @@ internal sealed partial class Binder
         => TryGetCheckedReferencePlace(
             place, isFinal: true, out rootVariable, out isWritable);
 
+    private bool TryGetCheckedFixedArrayFieldPlace(
+        BoundExpression? fieldPlace, PrimitiveType arrayType,
+        out int rootVariable, out bool isWritable)
+    {
+        rootVariable = -1;
+        isWritable = false;
+        if (fieldPlace is not BoundFieldRead field
+            || field.Type != arrayType
+            || !TryFindLocalCopyFixedArrayFieldRoot(field,
+                out rootVariable)
+            || !TryGetCheckedReferencePlace(field.Receiver,
+                isFinal: false, out var receiverRoot, out var receiverWritable)
+            || receiverRoot != rootVariable)
+        {
+            rootVariable = -1;
+            return false;
+        }
+
+        var ownerType = field.Receiver.Type;
+        var ownerIndex = (int)ownerType - 100;
+        if (ownerIndex < 0 || ownerIndex >= _structs.Count
+            || (uint)field.Field
+                >= (uint)_structs[ownerIndex].Fields.Length
+            || _structs[ownerIndex].Fields[field.Field].Type != arrayType)
+        {
+            rootVariable = -1;
+            return false;
+        }
+
+        isWritable = receiverWritable
+            && _structs[ownerIndex].Fields[field.Field].IsMutable;
+        return true;
+    }
+
     private bool TryGetCheckedReferencePlace(
         BoundExpression place, bool isFinal,
         out int rootVariable, out bool isWritable)
@@ -5077,9 +5114,17 @@ internal sealed partial class Binder
                 return true;
             case BoundNativeFixedArrayElement element:
                 if ((uint)element.Variable >= (uint)_variables.Count
-                    || _variables[element.Variable].Type != element.Layout.CarrierType
+                    || (element.FieldPlace is null
+                        && _variables[element.Variable].Type
+                            != element.Layout.CarrierType)
+                    || (element.FieldPlace is not null
+                        && (!TryGetCheckedFixedArrayFieldPlace(
+                                element.FieldPlace,
+                                element.Layout.CarrierType,
+                                    out var arrayFieldRoot, out _)
+                                || arrayFieldRoot != element.Variable))
                     || !NativeFixedArrayContract.MatchesType(
-                        _variables[element.Variable].Type, element.Layout,
+                        element.Layout.CarrierType, element.Layout,
                         _structs, _nativeFixedArrayTypes)
                     || !NativeFixedArrayContract.MatchesLayout(element.Layout,
                         _structs, _nativeFixedArrayTypes)
@@ -5091,8 +5136,63 @@ internal sealed partial class Binder
                     return false;
                 }
                 rootVariable = element.Variable;
-                isWritable = _variables[element.Variable].IsMutable
-                    && NativeFixedArrayContract.AllowsElementWrites(element.Layout);
+                isWritable = element.FieldPlace is null
+                    ? _variables[element.Variable].IsMutable
+                    : TryGetCheckedFixedArrayFieldPlace(
+                        element.FieldPlace, element.Layout.CarrierType,
+                        out _, out var writableField)
+                            && writableField;
+                isWritable &= NativeFixedArrayContract.AllowsElementWrites(
+                    element.Layout);
+                return true;
+            case BoundNativeFixedArrayPathElement element:
+                if ((uint)element.Variable >= (uint)_variables.Count
+                    || element.Projections.IsDefaultOrEmpty)
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                var rootLayout = element.Projections[0].Layout;
+                if (!NativeFixedArrayContract.MatchesPath(
+                        element.FieldPlace?.Type
+                            ?? _variables[element.Variable].Type,
+                        element.Projections, _structs,
+                        _nativeFixedArrayTypes, out _, out var leafLayout)
+                    || element.Type != leafLayout.ElementType)
+                {
+                    rootVariable = -1;
+                    isWritable = false;
+                    return false;
+                }
+                if (element.FieldPlace is null)
+                {
+                    if ((uint)element.Variable >= (uint)_variables.Count
+                        || _variables[element.Variable].Type
+                            != rootLayout.CarrierType)
+                    {
+                        rootVariable = -1;
+                        isWritable = false;
+                        return false;
+                    }
+                    isWritable = _variables[element.Variable].IsMutable;
+                }
+                else
+                {
+                    if (!TryGetCheckedFixedArrayFieldPlace(
+                            element.FieldPlace, rootLayout.CarrierType,
+                            out var pathFieldRoot, out var pathFieldWritable)
+                        || pathFieldRoot != element.Variable)
+                    {
+                        rootVariable = -1;
+                        isWritable = false;
+                        return false;
+                    }
+                    isWritable = pathFieldWritable;
+                }
+                rootVariable = element.Variable;
+                isWritable &= NativeFixedArrayContract.AllowsElementWrites(
+                    rootLayout);
                 return true;
             case BoundReferenceRead referenceRead:
                 if (!CheckedReferenceTypeContract.IsValidType(
@@ -7060,14 +7160,20 @@ internal sealed partial class Binder
 
                 if (target.Kind == SyntaxKind.IndexExpression
                     && TryBindNativeFixedArrayAccessPath(target,
-                        out var fixedArray, out var projections))
+                        out var fixedArray, out var arrayFieldPlace,
+                        out var projections))
                 {
                     var rootLayout = projections[0].Layout;
-                    if (!_variables[fixedArray].IsMutable
+                    if ((arrayFieldPlace is null
+                            && !_variables[fixedArray].IsMutable)
                         || !NativeFixedArrayContract.AllowsElementWrites(rootLayout))
                     {
                         Report("TRM3008", "The selected fixed-array local does not permit element writes.",
                             target.Span);
+                    }
+                    if (arrayFieldPlace is BoundFieldRead fieldPlace)
+                    {
+                        CheckUpdateFieldPlace(fieldPlace);
                     }
                     var leaf = projections[^1];
                     if (!NativeFixedArrayContract.IsIndexType(leaf.Index.Type))
@@ -7084,12 +7190,16 @@ internal sealed partial class Binder
                     {
                         return new BoundExpressionStatement(
                             new BoundNativeFixedArrayPathWrite(fixedArray,
-                                projections, fixedArrayValue, node.Span),
+                                projections, fixedArrayValue, node.Span) {
+                                FieldPlace = arrayFieldPlace,
+                            },
                             node.Span);
                     }
                     return new BoundExpressionStatement(
                         new BoundNativeFixedArrayWrite(fixedArray,
-                            rootLayout, leaf.Index, fixedArrayValue, node.Span),
+                            rootLayout, leaf.Index, fixedArrayValue, node.Span) {
+                            FieldPlace = arrayFieldPlace,
+                        },
                         node.Span);
                 }
 
@@ -7137,10 +7247,11 @@ internal sealed partial class Binder
                         }
                         var isUnsafeAuthorized = CheckFieldAccess(_variables[0].Type, ownField, target.Span);
                         CheckFieldMutation(_variables[0].Type, ownField, _constructor, target.Span);
-                        return new BoundFieldAssignment(0, ownField,
-                            BindExpression(valueNode, GetField(ResolveDeclaredType(_currentStruct), ownField).Type), node.Span) {
-                            IsUnsafeAuthorized = isUnsafeAuthorized,
-                        };
+                        return BindFieldAssignmentValue(0, ownField, [],
+                            valueNode,
+                            GetField(ResolveDeclaredType(_currentStruct),
+                                ownField).Type,
+                            node.Span, isUnsafeAuthorized);
                     }
                     Report("TRM3006", $"Unknown or not-yet-declared variable '{token.Text}'.", token.Span);
                     _ = BindExpression(valueNode, null);
@@ -7650,10 +7761,37 @@ internal sealed partial class Binder
             }
             fieldType = GetField(fieldType, path[index]).Type;
         }
-        return new BoundFieldAssignment(variable, path[0], BindExpression(value, type), span) {
-            NestedFields = path.RemoveAt(0),
-            IsUnsafeAuthorized = isUnsafeAuthorized,
-        };
+        return BindFieldAssignmentValue(variable, path[0],
+            path.RemoveAt(0), value, type, span, isUnsafeAuthorized);
+    }
+
+    private BoundStatement BindFieldAssignmentValue(int variable, int field,
+        ImmutableArray<int> nestedFields, SyntaxNode value,
+        PrimitiveType type, TextSpan span, bool isUnsafeAuthorized)
+    {
+        var boundValue = NativeFixedArrayTypes.IsType(type)
+            ? BindNativeFixedArrayValue(value, type)
+            : BindExpression(value, type);
+        if (boundValue is not BoundNativeFixedArrayInitialization initialization)
+        {
+            return new BoundFieldAssignment(variable, field, boundValue, span) {
+                NestedFields = nestedFields,
+                IsUnsafeAuthorized = isUnsafeAuthorized,
+            };
+        }
+
+        var temporary = AddVariable(
+            $"<fixed-array-field-temp-{_variables.Count}>", type, false,
+            value.Span);
+        var assignment = new BoundFieldAssignment(variable, field,
+            new BoundRead(temporary, type, value.Span), span) {
+                NestedFields = nestedFields,
+                IsUnsafeAuthorized = isUnsafeAuthorized,
+            };
+        return new BoundBlock([
+            new BoundLocal(temporary, initialization, span),
+            assignment,
+        ], span);
     }
 
     private void CheckWritableUpdatePlace(BoundExpression place, TextSpan span)
@@ -10590,6 +10728,17 @@ internal sealed partial class Binder
             return true;
         }
 
+        if (node.Kind == SyntaxKind.MemberAccessExpression
+            && KnownType(node) is PrimitiveType fieldArrayType
+            && NativeFixedArrayContract.IsCarrier(fieldArrayType)
+            && TryGetNativeFixedArrayLayout(fieldArrayType,
+                out var fieldLayout))
+        {
+            variable = -1;
+            layout = fieldLayout;
+            return true;
+        }
+
         variable = -1;
         layout = default;
         return node.Kind == SyntaxKind.IndexExpression
@@ -10601,10 +10750,11 @@ internal sealed partial class Binder
     }
 
     private bool TryBindNativeFixedArrayAccessPath(SyntaxNode node,
-        out int variable,
+        out int variable, out BoundExpression? fieldPlace,
         out ImmutableArray<BoundNativeFixedArrayProjection> projections)
     {
         variable = -1;
+        fieldPlace = null;
         projections = [];
         var reversed = new List<SyntaxNode>();
         while (node.Kind == SyntaxKind.ParenthesizedExpression)
@@ -10621,11 +10771,11 @@ internal sealed partial class Binder
             }
         }
         if (reversed.Count == 0
-            || !TryFindNativeFixedArrayLocal(node, out variable)
-            || !TryGetNativeFixedArrayLayout(_variables[variable].Type,
-                out var layout))
+            || !TryBindNativeFixedArrayAccessBase(node, out variable,
+                out fieldPlace, out var layout))
         {
             variable = -1;
+            fieldPlace = null;
             return false;
         }
 
@@ -10650,6 +10800,7 @@ internal sealed partial class Binder
                     out layout))
             {
                 variable = -1;
+                fieldPlace = null;
                 projections = [];
                 return false;
             }
@@ -10659,12 +10810,106 @@ internal sealed partial class Binder
         return true;
     }
 
+    private bool TryBindNativeFixedArrayAccessBase(SyntaxNode node,
+        out int variable, out BoundExpression? fieldPlace,
+        out BoundNativeFixedArrayLayout layout)
+    {
+        while (node.Kind == SyntaxKind.ParenthesizedExpression)
+        {
+            node = (SyntaxNode)node.Children[1];
+        }
+
+        if (TryFindNativeFixedArrayLocal(node, out variable)
+            && TryGetNativeFixedArrayLayout(_variables[variable].Type,
+                out layout))
+        {
+            fieldPlace = null;
+            return true;
+        }
+
+        variable = -1;
+        fieldPlace = null;
+        layout = default;
+        if (node.Kind != SyntaxKind.MemberAccessExpression
+            || BindExpression(node, null) is not BoundFieldRead place
+            || !NativeFixedArrayContract.IsCarrier(place.Type)
+            || !TryGetNativeFixedArrayLayout(place.Type, out layout)
+            || !TryFindLocalCopyFixedArrayFieldRoot(place, out variable))
+        {
+            variable = -1;
+            layout = default;
+            return false;
+        }
+
+        fieldPlace = place;
+        return NativeFixedArrayContract.MatchesLayout(layout, _structs,
+            _nativeFixedArrayTypes);
+    }
+
+    private bool TryFindLocalCopyFixedArrayFieldRoot(
+        BoundFieldRead place, out int variable)
+    {
+        variable = -1;
+        var fields = new Stack<BoundFieldRead>();
+        BoundExpression receiver = place;
+        while (receiver is BoundFieldRead field)
+        {
+            fields.Push(field);
+            receiver = field.Receiver;
+        }
+        if (receiver is not BoundRead root
+            || root.Variable < _localStart
+            || (uint)root.Variable >= (uint)_variables.Count
+            || root.Type != _variables[root.Variable].Type)
+        {
+            return false;
+        }
+
+        var ownerType = root.Type;
+        if (!NativeFixedArrayContract.IsRootlessCopyFieldType(ownerType,
+                _structs, _nativeFixedArrayTypes))
+        {
+            return false;
+        }
+        while (fields.TryPop(out var field))
+        {
+            var ownerIndex = (int)ownerType - 100;
+            if (field.Receiver.Type != ownerType
+                || !IsStruct(ownerType)
+                || IsUnique(ownerType)
+                || (uint)ownerIndex >= (uint)_structs.Count)
+            {
+                return false;
+            }
+
+            var ownerFields = _structs[ownerIndex].Fields;
+            if ((uint)field.Field >= (uint)ownerFields.Length
+                || field.Type != ownerFields[field.Field].Type)
+            {
+                return false;
+            }
+            ownerType = field.Type;
+            if (fields.Count != 0
+                && !NativeFixedArrayContract.IsRootlessCopyFieldType(
+                    ownerType, _structs, _nativeFixedArrayTypes))
+            {
+                return false;
+            }
+        }
+
+        variable = root.Variable;
+        return ownerType == place.Type
+            && NativeFixedArrayContract.IsCarrier(ownerType)
+            && NativeFixedArrayContract.IsRootlessCopyFieldType(root.Type,
+                _structs, _nativeFixedArrayTypes);
+    }
+
     private BoundExpression BindNativeFixedArrayElement(SyntaxNode node)
     {
         if (!TryBindNativeFixedArrayAccessPath(node, out var variable,
-                out var projections))
+                out var fieldPlace, out var projections))
         {
-            Report("TRM3030", "Indexing requires an initialized local with an admitted fixed-array layout.",
+            Report("TRM3030", "Indexing requires an initialized local or fixed-array field place with an admitted layout.",
                 node.Span);
             return ErrorExpression(node.Span);
         }
@@ -10673,11 +10918,15 @@ internal sealed partial class Binder
         {
             var projection = projections[0];
             return new BoundNativeFixedArrayElement(variable,
-                projection.Layout, projection.Index, node.Span);
+                projection.Layout, projection.Index, node.Span) {
+                FieldPlace = fieldPlace,
+            };
         }
 
         return new BoundNativeFixedArrayPathElement(variable, projections,
-            projections[^1].Layout.ElementType, node.Span);
+            projections[^1].Layout.ElementType, node.Span) {
+            FieldPlace = fieldPlace,
+        };
     }
 
     private int AddVariable(string name, PrimitiveType type, bool isMutable,
