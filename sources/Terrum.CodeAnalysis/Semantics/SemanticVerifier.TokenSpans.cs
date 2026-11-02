@@ -3759,6 +3759,37 @@ public static partial class SemanticVerifier
             }
         }
 
+        internal void MergeNativePointerFieldValueUnknown(
+            int slot, StorageProjection prefix,
+            IReadOnlySet<ProvenanceAnchor> sources, bool mayBeUnknown,
+            NativePointerExtentFact extentFact)
+        {
+            if ((uint)slot >= (uint)StorageInstances.Length
+                || sources is null
+                || (prefix.Kind != StorageProjectionKind.WholeObject
+                    && prefix.Kind != StorageProjectionKind.UnknownElement
+                    && !IsNativePointerFieldValueProjection(slot, prefix)))
+            {
+                throw Invalid();
+            }
+
+            foreach (var (key, value) in NativePointerFieldValues)
+            {
+                if (key.Site != slot
+                    || !NativePointerFieldProjectionOverlaps(
+                        slot, prefix, key.Projection))
+                {
+                    continue;
+                }
+
+                value.Sources.UnionWith(sources);
+                value.MayBeUnknown |= mayBeUnknown;
+                value.ExtentSources.UnionWith(extentFact.Sources);
+                value.ExtentMayBeOpaque |= extentFact.MayBeOpaque;
+                value.ExtentUnavailable |= extentFact.IsUnavailable;
+            }
+        }
+
         private bool IsNativePointerFieldValueProjection(
             int slot, StorageProjection projection) =>
                 (uint)slot < (uint)Function.Variables.Length

@@ -30,24 +30,59 @@ public static partial class SemanticVerifier
             throw InvalidEffect(initialization.Span, "NativeImport");
         }
 
+        initialized.ClearRawUnionArrayFacts(variable);
         var evaluationContinues = true;
-        foreach (var element in initialization.Elements)
+        for (var index = 0; index < initialization.Elements.Length; index++)
         {
+            var element = initialization.Elements[index];
             if (element is null || element.Type != layout.ElementType)
             {
                 throw InvalidEffect(element?.Span ?? initialization.Span, "NativeImport");
             }
             if (evaluationContinues)
             {
-                evaluationContinues = EvaluateExpression(element, initialized, fieldMasks,
-                    declarations, function, program, ref remaining, depth + 1, failures);
+                var elementProjection = StorageProjection.ForArrayIndex(
+                    (ulong)index);
+                evaluationContinues = element
+                    is BoundNativeFixedArrayInitialization nested
+                        ? EvaluateNestedNativeFixedArrayInitialization(nested,
+                            variable, elementProjection, initialized,
+                            fieldMasks, declarations, function, program, true,
+                            ref remaining, depth + 1, failures)
+                        : EvaluateExpression(element, initialized, fieldMasks,
+                            declarations, function, program, ref remaining,
+                            depth + 1, failures);
+                if (evaluationContinues
+                    && element is not BoundNativeFixedArrayInitialization
+                    && CarriesRawUnionPayloadFacts(program,
+                        layout.ElementType))
+                {
+                    initialized.SetRawUnionArrayElementBytes(variable,
+                        StorageProjection.WholeObject, layout,
+                        (ulong)index,
+                        InitializedPayloadBytesOfExpression(element,
+                            layout.ElementType, initialized, function,
+                            program));
+                }
             }
             else
             {
                 var unreachableState = initialized.Clone();
                 var unreachableMasks = (uint[])fieldMasks.Clone();
-                _ = EvaluateExpression(element, unreachableState, unreachableMasks,
-                    declarations, function, program, ref remaining, depth + 1, null);
+                if (element is BoundNativeFixedArrayInitialization nested)
+                {
+                    _ = EvaluateNestedNativeFixedArrayInitialization(nested,
+                        variable, StorageProjection.ForArrayIndex(
+                            (ulong)index), unreachableState,
+                        unreachableMasks, declarations, function, program,
+                        false, ref remaining, depth + 1, null);
+                }
+                else
+                {
+                    _ = EvaluateExpression(element, unreachableState,
+                        unreachableMasks, declarations, function, program,
+                        ref remaining, depth + 1, null);
+                }
             }
         }
     }
@@ -62,22 +97,12 @@ public static partial class SemanticVerifier
             program, ref remaining, depth + 1);
         var isDynamic = !NativeFixedArrayContract.TryGetUnsignedIndex(
             write.Index, out var selectedIndex);
-        if (isDynamic)
-        {
-            for (ulong index = 0; index < write.Layout.ElementCount; index++)
-            {
-                Count(ref remaining, depth + 1);
-                ApplyNativeFixedArrayWriteValues(write.Variable,
-                    StorageProjection.ForArrayIndex(index), true,
-                    newValues, facts, write.Span);
-            }
-        }
-        else
-        {
-            ApplyNativeFixedArrayWriteValues(write.Variable,
-                StorageProjection.ForArrayIndex(selectedIndex), false,
-                newValues, facts, write.Span);
-        }
+        var destination = isDynamic
+            ? StorageProjection.ForArrayRange(0,
+                write.Layout.ElementCount)
+            : StorageProjection.ForArrayIndex(selectedIndex);
+        ApplyNativeFixedArrayWriteValues(write.Variable, destination,
+            isDynamic, newValues, facts, write.Span);
     }
 
     private static void ApplyNativeFixedArrayPathWriteProvenance(
@@ -113,14 +138,11 @@ public static partial class SemanticVerifier
                 return;
             }
 
-            for (ulong index = 0; index < projection.Layout.ElementCount; index++)
-            {
-                Count(ref workRemaining, depth + 1);
-                ApplyPath(pathIndex + 1,
-                    StorageProjection.Combine(prefix,
-                        StorageProjection.ForArrayIndex(index)),
-                    true, ref workRemaining);
-            }
+            ApplyPath(pathIndex + 1,
+                StorageProjection.Combine(prefix,
+                    StorageProjection.ForArrayRange(0,
+                        projection.Layout.ElementCount)),
+                true, ref workRemaining);
         }
     }
 
@@ -133,10 +155,24 @@ public static partial class SemanticVerifier
         {
             var projection = StorageProjection.Combine(
                 destinationPrefix, relativeProjection);
-            if (!IsNativePointerFieldProjection(projection)
-                || !projection.ProjectionPath.IsConcrete)
+            if (!IsNativePointerFieldProjection(projection))
             {
                 throw Invalid(span);
+            }
+
+            if (!projection.ProjectionPath.IsConcrete)
+            {
+                if (!maySelect)
+                {
+                    throw Invalid(span);
+                }
+                facts.MergeNativePointerFieldValueUnknown(variable,
+                    projection, newValue.Sources,
+                    newValue.MayBeUnknown,
+                    new NativePointerExtentFact(newValue.ExtentSources,
+                        newValue.ExtentMayBeOpaque,
+                        newValue.ExtentUnavailable));
+                continue;
             }
 
             if (!maySelect)

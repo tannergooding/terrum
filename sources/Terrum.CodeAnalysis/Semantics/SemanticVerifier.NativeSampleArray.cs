@@ -36,6 +36,17 @@ public static partial class SemanticVerifier
 
             Dictionary<StorageProjection, NativePointerFieldValue>? copyPointerValues
                 = null;
+            var sourceVariable = expression switch {
+                BoundRead read => read.Variable,
+                BoundMove move => move.Variable,
+                _ => -1,
+            };
+            if (sourceVariable < 0)
+            {
+                throw Invalid(expression.Span);
+            }
+            _ = initialized.CopyRawUnionArrayFacts(variable,
+                sourceVariable);
             if (CarriesNativePointer(expression.Type, program)
                 && initialized.Dependencies is BackingDependencies copyFacts)
             {
@@ -104,6 +115,7 @@ public static partial class SemanticVerifier
         {
             throw InvalidEffect(expression.Span, "NativeImport");
         }
+        initialized.ClearRawUnionArrayFacts(variable);
         var evaluationContinues = true;
         for (var index = 0; index < initialization.Elements.Length; index++)
         {
@@ -124,6 +136,18 @@ public static partial class SemanticVerifier
                     : EvaluateExpression(element, initialized, fieldMasks,
                         declarations, function, program, ref remaining,
                         depth + 1, failures);
+                if (evaluationContinues
+                    && element is not BoundNativeFixedArrayInitialization
+                    && CarriesRawUnionPayloadFacts(
+                        program, initialization.Layout.ElementType))
+                {
+                    initialized.SetRawUnionArrayElementBytes(variable,
+                        StorageProjection.WholeObject,
+                        initialization.Layout, (ulong)index,
+                        InitializedPayloadBytesOfExpression(
+                            element, initialization.Layout.ElementType,
+                            initialized, function, program));
+                }
                 if (evaluationContinues
                     && element is not BoundNativeFixedArrayInitialization
                     && CarriesNativePointer(initialization.Layout.ElementType, program)
@@ -212,6 +236,18 @@ public static partial class SemanticVerifier
                         : EvaluateExpression(element, initialized, fieldMasks,
                             declarations, function, program, ref remaining,
                             depth + 1, failures);
+                if (evaluationContinues
+                    && trackPointerFacts
+                    && element is not BoundNativeFixedArrayInitialization
+                    && CarriesRawUnionPayloadFacts(program,
+                        layout.ElementType))
+                {
+                    initialized.SetRawUnionArrayElementBytes(variable,
+                        destinationPrefix, layout, (ulong)index,
+                        InitializedPayloadBytesOfExpression(element,
+                            layout.ElementType, initialized, function,
+                            program));
+                }
                 if (evaluationContinues
                     && trackPointerFacts
                     && element is not BoundNativeFixedArrayInitialization
@@ -499,6 +535,20 @@ public static partial class SemanticVerifier
                     declarations, function, program, ref remaining,
                     depth + 1, failures);
         if (valueCompletes
+            && CarriesRawUnionPayloadFacts(program,
+                write.Layout.ElementType))
+        {
+            var selectedIndex
+                = NativeFixedArrayContract.TryGetUnsignedIndex(
+                    write.Index, out var constantIndex)
+                    ? constantIndex : (ulong?)null;
+            initialized.SetRawUnionArrayElementBytes(write.Variable,
+                StorageProjection.WholeObject, write.Layout, selectedIndex,
+                InitializedPayloadBytesOfExpression(write.Value,
+                    write.Layout.ElementType, initialized, function,
+                    program));
+        }
+        if (valueCompletes
             && CarriesNativePointer(write.Layout.ElementType, program)
             && initialized.Dependencies is BackingDependencies facts)
         {
@@ -563,6 +613,25 @@ public static partial class SemanticVerifier
                 : EvaluateExpression(write.Value, initialized, fieldMasks,
                     declarations, function, program, ref remaining,
                     depth + 1, failures);
+        if (valueCompletes
+            && CarriesRawUnionPayloadFacts(program,
+                leafLayout.ElementType))
+        {
+            var parentProjections = write.Projections.Length == 1
+                ? [] : write.Projections.RemoveAt(
+                    write.Projections.Length - 1);
+            var arrayPrefix = StorageProjection.ForNativeFixedArrayPath(
+                parentProjections);
+            var selectedIndex
+                = NativeFixedArrayContract.TryGetUnsignedIndex(
+                    write.Projections[^1].Index, out var index)
+                    ? index : (ulong?)null;
+            initialized.SetRawUnionArrayElementBytes(write.Variable,
+                arrayPrefix, leafLayout, selectedIndex,
+                InitializedPayloadBytesOfExpression(write.Value,
+                    leafLayout.ElementType, initialized, function,
+                    program));
+        }
         if (valueCompletes
             && CarriesNativePointer(leafLayout.ElementType, program)
             && initialized.Dependencies is BackingDependencies facts)

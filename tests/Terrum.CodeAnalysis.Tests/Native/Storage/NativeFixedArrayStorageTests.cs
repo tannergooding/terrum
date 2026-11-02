@@ -82,6 +82,243 @@ public sealed class NativeFixedArrayStorageTests
             NativeRuntimePolicy.CheckedExceptions), Is.Not.Empty);
     }
 
+    [Test]
+    public void RawUnionPayloadCoverageRemainsPerFixedArrayElement()
+    {
+        const string prefix = """
+            [Blittable] [Layout(Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+                public Sparse(uint8 first, uint32 last) {
+                    First = first;
+                    Last = last;
+                }
+            }
+
+            [Blittable] [Layout(Union)]
+            public struct RawWord {
+                public mut uint64 Wide;
+                public mut Sparse Padded;
+                public RawWord(uint64 value) {
+                    unsafe { Wide = value; }
+                }
+            }
+
+            public RawWord MakePadded() {
+                mut RawWord value = new RawWord(0);
+                unsafe { value.Padded = new Sparse(1, 2); }
+                return value;
+            }
+            """;
+
+        var firstWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadFirstWide() {
+                    [RawWord; 2] values = [
+                        new RawWord(1), MakePadded()];
+                    unsafe { return values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(firstWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine, firstWide.Diagnostics));
+
+        var secondWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectSecondWide() {
+                    [RawWord; 2] values = [
+                        new RawWord(1), MakePadded()];
+                    unsafe { return values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(secondWide.HasErrors, Is.True,
+            string.Join(Environment.NewLine, secondWide.Diagnostics));
+
+        var dynamicAllWide = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadDynamicWide(int32 index) {
+                    [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    unsafe { return values[index].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicAllWide.HasErrors, Is.False,
+            string.Join(Environment.NewLine, dynamicAllWide.Diagnostics));
+
+        var dynamicMixed = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 RejectDynamicWide(int32 index) {
+                    [RawWord; 2] values = [
+                        new RawWord(1), MakePadded()];
+                    unsafe { return values[index].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicMixed.HasErrors, Is.True,
+            string.Join(Environment.NewLine, dynamicMixed.Diagnostics));
+
+        var constantElementWrite = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 PreserveUnwrittenElementWide() {
+                    mut [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    values[1] = MakePadded();
+                    unsafe { return values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(constantElementWrite.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                constantElementWrite.Diagnostics));
+
+        var constantWrittenElement = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectOverwrittenElementWide() {
+                    mut [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    values[1] = MakePadded();
+                    unsafe { return values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(constantWrittenElement.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                constantWrittenElement.Diagnostics));
+
+        var unknownElementWrite = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectElementAfterUnknownWrite(int32 index) {
+                    mut [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    values[index] = MakePadded();
+                    unsafe { return values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(unknownElementWrite.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                unknownElementWrite.Diagnostics));
+
+        var branchElementWrite = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 PreserveOtherElementAfterBranchWrite(
+                    bool replace) {
+                    mut [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    if (replace) {
+                        values[0] = MakePadded();
+                    }
+                    unsafe { return values[1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(branchElementWrite.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                branchElementWrite.Diagnostics));
+
+        var branchWrittenElement = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectElementAfterBranchWrite(bool replace) {
+                    mut [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    if (replace) {
+                        values[0] = MakePadded();
+                    }
+                    unsafe { return values[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(branchWrittenElement.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                branchWrittenElement.Diagnostics));
+
+        var copiedSnapshot = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 CopyBeforeElementOverwrite() {
+                    mut [RawWord; 2] values = [
+                        new RawWord(1), new RawWord(2)];
+                    [RawWord; 2] copy = values;
+                    values[0] = MakePadded();
+                    unsafe { return copy[0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(copiedSnapshot.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                copiedSnapshot.Diagnostics));
+
+        var nestedElement = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadNestedElementWide() {
+                    [[RawWord; 2]; 2] values = [
+                        [new RawWord(1), MakePadded()],
+                        [new RawWord(2), new RawWord(3)]];
+                    unsafe { return values[1][0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(nestedElement.HasErrors, Is.False,
+            string.Join(Environment.NewLine, nestedElement.Diagnostics));
+
+        var dynamicNestedElement = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectDynamicNestedWide(int32 index) {
+                    [[RawWord; 2]; 2] values = [
+                        [new RawWord(1), MakePadded()],
+                        [new RawWord(2), new RawWord(3)]];
+                    unsafe { return values[0][index].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicNestedElement.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                dynamicNestedElement.Diagnostics));
+
+        var dynamicOuterFull = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 ReadDynamicOuterNestedWide(int32 row) {
+                    [[RawWord; 2]; 2] values = [
+                        [new RawWord(1), MakePadded()],
+                        [new RawWord(2), new RawWord(3)]];
+                    unsafe { return values[row][0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicOuterFull.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                dynamicOuterFull.Diagnostics));
+
+        var dynamicOuterMixed = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectDynamicOuterNestedWide(int32 row) {
+                    [[RawWord; 2]; 2] values = [
+                        [new RawWord(1), MakePadded()],
+                        [new RawWord(2), new RawWord(3)]];
+                    unsafe { return values[row][1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicOuterMixed.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                dynamicOuterMixed.Diagnostics));
+
+        var nestedPathWrite = Compilation.CreateLibrary(SyntaxTree.Parse(
+            prefix + """
+                public uint64 PreserveNestedSiblingAfterPathWrite() {
+                    mut [[RawWord; 2]; 2] values = [
+                        [new RawWord(1), new RawWord(2)],
+                        [new RawWord(3), new RawWord(4)]];
+                    values[0][1] = MakePadded();
+                    unsafe { return values[0][0].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(nestedPathWrite.HasErrors, Is.False,
+            string.Join(Environment.NewLine, nestedPathWrite.Diagnostics));
+
+        var dynamicOuterPathWrite = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectAfterDynamicOuterPathWrite(int32 row) {
+                    mut [[RawWord; 2]; 2] values = [
+                        [new RawWord(1), new RawWord(2)],
+                        [new RawWord(3), new RawWord(4)]];
+                    values[row][1] = MakePadded();
+                    unsafe { return values[0][1].Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(dynamicOuterPathWrite.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                dynamicOuterPathWrite.Diagnostics));
+    }
+
     [TestCase(BoundRuntimePolicy.FailFast)]
     [TestCase(BoundRuntimePolicy.CheckedExceptions)]
     public void RequiredConstEvalCallsDetermineFixedArrayExtents(

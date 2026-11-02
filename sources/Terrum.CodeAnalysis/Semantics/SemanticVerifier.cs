@@ -5375,6 +5375,136 @@ public static partial class SemanticVerifier
     private sealed class InitializationState
     {
         private static readonly NativeOutputDestinationState UnknownNativeOutputDestination = new(null);
+        private readonly record struct RawUnionArrayStateKey(
+            int Variable, StorageProjection ArrayPrefix);
+
+        private sealed class RawUnionArrayElementState
+        {
+            private readonly Dictionary<ulong, byte[]> _elementBytes = [];
+
+            internal BoundNativeFixedArrayLayout Layout { get; }
+            internal ulong ElementCount => Layout.ElementCount;
+            internal byte[] GuaranteedBytes { get; }
+            internal IEnumerable<ulong> ElementIndexes => _elementBytes.Keys;
+
+            internal RawUnionArrayElementState(
+                BoundNativeFixedArrayLayout layout, byte[] guaranteedBytes)
+            {
+                Layout = layout;
+                GuaranteedBytes = [.. guaranteedBytes];
+            }
+
+            internal RawUnionArrayElementState Clone()
+            {
+                var result = new RawUnionArrayElementState(
+                    Layout, GuaranteedBytes);
+                foreach (var (index, bytes) in _elementBytes)
+                {
+                    result._elementBytes.Add(index, [.. bytes]);
+                }
+                return result;
+            }
+
+            internal byte[] Get(ulong index)
+                => _elementBytes.TryGetValue(index, out var bytes)
+                    ? [.. bytes] : [.. GuaranteedBytes];
+
+            internal byte[] Common()
+            {
+                if (Layout.ElementCount == 0)
+                {
+                    return [];
+                }
+
+                byte[]? common = (ulong)_elementBytes.Count
+                    < Layout.ElementCount ? [.. GuaranteedBytes] : null;
+                foreach (var bytes in _elementBytes.Values)
+                {
+                    if (common is null)
+                    {
+                        common = [.. bytes];
+                        continue;
+                    }
+                    for (var index = 0; index < common.Length; index++)
+                    {
+                        common[index] &= bytes[index];
+                    }
+                }
+                return common ?? [.. GuaranteedBytes];
+            }
+
+            internal bool Set(ulong index, ReadOnlySpan<byte> bytes)
+            {
+                if (index >= Layout.ElementCount
+                    || bytes.Length != GuaranteedBytes.Length)
+                {
+                    throw Invalid();
+                }
+
+                if (bytes.SequenceEqual(GuaranteedBytes))
+                {
+                    return _elementBytes.Remove(index);
+                }
+
+                if (_elementBytes.TryGetValue(index, out var current)
+                    && current.AsSpan().SequenceEqual(bytes))
+                {
+                    return false;
+                }
+                _elementBytes[index] = bytes.ToArray();
+                return true;
+            }
+
+            internal bool ApplyUnknownIndexWrite(ReadOnlySpan<byte> bytes)
+            {
+                if (bytes.Length != GuaranteedBytes.Length)
+                {
+                    throw Invalid();
+                }
+
+                var changed = false;
+                foreach (var index in _elementBytes.Keys.ToArray())
+                {
+                    var mergedBytes = Get(index);
+                    for (var byteIndex = 0;
+                        byteIndex < mergedBytes.Length;
+                        byteIndex++)
+                    {
+                        mergedBytes[byteIndex] &= bytes[byteIndex];
+                    }
+                    changed |= Set(index, mergedBytes);
+                }
+                return changed;
+            }
+
+            internal bool Merge(RawUnionArrayElementState other)
+            {
+                if (Layout != other.Layout
+                    || !GuaranteedBytes.AsSpan().SequenceEqual(
+                        other.GuaranteedBytes))
+                {
+                    throw Invalid();
+                }
+
+                var indexes = new HashSet<ulong>(_elementBytes.Keys);
+                indexes.UnionWith(other._elementBytes.Keys);
+                var changed = false;
+                foreach (var index in indexes)
+                {
+                    var mergedBytes = Get(index);
+                    var otherBytes = other.Get(index);
+                    for (var byteIndex = 0;
+                        byteIndex < mergedBytes.Length;
+                        byteIndex++)
+                    {
+                        mergedBytes[byteIndex] &= otherBytes[byteIndex];
+                    }
+                    changed |= Set(index, mergedBytes);
+                }
+                return changed;
+            }
+        }
+
         // Joins retain never-published vacancy (1), liveness (2), retired
         // vacancy (4), and partial structural ownership (8).
         private readonly byte[] _possibilities;
@@ -5383,6 +5513,8 @@ public static partial class SemanticVerifier
         private Dictionary<FieldGenerationKey, long> _fieldPlaceGenerations;
         private Dictionary<NestedOwnerStateKey, NestedOwnerFieldState> _nestedOwnerStates;
         private readonly Dictionary<int, byte[]> _rawUnionInitializedBytes = [];
+        private readonly Dictionary<RawUnionArrayStateKey,
+            RawUnionArrayElementState> _rawUnionArrayElementBytes = [];
         private readonly Dictionary<BoundExpression, byte> _canBeFacts;
         private readonly Dictionary<BoundExpression, byte> _flowFacts;
         private readonly Dictionary<BoundExpression, byte> _completionShapeFacts;
@@ -5973,7 +6105,7 @@ public static partial class SemanticVerifier
         {
             _possibilities[index] |= other._possibilities[index];
             _possibleFieldMasks[index] |= other._possibleFieldMasks[index];
-            MergeRawUnionInitializedBytes(index, other);
+            _ = MergeRawUnionInitializedBytes(index, other);
             _ = MergeFieldPlaceGenerations(index, other);
             _ = MergeNestedOwnerStates(index, other);
             MergeNativeOutputSlot(index, _nativeOutputDestinations[index], _nativeOutputResults[index],
@@ -6041,6 +6173,10 @@ public static partial class SemanticVerifier
                 result._rawUnionInitializedBytes.Add(variable,
                     (byte[])bytes.Clone());
             }
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                result._rawUnionArrayElementBytes.Add(key, state.Clone());
+            }
             return result;
         }
 
@@ -6060,6 +6196,11 @@ public static partial class SemanticVerifier
             {
                 destination._rawUnionInitializedBytes.Add(variable,
                     (byte[])bytes.Clone());
+            }
+            destination._rawUnionArrayElementBytes.Clear();
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                destination._rawUnionArrayElementBytes.Add(key, state.Clone());
             }
             destination._nativeOutputStateCount = _nativeOutputStateCount;
             destination.ScopeActivation = ScopeActivation;
@@ -6159,18 +6300,325 @@ public static partial class SemanticVerifier
             {
                 Array.Clear(initializedBytes);
             }
+            ClearRawUnionArrayFacts(variable);
+        }
+
+        internal void ClearRawUnionArrayFacts(int variable)
+        {
+            if ((uint)variable >= (uint)Length)
+            {
+                throw Invalid();
+            }
+            foreach (var key in _rawUnionArrayElementBytes.Keys
+                .Where(key => key.Variable == variable).ToArray())
+            {
+                _ = _rawUnionArrayElementBytes.Remove(key);
+            }
+        }
+
+        internal bool CopyRawUnionArrayFacts(int destination,
+            int source)
+        {
+            if ((uint)destination >= (uint)Length
+                || (uint)source >= (uint)Length)
+            {
+                throw Invalid();
+            }
+            if (destination == source)
+            {
+                return false;
+            }
+
+            var prior = _rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == destination)
+                .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                    static pair => pair.Value.Clone());
+            ClearRawUnionArrayFacts(destination);
+            foreach (var (key, state) in _rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == source).ToArray())
+            {
+                _rawUnionArrayElementBytes.Add(
+                    new RawUnionArrayStateKey(destination,
+                        key.ArrayPrefix), state.Clone());
+            }
+            return !RawUnionArrayStatesEqual(prior,
+                _rawUnionArrayElementBytes
+                    .Where(pair => pair.Key.Variable == destination)
+                    .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                        static pair => pair.Value));
+        }
+
+        internal void SetRawUnionArrayElementBytes(int variable,
+            StorageProjection arrayPrefix,
+            BoundNativeFixedArrayLayout layout, ulong? elementIndex,
+            ReadOnlySpan<byte> initializedBytes)
+        {
+            if ((uint)variable >= (uint)Length
+                || !NativeFixedArrayContract.MatchesLayout(layout, Program)
+                || !CarriesRawUnionPayloadFacts(Program,
+                    layout.ElementType))
+            {
+                throw Invalid();
+            }
+
+            var defaultBytes = GuaranteedInitializedPayloadBytes(
+                layout.ElementType, Program);
+            if (initializedBytes.Length != defaultBytes.Length)
+            {
+                throw Invalid();
+            }
+
+            if (arrayPrefix.Kind == StorageProjectionKind.WholeObject
+                || arrayPrefix.ProjectionPath.IsConcrete)
+            {
+                var key = new RawUnionArrayStateKey(variable, arrayPrefix);
+                if (!_rawUnionArrayElementBytes.TryGetValue(key,
+                        out var state))
+                {
+                    state = new RawUnionArrayElementState(layout,
+                        defaultBytes);
+                    _rawUnionArrayElementBytes.Add(key, state);
+                }
+                else if (state.Layout != layout)
+                {
+                    throw Invalid();
+                }
+
+                if (elementIndex is ulong index)
+                {
+                    _ = state.Set(index, initializedBytes);
+                }
+                else
+                {
+                    _ = state.ApplyUnknownIndexWrite(initializedBytes);
+                }
+                return;
+            }
+
+            foreach (var (key, state) in _rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == variable
+                    && arrayPrefix.ProjectionPath.IsPrefixOf(
+                        pair.Key.ArrayPrefix.ProjectionPath)).ToArray())
+            {
+                if (state.Layout != layout)
+                {
+                    throw Invalid();
+                }
+                if (elementIndex is ulong index)
+                {
+                    var mergedBytes = state.Get(index);
+                    for (var byteIndex = 0;
+                        byteIndex < mergedBytes.Length;
+                        byteIndex++)
+                    {
+                        mergedBytes[byteIndex] &= initializedBytes[byteIndex];
+                    }
+                    _ = state.Set(index, mergedBytes);
+                }
+                else
+                {
+                    _ = state.ApplyUnknownIndexWrite(initializedBytes);
+                }
+            }
+        }
+
+        internal byte[] RawUnionArrayElementBytes(int variable,
+            StorageProjection arrayPrefix,
+            BoundNativeFixedArrayLayout layout, ulong? elementIndex)
+        {
+            if ((uint)variable >= (uint)Length
+                || !NativeFixedArrayContract.MatchesLayout(layout, Program)
+                || !CarriesRawUnionPayloadFacts(Program,
+                    layout.ElementType))
+            {
+                throw Invalid();
+            }
+
+            var defaultBytes = GuaranteedInitializedPayloadBytes(
+                layout.ElementType, Program);
+            if (arrayPrefix.Kind == StorageProjectionKind.WholeObject
+                || arrayPrefix.ProjectionPath.IsConcrete)
+            {
+                if (!_rawUnionArrayElementBytes.TryGetValue(
+                        new RawUnionArrayStateKey(variable, arrayPrefix),
+                        out var exactState))
+                {
+                    return defaultBytes;
+                }
+                if (exactState.Layout != layout)
+                {
+                    throw Invalid();
+                }
+                return elementIndex is ulong index
+                    ? exactState.Get(index) : exactState.Common();
+            }
+
+            var expected = arrayPrefix.ProjectionPath.ExpectedMatchCount;
+            if (expected == 0)
+            {
+                return defaultBytes;
+            }
+
+            var matched = 0UL;
+            byte[]? commonBytes = null;
+            foreach (var (key, state) in _rawUnionArrayElementBytes)
+            {
+                if (key.Variable != variable
+                    || !arrayPrefix.ProjectionPath.IsPrefixOf(
+                        key.ArrayPrefix.ProjectionPath))
+                {
+                    continue;
+                }
+                if (state.Layout != layout)
+                {
+                    throw Invalid();
+                }
+                matched++;
+                var elementBytes = elementIndex is ulong index
+                    ? state.Get(index) : state.Common();
+                if (commonBytes is null)
+                {
+                    commonBytes = elementBytes;
+                    continue;
+                }
+                for (var byteIndex = 0;
+                    byteIndex < commonBytes.Length;
+                    byteIndex++)
+                {
+                    commonBytes[byteIndex] &= elementBytes[byteIndex];
+                }
+            }
+
+            return matched < expected || commonBytes is null
+                ? defaultBytes : commonBytes;
+        }
+
+        private bool CopyRawUnionArrayFacts(int variable,
+            InitializationState other)
+        {
+            var prior = _rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                    static pair => pair.Value.Clone());
+            var incoming = other._rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                    static pair => pair.Value.Clone());
+            ClearRawUnionArrayFacts(variable);
+            foreach (var (prefix, state) in incoming)
+            {
+                _rawUnionArrayElementBytes.Add(
+                    new RawUnionArrayStateKey(variable, prefix), state);
+            }
+            return !RawUnionArrayStatesEqual(prior, incoming);
+        }
+
+        private bool MergeRawUnionArrayFacts(int variable,
+            InitializationState first, InitializationState second)
+        {
+            var firstStates = first._rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                    static pair => pair.Value);
+            var secondStates = second._rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                    static pair => pair.Value);
+            var currentStates = _rawUnionArrayElementBytes
+                .Where(pair => pair.Key.Variable == variable)
+                .ToDictionary(static pair => pair.Key.ArrayPrefix,
+                    static pair => pair.Value);
+            var prefixes = new HashSet<StorageProjection>(
+                firstStates.Keys);
+            prefixes.UnionWith(secondStates.Keys);
+            prefixes.UnionWith(currentStates.Keys);
+            var changed = false;
+            foreach (var prefix in prefixes)
+            {
+                _ = firstStates.TryGetValue(prefix, out var firstState);
+                _ = secondStates.TryGetValue(prefix, out var secondState);
+                if (firstState is null || secondState is null)
+                {
+                    if (currentStates.Remove(prefix))
+                    {
+                        _ = _rawUnionArrayElementBytes.Remove(
+                            new RawUnionArrayStateKey(variable, prefix));
+                        changed = true;
+                    }
+                    continue;
+                }
+
+                var mergedState = firstState.Clone();
+                _ = mergedState.Merge(secondState);
+                if (currentStates.TryGetValue(prefix,
+                    out var currentState)
+                    && RawUnionArrayStatesEqual(
+                        new Dictionary<StorageProjection,
+                            RawUnionArrayElementState> {
+                                [prefix] = currentState,
+                            },
+                        new Dictionary<StorageProjection,
+                            RawUnionArrayElementState> {
+                                [prefix] = mergedState,
+                            }))
+                {
+                    continue;
+                }
+                _rawUnionArrayElementBytes[
+                    new RawUnionArrayStateKey(variable, prefix)]
+                    = mergedState;
+                changed = true;
+            }
+            return changed;
+        }
+
+        private static bool RawUnionArrayStatesEqual(
+            IReadOnlyDictionary<StorageProjection,
+                RawUnionArrayElementState> left,
+            IReadOnlyDictionary<StorageProjection,
+                RawUnionArrayElementState> right)
+        {
+            if (left.Count != right.Count)
+            {
+                return false;
+            }
+            foreach (var (prefix, leftState) in left)
+            {
+                if (!right.TryGetValue(prefix, out var rightState)
+                    || leftState.Layout != rightState.Layout
+                    || !leftState.GuaranteedBytes.AsSpan().SequenceEqual(
+                        rightState.GuaranteedBytes)
+                    || leftState.ElementCount != rightState.ElementCount)
+                {
+                    return false;
+                }
+
+                var indexes = new HashSet<ulong>(
+                    leftState.ElementIndexes);
+                indexes.UnionWith(rightState.ElementIndexes);
+                foreach (var index in indexes)
+                {
+                    if (!leftState.Get(index).AsSpan().SequenceEqual(
+                        rightState.Get(index)))
+                    {
+                        return false;
+                    }
+                }
+            }
+            return true;
         }
 
         internal bool CopyRawUnionInitializedBytes(int variable,
             InitializationState other)
         {
+            var arrayChanged = CopyRawUnionArrayFacts(variable, other);
             var hasCurrent = _rawUnionInitializedBytes.TryGetValue(variable,
                 out var currentBytes);
             var hasOther = other._rawUnionInitializedBytes.TryGetValue(variable,
                 out var otherBytes);
             if (!hasCurrent && !hasOther)
             {
-                return false;
+                return arrayChanged;
             }
             if (!hasCurrent || !hasOther
                 || currentBytes!.Length != otherBytes!.Length)
@@ -6180,7 +6628,7 @@ public static partial class SemanticVerifier
 
             var changed = !currentBytes.AsSpan().SequenceEqual(otherBytes);
             _rawUnionInitializedBytes[variable] = (byte[])otherBytes.Clone();
-            return changed;
+            return changed || arrayChanged;
         }
 
         internal bool MergeRawUnionInitializedBytes(int variable,
@@ -6190,6 +6638,8 @@ public static partial class SemanticVerifier
         internal bool MergeRawUnionInitializedBytes(int variable,
             InitializationState first, InitializationState second)
         {
+            var arrayChanged = MergeRawUnionArrayFacts(
+                variable, first, second);
             var hasCurrent = _rawUnionInitializedBytes.TryGetValue(variable,
                 out var currentBytes);
             var hasFirst = first._rawUnionInitializedBytes.TryGetValue(variable,
@@ -6198,7 +6648,7 @@ public static partial class SemanticVerifier
                 out var secondBytes);
             if (!hasFirst && !hasSecond && !hasCurrent)
             {
-                return false;
+                return arrayChanged;
             }
             if (!hasFirst || !hasSecond || !hasCurrent
                 || currentBytes!.Length != firstBytes!.Length
@@ -6215,7 +6665,7 @@ public static partial class SemanticVerifier
             }
             var changed = !currentBytes.AsSpan().SequenceEqual(mergedBytes);
             _rawUnionInitializedBytes[variable] = mergedBytes;
-            return changed;
+            return changed || arrayChanged;
         }
 
         internal void MarkNativeOutputPending(int index)
@@ -10880,6 +11330,36 @@ public static partial class SemanticVerifier
                 whenTrue[index] &= whenFalse[index];
             }
             return whenTrue;
+        }
+        if (expression is BoundNativeFixedArrayElement fixedArrayElement
+            && fixedArrayElement.Type == type)
+        {
+            var elementIndex
+                = NativeFixedArrayContract.TryGetUnsignedIndex(
+                    fixedArrayElement.Index, out var selectedIndex)
+                    ? selectedIndex : (ulong?)null;
+            return initialized.RawUnionArrayElementBytes(
+                fixedArrayElement.Variable,
+                StorageProjection.WholeObject,
+                fixedArrayElement.Layout, elementIndex);
+        }
+        if (expression is BoundNativeFixedArrayPathElement pathElement
+            && pathElement.Type == type
+            && !pathElement.Projections.IsDefaultOrEmpty)
+        {
+            var parentProjections = pathElement.Projections.Length == 1
+                ? [] : pathElement.Projections.RemoveAt(
+                    pathElement.Projections.Length - 1);
+            var arrayPrefix = StorageProjection.ForNativeFixedArrayPath(
+                parentProjections);
+            var leafProjection = pathElement.Projections[^1];
+            var elementIndex
+                = NativeFixedArrayContract.TryGetUnsignedIndex(
+                    leafProjection.Index, out var selectedIndex)
+                    ? selectedIndex : (ulong?)null;
+            return initialized.RawUnionArrayElementBytes(
+                pathElement.Variable, arrayPrefix, leafProjection.Layout,
+                elementIndex);
         }
         if (expression is BoundFieldRead fieldRead
             && fieldRead.Type == type
