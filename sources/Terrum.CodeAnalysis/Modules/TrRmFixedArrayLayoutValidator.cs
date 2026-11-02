@@ -1988,10 +1988,11 @@ internal static class TrRmFixedArrayLayoutValidator
                     sourceRepetitions.Length);
             var length = region.Length;
             var span = length;
+            var isContiguous = true;
             foreach (var repetition in sourceRepetitions)
             {
                 ConsumeWork();
-                if (repetition.Stride == span)
+                if (isContiguous && repetition.Stride == span)
                 {
                     length = checked(length * repetition.Count);
                     span = length;
@@ -1999,6 +2000,7 @@ internal static class TrRmFixedArrayLayoutValidator
                 else
                 {
                     repetitions.Add(repetition);
+                    isContiguous &= repetition.Stride == span;
                     span = checked(((repetition.Count - 1)
                         * repetition.Stride) + span);
                 }
@@ -2081,9 +2083,32 @@ internal static class TrRmFixedArrayLayoutValidator
                 return true;
             }
 
-            var normalizedCoverage = CanonicalizePayloadRanges(coverage);
             var normalizedPayloads
                 = CanonicalizePayloadRanges(possiblePayloads);
+            ConsumeWork(checked((ulong)coverage.Length + 1UL));
+            var remainingCoverage
+                = new List<TrRmReturnCoverageRegion>(coverage.Length);
+            foreach (var region in coverage)
+            {
+                ConsumeWork();
+                if (region.Repetitions.IsDefaultOrEmpty
+                    && region.Length
+                        <= ValueLayout.MaximumStructureSize)
+                {
+                    if (!IsByteRangeCoveredByPayloadUnion(region,
+                            normalizedPayloads))
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    remainingCoverage.Add(region);
+                }
+            }
+
+            var normalizedCoverage = CanonicalizePayloadRanges(
+                ImmutableArray.CreateRange(remainingCoverage));
             foreach (var region in normalizedCoverage)
             {
                 ConsumeWork();
@@ -2105,6 +2130,69 @@ internal static class TrRmFixedArrayLayoutValidator
             }
 
             return true;
+        }
+
+        private bool IsByteRangeCoveredByPayloadUnion(
+            TrRmReturnCoverageRegion coverage,
+            ImmutableArray<TrRmReturnCoverageRegion> possiblePayloads)
+        {
+            var end = checked(coverage.Offset + coverage.Length);
+            for (var byteOffset = coverage.Offset;
+                byteOffset < end;
+                byteOffset++)
+            {
+                ConsumeWork();
+                var isCovered = false;
+                foreach (var payload in possiblePayloads)
+                {
+                    ConsumeWork();
+                    if (PayloadContainsByte(payload, byteOffset))
+                    {
+                        isCovered = true;
+                        break;
+                    }
+                }
+
+                if (!isCovered)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private bool PayloadContainsByte(
+            TrRmReturnCoverageRegion payload, ulong offset)
+        {
+            if (offset < payload.Offset)
+            {
+                return false;
+            }
+
+            var localOffset = offset - payload.Offset;
+            var repetitions = payload.Repetitions;
+            if (repetitions.IsDefaultOrEmpty)
+            {
+                return localOffset < payload.Length;
+            }
+
+            for (var dimension = repetitions.Length - 1;
+                dimension >= 0;
+                dimension--)
+            {
+                ConsumeWork();
+                var repetition = repetitions[dimension];
+                var index = localOffset / repetition.Stride;
+                if (index >= repetition.Count)
+                {
+                    return false;
+                }
+
+                localOffset -= index * repetition.Stride;
+            }
+
+            return localOffset < payload.Length;
         }
 
         private bool ContainsPayloadRegion(

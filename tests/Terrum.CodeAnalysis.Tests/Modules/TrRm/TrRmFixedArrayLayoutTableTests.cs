@@ -183,6 +183,26 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             public struct PaddedArrayHolder {
                 public [PaddedEnvelope; 4] Values;
             }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct Sparse {
+                public uint8 First;
+                public uint32 Last;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Union)]
+            public struct PayloadUnion {
+                public uint64 Whole;
+                public [Sparse; 2] Parts;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct PayloadUnionHolder {
+                public PayloadUnion Value;
+            }
             """;
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
@@ -217,11 +237,12 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var rawWordLayout = tables.Layouts.GetLayoutForProfile(rawWordRow, 1);
         Assert.That(tables.Layouts.GetLayoutKind(rawWordLayout),
             Is.EqualTo(2));
-        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(2));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(3));
         if (isA2R1)
         {
             var envelopeTypeDef = 0;
             var paddedArrayHolderTypeDef = 0;
+            var payloadUnionHolderTypeDef = 0;
             for (var typeDef = 1; typeDef <= tables.TypeDefs.Count;
                 typeDef++)
             {
@@ -234,9 +255,15 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 {
                     paddedArrayHolderTypeDef = typeDef;
                 }
+                else if (tables.TypeDefs.GetName(typeDef)
+                    == "PayloadUnionHolder")
+                {
+                    payloadUnionHolderTypeDef = typeDef;
+                }
             }
             Assert.That(envelopeTypeDef, Is.GreaterThan(0));
             Assert.That(paddedArrayHolderTypeDef, Is.GreaterThan(0));
+            Assert.That(payloadUnionHolderTypeDef, Is.GreaterThan(0));
 
             var (envelopeFirstField, envelopeEndField)
                 = tables.TypeDefs.GetFieldRange(envelopeTypeDef);
@@ -362,6 +389,34 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                     paddedArrayTypeSpecRef, 1,
                     ImmutableArray.Create(
                         new TrRmReturnCoverageRegion(1, 7, []))),
+                Is.False);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    paddedArrayTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(8, 1, [
+                            new TrRmReturnCoverageRepetition(2, 4),
+                            new TrRmReturnCoverageRepetition(2, 5),
+                        ]))),
+                Is.False);
+
+            var (payloadUnionField, payloadUnionFieldEnd)
+                = tables.TypeDefs.GetFieldRange(payloadUnionHolderTypeDef);
+            Assert.That(payloadUnionFieldEnd - payloadUnionField,
+                Is.EqualTo(1));
+            var payloadUnionTypeSpecRef = tables.Fields.GetTypeSpecRef(
+                payloadUnionField);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    payloadUnionTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 9, []))),
+                Is.True);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    payloadUnionTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 10, []))),
                 Is.False);
         }
 
