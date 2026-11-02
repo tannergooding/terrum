@@ -256,6 +256,55 @@ internal sealed class UnionLayoutTests
     }
 
     [Test]
+    public void RawUnionOverlappingStoreInvalidatesPointerValidity()
+    {
+        var preservedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable]
+                [Layout(LayoutKind.Union)]
+                public struct RawPointer {
+                    public mut ptr<int32> Pointer;
+                    public mut uint64 Bits;
+                }
+
+                public unsafe int32 ReadPointer() {
+                    mut int32 value = 42;
+                    init mut RawPointer rawValue;
+                    unsafe {
+                        rawValue.Pointer = &value;
+                        return *rawValue.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(preservedCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                preservedCompilation.Diagnostics));
+
+        var invalidatedCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse("""
+                [Blittable]
+                [Layout(LayoutKind.Union)]
+                public struct RawPointer {
+                    public mut ptr<int32> Pointer;
+                    public mut uint64 Bits;
+                }
+
+                public unsafe int32 ReadAfterOverwrite() {
+                    mut int32 value = 42;
+                    init mut RawPointer rawValue;
+                    unsafe {
+                        rawValue.Pointer = &value;
+                        rawValue.Bits = 0;
+                        return *rawValue.Pointer;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(invalidatedCompilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                invalidatedCompilation.Diagnostics));
+    }
+
+    [Test]
     public void RawUnionCallSitesConsumeVerifiedReturnCoverage()
     {
         var wideCompilation = Compilation.CreateLibrary(SyntaxTree.Parse("""
