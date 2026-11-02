@@ -253,6 +253,7 @@ public static partial class TrRmExecutableCompiler
                 (byte)signature.CallingConvention, checked((uint)anchorMethodRow)),
         };
         var signatureTypeSpecRefs = new Dictionary<PrimitiveType, uint>();
+        var pointerTypeSpecTypesInProgress = new HashSet<PrimitiveType>();
         a3LayoutResourceLedger?.ConsumeWork();
         var fixedArrayTypeSpecRefs = new Dictionary<int, uint>();
         ReserveA3Buffer(a3LayoutResourceLedger,
@@ -342,17 +343,47 @@ public static partial class TrRmExecutableCompiler
                 var pointer = program.NativePointerTypes[
                     NativePointerTypes.Index(type)];
                 var pointeeIndex = Array.IndexOf(s_types, pointer.PointeeType);
-                if (pointeeIndex < 0
-                    || (pointer.PointeeType != PrimitiveType.Void
-                        && !DirectNativeImportContract.IsScalar(pointer.PointeeType)))
+                if (!pointerTypeSpecTypesInProgress.Add(type))
                 {
                     throw Unsupported(
-                        $"The NativeAddress producer does not support pointer pointee {pointer.PointeeType}.");
+                        "The NativeAddress producer received a recursive pointer TypeSpec.");
                 }
 
-                a3LayoutResourceLedger?.ConsumeWork(5);
-                typeSpecBytes = TrRmTypeSpecTableWriter.InlineFamily(0x8C,
-                    s_codes[pointeeIndex], pointer.IsWritable ? (byte)1 : (byte)0);
+                try
+                {
+                    if (pointeeIndex >= 0
+                        && (pointer.PointeeType == PrimitiveType.Void
+                            || DirectNativeImportContract.IsScalar(
+                                pointer.PointeeType)))
+                    {
+                        a3LayoutResourceLedger?.ConsumeWork(5);
+                        typeSpecBytes = TrRmTypeSpecTableWriter.InlineFamily(
+                            0x8C, s_codes[pointeeIndex],
+                            pointer.IsWritable ? (byte)1 : (byte)0);
+                    }
+                    else if (NativePointerTypes.IsType(
+                                pointer.PointeeType)
+                        || NativeFixedArrayTypes.IsType(
+                            pointer.PointeeType))
+                    {
+                        var pointeeTypeSpecRef
+                            = GetSignatureTypeSpecRef(pointer.PointeeType);
+                        a3LayoutResourceLedger?.ConsumeWork(5);
+                        typeSpecBytes
+                            = TrRmTypeSpecTableWriter.IndexedFamily(0x8C,
+                                pointeeTypeSpecRef,
+                                pointer.IsWritable ? (byte)1 : (byte)0);
+                    }
+                    else
+                    {
+                        throw Unsupported(
+                            $"The NativeAddress producer does not support pointer pointee {pointer.PointeeType}.");
+                    }
+                }
+                finally
+                {
+                    _ = pointerTypeSpecTypesInProgress.Remove(type);
+                }
             }
             else
             {
@@ -1714,16 +1745,16 @@ public static partial class TrRmExecutableCompiler
             switch (statement)
             {
                 case BoundAssignment assignment:
-                    if (!IsA2EEmptyArrayInitialization(assignment,
+                    if (IsA2EEmptyArrayInitialization(assignment,
                             out _))
                     {
-                        return false;
+                        _ = AddA3Staged(
+                            nullaryArrayInitializationVariables,
+                            assignment.Variable, resourceLedger);
+                        return true;
                     }
 
-                    _ = AddA3Staged(
-                        nullaryArrayInitializationVariables,
-                        assignment.Variable, resourceLedger);
-                    return true;
+                    return assignment.Value is BoundRead;
 
                 case BoundBlock block:
                     foreach (var nested in block.Statements)
@@ -1773,7 +1804,7 @@ public static partial class TrRmExecutableCompiler
             || statements.Take(callStatements[0].index)
                 .Any(statement => !IsSupportedStorageCallStatement(statement)
                     && statement is not BoundAssignment
-                        { Value: BoundNativeFixedArrayInitialization }))
+                        { Value: BoundNativeFixedArrayInitialization or BoundRead }))
         {
             return false;
         }
@@ -1826,6 +1857,15 @@ public static partial class TrRmExecutableCompiler
             }
             else if (NativeFixedArrayTypes.IsType(variable.Type))
             {
+                var hasSupportedArrayCopy
+                    = declaration.Initializer is BoundRead arrayRead
+                        && arrayRead.Variable != declaration.Variable
+                        && (uint)arrayRead.Variable
+                            < (uint)function.Variables.Length
+                        && localVariables.Contains(arrayRead.Variable)
+                        && arrayRead.Type == variable.Type
+                        && arrayRead.Type
+                            == function.Variables[arrayRead.Variable].Type;
                 if (schema is not (
                         TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyInitializationDraft
@@ -1833,13 +1873,16 @@ public static partial class TrRmExecutableCompiler
                         or TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyEmptyUnitScalarFrozenValuesDraft)
                     || !NativeFixedArrayContract.TryGetLayout(variable.Type,
                         program.Structures, program.NativeFixedArrayTypes,
-                        out var arrayLayout)
-                    || (arrayLayout.ElementCount != 0
-                        && !variable.IsMutable)
-                    || declaration.Initializer
-                        is not BoundNativeFixedArrayInitialization arrayInitialization
-                    || !IsSupportedNativeFixedArrayInitialization(
-                        variable.Type, arrayInitialization, program, schema))
+                            out _)
+                    || (declaration.Initializer
+                            is not BoundNativeFixedArrayInitialization
+                                arrayInitialization
+                        && !hasSupportedArrayCopy)
+                    || (declaration.Initializer
+                            is BoundNativeFixedArrayInitialization selectedArrayInitialization
+                        && !IsSupportedNativeFixedArrayInitialization(
+                            variable.Type, selectedArrayInitialization, program,
+                            schema)))
                 {
                     return false;
                 }
@@ -1849,10 +1892,15 @@ public static partial class TrRmExecutableCompiler
                 && (uint)read.Variable < (uint)function.Variables.Length
                 && read.Type == variable.Type
                 && read.Type == function.Variables[read.Variable].Type
-                && (DirectNativeImportContract.IsScalar(read.Type)
-                    || NativePointerTypes.IsType(read.Type))
+                && IsSupportedNativeAddressValueType(read.Type)
                 && (read.Variable < function.ParameterCount
                     || localVariables.Contains(read.Variable)))
+            {
+            }
+            else if (declaration.Initializer is BoundNativePointerAddress
+                    or BoundNativeFixedArrayPointerAddress
+                && NativePointerTypes.IsType(variable.Type)
+                && declaration.Initializer.Type == variable.Type)
             {
             }
             else if (declaration.Initializer is BoundCall localCall
@@ -1885,6 +1933,17 @@ public static partial class TrRmExecutableCompiler
                 || constant.Type != variable.Type
                 || !TryGetContextualInitializationRegister(constant,
                     variable.Type, schema, out _))
+            {
+                return false;
+            }
+        }
+
+        foreach (var statement in statements.Take(callStatements[0].index))
+        {
+            if (statement is BoundAssignment assignment
+                && !IsA2EEmptyArrayInitialization(assignment, out _)
+                && !IsSupportedNativeFixedArrayCopyAssignment(assignment,
+                    function, program))
             {
                 return false;
             }
@@ -1961,6 +2020,14 @@ public static partial class TrRmExecutableCompiler
                 && read.Type == signature.ParameterTypes[ordinal])
             {
             }
+            else if (argument is BoundNativeFixedArrayElement
+                    or BoundNativeFixedArrayPathElement
+                && argument.Type == signature.ParameterTypes[ordinal]
+                && IsSupportedNativeAddressValueType(argument.Type)
+                && IsSupportedNativeFixedArrayRead(argument, function,
+                    program, localVariables))
+            {
+            }
             else
             {
                 return false;
@@ -2007,6 +2074,20 @@ public static partial class TrRmExecutableCompiler
                 {
                     if (!DirectNativeImportContract.IsScalar(read.Type)
                         && !NativePointerTypes.IsType(read.Type))
+                    {
+                        return false;
+                    }
+
+                    argumentCaptureHomes[argumentIndex]
+                        = nextUnitCallResultHome++;
+                }
+
+                if (argument is BoundNativeFixedArrayElement
+                    or BoundNativeFixedArrayPathElement)
+                {
+                    if (!IsSupportedNativeAddressValueType(argument.Type)
+                        || !IsSupportedNativeFixedArrayRead(argument,
+                            function, program, localVariables))
                     {
                         return false;
                     }
@@ -2315,7 +2396,9 @@ public static partial class TrRmExecutableCompiler
                 return true;
 
             case BoundAssignment assignment:
-                return IsA2EEmptyArrayInitialization(assignment, out _);
+                return IsA2EEmptyArrayInitialization(assignment, out _)
+                    || IsSupportedNativeFixedArrayCopyAssignment(
+                        assignment, function, program);
 
             case BoundExpressionStatement
                 { Expression: BoundCall call }:
@@ -2567,7 +2650,7 @@ public static partial class TrRmExecutableCompiler
             && !caller.Variables[variable].IsInitializationLocal
             && NativeFixedArrayTypes.IsType(
                 caller.Variables[variable].Type)
-            && DirectNativeImportContract.IsScalar(elementType);
+            && IsSupportedNativeAddressValueType(elementType);
     }
 
     private static bool IsSupportedNativeUnitInitializerCall(
@@ -2731,6 +2814,26 @@ public static partial class TrRmExecutableCompiler
         return true;
     }
 
+    private static bool IsSupportedNativeFixedArrayCopyAssignment(
+        BoundAssignment assignment, BoundFunction function,
+        BoundProgram program)
+        => (uint)assignment.Variable
+            < (uint)function.Variables.Length
+            && assignment.Variable >= function.ParameterCount
+            && function.Variables[assignment.Variable].IsMutable
+            && NativeFixedArrayTypes.IsType(
+                function.Variables[assignment.Variable].Type)
+            && assignment.Value is BoundRead arrayRead
+            && (uint)arrayRead.Variable
+                < (uint)function.Variables.Length
+            && arrayRead.Variable >= function.ParameterCount
+            && arrayRead.Type
+                == function.Variables[assignment.Variable].Type
+            && arrayRead.Type
+                == function.Variables[arrayRead.Variable].Type
+            && NativeFixedArrayContract.TryGetLayout(arrayRead.Type,
+                program.Structures, program.NativeFixedArrayTypes, out _);
+
     private static int GetBoundCallParameterIndex(BoundCall call,
         int argumentIndex)
         => call.ArgumentParameterIndices.IsDefault
@@ -2791,8 +2894,18 @@ public static partial class TrRmExecutableCompiler
 
                 if (element is BoundRead initializerRead
                     && initializerRead.Type == layout.ElementType
-                    && DirectNativeImportContract.IsScalar(
+                    && IsSupportedNativeAddressValueType(
                         layout.ElementType))
+                {
+                    continue;
+                }
+
+                if (NativePointerTypes.IsType(layout.ElementType)
+                    && element.Type == layout.ElementType
+                    && element is BoundNativePointerAddress
+                        or BoundNativeFixedArrayPointerAddress
+                        or BoundNativeFixedArrayElement
+                        or BoundNativeFixedArrayPathElement)
                 {
                     continue;
                 }
@@ -3241,26 +3354,125 @@ public static partial class TrRmExecutableCompiler
             return result;
         }
 
-        var unitCallTemporaryHomes = GetNativeAddressUnitCallHomes(
-            storageCall.UnitInitializerCalls, storageCall.ConditionCaptures,
-            localCount, resourceLedger);
+        var unitCallTemporaryHomesBuilder
+            = GetNativeAddressUnitCallHomes(
+                storageCall.UnitInitializerCalls,
+                storageCall.ConditionCaptures, localCount,
+                resourceLedger).ToBuilder();
+        var pointerValueHomeByExpression
+            = new Dictionary<BoundExpression, int>(
+                ReferenceEqualityComparer.Instance);
+        var pointerValueAddresses = new List<BoundExpression>();
+        void AddPointerValueHome(BoundExpression expression)
+        {
+            if (!NativePointerTypes.IsType(expression.Type)
+                || expression is not (BoundNativePointerAddress
+                    or BoundNativeFixedArrayPointerAddress
+                    or BoundNativeFixedArrayElement
+                    or BoundNativeFixedArrayPathElement))
+            {
+                throw Unsupported(
+                    "The A2 pointer initializer has no admitted pointer-value producer.");
+            }
+
+            var home = checked(localCount
+                + unitCallTemporaryHomesBuilder.Count);
+            if (!TryAddA3Staged(pointerValueHomeByExpression, expression,
+                    home, resourceLedger))
+            {
+                throw Unsupported(
+                    "The A2 pointer initializer value Home is reused.");
+            }
+            pointerValueAddresses.Add(expression);
+            unitCallTemporaryHomesBuilder.Add(new NativeAddressUnitCallHome(
+                home, expression.Type));
+        }
+
+        void CollectPointerArrayInitializerValues(
+            BoundNativeFixedArrayInitialization initialization)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            foreach (var element in initialization.Elements)
+            {
+                resourceLedger?.ConsumeWork();
+                if (element is BoundNativeFixedArrayInitialization nested)
+                {
+                    CollectPointerArrayInitializerValues(nested);
+                }
+                else if (element is BoundNativePointerAddress
+                    or BoundNativeFixedArrayPointerAddress
+                    or BoundNativeFixedArrayElement
+                    or BoundNativeFixedArrayPathElement)
+                {
+                    AddPointerValueHome(element);
+                }
+            }
+        }
+
+        void CollectPointerValueHomes(BoundStatement statement)
+        {
+            resourceLedger?.ConsumeWork();
+            switch (statement)
+            {
+                case BoundLocal local when local.Initializer
+                    is BoundNativeFixedArrayInitialization initialization:
+                    CollectPointerArrayInitializerValues(initialization);
+                    break;
+
+                case BoundLocal local when local.Initializer
+                    is BoundNativePointerAddress
+                        or BoundNativeFixedArrayPointerAddress:
+                    AddPointerValueHome(local.Initializer);
+                    break;
+
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        CollectPointerValueHomes(nested);
+                    }
+                    break;
+
+                case BoundUnsafe unsafeBlock:
+                    CollectPointerValueHomes(unsafeBlock.Body);
+                    break;
+
+                case BoundIf branch:
+                    CollectPointerValueHomes(branch.Then);
+                    if (branch.Else is not null)
+                    {
+                        CollectPointerValueHomes(branch.Else);
+                    }
+                    break;
+            }
+        }
+
+        foreach (var statement in caller.Body.Statements)
+        {
+            CollectPointerValueHomes(statement);
+        }
+
+        var unitCallTemporaryHomes
+            = unitCallTemporaryHomesBuilder.ToImmutable();
         var unitCallResultHomeEnd
             = localCount + unitCallTemporaryHomes.Length;
         var indexCaptureHomesByAddress
-            = new Dictionary<BoundNativeStorageAddress, int[]>(
+            = new Dictionary<BoundExpression, int[]>(
                 ReferenceEqualityComparer.Instance);
         var indexCaptureHomes
             = new List<NativeAddressUnitCallHome>();
         var nextIndexCaptureHome = unitCallResultHomeEnd;
-        void AddIndexCaptureHomes(BoundNativeStorageAddress address)
+        void AddIndexCaptureHomes(BoundExpression address,
+            PrimitiveType carrierType, BoundExpression index,
+            ImmutableArray<BoundNativeFixedArrayProjection> projections)
         {
-            if (!NativeFixedArrayTypes.IsType(address.CarrierType))
+            if (!NativeFixedArrayTypes.IsType(carrierType))
             {
                 return;
             }
 
-            var projectionCount = address.Projections.IsDefaultOrEmpty
-                ? 1 : address.Projections.Length;
+            var projectionCount = projections.IsDefaultOrEmpty
+                ? 1 : projections.Length;
             ReserveA3Array(resourceLedger, projectionCount, sizeof(int));
             var homes = new int[projectionCount];
             Array.Fill(homes, -1);
@@ -3268,10 +3480,10 @@ public static partial class TrRmExecutableCompiler
                 projectionIndex < projectionCount; projectionIndex++)
             {
                 resourceLedger?.ConsumeWork();
-                var index = address.Projections.IsDefaultOrEmpty
-                    ? address.Index
-                    : address.Projections[projectionIndex].Index;
-                if (index is not BoundUpdate { IsPrefix: false } update)
+                var projectionIndexExpression = projections.IsDefaultOrEmpty
+                    ? index : projections[projectionIndex].Index;
+                if (projectionIndexExpression
+                    is not BoundUpdate { IsPrefix: false } update)
                 {
                     continue;
                 }
@@ -3291,6 +3503,23 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        void AddStorageAddressIndexCaptureHomes(
+            BoundNativeStorageAddress address)
+        {
+            AddIndexCaptureHomes(address, address.CarrierType, address.Index,
+                address.Projections);
+        }
+
+        void AddPointerAddressIndexCaptureHomes(
+            BoundNativeFixedArrayPointerAddress address)
+        {
+            var carrierType = address.Projections.IsDefaultOrEmpty
+                ? address.Layout.CarrierType
+                : address.Projections[0].Layout.CarrierType;
+            AddIndexCaptureHomes(address, carrierType, address.Index,
+                address.Projections);
+        }
+
         foreach (var unitCall in storageCall.UnitInitializerCalls)
         {
             resourceLedger?.ConsumeWork();
@@ -3299,7 +3528,7 @@ public static partial class TrRmExecutableCompiler
                 resourceLedger?.ConsumeWork();
                 if (argument is BoundNativeStorageAddress address)
                 {
-                    AddIndexCaptureHomes(address);
+                    AddStorageAddressIndexCaptureHomes(address);
                 }
             }
         }
@@ -3307,7 +3536,16 @@ public static partial class TrRmExecutableCompiler
         foreach (var storageArgument in storageCall.StorageArguments)
         {
             resourceLedger?.ConsumeWork();
-            AddIndexCaptureHomes(storageArgument.Address);
+            AddStorageAddressIndexCaptureHomes(storageArgument.Address);
+        }
+
+        foreach (var pointerAddress in pointerValueAddresses)
+        {
+            resourceLedger?.ConsumeWork();
+            if (pointerAddress is BoundNativeFixedArrayPointerAddress arrayAddress)
+            {
+                AddPointerAddressIndexCaptureHomes(arrayAddress);
+            }
         }
 
         var storageArgumentCount = 0;
@@ -3569,7 +3807,7 @@ public static partial class TrRmExecutableCompiler
                 return 2;
             }
 
-            long count = checked((long)depth
+            var count = checked((long)depth
                 * Math.Max(0, initialization.Elements.Length - 1));
             foreach (var element in initialization.Elements)
             {
@@ -3800,7 +4038,8 @@ public static partial class TrRmExecutableCompiler
         }
 
         void AppendNativeStorageAddress(BoundNativeStorageAddress address,
-            PrimitiveType pointerType, int resultHome)
+            PrimitiveType pointerType, int resultHome,
+            BoundExpression? indexCaptureIdentity = null)
         {
             if ((uint)address.Variable >= (uint)homeIndexByVariable.Length
                 || address.Variable < caller.ParameterCount
@@ -3845,7 +4084,8 @@ public static partial class TrRmExecutableCompiler
                         "The A2 storage address has an unsupported array path.");
                 }
 
-                if (!indexCaptureHomesByAddress.TryGetValue(address,
+                if (!indexCaptureHomesByAddress.TryGetValue(
+                        indexCaptureIdentity ?? address,
                         out var projectionCaptureHomes)
                     || projectionCaptureHomes.Length != projections.Length)
                 {
@@ -3965,6 +4205,84 @@ public static partial class TrRmExecutableCompiler
             code.Add(0);
             code.Add(unchecked((byte)storageRecordIndex));
             code.Add((byte)(storageRecordIndex >> 8));
+        }
+
+        void AppendNativePointerValueAddress(
+            BoundExpression expression, int resultHome)
+        {
+            if (!pointerValueHomeByExpression.TryGetValue(expression,
+                    out var expectedHome)
+                || expectedHome != resultHome
+                || !NativePointerTypeContract.IsValidType(expression.Type,
+                    program.NativePointerTypes))
+            {
+                throw Unsupported(
+                    "The A2 pointer value has no valid result Home or typed pointer.");
+            }
+
+            var pointer = program.NativePointerTypes[
+                NativePointerTypes.Index(expression.Type)];
+            switch (expression)
+            {
+                case BoundNativeFixedArrayPointerAddress arrayPointerAddress:
+                    var rootType = arrayPointerAddress.Projections.IsDefaultOrEmpty
+                        ? arrayPointerAddress.Layout.CarrierType
+                        : arrayPointerAddress.Projections[0].Layout.CarrierType;
+                    var arrayAddress = new BoundNativeStorageAddress(
+                        arrayPointerAddress.Variable,
+                        arrayPointerAddress.Index, rootType,
+                        arrayPointerAddress.Layout.ElementType,
+                        arrayPointerAddress.Type,
+                        arrayPointerAddress.Layout.ElementCount,
+                        arrayPointerAddress.Layout.ElementStride,
+                        arrayPointerAddress.Layout.ElementStride,
+                        !pointer.IsWritable, arrayPointerAddress.Span) {
+                            Projections = arrayPointerAddress.Projections,
+                        };
+                    AppendNativeStorageAddress(arrayAddress,
+                        arrayPointerAddress.Type, resultHome,
+                        arrayPointerAddress);
+                    return;
+
+                case BoundNativePointerAddress scalarPointerAddress:
+                    if ((uint)scalarPointerAddress.Variable
+                            >= (uint)caller.Variables.Length)
+                    {
+                        throw Unsupported(
+                            "The A2 pointer value has no source local.");
+                    }
+
+                    var sourceType = caller.Variables[
+                        scalarPointerAddress.Variable].Type;
+                    var stride = DirectNativeImportContract.IsScalar(
+                        sourceType)
+                        ? PrimitiveTypeFacts.ScalarWidth(sourceType)
+                        : sourceType == PrimitiveType.NativeRawPointer
+                            || NativePointerTypes.IsType(sourceType)
+                            || NativeFunctionPointerTypes.IsType(sourceType)
+                                ? sizeof(ulong) : 0;
+                    if (stride <= 0)
+                    {
+                        throw Unsupported(
+                            "The A2 pointer value source has no admitted scalar or pointer-cell stride.");
+                    }
+
+                    var scalarAddress = new BoundNativeStorageAddress(
+                        scalarPointerAddress.Variable,
+                        new BoundConstant(0, PrimitiveType.Int32,
+                            scalarPointerAddress.Span),
+                        sourceType, sourceType, scalarPointerAddress.Type, 1,
+                        (ulong)stride, (ulong)stride, !pointer.IsWritable,
+                        scalarPointerAddress.Span);
+                    AppendNativeStorageAddress(scalarAddress,
+                        scalarPointerAddress.Type, resultHome,
+                        scalarPointerAddress);
+                    return;
+
+                default:
+                    throw Unsupported(
+                        "The A2 pointer value source is not an admitted address formation.");
+            }
         }
 
         void AppendA2EUCheckedScalarCapture(BoundBinary scalarCheck,
@@ -4188,6 +4506,23 @@ public static partial class TrRmExecutableCompiler
                     continue;
                 }
 
+                if (argument is BoundNativeFixedArrayElement
+                    or BoundNativeFixedArrayPathElement)
+                {
+                    var captureHome
+                        = unitCallPlan.ArgumentCaptureHomes[argumentIndex];
+                    if (captureHome < 0
+                        || !IsSupportedNativeAddressValueType(
+                            argument.Type))
+                    {
+                        throw Unsupported(
+                            "The A2EU array-value argument has no typed capture Home.");
+                    }
+
+                    AppendNativeFixedArrayRead(argument, captureHome);
+                    continue;
+                }
+
                 if (argument is not BoundNativeStorageAddress storageAddress)
                 {
                     continue;
@@ -4253,6 +4588,23 @@ public static partial class TrRmExecutableCompiler
                         callInputs[parameterIndex]
                             = new TrRmRegisterBodyCallInput(2, 1,
                                 checked((ushort)checkHome));
+                        break;
+
+                    case BoundNativeFixedArrayElement
+                        or BoundNativeFixedArrayPathElement:
+                        var arrayReadHome
+                            = unitCallPlan.ArgumentCaptureHomes[argumentIndex];
+                        if (arrayReadHome < 0
+                            || unitCall.Arguments[argumentIndex].Type
+                                != parameterType)
+                        {
+                            throw Unsupported(
+                                "The A2EU array-value argument has no matching captured Home.");
+                        }
+
+                        callInputs[parameterIndex]
+                            = new TrRmRegisterBodyCallInput(2, 1,
+                                checked((ushort)arrayReadHome));
                         break;
 
                     case BoundConstant { Type: PrimitiveType.Void }:
@@ -4697,7 +5049,7 @@ public static partial class TrRmExecutableCompiler
                     || !NativeFixedArrayContract.MatchesLayout(
                         element.Layout, program)
                     || element.Layout.ElementType != expression.Type
-                    || !DirectNativeImportContract.IsScalar(
+                    || !IsSupportedNativeAddressValueType(
                         element.Layout.ElementType))
                 {
                     throw Unsupported(
@@ -4710,7 +5062,7 @@ public static partial class TrRmExecutableCompiler
                         caller.Variables[variable].Type, projections,
                         program, out _, out var leafLayout)
                     || pathElement.Type != leafLayout.ElementType
-                    || !DirectNativeImportContract.IsScalar(
+                    || !IsSupportedNativeAddressValueType(
                         leafLayout.ElementType))
             {
                 throw Unsupported(
@@ -4865,15 +5217,35 @@ public static partial class TrRmExecutableCompiler
                     return;
 
                 case BoundAssignment assignment:
-                    if (!IsSupportedA2EEmptyArrayInitialization(assignment,
-                            caller, program, schema, out var initialization))
+                    if (IsSupportedA2EEmptyArrayInitialization(assignment,
+                            caller, program, schema,
+                            out var initialization))
                     {
-                        throw Unsupported(
-                            "F+S supports only exact A2E vacant empty-array assignments.");
+                        AppendEmptyArrayHomeInitialization(
+                            assignment.Variable, initialization);
+                        return;
                     }
 
-                    AppendEmptyArrayHomeInitialization(
-                        assignment.Variable, initialization);
+                    if (!IsSupportedNativeFixedArrayCopyAssignment(
+                            assignment, caller, program)
+                        || assignment.Value is not BoundRead copySource)
+                    {
+                        throw Unsupported(
+                            "F+S supports only exact whole-array Copy assignments.");
+                    }
+
+                    var targetHome
+                        = homeIndexByVariable[assignment.Variable];
+                    var sourceHome
+                        = homeIndexByVariable[copySource.Variable];
+                    if (targetHome < 0 || sourceHome < 0)
+                    {
+                        throw Unsupported(
+                            "The F+S whole-array Copy assignment has no source or target Home.");
+                    }
+
+                    AppendHomeLoad(code, 0, sourceHome);
+                    AppendHomeStore(code, 0, targetHome);
                     return;
 
                 case BoundExpressionStatement
@@ -4991,6 +5363,31 @@ public static partial class TrRmExecutableCompiler
                             throw Unsupported(
                                 "The A2 nested scalar initializer has no unique result Home.");
                         }
+                        break;
+
+                    case BoundNativePointerAddress
+                        or BoundNativeFixedArrayPointerAddress:
+                        if (!pointerValueHomeByExpression.TryGetValue(
+                                element, out var addressValueHome))
+                        {
+                            throw Unsupported(
+                                "The A2 nested pointer initializer has no result Home.");
+                        }
+                        AppendNativePointerValueAddress(element,
+                            addressValueHome);
+                        break;
+
+                    case BoundNativeFixedArrayElement pointerElement
+                        when NativePointerTypes.IsType(pointerElement.Type):
+                    case BoundNativeFixedArrayPathElement pointerPathElement
+                        when NativePointerTypes.IsType(pointerPathElement.Type):
+                        if (!pointerValueHomeByExpression.TryGetValue(
+                                element, out var pointerReadHome))
+                        {
+                            throw Unsupported(
+                                "The A2 nested pointer read has no result Home.");
+                        }
+                        AppendNativeFixedArrayRead(element, pointerReadHome);
                         break;
 
                     case BoundConditional
@@ -5133,17 +5530,21 @@ public static partial class TrRmExecutableCompiler
                             pathIndex < arrayInitializationPath.Count;
                             pathIndex++)
                         {
-                            var parent = arrayInitializationPath[pathIndex];
-                            var replayedSelection
-                                = AppendArrayInitializationSelection(pathIndex,
-                                    parent.ArrayType, parent.IndexKind,
-                                    parent.IndexIndex, rootHome);
+                            var (parentArrayType, parentIndexKind,
+                                parentIndexIndex)
+                                = arrayInitializationPath[pathIndex];
+                            var (parentPlaceRegister,
+                                parentSelectionIndex)
+                                = AppendArrayInitializationSelection(
+                                    pathIndex, parentArrayType,
+                                    parentIndexKind, parentIndexIndex,
+                                    rootHome);
                             code.Add(0xD8);
-                            code.Add(replayedSelection.PlaceRegister);
+                            code.Add(parentPlaceRegister);
                             code.Add(unchecked((byte)
-                                replayedSelection.SelectionIndex));
+                                parentSelectionIndex));
                             code.Add((byte)(
-                                replayedSelection.SelectionIndex >> 8));
+                                parentSelectionIndex >> 8));
                         }
                 }
 
@@ -5216,7 +5617,8 @@ public static partial class TrRmExecutableCompiler
                     }
                     else if (element is BoundRead initializerRead
                         && initializerRead.Type == elementType
-                        && DirectNativeImportContract.IsScalar(elementType))
+                        && (DirectNativeImportContract.IsScalar(elementType)
+                            || NativePointerTypes.IsType(elementType)))
                     {
                         var sourceHome = GetCallerHome(
                             initializerRead.Variable);
@@ -5227,6 +5629,13 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         AppendHomeLoad(code, 13, sourceHome);
+                        sourceRegister = 13;
+                    }
+                    else if (NativePointerTypes.IsType(elementType)
+                        && pointerValueHomeByExpression.TryGetValue(
+                            element, out var pointerValueHome))
+                    {
+                        AppendHomeLoad(code, 13, pointerValueHome);
                         sourceRegister = 13;
                     }
                     else if (element is BoundCall
@@ -5301,16 +5710,35 @@ public static partial class TrRmExecutableCompiler
                     break;
 
                 case BoundAssignment assignment:
-                    if (!IsSupportedA2EEmptyArrayInitialization(assignment,
+                    if (IsSupportedA2EEmptyArrayInitialization(assignment,
                             caller, program, schema,
                             out var emptyInitialization))
                     {
-                        throw Unsupported(
-                            "F+S supports only exact A2E vacant empty-array assignments.");
+                        AppendEmptyArrayHomeInitialization(
+                            assignment.Variable, emptyInitialization);
+                        break;
                     }
 
-                    AppendEmptyArrayHomeInitialization(
-                        assignment.Variable, emptyInitialization);
+                    if (!IsSupportedNativeFixedArrayCopyAssignment(
+                            assignment, caller, program)
+                        || assignment.Value is not BoundRead copySourceRead)
+                    {
+                        throw Unsupported(
+                            "F+S supports only exact whole-array Copy assignments.");
+                    }
+
+                    var targetArrayHome
+                        = homeIndexByVariable[assignment.Variable];
+                    var sourceArrayHome
+                        = homeIndexByVariable[copySourceRead.Variable];
+                    if (targetArrayHome < 0 || sourceArrayHome < 0)
+                    {
+                        throw Unsupported(
+                            "The F+S whole-array Copy assignment has no source or target Home.");
+                    }
+
+                    AppendHomeLoad(code, 0, sourceArrayHome);
+                    AppendHomeStore(code, 0, targetArrayHome);
                     break;
 
                 case BoundLocal local:
@@ -5332,6 +5760,36 @@ public static partial class TrRmExecutableCompiler
                     if (NativeFixedArrayTypes.IsType(
                             caller.Variables[local.Variable].Type))
                     {
+                        if (local.Initializer
+                            is BoundRead arrayCopySource)
+                        {
+                            if ((uint)arrayCopySource.Variable
+                                    >= (uint)caller.Variables.Length
+                                || arrayCopySource.Variable
+                                    < caller.ParameterCount
+                                || arrayCopySource.Type
+                                    != caller.Variables[local.Variable].Type
+                                || arrayCopySource.Type
+                                    != caller.Variables[
+                                        arrayCopySource.Variable].Type)
+                            {
+                                throw Unsupported(
+                                    "The A2 whole-array copy has no exact initialized source Home.");
+                            }
+
+                            var sourceHome = homeIndexByVariable[
+                                arrayCopySource.Variable];
+                            if (sourceHome < 0 || sourceHome == homeIndex)
+                            {
+                                throw Unsupported(
+                                    "The A2 whole-array copy has no exact initialized source Home.");
+                            }
+
+                            AppendHomeLoad(code, 0, sourceHome);
+                            AppendHomeStore(code, 0, homeIndex);
+                            break;
+                        }
+
                         if (local.Initializer
                                 is not BoundNativeFixedArrayInitialization arrayInitialization
                             || !IsSupportedNativeFixedArrayInitialization(
@@ -5382,6 +5840,24 @@ public static partial class TrRmExecutableCompiler
                     if (local.Initializer is BoundCall localCall)
                     {
                         _ = AppendUnitInitializerCall(localCall);
+                        break;
+                    }
+
+                    if (local.Initializer is BoundNativePointerAddress
+                        or BoundNativeFixedArrayPointerAddress)
+                    {
+                        if (!pointerValueHomeByExpression.TryGetValue(
+                                local.Initializer,
+                                out var pointerValueHome))
+                        {
+                            throw Unsupported(
+                                "The A2 pointer local initializer has no result Home.");
+                        }
+
+                        AppendNativePointerValueAddress(local.Initializer,
+                            pointerValueHome);
+                        AppendHomeLoad(code, 13, pointerValueHome);
+                        AppendHomeStore(code, 13, homeIndex);
                         break;
                     }
 
@@ -5817,6 +6293,11 @@ public static partial class TrRmExecutableCompiler
 
         return true;
     }
+
+    private static bool IsSupportedNativeAddressValueType(
+        PrimitiveType type) =>
+            DirectNativeImportContract.IsScalar(type)
+            || NativePointerTypes.IsType(type);
 
     private static bool AppendStatements(BoundBlock block,
         List<BoundStatement> statements,

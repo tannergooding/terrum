@@ -1,6 +1,7 @@
 // Copyright © Tanner Gooding and Contributors. Licensed under the MIT License (MIT). See License.md in the repository root for more information.
 
 using System.Collections.Generic;
+using Terrum.CodeAnalysis.Text;
 
 namespace Terrum.CodeAnalysis.Semantics;
 
@@ -56,47 +57,112 @@ public static partial class SemanticVerifier
         BoundFunction function, BoundProgram program,
         ref int remaining, int depth)
     {
-        if (write.Index is BoundConstant)
-        {
-            SetNativePointerFieldValuesFromExpression(write.Variable,
-                StorageProjection.ForArrayElement(write.Index),
-                write.Layout.ElementType, write.Value, facts, function,
-                program, ref remaining, depth + 1);
-            return;
-        }
-
         var newValues = NativePointerFieldValueSnapshotOfExpression(
             write.Value, write.Layout.ElementType, facts, function,
             program, ref remaining, depth + 1);
-        for (ulong index = 0; index < write.Layout.ElementCount; index++)
+        var isDynamic = !NativeFixedArrayContract.TryGetUnsignedIndex(
+            write.Index, out var selectedIndex);
+        if (isDynamic)
         {
-            Count(ref remaining, depth + 1);
-            var elementProjection = StorageProjection.ForArrayIndex(index);
-            foreach (var (relativeProjection, newValue) in newValues)
+            for (ulong index = 0; index < write.Layout.ElementCount; index++)
             {
                 Count(ref remaining, depth + 1);
-                var projection = StorageProjection.Combine(
-                    elementProjection, relativeProjection);
-                if (!IsNativePointerFieldProjection(projection))
-                {
-                    throw Invalid(write.Span);
-                }
-
-                var hasValue = facts.TryGetNativePointerFieldValue(write.Variable,
-                    projection, out var previousSources, out var previousMayBeUnknown);
-                var hasExtent = facts.TryGetNativePointerFieldExtentValue(
-                    write.Variable, projection, out var previousExtent);
-                previousSources.UnionWith(newValue.Sources);
-                previousExtent.Sources.UnionWith(newValue.ExtentSources);
-                var extent = new NativePointerExtentFact(previousExtent.Sources,
-                    previousExtent.MayBeOpaque || newValue.ExtentMayBeOpaque,
-                    !hasValue || !hasExtent || previousExtent.IsUnavailable
-                        || newValue.ExtentUnavailable);
-                facts.SetNativePointerFieldValue(write.Variable, projection,
-                    previousSources,
-                    previousMayBeUnknown || newValue.MayBeUnknown,
-                    extent);
+                ApplyNativeFixedArrayWriteValues(write.Variable,
+                    StorageProjection.ForArrayIndex(index), true,
+                    newValues, facts, write.Span);
             }
+        }
+        else
+        {
+            ApplyNativeFixedArrayWriteValues(write.Variable,
+                StorageProjection.ForArrayIndex(selectedIndex), false,
+                newValues, facts, write.Span);
+        }
+    }
+
+    private static void ApplyNativeFixedArrayPathWriteProvenance(
+        BoundNativeFixedArrayPathWrite write,
+        BoundNativeFixedArrayLayout leafLayout, BackingDependencies facts,
+        BoundFunction function, BoundProgram program,
+        ref int remaining, int depth)
+    {
+        var newValues = NativePointerFieldValueSnapshotOfExpression(
+            write.Value, leafLayout.ElementType, facts, function, program,
+            ref remaining, depth + 1);
+        ApplyPath(0, StorageProjection.WholeObject, false, ref remaining);
+
+        void ApplyPath(int pathIndex, StorageProjection prefix, bool maySelect,
+            ref int workRemaining)
+        {
+            Count(ref workRemaining, depth + 1);
+            if (pathIndex == write.Projections.Length)
+            {
+                ApplyNativeFixedArrayWriteValues(write.Variable, prefix,
+                    maySelect, newValues, facts, write.Span);
+                return;
+            }
+
+            var projection = write.Projections[pathIndex];
+            if (NativeFixedArrayContract.TryGetUnsignedIndex(
+                    projection.Index, out var selectedIndex))
+            {
+                ApplyPath(pathIndex + 1,
+                    StorageProjection.Combine(prefix,
+                        StorageProjection.ForArrayIndex(selectedIndex)),
+                    maySelect, ref workRemaining);
+                return;
+            }
+
+            for (ulong index = 0; index < projection.Layout.ElementCount; index++)
+            {
+                Count(ref workRemaining, depth + 1);
+                ApplyPath(pathIndex + 1,
+                    StorageProjection.Combine(prefix,
+                        StorageProjection.ForArrayIndex(index)),
+                    true, ref workRemaining);
+            }
+        }
+    }
+
+    private static void ApplyNativeFixedArrayWriteValues(
+        int variable, StorageProjection destinationPrefix, bool maySelect,
+        IReadOnlyDictionary<StorageProjection, NativePointerFieldValue> newValues,
+        BackingDependencies facts, TextSpan span)
+    {
+        foreach (var (relativeProjection, newValue) in newValues)
+        {
+            var projection = StorageProjection.Combine(
+                destinationPrefix, relativeProjection);
+            if (!IsNativePointerFieldProjection(projection)
+                || !projection.ProjectionPath.IsConcrete)
+            {
+                throw Invalid(span);
+            }
+
+            if (!maySelect)
+            {
+                facts.SetNativePointerFieldValue(variable, projection,
+                    newValue.Sources, newValue.MayBeUnknown,
+                    new NativePointerExtentFact(newValue.ExtentSources,
+                        newValue.ExtentMayBeOpaque,
+                        newValue.ExtentUnavailable));
+                continue;
+            }
+
+            var hasValue = facts.TryGetNativePointerFieldValue(variable,
+                projection, out var previousSources,
+                out var previousMayBeUnknown);
+            var hasExtent = facts.TryGetNativePointerFieldExtentValue(
+                variable, projection, out var previousExtent);
+            previousSources.UnionWith(newValue.Sources);
+            previousExtent.Sources.UnionWith(newValue.ExtentSources);
+            var extent = new NativePointerExtentFact(previousExtent.Sources,
+                previousExtent.MayBeOpaque || newValue.ExtentMayBeOpaque,
+                !hasValue || !hasExtent || previousExtent.IsUnavailable
+                    || newValue.ExtentUnavailable);
+            facts.SetNativePointerFieldValue(variable, projection,
+                previousSources,
+                previousMayBeUnknown || newValue.MayBeUnknown, extent);
         }
     }
 

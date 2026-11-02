@@ -942,7 +942,6 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             """), options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
-
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, schemaIdentity, 1);
         var tables = TrRmStructuralMetadataValidator
@@ -4341,6 +4340,416 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             "nested initializer address failure before later calls",
             runJit: false, expectedReemitted: failureArtifact)
             .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2NestedPointerArrayValuesReachNativeParameters()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-nested-pointer-values";
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            public extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<ptr<int32>> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [int32; 3] values = [0, -1, 0];
+                mut int32 observed = 0;
+                uint64 byteCount = 0;
+                unsafe {
+                    mut [[ptr<int32>; 1]; 1] pointers = [
+                        [&values[zeroIndex]]];
+                    mut [[ptr<ptr<int32>>; 1]; 1] cells = [
+                        [&pointers[zeroIndex][zeroIndex]]];
+                    ptr<ptr<int32>> selectedCell
+                        = cells[zeroIndex][zeroIndex];
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, selectedCell, byteCount);
+                }
+                return observed;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var malformedPointerStore = ReplaceA2PointerStoreType(artifact);
+        Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    malformedPointerStore), moduleIdentity, []));
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast), Is.Zero);
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, 0, "nested pointer array NativeParameter value",
+            expectedReemitted: artifact).ConfigureAwait(true);
+
+        var failingSource = source.Replace("&values[zeroIndex]",
+            "&values[badIndex]", StringComparison.Ordinal)
+            .Replace("int32 zeroIndex = 0;",
+                "int32 zeroIndex = 0;\n                int32 badIndex = -1;",
+                StringComparison.Ordinal);
+        var failingCompilation = Compilation.Create(
+            SyntaxTree.Parse(failingSource), new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(failingCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                failingCompilation.Diagnostics));
+        const string failureModuleIdentity
+            = "a2-nested-pointer-values-bounds-failure";
+        var failureArtifact = TrRmExecutableCompiler.EmitStandard(
+            failingCompilation.Program!, failureModuleIdentity,
+            schemaIdentity, 1);
+        var failureInput = new TrRmStandardArtifactInput(schemaIdentity,
+            failureArtifact);
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            failureModuleIdentity, failureInput, failingSource,
+            unchecked((int)0xE0540004),
+            "nested pointer address failure before NativeParameter call",
+            runJit: false,
+            expectedReemitted: failureArtifact).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2NestedPointerArrayCopySurvivesSourceFreeExecution()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const string moduleIdentity = "a2-nested-pointer-array-copy";
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            public extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [int32; 3] values = [-1, 0, 0];
+                mut int32 observed = 0;
+                uint64 byteCount = 0;
+                unsafe {
+                    [[ptr<int32>; 1]; 1] original = [
+                        [&values[zeroIndex]]];
+                    [[ptr<int32>; 1]; 1] copied = original;
+                    mut [[ptr<int32>; 1]; 1] assigned = [
+                        [&values[zeroIndex]]];
+                    assigned = copied;
+                    ptr<int32> selected
+                        = assigned[zeroIndex][zeroIndex];
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, selected, byteCount);
+                }
+                return observed;
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(input,
+            moduleIdentity, [], NativeRuntimePolicy.FailFast), Is.Zero);
+
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, 0, "nested pointer array whole-value copy",
+            expectedReemitted: artifact).ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2NestedPointerCellValuesSurviveProviderRemapping()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        const string providerIdentity = "a2-pointer-cell-provider";
+        const string consumerIdentity = "a2-pointer-cell-consumer";
+        const string providerSource = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            public extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<ptr<int32>> source,
+                uint64 byteCount);
+
+            internal int32 ProviderBody() {
+                int32 zeroIndex = 0;
+                mut [int32; 1] values = [0];
+                mut int32 observed = 0;
+                uint64 byteCount = 0;
+                unsafe {
+                    mut ptr<int32> cell = &values[zeroIndex];
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, &cell, byteCount);
+                }
+                return observed;
+            }
+            """;
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), core);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, []);
+
+        const string consumerSource = """
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [int32; 3] values = [0, -1, 0];
+                mut int32 observed = 0;
+                uint64 byteCount = 0;
+                unsafe {
+                    mut [[ptr<int32>; 1]; 1] pointers = [
+                        [&values[zeroIndex]]];
+                    mut [[ptr<ptr<int32>>; 1]; 1] cells = [
+                        [&pointers[zeroIndex][zeroIndex]]];
+                    ptr<ptr<int32>> selectedCell
+                        = cells[zeroIndex][zeroIndex];
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, selectedCell, byteCount);
+                }
+                return observed;
+            }
+            """;
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse(consumerSource), providerReference,
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
+            consumerCompilation.Program!, consumerIdentity, schemaIdentity,
+            1);
+        var combinedArtifact = CombinePopulatedNativeAddressModules(
+            providerArtifact, consumerArtifact, schema);
+        var input = new TrRmStandardArtifactInput(schemaIdentity,
+            combinedArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            consumerIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
+            consumerIdentity, schemaIdentity, 1),
+            Is.EqualTo(consumerArtifact));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(input,
+            consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.Zero);
+
+        await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
+            input, providerSource + Environment.NewLine + consumerSource,
+            0, "nested pointer-cell TypeSpec provider remapping",
+            runJit: false,
+            expectedReemitted: consumerArtifact).ConfigureAwait(true);
+    }
+
+    private static byte[] ReplaceA2PointerStoreType(byte[] artifact)
+    {
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        var index = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyDraft(artifact);
+        var tables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                index);
+        var mainRow = 0;
+        for (var methodRow = 1;
+            methodRow <= tables.Methods.Count; methodRow++)
+        {
+            if (tables.Methods.GetName(methodRow) == "Main")
+            {
+                mainRow = methodRow;
+                break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        var mainBodyRow = tables.Methods.GetBodyRow(mainRow);
+        var body = tables.Bodies.GetRegisterBody(mainBodyRow,
+            tables.Contracts.Count);
+
+        static uint GetBodyTypeSpecRef(TrRmRegisterBodyReader body,
+            int typeMapIndex)
+        {
+            var token = BinaryPrimitives.ReadUInt32LittleEndian(
+                body.TypeMap.Slice(typeMapIndex * sizeof(uint)));
+            return (byte)(token >> 24) switch {
+                0x11 => token & 0x00FF_FFFF,
+                0xF2 or 0xF3 => token,
+                _ => throw new InvalidOperationException(
+                    "The A2 pointer-store fixture has an invalid TypeMap token."),
+            };
+        }
+
+        var pointerToPointerStoreD5Offset = -1;
+        var wrongPointerValueHome = -1;
+        var rewrittenCode = body.Code.ToArray();
+        for (var blockIndex = 0; blockIndex < body.BlockCount; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            var codeOffset = checked((int)
+                BinaryPrimitives.ReadUInt32LittleEndian(block));
+            var code = body.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], schema);
+                if (code[position] == 0xD9 && position >= 8
+                    && code[position - 4] == 0xD5
+                    && code[position - 8] == 0xD8)
+                {
+                    var selectionIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            code[(position - 8 + 2)..]);
+                    var selection = body.GetRecord(selectionIndex);
+                    var typeMapIndex
+                        = BinaryPrimitives.ReadUInt16LittleEndian(
+                            selection[20..]);
+                    var selectedType = tables.TypeSpecs.GetTypeSpecRef(
+                        GetBodyTypeSpecRef(body, typeMapIndex));
+                    if (selectedType.Form == 0x0C
+                        && selectedType.TypeCode == 0x8C)
+                    {
+                        pointerToPointerStoreD5Offset
+                            = codeOffset + position - 4;
+                    }
+                }
+
+                position += instructionLength;
+            }
+        }
+        Assert.That(pointerToPointerStoreD5Offset,
+            Is.GreaterThanOrEqualTo(0));
+
+        for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
+        {
+            var home = body.HomeMap.Slice(homeIndex * 8, 8);
+            var typeMapIndex
+                = BinaryPrimitives.ReadUInt16LittleEndian(home[2..]);
+            var type = tables.TypeSpecs.GetTypeSpecRef(
+                GetBodyTypeSpecRef(body, typeMapIndex));
+            if (home[0] == 3 && type.Form == 0x01
+                && type.TypeCode == 0x8C)
+            {
+                wrongPointerValueHome = homeIndex;
+                break;
+            }
+        }
+        Assert.That(wrongPointerValueHome, Is.GreaterThanOrEqualTo(0));
+
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            rewrittenCode.AsSpan(pointerToPointerStoreD5Offset + 2),
+            checked((ushort)wrongPointerValueHome));
+        var blocks = new TrRmRegisterBodyBlock[body.BlockCount];
+        for (var blockIndex = 0; blockIndex < blocks.Length; blockIndex++)
+        {
+            var block = body.GetBlock(blockIndex);
+            blocks[blockIndex] = new(
+                BinaryPrimitives.ReadUInt32LittleEndian(block),
+                BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+        }
+        var records = new ReadOnlyMemory<byte>[body.RecordCount];
+        for (var recordIndex = 0; recordIndex < records.Length; recordIndex++)
+        {
+            records[recordIndex] = body.GetRecord(recordIndex).ToArray();
+        }
+
+        var rewrittenBody = TrRmRegisterBodyWriter.Encode(
+            body.HomeMap.ToArray(), body.TypeMap.ToArray(),
+            body.MethodMap.ToArray(), body.FieldMap.ToArray(),
+            body.ConstantMap.ToArray(), blocks, records, rewrittenCode,
+            tables.Contracts.Count, schema);
+        if (!index.TryGetSection(0x0020, out var bodySection,
+                out var bodyCount))
+        {
+            throw new InvalidOperationException(
+                "The A2 pointer-store fixture has no Body section.");
+        }
+
+        var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount,
+            schema);
+        var bodyRows = new ReadOnlyMemory<byte>[bodyCount];
+        for (var bodyRow = 1; bodyRow <= bodyCount; bodyRow++)
+        {
+            bodyRows[bodyRow - 1] = bodyRow == mainBodyRow
+                ? rewrittenBody : bodyTable.GetRow(bodyRow).ToArray();
+        }
+        var rewrittenBodySection
+            = TrRmVariableTableWriter.EncodeBodies(bodyRows);
+        var sections = new List<TrRmSection>(index.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < index.SectionCount; sectionIndex++)
+        {
+            index.GetSection(sectionIndex, out var kind, out var flags,
+                out var section, out var recordCount);
+            sections.Add(kind == 0x0020
+                ? new TrRmSection(kind, flags, checked((uint)bodyCount),
+                    rewrittenBodySection)
+                : new TrRmSection(kind, flags,
+                    checked((uint)recordCount), section.ToArray()));
+        }
+
+        return TrRmArtifactWriter.Encode(sections, schema);
     }
 
     [TestCase(14, 1, false)]

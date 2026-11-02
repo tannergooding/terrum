@@ -10,6 +10,8 @@ namespace Terrum.CodeAnalysis.Semantics;
 
 internal sealed partial class Binder
 {
+    private bool _isBindingNativeFixedArrayValue;
+
     private bool TryBindNativeFixedArrayType(SyntaxNode node, out PrimitiveType arrayType,
         out PrimitiveType elementType, out ulong elementCount)
     {
@@ -209,7 +211,18 @@ internal sealed partial class Binder
             return ErrorExpression(node.Span);
         }
 
-        return BindExpression(node, arrayType);
+        var savedIsBindingNativeFixedArrayValue
+            = _isBindingNativeFixedArrayValue;
+        try
+        {
+            _isBindingNativeFixedArrayValue = true;
+            return BindExpression(node, null);
+        }
+        finally
+        {
+            _isBindingNativeFixedArrayValue
+                = savedIsBindingNativeFixedArrayValue;
+        }
     }
 
     private BoundExpression BindNativeFixedArrayPointerAddress(SyntaxNode node,

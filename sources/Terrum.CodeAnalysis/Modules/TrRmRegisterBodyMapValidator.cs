@@ -2007,6 +2007,15 @@ internal static class TrRmRegisterBodyMapValidator
             return;
         }
 
+        if (opcode == 0xDA)
+        {
+            UpdateFixedArrayPlaceLoadRegister(body, instruction,
+                registerTypes, methods.GetOwnerModule(methodDefRow),
+                typeSpecs, constantValues, codeOffset,
+                allowIncompletePlaceFlow);
+            return;
+        }
+
         if (opcode == 0xEC)
         {
             UpdateStorageAddressResult(body, instruction, registerTypes,
@@ -2041,7 +2050,7 @@ internal static class TrRmRegisterBodyMapValidator
                 && ReadByte(body, store, 1) == 1
                 && ReadUInt16(body, store, 6) < 14)
             {
-                ValidateScalarArrayElementStore(body, store,
+                ValidateArrayElementValueStore(body, store,
                     registerTypes, typeSpecs);
             }
             return;
@@ -2504,6 +2513,70 @@ internal static class TrRmRegisterBodyMapValidator
         ClearRegisterTypeStates(body, registerTypes);
     }
 
+    private static void UpdateFixedArrayPlaceLoadRegister(
+        TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
+        RegisterTypeState[] registerTypes, int ownerModule,
+        TrRmTypeSpecTableReader typeSpecs,
+        ConstantSourceValueContext constantValues, int codeOffset,
+        bool allowIncompletePlaceFlow)
+    {
+        var operand = ReadByte(body, instruction, 1);
+        var destination = operand & 0x0F;
+        var selectionIndex = ReadUInt16(body, instruction, 2);
+        Span<byte> placeInstruction = stackalloc byte[4];
+        instruction.CopyTo(placeInstruction);
+        placeInstruction[0] = 0xD8;
+        UpdateFixedArrayPlaceRegister(body, placeInstruction,
+            registerTypes, ownerModule, typeSpecs, constantValues,
+            codeOffset, allowIncompletePlaceFlow);
+        var place = GetRegisterTypeState(body, registerTypes, destination);
+        var matchesSelection = false;
+        foreach (var origin in place.PlaceOrigins)
+        {
+            ConsumeWork(body);
+            matchesSelection |= origin.PlaceSelectionRecordIndex
+                == selectionIndex;
+        }
+        if ((operand & 0xF0) != 0 || destination >= 14
+            || !place.IsPlaceHandle
+            || place.AccessKind != 1
+            || place.PlaceOrigins.Length == 0
+            || !matchesSelection)
+        {
+            throw InvalidMap();
+        }
+
+        var selectionRecord = body.GetRecord(selectionIndex);
+        if (ReadByte(body, selectionRecord, 0) != 0x04)
+        {
+            throw InvalidMap();
+        }
+        var selection = selectionRecord[4..];
+        var typeMapIndex = ReadUInt16(body, selection, 16);
+        var selectedTypeSpecRef = GetTypeMapTypeSpecRef(body, typeMapIndex);
+        var placeTypeSpecRef = GetRegisterTypeSpecRef(body, place);
+        var isScalar = TrRmNativeImportTypeContract.TryGetScalarType(
+                typeSpecs, selectedTypeSpecRef, out var elementType)
+            && DirectNativeImportContract.IsScalar(elementType);
+        if (ReadByte(body, selection, 0) != 3
+            || ReadByte(body, selection, 1) != 1
+            || ReadByte(body, selection, 2) != 1
+            || ReadUInt16(body, selection, 4) != destination
+            || !typeSpecs.AreEquivalentTypeSpecRefs(
+                selectedTypeSpecRef, placeTypeSpecRef)
+            || (!isScalar
+                && !IsNativeDataPointerTypeSpecRef(typeSpecs,
+                    selectedTypeSpecRef))
+            || !IsCopyableRegisterValueType(typeSpecs,
+                selectedTypeSpecRef, constantValues))
+        {
+            throw InvalidMap();
+        }
+
+        SetRegisterTypeState(body, registerTypes, destination,
+            RegisterTypeState.FromTypeMap(typeMapIndex));
+    }
+
     private static void UpdateFixedArrayPlaceRegister(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> instruction,
         RegisterTypeState[] registerTypes, int ownerModule,
@@ -2646,7 +2719,8 @@ internal static class TrRmRegisterBodyMapValidator
         var accessKind = ReadByte(body, payload, 1);
         var requiresWrite = accessKind is 2 or 3 or 4
             || (accessKind == 5 && (elementType.Qualifiers & 1) != 0);
-        if (requiresWrite && !parentAllowsWrite)
+        var initializesHomeArray = baseKind == 2 && accessKind == 3;
+        if (requiresWrite && !parentAllowsWrite && !initializesHomeArray)
         {
             throw InvalidMap();
         }
@@ -2939,10 +3013,9 @@ internal static class TrRmRegisterBodyMapValidator
                 throw InvalidMap();
             }
         }
-
     }
 
-    private static void ValidateScalarArrayElementStore(
+    private static void ValidateArrayElementValueStore(
         TrRmRegisterBodyReader body, ReadOnlySpan<byte> payload,
         RegisterTypeState[] registerTypes,
         TrRmTypeSpecTableReader typeSpecs)
@@ -2979,6 +3052,11 @@ internal static class TrRmRegisterBodyMapValidator
             place.PlaceSelectionRecordIndex);
         var selectedTypeSpecRef = GetTypeMapTypeSpecRef(body,
             ReadUInt16(body, selection, 16));
+        var isScalar = TrRmNativeImportTypeContract.TryGetScalarType(
+                typeSpecs, placeTypeSpecRef, out var elementType)
+            && DirectNativeImportContract.IsScalar(elementType);
+        var isPointer = IsNativeDataPointerTypeSpecRef(typeSpecs,
+            placeTypeSpecRef);
         if (ReadByte(body, selection, 0) != 3
             || ReadByte(body, selection, 1) != 3
             || ReadByte(body, selection, 2) != 1
@@ -2986,12 +3064,18 @@ internal static class TrRmRegisterBodyMapValidator
                 selectedTypeSpecRef, placeTypeSpecRef)
             || !typeSpecs.AreEquivalentTypeSpecRefs(
                 sourceTypeSpecRef, placeTypeSpecRef)
-            || !TrRmNativeImportTypeContract.TryGetScalarType(
-                typeSpecs, placeTypeSpecRef, out var elementType)
-            || !DirectNativeImportContract.IsScalar(elementType))
+            || (!isScalar && !isPointer))
         {
             throw InvalidMap();
         }
+    }
+
+    private static bool IsNativeDataPointerTypeSpecRef(
+        TrRmTypeSpecTableReader typeSpecs, uint typeSpecRef)
+    {
+        var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        return type.TypeCode == 0x8C
+            && type.Form is 0x01 or 0x0C;
     }
 
     private static bool IsUnitTypeSpecRef(
@@ -3230,6 +3314,12 @@ internal static class TrRmRegisterBodyMapValidator
         ConstantSourceValueContext constantValues)
     {
         var type = typeSpecs.GetTypeSpecRef(typeSpecRef);
+        if (type.Form == 0x11 && type.Qualifiers == 0)
+        {
+            return typeSpecs.TryGetFixedInlineArray(typeSpecRef,
+                out _, out _);
+        }
+
         var isAtomicValueType = type.TypeCode is > 0 and < 0x80;
         var isPointerFamily = type.TypeCode == 0x8C;
         if ((type.Form is 0x02 or 0x03) && type.Qualifiers == 0)
@@ -3550,9 +3640,13 @@ internal static class TrRmRegisterBodyMapValidator
                 sourceType = GetTypeMapTypeSpecRef(body,
                     ReadUInt16(body, sourceHome, 2));
                 sourceHomeMutable = (ReadByte(body, sourceHome, 1) & 1) != 0;
-                if (!TrRmNativeImportTypeContract.TryGetScalarType(
+                var sourceIsScalar
+                    = TrRmNativeImportTypeContract.TryGetScalarType(
                         typeSpecs, sourceType, out var sourceScalar)
-                    || !DirectNativeImportContract.IsScalar(sourceScalar))
+                    && DirectNativeImportContract.IsScalar(sourceScalar);
+                if (!sourceIsScalar
+                    && !IsNativeDataPointerTypeSpecRef(typeSpecs,
+                        sourceType))
                 {
                     throw InvalidMap();
                 }
@@ -3684,7 +3778,8 @@ internal static class TrRmRegisterBodyMapValidator
                 var requiresWrite = accessKind is 2 or 3 or 4
                     || (accessKind == 5
                         && (referent.Qualifiers & 1) != 0);
-                if (requiresWrite
+                var initializesHomeArray = accessKind == 3;
+                if (requiresWrite && !initializesHomeArray
                     && (ReadByte(body, home, 1) & 1) == 0)
                 {
                     throw InvalidMap();

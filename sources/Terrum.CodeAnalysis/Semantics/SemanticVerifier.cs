@@ -1304,7 +1304,10 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundNativeStorageAddress address:
-                    Expression(address.Index, scope, depth + 1);
+                    foreach (var nested in address.NestedExpressions)
+                    {
+                        Expression(nested, scope, depth + 1);
+                    }
                     break;
                 case BoundNativeOutputReservation:
                     break;
@@ -1872,7 +1875,10 @@ public static partial class SemanticVerifier
                     }
                     break;
                 case BoundNativeStorageAddress address:
-                    Expression(address.Index, depth + 1, acquiringRoot);
+                    foreach (var nested in address.NestedExpressions)
+                    {
+                        Expression(nested, depth + 1, acquiringRoot);
+                    }
                     break;
                 case BoundNativeOutputReservation:
                     break;
@@ -2958,7 +2964,8 @@ public static partial class SemanticVerifier
                     localPointerDependencies.SetNativePointerExtentProvenance(
                         local.Variable, extentFact.Sources,
                         extentFact.MayBeOpaque, extentFact.IsUnavailable);
-                    if (IsInlineStructStorage(local.Initializer.Type, program))
+                    if (IsNativePointerFieldAggregateStorage(
+                        local.Initializer.Type, program))
                     {
                         SetNativePointerFieldValuesFromExpression(local.Variable,
                             StorageProjection.WholeObject, local.Initializer.Type,
@@ -3151,6 +3158,10 @@ public static partial class SemanticVerifier
                 var nullaryArrayInitialization
                     = assignment.Value is BoundNativeFixedArrayInitialization
                         { Layout.ElementCount: 0, Elements.IsEmpty: true };
+                var wholeArrayValueCopy
+                    = NativeFixedArrayContract.IsCarrier(
+                        function.Variables[assignment.Variable].Type)
+                        && assignment.Value is BoundRead or BoundMove;
                 var assignmentCouldComplete = nullaryArrayInitialization
                     || CanCompleteNormally(assignment.Value, initialized,
                         program, ref remaining, depth + 1);
@@ -3180,6 +3191,14 @@ public static partial class SemanticVerifier
                         throw InvalidEffect(assignment.Span, "NativeImport");
                     }
 
+                    VerifyNativeFixedArrayInitialization(assignment.Value,
+                        assignment.Variable, initialized, fieldMasks,
+                        declarations, function, program, ref remaining,
+                        depth + 1, failures);
+                    assignmentCompletes = true;
+                }
+                else if (wholeArrayValueCopy)
+                {
                     VerifyNativeFixedArrayInitialization(assignment.Value,
                         assignment.Variable, initialized, fieldMasks,
                         declarations, function, program, ref remaining,
@@ -3492,8 +3511,8 @@ public static partial class SemanticVerifier
                         projectionOwnerType, nestedField);
                     projectionOwnerType = Fields(program, projectionOwnerType)[nestedField].Type;
                 }
-                var fieldPlaceProjection = new StorageProjection(
-                    StorageProjectionKind.InlineFieldPath, 0, 0, fieldProjectionPath);
+                var fieldPlaceProjection = StorageProjection.ForFieldPath(
+                    fieldProjectionPath);
                 var fieldSegments = fieldProjectionPath.Segments;
                 var normalBackingPartialReferenceAggregate =
                     program.NativeLoweringAgreement
@@ -7469,8 +7488,9 @@ public static partial class SemanticVerifier
             case BoundNativeFixedArrayInitialization:
                 throw InvalidEffect(expression.Span, "NativeImport");
             case BoundNativeStorageAddress or BoundNativeOutputReservation:
-            case BoundRead read when NativeFixedArrayContract.IsCarrier(read.Type):
                 throw InvalidEffect(expression.Span, "NativeImport");
+            case BoundRead read when NativeFixedArrayContract.IsCarrier(read.Type):
+                throw InvalidEffect(read.Span, "NativeImport");
             case BoundNativeFixedArrayElement fixedArrayElement:
                 VerifyNativeFixedArrayElement(fixedArrayElement, initialized, fieldMasks, declarations,
                     function, program, ref remaining, depth + 1, failures);
@@ -8001,8 +8021,8 @@ public static partial class SemanticVerifier
                 {
                     throw InvalidEffect(move.Span, "Ownership");
                 }
-                var movedFieldProjection = new StorageProjection(
-                    StorageProjectionKind.InlineFieldPath, 0, 0, movedFieldPath);
+                var movedFieldProjection = StorageProjection.ForFieldPath(
+                    movedFieldPath);
                 CheckReferencePlaceInvalidation(moveRootVariable,
                     movedFieldProjection, initialized, move.Span);
                 initialized.AdvanceFieldPlaceGeneration(moveRootVariable,
@@ -10299,7 +10319,10 @@ public static partial class SemanticVerifier
                 }
                 break;
             case BoundNativeStorageAddress address:
-                VacateNestedOutputs(address.Index, state, ref remaining);
+                foreach (var nested in address.NestedExpressions)
+                {
+                    VacateNestedOutputs(nested, state, ref remaining);
+                }
                 break;
             case BoundNativeOutputReservation:
                 break;
@@ -10461,7 +10484,9 @@ public static partial class SemanticVerifier
                 FlowFacts([.. pathWrite.Projections.Select(
                     static projection => projection.Index), pathWrite.Value],
                     flowFacts, ref remaining),
-            BoundNativeStorageAddress address => FlowFacts(address.Index, flowFacts, ref remaining),
+            BoundNativeStorageAddress address =>
+                FlowFacts(address.NestedExpressions, flowFacts,
+                    ref remaining),
             BoundReferenceFormation formation => FlowFacts(formation.Place, flowFacts, ref remaining),
             BoundReferenceReborrow reborrow =>
                 FlowFacts(reborrow.Descriptor, flowFacts, ref remaining),

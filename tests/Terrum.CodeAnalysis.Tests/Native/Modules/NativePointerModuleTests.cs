@@ -602,6 +602,336 @@ public sealed class NativePointerModuleTests
             NativeRuntimePolicy.FailFast), Is.EqualTo(5));
     }
 
+    [Test]
+    public void NestedPointerCellAddressAndStoredValueRemainDistinctDuringJitExecution()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                [uint32; 4] values = [4, 5, 6, 7];
+                unsafe {
+                    [[ptr<uint32>; 2]; 2] pointers = [
+                        [&values[0], &values[1]],
+                        [&values[2], &values[3]]];
+                    ptr<ptr<uint32>> cell = &pointers[1][0];
+                    ptr<uint32> stored = *cell;
+                    return int32(*stored);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(6));
+    }
+
+    [Test]
+    public void CopyingNestedPointerArraysPreservesBackingDuringJitExecution()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                [uint32; 5] values = [10, 20, 30, 40, 50];
+                unsafe {
+                    [[ptr<uint32>; 2]; 2] original = [
+                        [&values[0], &values[1]],
+                        [&values[2], &values[3]]];
+                    mut [[ptr<uint32>; 2]; 2] copied = original;
+                    return int32(*copied[1][0]);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(30));
+    }
+
+    [Test]
+    public void AssigningNestedPointerArraysCopiesPointerCellsDuringJitExecution()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                [uint32; 5] values = [10, 20, 30, 40, 50];
+                unsafe {
+                    [[ptr<uint32>; 2]; 2] original = [
+                        [&values[0], &values[1]],
+                        [&values[2], &values[3]]];
+                    mut [[ptr<uint32>; 2]; 2] copied = [
+                        [&values[4], &values[4]],
+                        [&values[4], &values[4]]];
+                    copied = original;
+                    copied[1][0] = &values[0];
+                    return int32(*original[1][0]) + int32(*copied[1][0]);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(40));
+    }
+
+    [Test]
+    public void NestedPointerArrayCanStoreNullWithoutBackingUse()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            int32 Main() {
+                unsafe {
+                    [[ptr<uint32>; 1]; 1] pointers = [[null]];
+                }
+                return 0;
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(NativeJit.Execute(compilation.Program!,
+            NativeRuntimePolicy.FailFast), Is.Zero);
+    }
+
+    [Test]
+    public void NativeParameterRejectsUnknownNestedPointerArrayBacking()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                unsafe {
+                    [[ptr<uint32>; 1]; 1] pointers = [[null]];
+                    return Observe(pointers[0][0]);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.Program, Is.Null);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3030"), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+    }
+
+    [TestCase(3, true)]
+    [TestCase(4, false)]
+    public void NativeParameterExtentMergesNestedPointerArrayReads(
+        int lastPointerIndex, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Check(int32 outer, int32 inner) {
+                [uint32; 5] values = [1, 2, 3, 4, 5];
+                unsafe {
+                    [[ptr<uint32>; 2]; 2] pointers = [
+                        [&values[0], &values[1]],
+                        [&values[2], &values[{{lastPointerIndex}}]]];
+                    return Observe(pointers[outer][inner]);
+                }
+            }
+
+            int32 Main() { return Check(1, 1); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(0, true)]
+    [TestCase(4, false)]
+    public void NativeParameterExtentMergesNestedPointerArrayPathWrites(
+        int replacementIndex, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Check(int32 outer, int32 inner) {
+                [uint32; 5] values = [1, 2, 3, 4, 5];
+                unsafe {
+                    mut [[ptr<uint32>; 2]; 2] pointers = [
+                        [&values[0], &values[0]],
+                        [&values[0], &values[0]]];
+                    pointers[outer][inner] = &values[{{replacementIndex}}];
+                    return Observe(pointers[1][1]);
+                }
+            }
+
+            int32 Main() { return Check(0, 0); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase(1, true)]
+    [TestCase(4, false)]
+    public void NativeParameterExtentRejectsShortNestedPointerAlternativeAtJoin(
+        int replacementIndex, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Check(bool replace) {
+                [uint32; 5] values = [1, 2, 3, 4, 5];
+                unsafe {
+                    mut [[ptr<uint32>; 1]; 1] pointers = [[&values[0]]];
+                    if (replace) {
+                        pointers[0][0] = &values[{{replacementIndex}}];
+                    }
+                    return Observe(pointers[0][0]);
+                }
+            }
+
+            int32 Main() { return Check(false); }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [TestCase("", false)]
+    [TestCase("pointers[1][0] = &values[0];", true)]
+    public void NativeParameterWriteInvalidatesNestedPointerCellsUntilReassigned(
+        string reassignment, bool shouldCompile)
+    {
+        var source = $$"""
+            [Terrum.Interop.NativeImport("fixture.dll", "Overwrite")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            extern int32 Overwrite(write ptr<ptr<uint32>> cell);
+
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 2)]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                [uint32; 2] values = [42, 42];
+                unsafe {
+                    mut [[ptr<uint32>; 2]; 2] pointers = [
+                        [&values[0], &values[0]],
+                        [&values[0], &values[0]]];
+                    int32 status = Overwrite(&pointers[1][0]);
+                    {{reassignment}}
+                    return Observe(pointers[1][0]) + status;
+                }
+            }
+            """;
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.EqualTo(!shouldCompile),
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (!shouldCompile)
+        {
+            Assert.That(compilation.Program, Is.Null);
+            Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+                diagnostic.Code == "TRM3030"), Is.True,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            return;
+        }
+
+        Assert.That(NativeEmitter.EmitWithNativeImports(
+            compilation.Program!, NativeRuntimePolicy.FailFast), Is.Not.Empty);
+    }
+
+    [Test]
+    public void NestedPointerArrayValueCannotEscapeItsBacking()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            unsafe ptr<uint32> Escape() {
+                [uint32; 2] values = [1, 2];
+                unsafe {
+                    [[ptr<uint32>; 1]; 1] pointers = [[&values[0]]];
+                    return pointers[0][0];
+                }
+            }
+
+            int32 Main() { return 0; }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM3016"
+            && diagnostic.Message.Contains("NativePointer",
+                StringComparison.Ordinal)), Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
+    [Test]
+    public void NestedPointerArrayArgumentRejectsWrongPointerDepth()
+    {
+        var compilation = Compilation.Create(SyntaxTree.Parse("""
+            [Terrum.Interop.NativeImport("fixture.dll", "Observe")]
+            extern int32 Observe(ptr<uint32> value);
+
+            int32 Main() {
+                [uint32; 2] values = [1, 2];
+                unsafe {
+                    [ptr<uint32>; 1] pointers = [&values[0]];
+                    [[ptr<ptr<uint32>>; 1]; 1] cells = [[&pointers[0]]];
+                    return Observe(cells[0][0]);
+                }
+            }
+            """), BoundRuntimePolicy.FailFast);
+
+        Assert.That(compilation.HasErrors, Is.True,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        Assert.That(compilation.Program, Is.Null);
+    }
+
     [TestCase(0, 2, true)]
     [TestCase(1, 1, true)]
     [TestCase(1, 2, false)]
@@ -2286,7 +2616,7 @@ public sealed class NativePointerModuleTests
         using var stream = new MemoryStream(module, writable: false);
         using var reader = new BinaryReader(stream, Encoding.UTF8, leaveOpen: true);
         _ = reader.ReadInt32();
-        Assert.That(reader.ReadInt32(), Is.EqualTo(100));
+        Assert.That(reader.ReadInt32(), Is.EqualTo(101));
         SkipString(reader);
         _ = reader.ReadBoolean();
         _ = reader.ReadByte();

@@ -619,18 +619,6 @@ public sealed class NativeFixedArrayStorageTests
             diagnostic.Code == "TRM3030"), Is.True,
             string.Join(Environment.NewLine, incomplete.Diagnostics));
 
-        var pointerNested = Compilation.Create(SyntaxTree.Parse("""
-            int32 Main() {
-                unsafe {
-                    [[ptr<uint32>; 1]; 1] values = [[null]];
-                }
-                return 0;
-            }
-            """), BoundRuntimePolicy.FailFast);
-        Assert.That(pointerNested.Program, Is.Null);
-        Assert.That(pointerNested.Diagnostics.Any(static diagnostic =>
-            diagnostic.Code == "TRM3030"), Is.True,
-            string.Join(Environment.NewLine, pointerNested.Diagnostics));
     }
 
     [Test]

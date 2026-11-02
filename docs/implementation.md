@@ -857,6 +857,14 @@ including the terminator; `utf8z` and `ptr<void>` literal inputs remain limited
 to extent zero. When a call forms an
 address with `&local` or the first element of a fixed array, the backing must be initialized
 and match the pointee type; `Write` and `ReadWrite` require mutable backing.
+Standard A2 now emits typed nested pointer-cell stores and reconstructs them
+source-free. JIT/AOT coverage exercises the nested NativeParameter route,
+fail-fast bounds suppression, provider pointer-TypeSpec remapping, and exact
+whole-array local Copy/assignment through typed Home transfers. Source JIT
+separately verifies that copied pointer cells remain independent and retain
+their backing. The A2 profile is fail-fast-only; whole-array signatures,
+reference parameters/results, CLI execution, and provider-bound whole-array
+Copy remain open.
 Raw pointer values remain caller-authored unsafe inputs. Caller-unsafe source
 functions may return opaque `ptr<void>` values through private semantic
 modules. This preserves caller-unsafety and address bits only; it conveys no
