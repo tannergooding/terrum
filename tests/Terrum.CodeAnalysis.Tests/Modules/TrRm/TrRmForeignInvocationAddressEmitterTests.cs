@@ -4712,6 +4712,70 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             0, "consumer-before-provider Body and TypeMap row remapping",
             runJit: false, expectedReemitted: reversedReemitted)
             .ConfigureAwait(true);
+
+        var compatibleProviderSource = providerSource.Replace(
+            "uint64 byteCount = 0;",
+            "mut [uint32; 2] padding = [0, 0];\n"
+                + "                uint64 byteCount = 0;",
+            StringComparison.Ordinal);
+        var compatibleProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(compatibleProviderSource), core);
+        Assert.That(compatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                compatibleProviderCompilation.Diagnostics));
+        var compatibleProviderArtifact = TrRmExecutableCompiler.EmitStandard(
+            compatibleProviderCompilation.Program!, providerIdentity,
+            schemaIdentity, 1);
+        Assert.That(compatibleProviderArtifact,
+            Is.Not.EqualTo(providerArtifact));
+        var remappedCompatibleProvider = PermuteA2BodyLocalMaps(
+            compatibleProviderArtifact, "ProviderBody");
+        var compatibleCombinedArtifact = CombinePopulatedNativeAddressModules(
+            remappedCompatibleProvider, remappedConsumerArtifact, schema);
+        var compatibleInput = new TrRmStandardArtifactInput(schemaIdentity,
+            compatibleCombinedArtifact);
+        var compatibleLoaded = TrRmExecutableCompiler.LoadStandard(
+            compatibleInput, consumerIdentity, []);
+        var compatibleReemitted = TrRmExecutableCompiler.EmitStandard(
+            compatibleLoaded, consumerIdentity, schemaIdentity, 1);
+        Assert.That(compatibleReemitted, Is.EqualTo(reemitted));
+        Assert.That(NativeModuleCompiler.ExecuteStandard(compatibleInput,
+            consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.Zero);
+        await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
+            compatibleInput,
+            compatibleProviderSource + Environment.NewLine + consumerSource,
+            0, "compatible provider replacement with Body map permutations",
+            runJit: false, expectedReemitted: compatibleReemitted)
+            .ConfigureAwait(true);
+
+        var incompatibleProviderSource = providerSource
+            .Replace("NativeParameter(2, Read, NoEscape, 1)",
+                "NativeParameter(2, Write, NoEscape, 1)",
+                StringComparison.Ordinal)
+            .Replace("ptr<ptr<int32>> source",
+                "write ptr<ptr<int32>> source",
+                StringComparison.Ordinal);
+        var incompatibleProviderCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(incompatibleProviderSource), core);
+        Assert.That(incompatibleProviderCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                incompatibleProviderCompilation.Diagnostics));
+        var incompatibleProviderArtifact
+            = TrRmExecutableCompiler.EmitStandard(
+                incompatibleProviderCompilation.Program!, providerIdentity,
+                schemaIdentity, 1);
+        Assert.That(incompatibleProviderArtifact,
+            Is.Not.EqualTo(providerArtifact));
+        var remappedIncompatibleProvider = PermuteA2BodyLocalMaps(
+            incompatibleProviderArtifact, "ProviderBody");
+        var incompatibleCombinedArtifact
+            = CombinePopulatedNativeAddressModules(
+                remappedIncompatibleProvider, remappedConsumerArtifact,
+                schema);
+        _ = Assert.Throws<InvalidDataException>(() =>
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    incompatibleCombinedArtifact), consumerIdentity, []));
     }
 
     private static void AssertA2ProviderBodyMalformedInputs(
