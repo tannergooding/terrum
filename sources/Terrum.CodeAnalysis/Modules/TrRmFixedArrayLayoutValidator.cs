@@ -2091,19 +2091,19 @@ internal static class TrRmFixedArrayLayoutValidator
             foreach (var region in coverage)
             {
                 ConsumeWork();
-                if (region.Repetitions.IsDefaultOrEmpty
-                    && region.Length
-                        <= ValueLayout.MaximumStructureSize)
+                var normalizedRegion = NormalizePayloadRegion(region);
+                if (TryGetSmallCoverageByteCount(normalizedRegion,
+                        out var byteCount))
                 {
-                    if (!IsByteRangeCoveredByPayloadUnion(region,
-                            normalizedPayloads))
+                    if (!IsSmallCoverageCoveredByPayloadUnion(
+                            normalizedRegion, byteCount, normalizedPayloads))
                     {
                         return false;
                     }
                 }
                 else
                 {
-                    remainingCoverage.Add(region);
+                    remainingCoverage.Add(normalizedRegion);
                 }
             }
 
@@ -2132,33 +2132,92 @@ internal static class TrRmFixedArrayLayoutValidator
             return true;
         }
 
-        private bool IsByteRangeCoveredByPayloadUnion(
-            TrRmReturnCoverageRegion coverage,
+        private bool IsSmallCoverageCoveredByPayloadUnion(
+            TrRmReturnCoverageRegion coverage, int byteCount,
             ImmutableArray<TrRmReturnCoverageRegion> possiblePayloads)
         {
-            var end = checked(coverage.Offset + coverage.Length);
-            for (var byteOffset = coverage.Offset;
-                byteOffset < end;
-                byteOffset++)
+            var repetitions = coverage.Repetitions.IsDefault
+                ? ImmutableArray<TrRmReturnCoverageRepetition>.Empty
+                : coverage.Repetitions;
+            var instanceCount = BigInteger.One;
+            foreach (var repetition in repetitions)
             {
                 ConsumeWork();
-                var isCovered = false;
-                foreach (var payload in possiblePayloads)
+                instanceCount *= repetition.Count;
+            }
+
+            var instances = checked((int)instanceCount);
+            ConsumeWork(checked((ulong)instances + (ulong)byteCount + 1UL));
+            for (var instance = 0; instance < instances; instance++)
+            {
+                var remainingIndex = instance;
+                var byteOffset = coverage.Offset;
+                for (var dimension = 0;
+                    dimension < repetitions.Length;
+                    dimension++)
                 {
                     ConsumeWork();
-                    if (PayloadContainsByte(payload, byteOffset))
-                    {
-                        isCovered = true;
-                        break;
-                    }
+                    var repetition = repetitions[dimension];
+                    var index = (ulong)remainingIndex
+                        % repetition.Count;
+                    remainingIndex = checked((int)(
+                        (ulong)remainingIndex / repetition.Count));
+                    byteOffset = checked(byteOffset
+                        + (index * repetition.Stride));
                 }
 
-                if (!isCovered)
+                var end = checked(byteOffset + coverage.Length);
+                for (var currentByte = byteOffset;
+                    currentByte < end;
+                    currentByte++)
                 {
-                    return false;
+                    ConsumeWork();
+                    var isCovered = false;
+                    foreach (var payload in possiblePayloads)
+                    {
+                        ConsumeWork();
+                        if (PayloadContainsByte(payload, currentByte))
+                        {
+                            isCovered = true;
+                            break;
+                        }
+                    }
+
+                    if (!isCovered)
+                    {
+                        return false;
+                    }
                 }
             }
 
+            return true;
+        }
+
+        private bool TryGetSmallCoverageByteCount(
+            TrRmReturnCoverageRegion region, out int byteCount)
+        {
+            var totalBytes = new BigInteger(region.Length);
+            if (!region.Repetitions.IsDefault)
+            {
+                foreach (var repetition in region.Repetitions)
+                {
+                    ConsumeWork();
+                    totalBytes *= repetition.Count;
+                    if (totalBytes > ValueLayout.MaximumStructureSize)
+                    {
+                        byteCount = 0;
+                        return false;
+                    }
+                }
+            }
+
+            if (totalBytes > ValueLayout.MaximumStructureSize)
+            {
+                byteCount = 0;
+                return false;
+            }
+
+            byteCount = checked((int)totalBytes);
             return true;
         }
 

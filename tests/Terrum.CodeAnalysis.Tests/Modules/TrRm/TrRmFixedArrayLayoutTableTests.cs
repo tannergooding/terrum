@@ -203,6 +203,18 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             public struct PayloadUnionHolder {
                 public PayloadUnion Value;
             }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct NestedPaddedArray {
+                public [PaddedEnvelope; 2] Values;
+            }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct NestedPaddedHolder {
+                public [NestedPaddedArray; 2] Values;
+            }
             """;
         var compilation = Compilation.CreateLibrary(
             SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
@@ -237,12 +249,13 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var rawWordLayout = tables.Layouts.GetLayoutForProfile(rawWordRow, 1);
         Assert.That(tables.Layouts.GetLayoutKind(rawWordLayout),
             Is.EqualTo(2));
-        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(3));
+        Assert.That(tables.FixedArrayLayouts.Count, Is.EqualTo(5));
         if (isA2R1)
         {
             var envelopeTypeDef = 0;
             var paddedArrayHolderTypeDef = 0;
             var payloadUnionHolderTypeDef = 0;
+            var nestedPaddedHolderTypeDef = 0;
             for (var typeDef = 1; typeDef <= tables.TypeDefs.Count;
                 typeDef++)
             {
@@ -260,10 +273,16 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                 {
                     payloadUnionHolderTypeDef = typeDef;
                 }
+                else if (tables.TypeDefs.GetName(typeDef)
+                    == "NestedPaddedHolder")
+                {
+                    nestedPaddedHolderTypeDef = typeDef;
+                }
             }
             Assert.That(envelopeTypeDef, Is.GreaterThan(0));
             Assert.That(paddedArrayHolderTypeDef, Is.GreaterThan(0));
             Assert.That(payloadUnionHolderTypeDef, Is.GreaterThan(0));
+            Assert.That(nestedPaddedHolderTypeDef, Is.GreaterThan(0));
 
             var (envelopeFirstField, envelopeEndField)
                 = tables.TypeDefs.GetFieldRange(envelopeTypeDef);
@@ -418,6 +437,38 @@ internal sealed class TrRmFixedArrayLayoutTableTests
                     ImmutableArray.Create(
                         new TrRmReturnCoverageRegion(0, 10, []))),
                 Is.False);
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    payloadUnionTypeSpecRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(0, 1, [
+                            new TrRmReturnCoverageRepetition(9, 1),
+                        ]))),
+                Is.True);
+
+            var (nestedPaddedFirstField, nestedPaddedEndField)
+                = tables.TypeDefs.GetFieldRange(nestedPaddedHolderTypeDef);
+            Assert.That(nestedPaddedEndField - nestedPaddedFirstField,
+                Is.EqualTo(1));
+            var nestedPaddedArrayRef = tables.Fields.GetTypeSpecRef(
+                nestedPaddedFirstField);
+            Assert.That(tables.TypeSpecs.TryGetFixedInlineArray(
+                nestedPaddedArrayRef, out var nestedArrayTypeRef,
+                out var nestedArrayCount), Is.True);
+            Assert.That(nestedArrayCount, Is.EqualTo(2));
+            var nestedArrayGeometry
+                = TrRmFixedArrayLayoutValidator
+                    .CalculateReturnCoverageSubjectGeometry(tables,
+                        nestedPaddedArrayRef, 1);
+            Assert.That(nestedArrayGeometry.Size, Is.EqualTo(96));
+            Assert.That(TrRmFixedArrayLayoutValidator
+                .IsReturnCoverageSubjectAndRegionsValid(tables,
+                    nestedPaddedArrayRef, 1,
+                    ImmutableArray.Create(
+                        new TrRmReturnCoverageRegion(24, 1, [
+                            new TrRmReturnCoverageRepetition(2, 24),
+                        ]))),
+                Is.True);
         }
 
         var input = new TrRmStandardArtifactInput(schemaIdentity, artifact);
