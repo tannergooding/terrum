@@ -3,6 +3,7 @@
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -3475,6 +3476,110 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
     }
 
+    [TestCase(14, 1, false)]
+    [TestCase(15, 1, false)]
+    [TestCase(65, 1, false)]
+    [TestCase(7, 2, false)]
+    [TestCase(12, 2, false)]
+    [TestCase(65, 2, true)]
+    public async Task StandardA2NestedArrayPathsReuseRegisters(
+        int dimensionCount, int elementCount, bool singleWideLeaf)
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        var moduleIdentity
+            = $"a2-nested-register-depth-{dimensionCount}-{elementCount}-"
+                + (singleWideLeaf ? "leaf" : "uniform");
+        var input = CreateA2DeepNestedAddressInput(moduleIdentity,
+            dimensionCount, elementCount, singleWideLeaf, out var source);
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            moduleIdentity, input, source, -1,
+            $"nested path depth {dimensionCount}").ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2NestedArrayPathDepth126RoundTripsAndExecutes()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2-nested-register-depth-126";
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        var source = CreateA2DeepNestedAddressSource(65, 1, false);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var (extendedProgram, _)
+            = ExtendA2NestedArrayDepth(compilation.Program!, 126);
+        var input = new TrRmStandardArtifactInput(schemaIdentity,
+            TrRmExecutableCompiler.EmitStandard(extendedProgram,
+                moduleIdentity, schemaIdentity, 1));
+        TestContext.WriteLine(
+            "A2 126-level Body input extends the 65-level source-bound seed before Standard emission.");
+        await AssertStandardA2SourceFreeJitAndAotAsync(moduleIdentity,
+            input, source, -1, "semantic depth 126").ConfigureAwait(true);
+    }
+
+    [Test]
+    public void StandardA2NestedArrayPathRejectsOneBeyondSemanticDepth()
+    {
+        const string moduleIdentity = "a2-nested-register-depth-128";
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        var source = CreateA2DeepNestedAddressSource(65, 1, false);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var (extendedProgram, _)
+            = ExtendA2NestedArrayDepth(compilation.Program!, 127);
+        Assert.Throws<NotSupportedException>(() =>
+            TrRmExecutableCompiler.EmitStandard(extendedProgram,
+                moduleIdentity, schemaIdentity, 1));
+    }
+
+    [Test]
+    public void NativeFixedArrayContractRejectsPathDepth129()
+    {
+        var source = CreateA2DeepNestedAddressSource(65, 1, false);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+
+        var (extendedProgram, nestedPath)
+            = ExtendA2NestedArrayDepth(compilation.Program!, 128);
+        Assert.That(nestedPath.Projections.Length, Is.EqualTo(128));
+        Assert.That(NativeFixedArrayContract.MatchesPath(
+            extendedProgram.Functions[extendedProgram.EntryPoint]
+                .Variables[nestedPath.Variable].Type,
+            nestedPath.Projections, extendedProgram.Structures,
+            extendedProgram.NativeFixedArrayTypes, out _, out _), Is.True);
+        var beyondDepthProjections
+            = nestedPath.Projections.Add(nestedPath.Projections[^1]);
+        Assert.That(beyondDepthProjections.Length, Is.EqualTo(129));
+        Assert.That(NativeFixedArrayContract.MatchesPath(
+            extendedProgram.Functions[extendedProgram.EntryPoint]
+                .Variables[nestedPath.Variable].Type,
+            beyondDepthProjections, extendedProgram.Structures,
+            extendedProgram.NativeFixedArrayTypes, out _, out _), Is.False);
+    }
+
     [TestCase(0, 0, 0, 0)]
     [TestCase(0, 0, 1, -1)]
     [TestCase(0, 1, 0, -1)]
@@ -5334,6 +5439,230 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, schemaIdentity, 1);
         return new TrRmStandardArtifactInput(schemaIdentity, artifact);
+    }
+
+    private static TrRmStandardArtifactInput
+        CreateA2DeepNestedAddressInput(string moduleIdentity,
+            int dimensionCount, int elementCount, bool singleWideLeaf,
+            out string source)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
+        source = CreateA2DeepNestedAddressSource(dimensionCount,
+            elementCount, singleWideLeaf);
+        var compilation = Compilation.Create(SyntaxTree.Parse(source),
+            new CompilationOptions {
+                RuntimePolicy = BoundRuntimePolicy.FailFast,
+                NativeCoreRegistration
+                    = NativeCoreRegistrationTests.CreateRegistration(),
+            });
+        Assert.That(compilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine, compilation.Diagnostics));
+        var artifact = TrRmExecutableCompiler.EmitStandard(
+            compilation.Program!, moduleIdentity, schemaIdentity, 1);
+        return new TrRmStandardArtifactInput(schemaIdentity, artifact);
+    }
+
+    private static string CreateA2DeepNestedAddressSource(
+        int dimensionCount, int elementCount, bool singleWideLeaf)
+    {
+        var arrayType = "int32";
+        var initializer = "-1";
+        for (var depth = 0; depth < dimensionCount; depth++)
+        {
+            var currentElementCount = singleWideLeaf && depth > 0
+                ? 1 : elementCount;
+            arrayType = $"[{arrayType}; {currentElementCount}]";
+            initializer = $"[{string.Join(", ",
+                Enumerable.Repeat(initializer, currentElementCount))}]";
+        }
+
+        var selectedPath = string.Concat(
+            Enumerable.Repeat("[zeroIndex]", dimensionCount));
+        return $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut {{arrayType}} values = {{initializer}};
+                mut int32 observed = values{{selectedPath}};
+                uint64 byteCount = 0;
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback(&observed, &values{{selectedPath}}, byteCount);
+                }
+                return observed;
+            }
+            """;
+    }
+
+    private static (BoundProgram Program,
+        BoundNativeFixedArrayPathElement PathElement)
+        ExtendA2NestedArrayDepth(
+        BoundProgram program, int targetDepth)
+    {
+        var functionIndex = program.EntryPoint;
+        var function = program.Functions[functionIndex];
+        var valuesVariable = -1;
+        var zeroIndexVariable = -1;
+        for (var variableIndex = 0;
+            variableIndex < function.Variables.Length;
+            variableIndex++)
+        {
+            var variable = function.Variables[variableIndex];
+            if (variable.Name == "values")
+            {
+                valuesVariable = variableIndex;
+            }
+            else if (variable.Name == "zeroIndex")
+            {
+                zeroIndexVariable = variableIndex;
+            }
+        }
+
+        if (valuesVariable < 0 || zeroIndexVariable < 0
+            || !NativeFixedArrayTypes.IsType(
+                function.Variables[valuesVariable].Type))
+        {
+            throw new InvalidOperationException(
+                "The deep A2 source fixture has no array or zero-index local.");
+        }
+
+        var originalRootType = function.Variables[valuesVariable].Type;
+        var originalArrayDepth = 0;
+        var elementType = originalRootType;
+        while (NativeFixedArrayTypes.IsType(elementType))
+        {
+            originalArrayDepth++;
+            elementType = program.NativeFixedArrayTypes[
+                NativeFixedArrayTypes.Index(elementType)].ElementType;
+        }
+
+        if (targetDepth < originalArrayDepth)
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetDepth));
+        }
+
+        var fixedArrayTypes = program.NativeFixedArrayTypes.ToList();
+        var firstAddedTypeIndex = fixedArrayTypes.Count;
+        var rootType = originalRootType;
+        for (var depth = originalArrayDepth; depth < targetDepth; depth++)
+        {
+            if (!NativeFixedArrayContract.TryCreateType(rootType, 1,
+                    program.Structures, fixedArrayTypes,
+                    out var nestedArrayType, out _))
+            {
+                throw new InvalidOperationException(
+                    "The synthetic A2 array type could not be extended.");
+            }
+
+            rootType = nestedArrayType;
+        }
+
+        var additionalProjections
+            = ImmutableArray.CreateBuilder<BoundNativeFixedArrayProjection>(
+                fixedArrayTypes.Count - firstAddedTypeIndex);
+        for (var typeIndex = fixedArrayTypes.Count - 1;
+            typeIndex >= firstAddedTypeIndex; typeIndex--)
+        {
+            var arrayType = NativeFixedArrayTypes.Type(typeIndex);
+            if (!NativeFixedArrayContract.TryGetLayout(arrayType,
+                    program.Structures, fixedArrayTypes, out var layout))
+            {
+                throw new InvalidOperationException(
+                    "The synthetic A2 array layout could not be reconstructed.");
+            }
+
+            additionalProjections.Add(
+                new BoundNativeFixedArrayProjection(layout,
+                    new BoundRead(zeroIndexVariable, PrimitiveType.Int32,
+                        default)));
+        }
+
+        var addedProjections = additionalProjections.MoveToImmutable();
+        var variables = function.Variables.ToBuilder();
+        variables[valuesVariable] = variables[valuesVariable] with {
+            Type = rootType,
+        };
+        BoundNativeFixedArrayPathElement? extendedPathElement = null;
+        var rewrittenFunction = BoundTreeTraversal.RewriteExpressions(
+            function with {
+                Variables = variables.ToImmutable(),
+            },
+            expression =>
+            {
+                switch (expression)
+                {
+                    case BoundNativeFixedArrayInitialization initialization
+                        when initialization.Type == originalRootType:
+                    {
+                        BoundNativeFixedArrayInitialization expanded
+                            = initialization;
+                        for (var typeIndex = firstAddedTypeIndex;
+                            typeIndex < fixedArrayTypes.Count; typeIndex++)
+                        {
+                            var arrayType = NativeFixedArrayTypes.Type(
+                                typeIndex);
+                            if (!NativeFixedArrayContract.TryGetLayout(
+                                    arrayType, program.Structures,
+                                    fixedArrayTypes, out var layout))
+                            {
+                                throw new InvalidOperationException(
+                                    "The synthetic A2 initializer layout is invalid.");
+                            }
+
+                            expanded = new BoundNativeFixedArrayInitialization(
+                                layout, [expanded], initialization.Span);
+                        }
+
+                        return expanded;
+                    }
+
+                    case BoundNativeFixedArrayPathElement pathElement
+                        when pathElement.Variable == valuesVariable:
+                    {
+                        var expandedPathElement = pathElement with {
+                            Projections = [
+                                .. addedProjections,
+                                .. pathElement.Projections,
+                            ],
+                        };
+                        extendedPathElement = expandedPathElement;
+                        return expandedPathElement;
+                    }
+
+                    case BoundNativeStorageAddress address
+                        when address.Variable == valuesVariable:
+                        return address with {
+                            CarrierType = rootType,
+                            Projections = [
+                                .. addedProjections,
+                                .. address.Projections,
+                            ],
+                        };
+
+                    default:
+                        return expression;
+                }
+            });
+        var functions = program.Functions.ToBuilder();
+        functions[functionIndex] = rewrittenFunction;
+        var extendedProgram = program with {
+            Functions = functions.ToImmutable(),
+            NativeFixedArrayTypes = [.. fixedArrayTypes],
+        };
+        return (extendedProgram, extendedPathElement
+            ?? throw new InvalidOperationException(
+                "The deep A2 source fixture has no nested array read."));
     }
 
     private static string CreateNativeNestedArrayReadbackSource(

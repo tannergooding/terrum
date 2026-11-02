@@ -2718,7 +2718,7 @@ public static partial class TrRmExecutableCompiler
         pending.Push((arrayType, initialization, 1));
         while (pending.TryPop(out var current))
         {
-            if (current.Depth > 6
+            if (current.Depth > SemanticVerifier.MaximumDepth
                 || !NativeFixedArrayContract.TryGetLayout(
                     current.ArrayType, program.Structures,
                     program.NativeFixedArrayTypes, out var layout)
@@ -3306,9 +3306,64 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var arrayInitializationCounterDepths = new SortedSet<int>();
+        void CollectArrayInitializationCounterDepths(
+            BoundNativeFixedArrayInitialization initialization, int depth)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            if (depth > SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The A2 nested array initializer exceeds the semantic depth limit.");
+            }
+
+            if (depth >= 11 && initialization.Layout.ElementCount > 1)
+            {
+                _ = arrayInitializationCounterDepths.Add(depth);
+            }
+
+            foreach (var element in initialization.Elements)
+            {
+                resourceLedger?.ConsumeWork();
+                if (element
+                    is BoundNativeFixedArrayInitialization nested
+                    && nested.Layout.ElementCount > 0)
+                {
+                    CollectArrayInitializationCounterDepths(nested,
+                        checked(depth + 1));
+                }
+            }
+        }
+
+        if (!BoundTreeTraversal.VisitStatements(caller.Body, statement =>
+                {
+                    if (statement is BoundLocal {
+                        Initializer: BoundNativeFixedArrayInitialization
+                            initialization,
+                    })
+                    {
+                        CollectArrayInitializationCounterDepths(
+                            initialization, 0);
+                    }
+                }))
+        {
+            throw Unsupported(
+                "The A2 Body array initializers exceed the bound-tree analysis limits.");
+        }
+
         var storageResultHomeStart = nextStorageHome;
-        var formalHomeStart = storageResultHomeStart
+        var arrayInitializationCounterHomeByDepth
+            = new Dictionary<int, int>(arrayInitializationCounterDepths.Count);
+        var nextArrayInitializationCounterHome = storageResultHomeStart
             + storageCall.StorageArguments.Length;
+        foreach (var depth in arrayInitializationCounterDepths)
+        {
+            arrayInitializationCounterHomeByDepth.Add(depth,
+                nextArrayInitializationCounterHome++);
+        }
+
+        var formalHomeStart = nextArrayInitializationCounterHome;
         var homeCount = formalHomeStart + caller.ParameterCount;
         if (localCount <= 0 || homeCount > 65_536)
         {
@@ -3413,6 +3468,17 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        foreach (var counterHome in arrayInitializationCounterHomeByDepth.Values)
+        {
+            var offset = counterHome * 8;
+            homeMap[offset] = 3;
+            homeMap[offset + 1] = 1;
+            BinaryPrimitives.WriteUInt16LittleEndian(
+                homeMap.AsSpan(offset + 2),
+                maps.GetTypeMapIndex(CreateStandardBodyTypeMapToken(
+                    getSignatureTypeSpecRef(PrimitiveType.Int32))));
+        }
+
         for (var ordinal = 0; ordinal < caller.ParameterCount; ordinal++)
         {
             var home = formalHomeStart + ordinal;
@@ -3444,7 +3510,7 @@ public static partial class TrRmExecutableCompiler
         }
 
         long CountFixedArrayInitializationRecords(
-            BoundNativeFixedArrayInitialization initialization)
+            BoundNativeFixedArrayInitialization initialization, int depth)
         {
             using var frame = resourceLedger?.EnterFrame();
             resourceLedger?.ConsumeWork();
@@ -3453,7 +3519,8 @@ public static partial class TrRmExecutableCompiler
                 return 2;
             }
 
-            long count = 0;
+            long count = checked((long)depth
+                * Math.Max(0, initialization.Elements.Length - 1));
             foreach (var element in initialization.Elements)
             {
                 resourceLedger?.ConsumeWork();
@@ -3462,7 +3529,8 @@ public static partial class TrRmExecutableCompiler
                     && nested.Layout.ElementCount > 0)
                 {
                     count = checked(count + 1
-                        + CountFixedArrayInitializationRecords(nested));
+                        + CountFixedArrayInitializationRecords(nested,
+                            checked(depth + 1)));
                 }
                 else
                 {
@@ -3482,7 +3550,7 @@ public static partial class TrRmExecutableCompiler
                 BoundLocal
                 {
                     Initializer: BoundNativeFixedArrayInitialization initialization,
-                } => CountFixedArrayInitializationRecords(initialization),
+                } => CountFixedArrayInitializationRecords(initialization, 0),
                 BoundLocal
                 {
                     Initializer: BoundNativeFixedArrayElement,
@@ -3735,10 +3803,10 @@ public static partial class TrRmExecutableCompiler
                         "The A2 storage address has no index-capture map.");
                 }
 
-                if (projections.Length > 14)
+                if (projections.Length > SemanticVerifier.MaximumDepth)
                 {
                     throw Unsupported(
-                        "The A2 storage address exceeds the Body register window.");
+                        "The A2 storage address exceeds the semantic depth limit.");
                 }
 
                 var rootHome = homeIndexByVariable[address.Variable];
@@ -3797,10 +3865,10 @@ public static partial class TrRmExecutableCompiler
                     }
 
                     var destinationRegister
-                        = checked((byte)projectionIndex);
+                        = checked((byte)(projectionIndex % 2));
                     var baseKind = projectionIndex == 0 ? (byte)2 : (byte)1;
                     var baseIndex = projectionIndex == 0
-                        ? rootHome : previousRegister;
+                        ? rootHome : (projectionIndex - 1) % 2;
                     if (baseIndex < 0 || (uint)baseIndex > ushort.MaxValue)
                     {
                         throw Unsupported(
@@ -3821,7 +3889,7 @@ public static partial class TrRmExecutableCompiler
                             schema, resourceLedger));
                     code.Add(0xD8);
                     code.Add(destinationRegister);
-                    code.Add((byte)placeSelectionIndex);
+                    code.Add(unchecked((byte)placeSelectionIndex));
                     code.Add((byte)(placeSelectionIndex >> 8));
                     previousRegister = destinationRegister;
                 }
@@ -3845,7 +3913,7 @@ public static partial class TrRmExecutableCompiler
                     requiredElementCount, resourceLedger));
             code.Add(0xEC);
             code.Add(0);
-            code.Add((byte)storageRecordIndex);
+            code.Add(unchecked((byte)storageRecordIndex));
             code.Add((byte)(storageRecordIndex >> 8));
         }
 
@@ -4228,7 +4296,7 @@ public static partial class TrRmExecutableCompiler
             {
                 code.Add(0xD4);
                 code.Add(destinationRegister);
-                code.Add((byte)constantIndex);
+                code.Add(unchecked((byte)constantIndex));
                 code.Add((byte)(constantIndex >> 8));
             }
         }
@@ -4459,7 +4527,7 @@ public static partial class TrRmExecutableCompiler
             records.Add(conditionalEdge);
             code.Add(0xE4);
             code.Add(0);
-            code.Add((byte)conditionalEdgeIndex);
+            code.Add(unchecked((byte)conditionalEdgeIndex));
             code.Add((byte)(conditionalEdgeIndex >> 8));
             EndCurrentBlock();
 
@@ -4561,7 +4629,7 @@ public static partial class TrRmExecutableCompiler
                     caller.Variables[variable].Type)
                 || homeIndexByVariable[variable] < 0
                 || projections.IsDefaultOrEmpty
-                || projections.Length > 14
+                || projections.Length > SemanticVerifier.MaximumDepth
                 || destinationHome < 0)
             {
                 throw Unsupported(
@@ -4626,10 +4694,11 @@ public static partial class TrRmExecutableCompiler
                         "The A2 nested array read index has no caller Home.");
                 }
 
-                var destinationRegister = checked((byte)projectionIndex);
+                var destinationRegister
+                    = checked((byte)(projectionIndex % 2));
                 var baseKind = projectionIndex == 0 ? (byte)2 : (byte)1;
                 var baseIndex = projectionIndex == 0
-                    ? rootHome : projectionIndex - 1;
+                    ? rootHome : (projectionIndex - 1) % 2;
                 var placeSelectionIndex = checked((ushort)records.Count);
                 records.Add(
                     TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
@@ -4645,12 +4714,12 @@ public static partial class TrRmExecutableCompiler
                 code.Add(projectionIndex + 1 == projections.Length
                     ? (byte)0xDA : (byte)0xD8);
                 code.Add(destinationRegister);
-                code.Add((byte)placeSelectionIndex);
+                code.Add(unchecked((byte)placeSelectionIndex));
                 code.Add((byte)(placeSelectionIndex >> 8));
             }
 
             AppendHomeStore(code,
-                checked((byte)(projections.Length - 1)),
+                checked((byte)((projections.Length - 1) % 2)),
                 destinationHome);
         }
 
@@ -4871,10 +4940,52 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var arrayInitializationPath
+            = new List<(PrimitiveType ArrayType, byte IndexKind,
+                ushort IndexIndex)>();
+        (byte PlaceRegister, ushort SelectionIndex)
+            AppendArrayInitializationSelection(int depth,
+            PrimitiveType arrayType, byte indexKind, ushort indexIndex,
+            int rootHome)
+        {
+            resourceLedger?.ConsumeWork();
+            var arrayTypeIndex = NativeFixedArrayTypes.Index(arrayType);
+            if (!fixedArrayLayoutRowByType.TryGetValue(arrayTypeIndex,
+                    out var layoutRow)
+                || layoutRow == 0 || (uint)layoutRow > 0xFF_FFFFu)
+            {
+                throw Unsupported(
+                    "The A2 nested array initializer has no exact selected layout.");
+            }
+
+            var placeRegister = checked((byte)(depth % 2));
+            var baseKind = depth == 0 ? (byte)2 : (byte)1;
+            var baseIndex = depth == 0
+                ? rootHome : (depth - 1) % 2;
+            if (baseIndex < 0 || (uint)baseIndex > ushort.MaxValue)
+            {
+                throw Unsupported(
+                    "The A2 nested array initializer has no parent place.");
+            }
+
+            var elementType = program.NativeFixedArrayTypes[
+                arrayTypeIndex].ElementType;
+            var selectionIndex = checked((ushort)records.Count);
+            records.Add(
+                TrRmRegisterBodyRecordWriter.EncodePlaceSelection(3, 3,
+                    1, baseKind, placeRegister,
+                    checked((ushort)baseIndex), indexKind, 3, indexIndex,
+                    checked((uint)layoutRow),
+                    maps.GetTypeMapIndex(
+                        CreateStandardBodyTypeMapToken(
+                            getSignatureTypeSpecRef(elementType))),
+                    schema, resourceLedger));
+            return (placeRegister, selectionIndex);
+        }
+
         void AppendArrayInitializationElements(
             BoundNativeFixedArrayInitialization initialization,
-            int rootVariable, int depth, int maximumDepth, int indexHome,
-            int oneRegister, int parentPlaceRegister)
+            int rootVariable, int depth, int maximumDepth, int indexHome)
         {
             using var frame = resourceLedger?.EnterFrame();
             resourceLedger?.ConsumeWork();
@@ -4899,30 +5010,44 @@ public static partial class TrRmExecutableCompiler
                     "The A2 nested array initializer has no exact selected layout.");
             }
 
-            var indexRegister = checked((byte)depth);
-            var placeRegister
-                = checked((byte)(maximumDepth + depth + 1));
-            if (indexRegister > 13 || placeRegister > 13
-                || oneRegister > 13)
+            byte indexKind;
+            ushort indexIndex;
+            if (depth < 11)
             {
-                throw Unsupported(
-                    "The A2 nested initializer exceeds the Body register window.");
+                var indexRegister = checked((byte)(depth + 2));
+                indexKind = 1;
+                indexIndex = indexRegister;
+                if (depth > 0)
+                {
+                    AppendZeroArrayIndex(indexHome, indexRegister);
+                }
+            }
+            else if (layout.ElementCount > 1)
+            {
+                if (!arrayInitializationCounterHomeByDepth.TryGetValue(
+                        depth, out var counterHome))
+                {
+                    throw Unsupported(
+                        "The A2 nested array initializer has no counter Home.");
+                }
+
+                indexKind = 2;
+                indexIndex = checked((ushort)counterHome);
+                AppendHomeStore(code, 14, counterHome, forceLong: true);
+            }
+            else
+            {
+                indexKind = 2;
+                indexIndex = checked((ushort)indexHome);
             }
 
-            if (depth > 0)
-            {
-                AppendZeroArrayIndex(indexHome, indexRegister);
-            }
-            var elementType = layout.ElementType;
-            var baseKind = depth == 0 ? (byte)2 : (byte)1;
-            var baseIndex = depth == 0
-                ? homeIndexByVariable[rootVariable]
-                : parentPlaceRegister;
-            if (baseIndex < 0 || (uint)baseIndex > ushort.MaxValue)
+            var rootHome = homeIndexByVariable[rootVariable];
+            if (rootHome < 0 || arrayInitializationPath.Count != depth)
             {
                 throw Unsupported(
-                    "The A2 nested array initializer has no parent place.");
+                    "The A2 nested array initializer has no complete parent path.");
             }
+            var elementType = layout.ElementType;
 
             for (var elementIndex = 0;
                 elementIndex < initialization.Elements.Length;
@@ -4936,16 +5061,29 @@ public static partial class TrRmExecutableCompiler
                             Layout.ElementCount: 0,
                             Elements.IsEmpty: true,
                         };
-                var selectionIndex = checked((ushort)records.Count);
-                records.Add(
-                    TrRmRegisterBodyRecordWriter.EncodePlaceSelection(3, 3,
-                        1, baseKind, placeRegister,
-                        checked((ushort)baseIndex), 1, 3, indexRegister,
-                        checked((uint)layoutRow),
-                        maps.GetTypeMapIndex(
-                            CreateStandardBodyTypeMapToken(
-                                getSignatureTypeSpecRef(elementType))),
-                        schema, resourceLedger));
+                if (elementIndex > 0 && depth > 0)
+                {
+                        for (var pathIndex = 0;
+                            pathIndex < arrayInitializationPath.Count;
+                            pathIndex++)
+                        {
+                            var parent = arrayInitializationPath[pathIndex];
+                            var replayedSelection
+                                = AppendArrayInitializationSelection(pathIndex,
+                                    parent.ArrayType, parent.IndexKind,
+                                    parent.IndexIndex, rootHome);
+                            code.Add(0xD8);
+                            code.Add(replayedSelection.PlaceRegister);
+                            code.Add(unchecked((byte)
+                                replayedSelection.SelectionIndex));
+                            code.Add((byte)(
+                                replayedSelection.SelectionIndex >> 8));
+                        }
+                }
+
+                var (placeRegister, selectionIndex)
+                        = AppendArrayInitializationSelection(depth, arrayType,
+                            indexKind, indexIndex, rootHome);
                 if (isNullaryEmptyChild)
                 {
                     AppendRecordPlaceSelectionInstruction(code, selectionIndex,
@@ -4955,7 +5093,7 @@ public static partial class TrRmExecutableCompiler
                 {
                     code.Add(0xD8);
                     code.Add(placeRegister);
-                    code.Add((byte)selectionIndex);
+                    code.Add(unchecked((byte)selectionIndex));
                     code.Add((byte)(selectionIndex >> 8));
                 }
 
@@ -4981,9 +5119,13 @@ public static partial class TrRmExecutableCompiler
                     }
                     else
                     {
+                        arrayInitializationPath.Add(
+                            (arrayType, indexKind, indexIndex));
                         AppendArrayInitializationElements(nested,
                             rootVariable, depth + 1, maximumDepth,
-                            indexHome, oneRegister, placeRegister);
+                            indexHome);
+                        arrayInitializationPath.RemoveAt(
+                            arrayInitializationPath.Count - 1);
                     }
                 }
                 else
@@ -5017,15 +5159,30 @@ public static partial class TrRmExecutableCompiler
 
                     code.Add(0xD9);
                     code.Add(0);
-                    code.Add((byte)storeIndex);
+                    code.Add(unchecked((byte)storeIndex));
                     code.Add((byte)(storeIndex >> 8));
                 }
 
                 if (elementIndex + 1
                     < initialization.Elements.Length)
                 {
-                    code.Add(0x21);
-                    code.Add((byte)((oneRegister << 4) | indexRegister));
+                    var indexRegister = indexKind == 1
+                        ? checked((byte)indexIndex) : (byte)13;
+                    if (indexKind == 2)
+                    {
+                        AppendHomeLoad(code, indexRegister, indexIndex);
+                    }
+
+                    var unaryIndexOperand = (byte)((indexRegister << 4)
+                        | indexRegister);
+                    code.Add(0x33);
+                    code.Add(unaryIndexOperand);
+                    code.Add(0x20);
+                    code.Add(unaryIndexOperand);
+                    if (indexKind == 2)
+                    {
+                        AppendHomeStore(code, indexRegister, indexIndex);
+                    }
                 }
             }
         }
@@ -5114,25 +5271,16 @@ public static partial class TrRmExecutableCompiler
                             local.Variable);
                         var maximumDepth
                             = GetArrayInitializationDepth(arrayInitialization);
-                        var oneRegister = maximumDepth;
-                        if (oneRegister > 13)
+                        if (maximumDepth > SemanticVerifier.MaximumDepth)
                         {
                             throw Unsupported(
-                                "The A2 nested array initializer exceeds the Body register window.");
+                                "The A2 nested array initializer exceeds the semantic depth limit.");
                         }
 
-                        AppendZeroArrayIndex(indexHome, 0);
-                        code.Add(0x10);
-                        code.Add(checked((byte)oneRegister));
-                        code.Add(0x33);
-                        code.Add(checked((byte)((oneRegister << 4)
-                            | oneRegister)));
-                        code.Add(0x20);
-                        code.Add(checked((byte)((oneRegister << 4)
-                            | oneRegister)));
+                        AppendZeroArrayIndex(indexHome, 2);
                         AppendArrayInitializationElements(
                             arrayInitialization, local.Variable, 0,
-                            maximumDepth, indexHome, oneRegister, -1);
+                            maximumDepth, indexHome);
 
                         break;
                     }
@@ -5308,14 +5456,14 @@ public static partial class TrRmExecutableCompiler
 
     private static void AppendHomeStore(TrRmA3StagedList<byte> code,
         byte sourceRegister,
-        int homeIndex)
+        int homeIndex, bool forceLong = false)
     {
         if (sourceRegister > 15 || (uint)homeIndex > ushort.MaxValue)
         {
             throw Unsupported("The F+S Home initialization operand is invalid.");
         }
 
-        if (sourceRegister is 14 or 15 && homeIndex < 16)
+        if (!forceLong && sourceRegister is 14 or 15 && homeIndex < 16)
         {
             code.Add(0x14);
             code.Add((byte)((sourceRegister << 4) | homeIndex));
@@ -5324,7 +5472,7 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0xD6);
         code.Add((byte)(0x10 | sourceRegister));
-        code.Add((byte)homeIndex);
+        code.Add(unchecked((byte)homeIndex));
         code.Add((byte)(homeIndex >> 8));
     }
 
@@ -5339,7 +5487,7 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0xD5);
         code.Add(destinationRegister);
-        code.Add((byte)homeIndex);
+        code.Add(unchecked((byte)homeIndex));
         code.Add((byte)(homeIndex >> 8));
     }
 
@@ -5620,7 +5768,7 @@ public static partial class TrRmExecutableCompiler
         resourceLedger?.ConsumeWork(4);
         code.Add(0xE0);
         code.Add(0);
-        code.Add((byte)recordIndex);
+        code.Add(unchecked((byte)recordIndex));
         code.Add((byte)(recordIndex >> 8));
     }
 
@@ -5629,7 +5777,7 @@ public static partial class TrRmExecutableCompiler
     {
         code.Add(0xE0);
         code.Add(0);
-        code.Add((byte)recordIndex);
+        code.Add(unchecked((byte)recordIndex));
         code.Add((byte)(recordIndex >> 8));
     }
 
@@ -5652,7 +5800,7 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0xD8);
         code.Add(destinationRegister);
-        code.Add((byte)recordIndex);
+        code.Add(unchecked((byte)recordIndex));
         code.Add((byte)(recordIndex >> 8));
     }
 
@@ -5668,7 +5816,7 @@ public static partial class TrRmExecutableCompiler
 
         code.Add(0xD9);
         code.Add(0);
-        code.Add((byte)recordIndex);
+        code.Add(unchecked((byte)recordIndex));
         code.Add((byte)(recordIndex >> 8));
     }
 

@@ -21,22 +21,30 @@ public static partial class TrRmExecutableCompiler
         ImmutableArray<BoundNativeFixedArrayProjection> Projections,
         bool SourceWritable);
 
-    private readonly record struct NativeArrayPlaceSelectionFacts(
-        int RecordIndex, int DestinationRegister, byte TargetKind,
-        byte AccessKind,
+    internal readonly record struct NativeArrayPlaceSelectionFacts(
+        int RecordIndex, int SelectionInstanceKey, int DestinationRegister,
+        byte TargetKind, byte AccessKind,
         int BaseHome, int BaseRegister, byte IndexKind, int IndexHome,
         int IndexRegister,
         int ArrayTypeSpecRow, int FixedArrayLayoutRow, PrimitiveType ArrayType,
         PrimitiveType ElementType, ulong ElementCount,
-        int ArrayInstanceKey, ulong SelectedElementIndex)
+        int ArrayInstanceKey, int ArrayValueInstanceKey,
+        ulong SelectedElementIndex)
     {
         internal BoundExpression? IndexExpressionOverride { get; init; }
+        internal bool HasSelectedElementIndex { get; init; }
+        internal NativeArrayPlaceSelectionPath? Path { get; init; }
     }
+
+    internal sealed record NativeArrayPlaceSelectionPath(
+        NativeArrayPlaceSelectionFacts Selection,
+        NativeArrayPlaceSelectionPath? Parent);
 
     private readonly record struct NativeArrayPlacePathFacts(
         int RootHome, int RootVariable,
         ImmutableArray<BoundNativeFixedArrayProjection> Projections,
-        ImmutableArray<int> SelectionRegisters, bool IsWritable,
+        ImmutableArray<(int Register, int SelectionInstanceKey)>
+            SelectionRegisters, bool IsWritable,
         bool IsReadable);
 
     private readonly record struct NativeAddressRegisterConstant(
@@ -55,6 +63,10 @@ public static partial class TrRmExecutableCompiler
         List<int> CallArgumentHomeOrder,
         Dictionary<int, long> LocalConstantByHome,
         Dictionary<int, NativeArrayPlaceSelectionFacts> PlaceSelectionsByRegister,
+        Dictionary<int, NativeArrayPlaceSelectionFacts> PlaceSelectionsByInstanceKey,
+        Dictionary<(int ParentArrayInstanceKey, ulong ElementIndex), int>
+            ArrayValueInstanceKeys,
+        int NextArrayValueInstanceKey,
         Dictionary<int, NativeAddressRegisterConstant> RegisterConstants,
         Dictionary<int, BoundExpression> RegisterExpressions,
         Dictionary<int, List<BoundExpression>> ArrayInitializationElementsByHome);
@@ -1687,11 +1699,124 @@ public static partial class TrRmExecutableCompiler
             _ = nonLocalHomeResults.Add(captureHome);
         }
 
+        var arrayInitializationIndexHomes = new HashSet<int>();
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x04 || record.Length != 24)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            if (payload[0] == 3 && payload[1] == 3 && payload[8] == 2)
+            {
+                var indexHome = BinaryPrimitives.ReadUInt16LittleEndian(
+                    payload[10..]);
+                if (indexHome >= body.HomeCount)
+                {
+                    throw Invalid(
+                        "The F+S array initializer has an invalid index Home.");
+                }
+
+                _ = arrayInitializationIndexHomes.Add(indexHome);
+            }
+        }
+
+        var initializationIndexHomeStoreCounts = new Dictionary<int, int>();
+        foreach (var instruction in instructions)
+        {
+            if (instruction.Opcode is 0x14 or 0xD6)
+            {
+                initializationIndexHomeStoreCounts.TryGetValue(
+                    instruction.Index, out var storeCount);
+                initializationIndexHomeStoreCounts[instruction.Index]
+                    = checked(storeCount + 1);
+            }
+        }
+
+        var arrayInitializationCounterHomes = new HashSet<int>();
+        foreach (var indexHome in arrayInitializationIndexHomes)
+        {
+            if (!initializationIndexHomeStoreCounts.TryGetValue(indexHome,
+                    out var storeCount)
+                || storeCount < 2)
+            {
+                continue;
+            }
+
+            var home = body.HomeMap.Slice(indexHome * 8, 8);
+            var type = ReadForeignInvocationType(typeSpecs,
+                ReadForeignInvocationBodyTypeSpec(body,
+                    BinaryPrimitives.ReadUInt16LittleEndian(home[2..])),
+                nativePointerTypeDefinitions, signatureIndexByAnchorMethod,
+                structureTypeByTypeDef,
+                arrayTypeByTypeSpecRow: arrayTypeByTypeSpecRow);
+            if (home[0] != 3 || home[1] != 1
+                || type != PrimitiveType.Int32
+                || nonLocalHomeResults.Contains(indexHome))
+            {
+                throw Invalid(
+                    "The F+S array initializer counter Home is invalid.");
+            }
+
+            _ = arrayInitializationCounterHomes.Add(indexHome);
+        }
+
+        for (var recordIndex = 0; recordIndex < body.RecordCount;
+            recordIndex++)
+        {
+            var record = body.GetRecord(recordIndex);
+            if (record[0] != 0x04 || record.Length != 24)
+            {
+                continue;
+            }
+
+            var payload = record[4..];
+            var indexHome = BinaryPrimitives.ReadUInt16LittleEndian(
+                payload[10..]);
+            if (payload[8] == 2
+                && arrayInitializationCounterHomes.Contains(indexHome)
+                && (payload[0] != 3 || payload[1] != 3))
+            {
+                throw Invalid(
+                    "The F+S array initializer counter Home is reused outside initialization.");
+            }
+        }
+
+        bool IsArrayInitializationCounterIncrementSequence(
+            int firstInstructionOrdinal, int homeIndex, int register)
+        {
+            if (firstInstructionOrdinal < 0
+                || firstInstructionOrdinal + 3 >= instructions.Count)
+            {
+                return false;
+            }
+
+            var homeLoad = instructions[firstInstructionOrdinal];
+            var bitwiseNot = instructions[firstInstructionOrdinal + 1];
+            var negate = instructions[firstInstructionOrdinal + 2];
+            var homeStore = instructions[firstInstructionOrdinal + 3];
+            var unaryOperand = (register << 4) | register;
+            return homeLoad.Opcode == 0xD5
+                && homeLoad.Index == homeIndex
+                && homeLoad.Register == register
+                && bitwiseNot.Opcode == 0x33
+                && bitwiseNot.Index == unaryOperand
+                && negate.Opcode == 0x20
+                && negate.Index == unaryOperand
+                && homeStore.Opcode == 0xD6
+                && homeStore.Index == homeIndex
+                && homeStore.Register == register;
+        }
+
         var localInitializedByHome = new bool[body.HomeCount];
         for (var homeIndex = 0; homeIndex < body.HomeCount; homeIndex++)
         {
             if (body.HomeMap[homeIndex * 8] != 3
-                || nonLocalHomeResults.Contains(homeIndex))
+                || nonLocalHomeResults.Contains(homeIndex)
+                || arrayInitializationCounterHomes.Contains(homeIndex))
             {
                 continue;
             }
@@ -1722,6 +1847,34 @@ public static partial class TrRmExecutableCompiler
             = new Dictionary<int, int>();
         var placeSelectionsByRegister
             = new Dictionary<int, NativeArrayPlaceSelectionFacts>();
+        var placeSelectionsByInstanceKey
+            = new Dictionary<int, NativeArrayPlaceSelectionFacts>();
+        var arrayValueInstanceKeyBySelection
+            = new Dictionary<(int ParentArrayInstanceKey, ulong ElementIndex),
+                int>();
+        var nextArrayValueInstanceKey = 0;
+        int GetArrayValueInstanceKey(int parentArrayInstanceKey,
+            ulong elementIndex)
+        {
+            var selectionKey = (parentArrayInstanceKey, elementIndex);
+            if (arrayValueInstanceKeyBySelection.TryGetValue(selectionKey,
+                    out var existingKey))
+            {
+                return existingKey;
+            }
+
+            if (arrayValueInstanceKeyBySelection.Count
+                >= SemanticVerifier.MaximumDepth)
+            {
+                throw Invalid(
+                    "The F+S nested array initializer exceeds its bounded selection state.");
+            }
+
+            var instanceKey = nextArrayValueInstanceKey;
+            nextArrayValueInstanceKey = checked(nextArrayValueInstanceKey + 1);
+            arrayValueInstanceKeyBySelection.Add(selectionKey, instanceKey);
+            return instanceKey;
+        }
         var registerConstants
             = new Dictionary<int, NativeAddressRegisterConstant>();
         var registerExpressions = new Dictionary<int, BoundExpression>();
@@ -1764,16 +1917,8 @@ public static partial class TrRmExecutableCompiler
             }
             else
             {
-                foreach (var placeSelection in placeSelectionsByRegister.Values)
-                {
-                    if (placeSelection.RecordIndex == arrayInstanceKey)
-                    {
-                        childSelection = placeSelection;
-                        break;
-                    }
-                }
-
-                if (childSelection is not { } selectedChild
+                if (!placeSelectionsByInstanceKey.TryGetValue(
+                        arrayInstanceKey, out var selectedChild)
                     || !NativeFixedArrayTypes.IsType(
                         selectedChild.ElementType))
                 {
@@ -1781,6 +1926,7 @@ public static partial class TrRmExecutableCompiler
                         "The F+S nested array initialization has no selected child Home.");
                 }
 
+                childSelection = selectedChild;
                 rootHome = selectedChild.BaseHome;
                 arrayType = selectedChild.ElementType;
                 elementCount = nativeFixedArrayTypes[
@@ -1849,16 +1995,29 @@ public static partial class TrRmExecutableCompiler
                 throw Invalid(
                     "The F+S nested array selection has a self-parent.");
             }
-
-            var placeRegister = completedChild.DestinationRegister;
-            if (!placeSelectionsByRegister.TryGetValue(placeRegister,
-                    out var liveChild)
-                || liveChild.RecordIndex != arrayInstanceKey)
+            if (completedChild.ArrayValueInstanceKey != arrayInstanceKey
+                || !arrayValueInstanceKeyBySelection.TryGetValue(
+                    (completedChild.ArrayInstanceKey,
+                        completedChild.SelectedElementIndex),
+                    out var completedArrayValueInstanceKey)
+                || completedArrayValueInstanceKey != arrayInstanceKey)
             {
                 throw Invalid(
-                    "The F+S nested array initialization lost its child place.");
+                    "The F+S nested array initialization has an inconsistent selected instance.");
             }
-            _ = placeSelectionsByRegister.Remove(placeRegister);
+
+            var placeRegister = completedChild.DestinationRegister;
+            if (placeSelectionsByRegister.TryGetValue(placeRegister,
+                    out var liveChild)
+                && liveChild.SelectionInstanceKey
+                    == completedChild.SelectionInstanceKey)
+            {
+                _ = placeSelectionsByRegister.Remove(placeRegister);
+            }
+            _ = placeSelectionsByInstanceKey.Remove(arrayInstanceKey);
+            _ = arrayValueInstanceKeyBySelection.Remove(
+                (completedChild.ArrayInstanceKey,
+                    completedChild.SelectedElementIndex));
             var completedElementIndex
                 = ReadArrayInitializationElementIndex(completedChild,
                     bodyReader,
@@ -1879,6 +2038,12 @@ public static partial class TrRmExecutableCompiler
                 new Dictionary<int, long>(localConstantByHome),
                 new Dictionary<int, NativeArrayPlaceSelectionFacts>(
                     placeSelectionsByRegister),
+                new Dictionary<int, NativeArrayPlaceSelectionFacts>(
+                    placeSelectionsByInstanceKey),
+                new Dictionary<(int ParentArrayInstanceKey,
+                    ulong ElementIndex), int>(
+                    arrayValueInstanceKeyBySelection),
+                nextArrayValueInstanceKey,
                 new Dictionary<int, NativeAddressRegisterConstant>(
                     registerConstants),
                 new Dictionary<int, BoundExpression>(registerExpressions),
@@ -1916,6 +2081,19 @@ public static partial class TrRmExecutableCompiler
                 placeSelectionsByRegister.Add(pair.Key, pair.Value);
             }
 
+            placeSelectionsByInstanceKey.Clear();
+            foreach (var pair in state.PlaceSelectionsByInstanceKey)
+            {
+                placeSelectionsByInstanceKey.Add(pair.Key, pair.Value);
+            }
+
+            arrayValueInstanceKeyBySelection.Clear();
+            foreach (var pair in state.ArrayValueInstanceKeys)
+            {
+                arrayValueInstanceKeyBySelection.Add(pair.Key, pair.Value);
+            }
+            nextArrayValueInstanceKey = state.NextArrayValueInstanceKey;
+
             registerConstants.Clear();
             foreach (var pair in state.RegisterConstants)
             {
@@ -1951,6 +2129,18 @@ public static partial class TrRmExecutableCompiler
                     initial.PlaceSelectionsByRegister)
                 || !DictionaryEquals(falseState.PlaceSelectionsByRegister,
                     initial.PlaceSelectionsByRegister)
+                || !DictionaryEquals(trueState.PlaceSelectionsByInstanceKey,
+                    initial.PlaceSelectionsByInstanceKey)
+                || !DictionaryEquals(falseState.PlaceSelectionsByInstanceKey,
+                    initial.PlaceSelectionsByInstanceKey)
+                || !DictionaryEquals(trueState.ArrayValueInstanceKeys,
+                    initial.ArrayValueInstanceKeys)
+                || !DictionaryEquals(falseState.ArrayValueInstanceKeys,
+                    initial.ArrayValueInstanceKeys)
+                || trueState.NextArrayValueInstanceKey
+                    != initial.NextArrayValueInstanceKey
+                || falseState.NextArrayValueInstanceKey
+                    != initial.NextArrayValueInstanceKey
                 || !ArrayInitializationElementsEqual(
                     trueState.ArrayInitializationElementsByHome,
                     initial.ArrayInitializationElementsByHome)
@@ -2187,7 +2377,9 @@ public static partial class TrRmExecutableCompiler
 
                     if ((uint)localHome >= (uint)body.HomeCount
                         || body.HomeMap[localHome * 8] != 3
-                        || localVariableByHome[localHome] < 0
+                        || (localVariableByHome[localHome] < 0
+                            && !arrayInitializationCounterHomes.Contains(
+                                localHome))
                         || (localInitializedByHome[localHome]
                             && instruction.Opcode != 0xD6)
                         || storageAddressesByHome.ContainsKey(localHome))
@@ -2206,6 +2398,60 @@ public static partial class TrRmExecutableCompiler
                         = body.Schema.UsesForeignInvocationStorageFixedArrays()
                             && NativeFixedArrayContract.IsIndexType(
                                 localType);
+                    if (instruction.Opcode == 0xD6
+                        && localInitializedByHome[localHome]
+                        && arrayInitializationCounterHomes.Contains(
+                            localHome))
+                    {
+                        if (localType != PrimitiveType.Int32
+                            || body.HomeMap[(localHome * 8) + 1] != 1)
+                        {
+                            throw Invalid(
+                                "The F+S array initializer counter Home has an invalid type or access.");
+                        }
+
+                        if (instruction.Register == 14)
+                        {
+                            if (!TryGetContextualConstant(14, localType,
+                                    body.Schema, out var zeroCounter)
+                                || zeroCounter != 0)
+                            {
+                                throw Invalid(
+                                    "The F+S array initializer counter reset is not typed zero.");
+                            }
+
+                            localConstantByHome[localHome] = 0;
+                        }
+                        else
+                        {
+                            if (instruction.Register != 13
+                                || !localConstantByHome.TryGetValue(
+                                    localHome, out var previousCounter)
+                                || previousCounter < 0
+                                || previousCounter >= int.MaxValue
+                                || !registerConstants.TryGetValue(
+                                    instruction.Register,
+                                    out var incrementedCounter)
+                                || incrementedCounter.Type
+                                    != PrimitiveType.Int32
+                                || incrementedCounter.Bits
+                                    != unchecked((uint)(previousCounter + 1))
+                                || !IsArrayInitializationCounterIncrementSequence(
+                                    instructionOrdinal - 3, localHome,
+                                    instruction.Register))
+                            {
+                                throw Invalid(
+                                    "The F+S array initializer counter update is invalid.");
+                            }
+
+                            localConstantByHome[localHome]
+                                = incrementedCounter.Bits;
+                        }
+
+                        _ = registerExpressions.Remove(instruction.Register);
+                        break;
+                    }
+
                     if (instruction.Opcode == 0xD6
                         && localInitializedByHome[localHome])
                     {
@@ -2275,10 +2521,30 @@ public static partial class TrRmExecutableCompiler
                         localConstantByHome.Add(localHome, initialValue);
                     }
 
-                    var localVariable = localVariableByHome[localHome];
                     localInitializedByHome[localHome] = true;
-                    currentStatements.Add(new BoundLocal(localVariable, localValue,
-                        default));
+                    if (arrayInitializationCounterHomes.Contains(localHome))
+                    {
+                        if (localType != PrimitiveType.Int32
+                            || !localConstantByHome.TryGetValue(localHome,
+                                out var counterValue)
+                            || counterValue != 0)
+                        {
+                            throw Invalid(
+                                "The F+S array initializer counter is not initialized to zero.");
+                        }
+                    }
+                    else
+                    {
+                        var localVariable = localVariableByHome[localHome];
+                        if (localVariable < 0)
+                        {
+                            throw Invalid(
+                                "A contextual Home store has no reconstructed local.");
+                        }
+
+                        currentStatements.Add(new BoundLocal(localVariable,
+                            localValue, default));
+                    }
                     break;
 
                 case 0x13:
@@ -2311,6 +2577,30 @@ public static partial class TrRmExecutableCompiler
                     {
                         throw Invalid(
                             "The F+S Home load is invalid.");
+                    }
+
+                    if (arrayInitializationCounterHomes.Contains(
+                            longLoadHome))
+                    {
+                        if (longLoadDestination != 13
+                            || !localInitializedByHome[longLoadHome]
+                            || !localConstantByHome.TryGetValue(
+                                longLoadHome, out var counterValue)
+                            || counterValue < 0
+                            || !IsArrayInitializationCounterIncrementSequence(
+                                instructionOrdinal, longLoadHome,
+                                longLoadDestination))
+                        {
+                            throw Invalid(
+                                "The F+S array initializer counter load is invalid.");
+                        }
+
+                        _ = registerExpressions.Remove(longLoadDestination);
+                        registerConstants[longLoadDestination]
+                            = new NativeAddressRegisterConstant(
+                                PrimitiveType.Int32,
+                                unchecked((uint)counterValue));
+                        break;
                     }
 
                     var longLoadFormal
@@ -2677,13 +2967,6 @@ public static partial class TrRmExecutableCompiler
                     break;
 
                 case 0xD8:
-                    if (placeSelectionsByRegister.ContainsKey(
-                            instruction.Register))
-                    {
-                        throw Invalid(
-                            "An F+S PlaceHandle is replaced before its operation.");
-                    }
-
                     var selection
                         = ReadForeignInvocationArrayPlaceSelection(
                             body, typeSpecs, targetProfiles,
@@ -2692,7 +2975,8 @@ public static partial class TrRmExecutableCompiler
                             nativePointerTypeDefinitions,
                             signatureIndexByAnchorMethod,
                             structureTypeByTypeDef, selectedModuleRow,
-                            instruction.Index, instruction.Register,
+                            instruction.Index, instructionOrdinal,
+                            instruction.Register,
                             placeSelectionsByRegister);
                     if (selection.IndexKind == 2
                         && pendingIndexUpdatesByHome.Remove(
@@ -2736,14 +3020,55 @@ public static partial class TrRmExecutableCompiler
                         };
                     }
 
-                    placeSelectionsByRegister.Add(instruction.Register,
-                        selection);
+                    if (selection.TargetKind == 3
+                        && !localInitializedByHome[selection.BaseHome])
+                    {
+                        selection = selection with {
+                            HasSelectedElementIndex = true,
+                            SelectedElementIndex
+                                = ReadArrayInitializationElementIndex(
+                                    selection, body, registerConstants,
+                                    localConstantByHome),
+                        };
+                        if (NativeFixedArrayTypes.IsType(
+                                selection.ElementType))
+                        {
+                            selection = selection with {
+                                ArrayValueInstanceKey
+                                    = GetArrayValueInstanceKey(
+                                        selection.ArrayInstanceKey,
+                                        selection.SelectedElementIndex),
+                            };
+                        }
+                    }
+
+                    selection = CaptureNativeArrayPlaceSelectionPath(
+                        selection, placeSelectionsByRegister);
+                    _ = registerConstants.Remove(instruction.Register);
+                    _ = registerExpressions.Remove(instruction.Register);
+                    placeSelectionsByRegister[instruction.Register] = selection;
+                    if (selection.TargetKind == 3
+                        && !localInitializedByHome[selection.BaseHome]
+                        && NativeFixedArrayTypes.IsType(
+                            selection.ElementType))
+                    {
+                        if (selection.ArrayValueInstanceKey < 0
+                            || (!placeSelectionsByInstanceKey.ContainsKey(
+                                    selection.ArrayValueInstanceKey)
+                                && placeSelectionsByInstanceKey.Count
+                                    >= SemanticVerifier.MaximumDepth))
+                        {
+                            throw Invalid(
+                                "The F+S nested array initializer exceeds its bounded selection state.");
+                        }
+
+                        placeSelectionsByInstanceKey[
+                            selection.ArrayValueInstanceKey] = selection;
+                    }
                     break;
 
                 case 0xDA:
-                    if (instruction.Register >= 14
-                        || placeSelectionsByRegister.ContainsKey(
-                            instruction.Register))
+                    if (instruction.Register >= 14)
                     {
                         throw Invalid(
                             "An F+S PlaceLoad has an invalid value destination.");
@@ -2756,13 +3081,15 @@ public static partial class TrRmExecutableCompiler
                             nativePointerTypeDefinitions,
                             signatureIndexByAnchorMethod,
                             structureTypeByTypeDef, selectedModuleRow,
-                            instruction.Index, instruction.Register,
+                            instruction.Index, instructionOrdinal,
+                            instruction.Register,
                             placeSelectionsByRegister);
+                    readSelection = CaptureNativeArrayPlaceSelectionPath(
+                        readSelection, placeSelectionsByRegister);
                     var readPath = ReconstructNativeArrayPlacePath(
                         readSelection, body, nativeFixedArrayTypes,
                         formalOrdinalByHome, localVariableByHome,
-                        localInitializedByHome, variables,
-                        placeSelectionsByRegister);
+                        localInitializedByHome, variables);
                     var readLeaf = readPath.Projections[^1];
                     if (readSelection.TargetKind != 3
                         || !readPath.IsReadable
@@ -2781,17 +3108,16 @@ public static partial class TrRmExecutableCompiler
                             readPath.RootVariable,
                             readPath.Projections,
                             readLeaf.Layout.ElementType, default);
-                    for (var pathRegisterIndex = 0;
-                        pathRegisterIndex
-                            < readPath.SelectionRegisters.Length - 1;
-                        pathRegisterIndex++)
+                    foreach (var (pathRegister, selectionInstanceKey)
+                        in readPath.SelectionRegisters)
                     {
-                        if (!placeSelectionsByRegister.Remove(
-                                readPath.SelectionRegisters[
-                                    pathRegisterIndex]))
+                        if (placeSelectionsByRegister.TryGetValue(
+                                pathRegister, out var selectedParent)
+                            && selectedParent.SelectionInstanceKey
+                                == selectionInstanceKey)
                         {
-                            throw Invalid(
-                                "The F+S PlaceLoad consumes a missing parent PlaceHandle.");
+                            _ = placeSelectionsByRegister.Remove(
+                                pathRegister);
                         }
                     }
 
@@ -2958,6 +3284,14 @@ public static partial class TrRmExecutableCompiler
                                 initializationSelection.ElementType, default));
                     }
 
+                    if (initializationSelection.ArrayValueInstanceKey >= 0)
+                    {
+                        _ = placeSelectionsByInstanceKey.Remove(
+                            initializationSelection.ArrayValueInstanceKey);
+                        _ = arrayValueInstanceKeyBySelection.Remove(
+                            (initializationSelection.ArrayInstanceKey,
+                                initializationSelection.SelectedElementIndex));
+                    }
                     _ = placeSelectionsByRegister.Remove(placeRegister);
                     break;
 
@@ -3108,34 +3442,7 @@ public static partial class TrRmExecutableCompiler
                         }
 
                         var reversedSelectionPath
-                            = new List<NativeArrayPlaceSelectionFacts>();
-                        var selectionRegisters = new HashSet<int>();
-                        var pathPlace = selectedPlace;
-                        while (true)
-                        {
-                            if (reversedSelectionPath.Count >= 14
-                                || !selectionRegisters.Add(
-                                    pathPlace.DestinationRegister))
-                            {
-                                throw Unsupported(
-                                    "The F+S nested storage address exceeds the Body register window.");
-                            }
-
-                            reversedSelectionPath.Add(pathPlace);
-                            if (pathPlace.BaseRegister < 0)
-                            {
-                                break;
-                            }
-                            if (!placeSelectionsByRegister.TryGetValue(
-                                    pathPlace.BaseRegister,
-                                    out pathPlace))
-                            {
-                                throw Invalid(
-                                    "The F+S nested address lost its parent selection.");
-                            }
-                        }
-
-                        reversedSelectionPath.Reverse();
+                            = GetNativeArrayPlaceSelectionPath(selectedPlace);
                         var rootHome = selectedPlace.BaseHome;
                         var rootVariable = localVariableByHome[rootHome];
                         if (rootVariable < 0
@@ -3152,11 +3459,10 @@ public static partial class TrRmExecutableCompiler
                         var projections
                             = ImmutableArray.CreateBuilder<
                                 BoundNativeFixedArrayProjection>(
-                                    reversedSelectionPath.Count);
+                                    reversedSelectionPath.Length);
                         var storageSourceWritable
                             = body.HomeMap[(rootHome * 8) + 1] != 0;
-                        foreach (var pathSelection
-                            in reversedSelectionPath)
+                        foreach (var pathSelection in reversedSelectionPath)
                         {
                             if (pathSelection.TargetKind != 3
                                 || pathSelection.AccessKind is not (1 or 2)
@@ -3288,14 +3594,16 @@ public static partial class TrRmExecutableCompiler
                             requiredElementCount,
                             addressProjections,
                             storageSourceWritable);
-                        foreach (var pathSelection
-                            in reversedSelectionPath)
+                        foreach (var pathSelection in reversedSelectionPath)
                         {
-                            if (!placeSelectionsByRegister.Remove(
-                                    pathSelection.DestinationRegister))
+                            if (placeSelectionsByRegister.TryGetValue(
+                                    pathSelection.DestinationRegister,
+                                    out var liveSelection)
+                                && liveSelection.SelectionInstanceKey
+                                    == pathSelection.SelectionInstanceKey)
                             {
-                                throw Invalid(
-                                    "The F+S nested address consumes a missing PlaceHandle.");
+                                _ = placeSelectionsByRegister.Remove(
+                                    pathSelection.DestinationRegister);
                             }
                         }
                     }
@@ -3579,6 +3887,7 @@ public static partial class TrRmExecutableCompiler
 
         if (!sawCallSite || !sawReturn || conditionalFrames.Count != 0
             || placeSelectionsByRegister.Count != 0
+            || placeSelectionsByInstanceKey.Count != 0
             || arrayInitializationElementsByHome.Count != 0
             || callArgumentHomeOrder.Count != 0
             || storageAddressesByHome.Keys.Any(home =>
@@ -3618,6 +3927,15 @@ public static partial class TrRmExecutableCompiler
                         "An F+S local Home has no initialization operation.");
                 }
             }
+            else if (arrayInitializationCounterHomes.Contains(homeIndex))
+            {
+                if (!localInitializedByHome[homeIndex]
+                    || !localConstantByHome.ContainsKey(homeIndex))
+                {
+                    throw Invalid(
+                        "An F+S array initializer counter Home has no initialization operation.");
+                }
+            }
             else if (!storageAddressesByHome.ContainsKey(homeIndex)
                 && (!capturedIndexSourceHomeByCaptureHome.ContainsKey(
                         homeIndex)
@@ -3627,10 +3945,80 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
-        return (new BoundBlock([
-                new BoundUnsafe(reconstructedBody,
-                    default),
-            ], default),
+        var nativeAddressTargetVariable = localVariableByHome[targetHome];
+        var unsafeStart = rootStatements.FindIndex(statement =>
+            statement is BoundLocal local
+                && local.Variable == nativeAddressTargetVariable
+                && local.Initializer is BoundNativeFunctionAddress);
+        var indirectCallIndex = rootStatements.FindIndex(statement =>
+            statement is BoundExpressionStatement {
+                Expression: BoundIndirectCall,
+            } or BoundLocal {
+                Initializer: BoundIndirectCall,
+            });
+        var returnIndex = rootStatements.FindIndex(
+            static statement => statement is BoundReturn);
+        if (nativeAddressTargetVariable < 0 || unsafeStart < 0
+            || indirectCallIndex < unsafeStart
+            || returnIndex <= indirectCallIndex)
+        {
+            throw Invalid(
+                "The F+S NativeAddress caller has no scoped indirect call.");
+        }
+
+        bool ContainsNativeUnsafeOperation(BoundStatement statement)
+        {
+            var containsUnsafeOperation = false;
+            if (!BoundTreeTraversal.VisitExpressions(
+                new BoundBlock([statement], default), expression =>
+                {
+                    if (expression is BoundNativeFunctionAddress
+                        or BoundNativeStorageAddress
+                        or BoundNativeOutputReservation
+                        or BoundIndirectCall { IsUnsafeAuthorized: true }
+                        or BoundCall { IsUnsafeAuthorized: true })
+                    {
+                        containsUnsafeOperation = true;
+                    }
+                }))
+            {
+                throw Unsupported(
+                    "The reconstructed F+S unsafe-scope analysis exceeded the bound-tree limits.");
+            }
+
+            return containsUnsafeOperation;
+        }
+
+        var callerStatements
+            = ImmutableArray.CreateBuilder<BoundStatement>(
+                rootStatements.Count);
+        for (var statementIndex = 0;
+            statementIndex < rootStatements.Count;)
+        {
+            if (statementIndex == unsafeStart)
+            {
+                callerStatements.Add(new BoundUnsafe(
+                    new BoundBlock(
+                        [.. rootStatements.GetRange(unsafeStart,
+                            returnIndex - unsafeStart)], default),
+                    default));
+                statementIndex = returnIndex;
+                continue;
+            }
+
+            var statement = rootStatements[statementIndex++];
+            if (ContainsNativeUnsafeOperation(statement))
+            {
+                callerStatements.Add(new BoundUnsafe(
+                    new BoundBlock([statement], default), default));
+            }
+            else
+            {
+                callerStatements.Add(statement);
+            }
+        }
+
+        return (new BoundBlock(callerStatements.ToImmutable(), default),
             variables.ToImmutable());
     }
 
@@ -3939,7 +4327,8 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundNativeFixedArrayType> nativeFixedArrayTypes,
             List<NativePointerTypeDefinition> nativePointerTypeDefinitions,
             int[] signatureIndexByAnchorMethod, int[] structureTypeByTypeDef,
-            int ownerModule, int recordIndex, int destinationRegister,
+            int ownerModule, int recordIndex, int selectionInstanceKey,
+            int destinationRegister,
             Dictionary<int, NativeArrayPlaceSelectionFacts>
                 placeSelectionsByRegister)
     {
@@ -4048,10 +4437,11 @@ public static partial class TrRmExecutableCompiler
             }
 
             return new NativeArrayPlaceSelectionFacts(recordIndex,
-                destinationRegister, targetKind, accessKind, homeIndex, -1,
-                0, -1, -1, arrayTypeReference.Row, emptyArrayLayoutRow,
-                emptyArrayType, emptyElementType, 0,
-                GetArrayInitializationInstanceKey(homeIndex), 0);
+                selectionInstanceKey, destinationRegister, targetKind,
+                accessKind, homeIndex, -1, 0, -1, -1,
+                arrayTypeReference.Row, emptyArrayLayoutRow, emptyArrayType,
+                emptyElementType, 0,
+                GetArrayInitializationInstanceKey(homeIndex), -1, 0);
         }
 
         if (targetKind != 3 || accessKind is < 1 or > 3
@@ -4117,7 +4507,7 @@ public static partial class TrRmExecutableCompiler
             }
 
             rootHome = basePlace.BaseHome;
-            arrayInstanceKey = basePlace.RecordIndex;
+            arrayInstanceKey = basePlace.ArrayValueInstanceKey;
         }
 
         var arrayTypeIndex = NativeFixedArrayTypes.Index(arrayType);
@@ -4164,11 +4554,67 @@ public static partial class TrRmExecutableCompiler
         }
 
         return new NativeArrayPlaceSelectionFacts(recordIndex,
-            destinationRegister, targetKind, accessKind, rootHome,
-            baseKind == 1 ? baseHome : -1, indexKind, indexHome,
-            indexRegister, fixedArrayLayout.ArrayTypeSpecRow,
-            checked((int)layoutRow), arrayType, elementType, elementCount,
-            arrayInstanceKey, 0);
+            selectionInstanceKey, destinationRegister, targetKind,
+            accessKind, rootHome, baseKind == 1 ? baseHome : -1,
+            indexKind, indexHome, indexRegister,
+            fixedArrayLayout.ArrayTypeSpecRow, checked((int)layoutRow),
+            arrayType, elementType, elementCount, arrayInstanceKey, -1, 0);
+    }
+
+    private static NativeArrayPlaceSelectionFacts
+        CaptureNativeArrayPlaceSelectionPath(
+            NativeArrayPlaceSelectionFacts selection,
+            Dictionary<int, NativeArrayPlaceSelectionFacts>
+                placeSelectionsByRegister)
+    {
+        NativeArrayPlaceSelectionPath? parent = null;
+        if (selection.BaseRegister >= 0)
+        {
+            if (!placeSelectionsByRegister.TryGetValue(
+                    selection.BaseRegister, out var baseSelection)
+                || baseSelection.DestinationRegister
+                    != selection.BaseRegister
+                || baseSelection.Path is null)
+            {
+                throw Invalid(
+                    "The F+S nested PlaceSelection has no captured parent path.");
+            }
+
+            parent = baseSelection.Path;
+        }
+
+        var pathSelection = selection with { Path = null };
+        return pathSelection with {
+            Path = new NativeArrayPlaceSelectionPath(pathSelection, parent),
+        };
+    }
+
+    private static ImmutableArray<NativeArrayPlaceSelectionFacts>
+        GetNativeArrayPlaceSelectionPath(
+            NativeArrayPlaceSelectionFacts finalSelection)
+    {
+        var reversed = new List<NativeArrayPlaceSelectionFacts>();
+        var current = finalSelection.Path;
+        while (current is not null)
+        {
+            if (reversed.Count >= SemanticVerifier.MaximumDepth)
+            {
+                throw Unsupported(
+                    "The F+S nested array path exceeds the semantic depth limit.");
+            }
+
+            reversed.Add(current.Selection);
+            current = current.Parent;
+        }
+
+        if (reversed.Count == 0)
+        {
+            throw Invalid(
+                "The F+S nested array path has no captured PlaceSelections.");
+        }
+
+        reversed.Reverse();
+        return [.. reversed];
     }
 
     private static NativeArrayPlacePathFacts
@@ -4178,36 +4624,9 @@ public static partial class TrRmExecutableCompiler
             ImmutableArray<BoundNativeFixedArrayType> fixedArrayTypes,
             int[] formalOrdinalByHome, int[] localVariableByHome,
             bool[] localInitializedByHome,
-            ImmutableArray<BoundVariable>.Builder variables,
-            Dictionary<int, NativeArrayPlaceSelectionFacts>
-                placeSelectionsByRegister)
+            ImmutableArray<BoundVariable>.Builder variables)
     {
-        var reversed = new List<NativeArrayPlaceSelectionFacts>();
-        var registers = new HashSet<int>();
-        var current = finalSelection;
-        while (true)
-        {
-            if (reversed.Count >= 14
-                || !registers.Add(current.DestinationRegister))
-            {
-                throw Unsupported(
-                    "The F+S nested array path exceeds the Body register window.");
-            }
-
-            reversed.Add(current);
-            if (current.BaseRegister < 0)
-            {
-                break;
-            }
-            if (!placeSelectionsByRegister.TryGetValue(
-                    current.BaseRegister, out current))
-            {
-                throw Invalid(
-                    "The F+S nested array path lost its parent selection.");
-            }
-        }
-
-        reversed.Reverse();
+        var reversed = GetNativeArrayPlaceSelectionPath(finalSelection);
         var rootHome = finalSelection.BaseHome;
         if ((uint)rootHome >= (uint)body.HomeCount
             || localVariableByHome[rootHome] < 0
@@ -4222,10 +4641,10 @@ public static partial class TrRmExecutableCompiler
 
         var projections
             = ImmutableArray.CreateBuilder<BoundNativeFixedArrayProjection>(
-                reversed.Count);
+                reversed.Length);
         var isWritable = body.HomeMap[(rootHome * 8) + 1] != 0;
         var isReadable = true;
-        for (var index = 0; index < reversed.Count; index++)
+        for (var index = 0; index < reversed.Length; index++)
         {
             var selection = reversed[index];
             if (selection.TargetKind != 3
@@ -4318,11 +4737,14 @@ public static partial class TrRmExecutableCompiler
             isReadable &= selection.AccessKind == 1;
         }
 
-        var selectionRegisters = ImmutableArray.CreateBuilder<int>(
-            reversed.Count);
-        foreach (var selection in reversed)
+        var selectionRegisters
+            = ImmutableArray.CreateBuilder<(int Register, int SelectionInstanceKey)>(
+                Math.Max(0, reversed.Length - 1));
+        for (var index = 0; index < reversed.Length - 1; index++)
         {
-            selectionRegisters.Add(selection.DestinationRegister);
+            var selection = reversed[index];
+            selectionRegisters.Add((selection.DestinationRegister,
+                selection.SelectionInstanceKey));
         }
 
         return new NativeArrayPlacePathFacts(rootHome,
@@ -4373,6 +4795,11 @@ public static partial class TrRmExecutableCompiler
         Dictionary<int, NativeAddressRegisterConstant> registerConstants,
         Dictionary<int, long> localConstantByHome)
     {
+        if (selection.HasSelectedElementIndex)
+        {
+            return selection.SelectedElementIndex;
+        }
+
         if (selection.IndexKind == 1)
         {
             if (!registerConstants.TryGetValue(selection.IndexRegister,
