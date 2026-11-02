@@ -659,6 +659,28 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void A2R1WriterCoalescesAdjacentAndDuplicateByteRanges()
+    {
+        var emitted = Create(Section(ReturnCoverageContractWithRegions(
+                (8, 2), (0, 4), (4, 4), (0, 4))),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            writeRows: true, developmentProfile: false,
+            a2r1ReturnCoverageDraft: true, canonicalizeReturnCoverage: true);
+        var rows = new TrRmVariableTableIndex(emitted, 1, 8, 1);
+        var clause = rows.GetRow(1);
+
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(clause[12..]),
+            Is.EqualTo(1));
+        Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(clause[16..]),
+            Is.Zero);
+        Assert.That(BinaryPrimitives.ReadUInt64LittleEndian(clause[24..]),
+            Is.EqualTo(10));
+        Assert.That(BinaryPrimitives.ReadUInt32LittleEndian(clause[32..]),
+            Is.Zero);
+    }
+
+    [Test]
     public void A2R1ReturnCoverageAllowsEmptyAndRejectsInvalidRepetitionShapes()
     {
         var emptyPayload = new byte[8];
@@ -806,6 +828,7 @@ public sealed class TrRmContractTableReaderTests
         bool includeGeneralPredicateGraphsFeature = true,
         bool includeConstantExecutionFeature = false,
         bool canonicalizeEvaluationForms = false,
+        bool canonicalizeReturnCoverage = false,
         byte[]? expectedEvaluationForms = null,
         bool a2r1ReturnCoverageDraft = false,
         bool includeRawUnionValueCoverageFeature = true,
@@ -1037,7 +1060,8 @@ public sealed class TrRmContractTableReaderTests
                     : TrRmContractTableWriter.Encode(
                         rows, types, methods, signatures, parameters, typeSpecs,
                         developmentProfile);
-            if (!canonicalizeCopyOrigin && !canonicalizeEvaluationForms)
+            if (!canonicalizeCopyOrigin && !canonicalizeEvaluationForms
+                && !canonicalizeReturnCoverage)
             {
                 Assert.That(emitted, Is.EqualTo(section));
             }
@@ -1559,6 +1583,25 @@ public sealed class TrRmContractTableReaderTests
             BinaryPrimitives.WriteUInt64LittleEndian(
                 data.AsSpan(offset + 8), stride);
             offset += 16;
+        }
+
+        return Contract(0x1600_0001, 0x0F, data);
+    }
+
+    private static byte[] ReturnCoverageContractWithRegions(
+        params (ulong Offset, ulong Length)[] regions)
+    {
+        var data = new byte[8 + (regions.Length * 20)];
+        Write(data, 0, 1);
+        Write(data, 4, checked((uint)regions.Length));
+        var offset = 8;
+        foreach (var (regionOffset, regionLength) in regions)
+        {
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                data.AsSpan(offset), regionOffset);
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                data.AsSpan(offset + sizeof(ulong)), regionLength);
+            offset += 20;
         }
 
         return Contract(0x1600_0001, 0x0F, data);

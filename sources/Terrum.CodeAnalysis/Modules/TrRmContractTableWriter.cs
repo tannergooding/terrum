@@ -57,7 +57,9 @@ public static class TrRmContractTableWriter
         TrRmFeatureTableReader features, TrRmModuleTableReader modules,
         int predicateGraphCount,
         TrRmArtifactSchema schema = TrRmArtifactSchema.ForeignInvocationDraft,
-        TrRmA3LayoutResourceLedger? resourceLedger = null)
+        TrRmA3LayoutResourceLedger? resourceLedger = null,
+        TrRmFieldPathTableReader fieldPaths = default,
+        int fieldPathCount = 0)
     {
         if (schema is not (TrRmArtifactSchema.ForeignInvocationDraft
             or TrRmArtifactSchema.ForeignInvocationStorageAddressDraft
@@ -71,8 +73,12 @@ public static class TrRmContractTableWriter
             throw new ArgumentOutOfRangeException(nameof(schema));
         }
 
-        return EncodeCore(rows, types, methods, signatures, parameters, typeSpecs,
-            fieldPathCount: 0, predicateGraphCount, features, modules,
+        var selectedRows = schema.UsesRawUnionValueCoverage()
+            ? CanonicalizeRawUnionContractRows(rows, fieldPaths,
+                resourceLedger)
+            : rows;
+        return EncodeCore(selectedRows, types, methods, signatures, parameters,
+            typeSpecs, fieldPathCount, predicateGraphCount, features, modules,
             schema, profileAware: true, resourceLedger: resourceLedger);
     }
 
@@ -122,6 +128,253 @@ public static class TrRmContractTableWriter
         }
 
         return result;
+    }
+
+    private static TrRmContractRow[] CanonicalizeRawUnionContractRows(
+        IReadOnlyList<TrRmContractRow> rows,
+        TrRmFieldPathTableReader fieldPaths,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        long payloadLength = 0;
+        foreach (var row in rows)
+        {
+            payloadLength = checked(payloadLength + row.Payload.Length);
+        }
+
+        resourceLedger?.ConsumeWork(checked((ulong)rows.Count
+            + (ulong)payloadLength + 1UL));
+        var result = CanonicalizeCopyOriginRows(rows, fieldPaths);
+        for (var index = 0; index < result.Length; index++)
+        {
+            resourceLedger?.ConsumeWork();
+            var row = result[index];
+            if (row.Kind == 0x0F)
+            {
+                result[index] = row with
+                {
+                    Payload = CanonicalizeReturnCoveragePayload(
+                        row.Payload, resourceLedger),
+                };
+            }
+        }
+
+        return result;
+    }
+
+    private static byte[] CanonicalizeReturnCoveragePayload(
+        ReadOnlyMemory<byte> payload,
+        TrRmA3LayoutResourceLedger? resourceLedger)
+    {
+        var data = payload.Span;
+        if (data.Length < 8)
+        {
+            throw InvalidReturnCoverage();
+        }
+
+        var targetProfile = Read(data, 0);
+        var regionCount = Read(data, 4);
+        if (targetProfile == 0
+            || regionCount > checked((uint)((data.Length - 8) / 20)))
+        {
+            throw InvalidReturnCoverage();
+        }
+
+        var plainRegions = new List<ReturnCoverageRegion>();
+        var repeatedRegions = new List<ReturnCoverageRegion>();
+        var regionCountInt = checked((int)regionCount);
+        resourceLedger?.ConsumeWork(checked((ulong)regionCountInt + 2UL));
+        var offset = 8;
+        for (var regionIndex = 0; regionIndex < regionCountInt; regionIndex++)
+        {
+            resourceLedger?.ConsumeWork();
+            if (offset > data.Length - 20)
+            {
+                throw InvalidReturnCoverage();
+            }
+
+            var byteOffset = BinaryPrimitives.ReadUInt64LittleEndian(
+                data.Slice(offset, sizeof(ulong)));
+            var byteLength = BinaryPrimitives.ReadUInt64LittleEndian(
+                data.Slice(offset + sizeof(ulong), sizeof(ulong)));
+            var repeatRank = Read(data, offset + 16);
+            offset += 20;
+            if (byteLength == 0
+                || repeatRank
+                    > checked((uint)((data.Length - offset) / 16)))
+            {
+                throw InvalidReturnCoverage();
+            }
+
+            var repetitions = new ReturnCoverageRepetition[
+                checked((int)repeatRank)];
+            var span = byteLength;
+            for (var dimension = 0; dimension < repetitions.Length; dimension++)
+            {
+                resourceLedger?.ConsumeWork();
+                if (offset > data.Length - 16)
+                {
+                    throw InvalidReturnCoverage();
+                }
+
+                var count = BinaryPrimitives.ReadUInt64LittleEndian(
+                    data.Slice(offset, sizeof(ulong)));
+                var stride = BinaryPrimitives.ReadUInt64LittleEndian(
+                    data.Slice(offset + sizeof(ulong), sizeof(ulong)));
+                offset += 16;
+                if (count < 2 || stride < span
+                    || count - 1 > (ulong.MaxValue - span) / stride)
+                {
+                    throw InvalidReturnCoverage();
+                }
+
+                span = ((count - 1) * stride) + span;
+                repetitions[dimension] = new ReturnCoverageRepetition(
+                    count, stride);
+            }
+
+            if (byteOffset > ulong.MaxValue - span)
+            {
+                throw InvalidReturnCoverage();
+            }
+
+            var region = new ReturnCoverageRegion(byteOffset, byteLength,
+                repetitions);
+            if (repeatRank == 0)
+            {
+                plainRegions.Add(region);
+            }
+            else
+            {
+                repeatedRegions.Add(region);
+            }
+        }
+
+        if (offset != data.Length)
+        {
+            throw InvalidReturnCoverage();
+        }
+
+        plainRegions.Sort(static (left, right) =>
+        {
+            var offsetOrder = left.Offset.CompareTo(right.Offset);
+            return offsetOrder != 0 ? offsetOrder
+                : left.Length.CompareTo(right.Length);
+        });
+        var canonicalPlainRegions = new List<ReturnCoverageRegion>(
+            plainRegions.Count);
+        foreach (var region in plainRegions)
+        {
+            resourceLedger?.ConsumeWork();
+            if (canonicalPlainRegions.Count == 0)
+            {
+                canonicalPlainRegions.Add(region);
+                continue;
+            }
+
+            var lastIndex = canonicalPlainRegions.Count - 1;
+            var last = canonicalPlainRegions[lastIndex];
+            var lastEnd = checked(last.Offset + last.Length);
+            var regionEnd = checked(region.Offset + region.Length);
+            if (region.Offset > lastEnd)
+            {
+                canonicalPlainRegions.Add(region);
+            }
+            else if (regionEnd > lastEnd)
+            {
+                canonicalPlainRegions[lastIndex] = last with
+                {
+                    Length = regionEnd - last.Offset,
+                };
+            }
+        }
+
+        repeatedRegions.Sort(CompareReturnCoverageRegions);
+        var uniqueRepeatedRegions = new List<ReturnCoverageRegion>(
+            repeatedRegions.Count);
+        foreach (var region in repeatedRegions)
+        {
+            resourceLedger?.ConsumeWork();
+            if (uniqueRepeatedRegions.Count == 0
+                || CompareReturnCoverageRegions(
+                    uniqueRepeatedRegions[^1], region) != 0)
+            {
+                uniqueRepeatedRegions.Add(region);
+            }
+        }
+
+        var canonicalRegions = new List<ReturnCoverageRegion>(
+            canonicalPlainRegions.Count + uniqueRepeatedRegions.Count);
+        canonicalRegions.AddRange(canonicalPlainRegions);
+        canonicalRegions.AddRange(uniqueRepeatedRegions);
+        canonicalRegions.Sort(CompareReturnCoverageRegions);
+        var canonicalLength = checked(8L + (canonicalRegions.Count * 20L));
+        foreach (var region in canonicalRegions)
+        {
+            canonicalLength = checked(canonicalLength
+                + (region.Repetitions.Length * 16L));
+        }
+
+        if (canonicalLength > int.MaxValue)
+        {
+            throw InvalidReturnCoverage();
+        }
+
+        resourceLedger?.ConsumeWork(checked((ulong)canonicalLength + 1UL));
+        var result = new byte[(int)canonicalLength];
+        Write(result, 0, targetProfile);
+        Write(result, 4, checked((uint)canonicalRegions.Count));
+        offset = 8;
+        foreach (var region in canonicalRegions)
+        {
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                result.AsSpan(offset), region.Offset);
+            BinaryPrimitives.WriteUInt64LittleEndian(
+                result.AsSpan(offset + sizeof(ulong)), region.Length);
+            Write(result, offset + 16,
+                checked((uint)region.Repetitions.Length));
+            offset += 20;
+            foreach (var repetition in region.Repetitions)
+            {
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    result.AsSpan(offset), repetition.Count);
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    result.AsSpan(offset + sizeof(ulong)), repetition.Stride);
+                offset += 16;
+            }
+        }
+
+        return result;
+    }
+
+    private static int CompareReturnCoverageRegions(
+        ReturnCoverageRegion left, ReturnCoverageRegion right)
+    {
+        var comparison = left.Offset.CompareTo(right.Offset);
+        if (comparison == 0)
+        {
+            comparison = left.Length.CompareTo(right.Length);
+        }
+        if (comparison == 0)
+        {
+            comparison = left.Repetitions.Length.CompareTo(
+                right.Repetitions.Length);
+        }
+
+        for (var dimension = 0;
+            comparison == 0 && dimension < left.Repetitions.Length;
+            dimension++)
+        {
+            comparison = left.Repetitions[dimension].Count.CompareTo(
+                right.Repetitions[dimension].Count);
+            if (comparison == 0)
+            {
+                comparison = left.Repetitions[dimension].Stride.CompareTo(
+                    right.Repetitions[dimension].Stride);
+            }
+        }
+
+        return comparison;
     }
 
     private static TrRmContractRow[] CanonicalizeEvaluationFormRows(
@@ -301,6 +554,9 @@ public static class TrRmContractTableWriter
     private static InvalidDataException InvalidCopyOrigin()
         => new("Invalid TRRM CopyOrigin contract.");
 
+    private static InvalidDataException InvalidReturnCoverage()
+        => new("Invalid TRRM ReturnCoverage contract.");
+
     private static InvalidDataException InvalidContract()
         => new("Invalid TRRM Contract table.");
 
@@ -311,6 +567,12 @@ public static class TrRmContractTableWriter
     private readonly record struct CopyOriginOrigin(
         byte SourceKind, byte SourceView, uint SourceOrdinal,
         uint SourcePath, uint[] SourcePathReferences, int Offset);
+
+    private readonly record struct ReturnCoverageRepetition(
+        ulong Count, ulong Stride);
+
+    private readonly record struct ReturnCoverageRegion(
+        ulong Offset, ulong Length, ReturnCoverageRepetition[] Repetitions);
 
     private static byte[] EncodeCore(IReadOnlyList<TrRmContractRow> rows,
         TrRmTypeDefTableReader types, TrRmMethodDefTableReader methods,
