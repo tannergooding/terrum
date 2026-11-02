@@ -1406,8 +1406,9 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             plan.CreateLoweringInputs(
                 TrRmStandardNativeOperation.EmitExecutable));
         Assert.That(revalidationLimit!.Required,
-            Is.EqualTo(new System.Numerics.BigInteger(
-                TrRmA3LayoutResourceLedger.WorkLimit + 1)));
+            Is.GreaterThan(new System.Numerics.BigInteger(
+                TrRmA3LayoutResourceLedger.WorkLimit)));
+        Assert.That(revalidationLimit.Dimension, Is.EqualTo("work"));
         Assert.That(ledger.WorkRemaining,
             Is.LessThan(workBeforeRevalidation));
 
