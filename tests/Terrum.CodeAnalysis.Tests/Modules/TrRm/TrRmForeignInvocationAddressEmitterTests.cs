@@ -4828,11 +4828,45 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     {
         Assume.That(OperatingSystem.IsWindows()
             && RuntimeInformation.ProcessArchitecture == Architecture.X64);
-        const string schemaIdentity
-            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
         const string moduleIdentity = "a2-nested-array-runtime";
         var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
             0, 0, 1, out var source);
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            moduleIdentity, input, source, -1, "nested leaf read")
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task StandardA2NestedAddressIndexesExecuteOnceInSourceOrder()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string moduleIdentity = "a2-nested-array-index-updates";
+        var input = CreateA2NestedArrayReadbackInput(moduleIdentity,
+            0, 0, 1, out var source, effectfulIndices: true,
+            returnSequence: true, effectfulPostfix: true);
+        await AssertStandardA2SourceFreeJitAndAotAsync(
+            moduleIdentity, input, source, 3, "nested index count/order")
+            .ConfigureAwait(true);
+
+        var prefixInput = CreateA2NestedArrayReadbackInput(
+            "a2-nested-array-prefix-index", 0, 0, 1, out _,
+            effectfulIndices: true, returnSequence: true);
+        var prefixLoaded = TrRmExecutableCompiler.LoadStandard(prefixInput,
+            "a2-nested-array-prefix-index", []);
+        Assert.That(NativeJit.Execute(prefixLoaded,
+            NativeRuntimePolicy.FailFast), Is.EqualTo(2));
+    }
+
+    private static async Task AssertStandardA2SourceFreeJitAndAotAsync(
+        string moduleIdentity,
+        TrRmStandardArtifactInput input,
+        string source,
+        int expectedResult,
+        string scenario)
+    {
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
         var artifact = input.Artifact.ToArray();
         var loaded = TrRmExecutableCompiler.LoadStandard(input,
             moduleIdentity, []);
@@ -4844,11 +4878,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var importPath = Path.Combine(Environment.SystemDirectory,
             "kernel32.dll");
         TestContext.WriteLine(
-            $"A2 nested source-free runtime input: schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!RtlMoveMemory; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
+            $"A2 nested source-free runtime input: scenario={scenario}; schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!RtlMoveMemory; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
         var jitResult = NativeJit.Execute(loaded, NativeRuntimePolicy.FailFast);
         TestContext.WriteLine(
-            $"A2 nested source-free JIT leaf read: policy=FailFast; expected=-1; actual={jitResult}.");
-        Assert.That(jitResult, Is.EqualTo(-1));
+            $"A2 nested source-free JIT {scenario}: policy=FailFast; expected={expectedResult}; actual={jitResult}.");
+        Assert.That(jitResult, Is.EqualTo(expectedResult));
 
         var image = NativeModuleCompiler.EmitStandardExecutable(input,
             moduleIdentity, [], NativeRuntimePolicy.FailFast);
@@ -4892,10 +4926,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             var output = await stdout.ConfigureAwait(true);
             var error = await stderr.ConfigureAwait(true);
             TestContext.WriteLine(
-                $"A2 nested source-free AOT leaf read: policy=FailFast; pid={processId}; expected=-1; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
+                $"A2 nested source-free AOT {scenario}: policy=FailFast; pid={processId}; expected={expectedResult}; actual={process.ExitCode}; image-sha256={Convert.ToHexString(SHA256.HashData(image))}; deadline=10s.");
             Assert.That(output, Is.Empty);
             Assert.That(error, Is.Empty);
-            Assert.That(process.ExitCode, Is.EqualTo(-1));
+            Assert.That(process.ExitCode, Is.EqualTo(expectedResult));
         }
         finally
         {
@@ -4917,7 +4951,9 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
     private static TrRmStandardArtifactInput
         CreateA2NestedArrayReadbackInput(string moduleIdentity,
-            int outerIndex, int middleIndex, int innerIndex, out string source)
+            int outerIndex, int middleIndex, int innerIndex, out string source,
+            bool effectfulIndices = false, bool returnSequence = false,
+            bool effectfulPostfix = false)
     {
         const string schemaIdentity
             = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1";
@@ -4932,7 +4968,45 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             ? "0" : "minusOne / minusOne";
         var innerIndexExpression = innerIndex == 0
             ? "0" : "minusOne / minusOne";
-        source = $$"""
+        var effectfulCopyByteCount = returnSequence ? 0 : 4;
+        var effectfulDestination = returnSequence
+            ? "&sequence" : "&observed";
+        var effectfulInitialSequence = effectfulPostfix ? "0" : "-1";
+        var effectfulIndexExpression = effectfulPostfix
+            ? "sequence++" : "++sequence";
+        var effectfulIndexPath
+            = $"[{effectfulIndexExpression}]"
+                + $"[{effectfulIndexExpression}]"
+                + $"[{effectfulIndexExpression}]";
+        source = effectfulIndices ? $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 Main() {
+                int32 zeroIndex = 0;
+                mut [[[int32; 4]; 3]; 2] values = [
+                    [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
+                    [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]]];
+                mut int32 sequence = {{effectfulInitialSequence}};
+                mut int32 observed = 0;
+                uint64 copyByteCount = {{effectfulCopyByteCount}};
+                unsafe {
+                    var callback = &RtlMoveMemory;
+                    callback({{effectfulDestination}},
+                        &values{{effectfulIndexPath}},
+                        copyByteCount);
+                }
+                return {{(returnSequence ? "sequence" : "observed")}};
+            }
+            """ : $$"""
             [Terrum.Interop.NativeImport(
                 "kernel32.dll",
                 "RtlMoveMemory",
@@ -4966,6 +5040,36 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var compilation = Compilation.Create(SyntaxTree.Parse(source), options);
         Assert.That(compilation.HasErrors, Is.False,
             string.Join(Environment.NewLine, compilation.Diagnostics));
+        if (effectfulIndices)
+        {
+            var function = compilation.Program!.Functions[
+                compilation.Program.EntryPoint];
+            var addresses = new List<BoundNativeStorageAddress>();
+            _ = BoundTreeTraversal.VisitExpressions(function.Body,
+                expression =>
+                {
+                    if (expression is BoundNativeStorageAddress address
+                        && address.Projections.Length == 3)
+                    {
+                        if (address.Projections.Any(static projection =>
+                                projection.Index is BoundUpdate))
+                        {
+                            addresses.Add(address);
+                        }
+                    }
+                });
+            Assert.That(addresses, Has.Count.EqualTo(1));
+            var indexUpdates = addresses[0].Projections
+                .Select(static projection => projection.Index)
+                .OfType<BoundUpdate>().ToArray();
+            Assert.That(indexUpdates, Has.Length.EqualTo(3));
+            Assert.That(indexUpdates.All(update =>
+                update.Operator == TokenKind.PlusPlus
+                && update.Type == PrimitiveType.Int32
+                && update.OverflowBehavior
+                    == BoundIntegerOverflowBehavior.Checked
+                && update.IsPrefix != effectfulPostfix), Is.True);
+        }
         var artifact = TrRmExecutableCompiler.EmitStandard(
             compilation.Program!, moduleIdentity, schemaIdentity, 1);
         return new TrRmStandardArtifactInput(schemaIdentity, artifact);
