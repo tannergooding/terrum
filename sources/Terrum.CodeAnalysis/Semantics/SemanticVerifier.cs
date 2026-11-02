@@ -3555,6 +3555,18 @@ public static partial class SemanticVerifier
                     throw Invalid();
                 }
                 var fieldSegments = fieldProjectionPath.Segments;
+                var rootField = Fields(program, ownerType)[
+                    fieldAssignment.Field];
+                var initializesVacantCarrierField =
+                    fieldSegments.Length == 1
+                    && function.Variables[fieldAssignment.Variable]
+                        .IsInitializationLocal
+                    && CarriesRawUnionPayloadFacts(program, ownerType)
+                    && !IsUnique(program, ownerType)
+                    && program.Structures[(int)ownerType - 100]
+                        .CleanupMethod is null
+                    && rootField.IsMutable
+                    && !IsUnique(program, rootField.Type);
                 var initializesVacantUnion = IsRawUnionType(program, ownerType)
                     && fieldSegments.Length == 1
                     && function.Variables[fieldAssignment.Variable]
@@ -3565,8 +3577,7 @@ public static partial class SemanticVerifier
                     && IsRawUnionType(program,
                         fieldSegments[^1].OwnerType)
                     && function.Variables[fieldAssignment.Variable]
-                        .IsInitializationLocal
-                    && initialized.IsVacant(fieldAssignment.Variable))
+                        .IsInitializationLocal)
                 {
                     var nestedUnionOwnerPath = FieldPathPrefix(
                         fieldProjectionPath, fieldSegments.Length - 1);
@@ -3579,7 +3590,8 @@ public static partial class SemanticVerifier
                         = (nestedUnionDefinite | nestedUnionPossible) == 0;
                 }
                 var initializesVacantNestedRawUnion
-                    = initializesVacantUnion || initializesVacantNestedUnion;
+                    = initializesVacantUnion || initializesVacantNestedUnion
+                        || initializesVacantCarrierField;
                 var initializesNestedRawUnionInConstructor
                     = fieldSegments.Length > 1
                     && IsRawUnionType(program,
@@ -3720,13 +3732,25 @@ public static partial class SemanticVerifier
                 var ownerPlaceIsPartial = fieldOwnerPath.Segments.IsEmpty
                     ? initialized.HasPartialValue(fieldAssignment.Variable)
                     : fieldOwnerDefinite != FullMask(program, fieldOwnerType);
-                var isPartialFieldRepairBefore =
+                var isCarrierFieldInitialization
+                    = initializesVacantCarrierField
+                        && fieldIsDefinitelyVacantBefore;
+                if (initializesVacantCarrierField
+                    && initialized.HasPartialValue(
+                        fieldAssignment.Variable)
+                    && !fieldIsDefinitelyVacantBefore)
+                {
+                    throw InvalidEffect(fieldAssignment.Span, "Ownership");
+                }
+                var isPartialFieldRepairBefore = (
                     IsUnique(program, targetField.Type)
                     && targetField.IsMutable
                     && ownerPlaceIsPartial
                     && fieldIsDefinitelyVacantBefore
                     && ownerPathCanBePartial
-                    && (fieldSegments.Length > 1 || fieldAssignment.Variable != 0);
+                    && (fieldSegments.Length > 1 || fieldAssignment.Variable != 0))
+                    || (isCarrierFieldInitialization
+                        && ownerPlaceIsPartial);
                 var isLiveFieldReplacementCandidate =
                     fieldPathIsUnique
                     && IsUnique(program, targetField.Type)
@@ -3759,7 +3783,9 @@ public static partial class SemanticVerifier
                 }
                 if (initialized.HasPartialValue(fieldAssignment.Variable)
                     && fieldIsDefinitelyVacantBefore
-                    && !isPartialFieldRepairBefore && !isConstructorFieldInitializationBefore)
+                    && !isPartialFieldRepairBefore
+                    && !isConstructorFieldInitializationBefore
+                    && !initializesNestedRawUnionPath)
                 {
                     throw InvalidEffect(fieldAssignment.Span, "Ownership");
                 }
@@ -3821,14 +3847,17 @@ public static partial class SemanticVerifier
                 var ownerPlaceIsPartialAfter = fieldOwnerPath.Segments.IsEmpty
                     ? initialized.HasPartialValue(fieldAssignment.Variable)
                     : fieldOwnerDefiniteAfter != FullMask(program, fieldOwnerType);
-                var isPartialFieldRepair = initialized.HasPartialValue(fieldAssignment.Variable)
+                var isPartialFieldRepair = (
+                    initialized.HasPartialValue(fieldAssignment.Variable)
                     && ownerPlaceIsPartialAfter
                     && targetField.IsMutable
                     && fieldIsDefinitelyVacantAfter
                     && ownerPathCanBePartial
                     && (fieldSegments.Length > 1
                         || (!function.IsConstructor && !function.IsClassConstructor
-                            && fieldAssignment.Variable != 0));
+                            && fieldAssignment.Variable != 0)))
+                    || (isCarrierFieldInitialization
+                        && ownerPlaceIsPartialAfter);
                 var isLiveFieldReplacement = fieldPathIsUnique
                     && IsUnique(program, targetField.Type)
                     && targetField.IsMutable

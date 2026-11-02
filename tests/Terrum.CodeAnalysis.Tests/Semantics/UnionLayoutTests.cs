@@ -229,6 +229,13 @@ internal sealed class UnionLayoutTests
                     unsafe { Word.Wide = value; }
                 }
             }
+
+            [Blittable]
+            [Layout(LayoutKind.Sequential)]
+            public struct MultiEnvelope {
+                public mut RawWord Word;
+                public mut uint32 Tag;
+            }
             """;
 
         var constructionOnly = Compilation.CreateLibrary(SyntaxTree.Parse(
@@ -303,6 +310,33 @@ internal sealed class UnionLayoutTests
         Assert.That(partialNestedChild.HasErrors, Is.True,
             string.Join(Environment.NewLine,
                 partialNestedChild.Diagnostics));
+
+        var completedMultiParent = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 CompleteMultiFieldParent() {
+                    init mut MultiEnvelope value;
+                    unsafe { value.Word.Wide = 7; }
+                    value.Tag = 1;
+                    unsafe { return value.Word.Wide; }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(completedMultiParent.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                completedMultiParent.Diagnostics));
+
+        var incompleteMultiParent = Compilation.CreateLibrary(
+            SyntaxTree.Parse(prefix + """
+                public uint64 RejectIncompleteMultiFieldParent() {
+                    init mut MultiEnvelope value;
+                    unsafe {
+                        value.Word.Wide = 7;
+                        return value.Word.Wide;
+                    }
+                }
+                """), BoundRuntimePolicy.FailFast);
+        Assert.That(incompleteMultiParent.HasErrors, Is.True,
+            string.Join(Environment.NewLine,
+                incompleteMultiParent.Diagnostics));
 
         var storedWide = Compilation.CreateLibrary(SyntaxTree.Parse(
             prefix + """
