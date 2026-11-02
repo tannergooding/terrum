@@ -10072,7 +10072,7 @@ public static partial class SemanticVerifier
         PrimitiveType ownerType, BoundStructField field)
         => field.RequiresUnsafeCaller || IsUnion(program, ownerType);
 
-    private static bool IsRawUnionType(BoundProgram program,
+    internal static bool IsRawUnionType(BoundProgram program,
         PrimitiveType type)
     {
         var typeValue = (int)type;
@@ -10339,6 +10339,17 @@ public static partial class SemanticVerifier
         var remaining = MaximumAnalysisVisits;
         return GuaranteedInitializedPayloadBytes(type, program, [], ref remaining,
             depth: 0);
+    }
+
+    internal static byte[] RawUnionGuaranteedInitializedPayloadBytes(
+        PrimitiveType type, BoundProgram program)
+    {
+        if (!IsRawUnionType(program, type))
+        {
+            throw Invalid();
+        }
+
+        return GuaranteedInitializedPayloadBytes(type, program);
     }
 
     private static byte[] InitializedPayloadBytesOfExpression(
