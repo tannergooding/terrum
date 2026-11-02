@@ -1041,6 +1041,52 @@ internal sealed class TrRmFixedArrayLayoutTableTests
     }
 
     [Test]
+    public void ValidatesA2FieldPlaceAsFixedArrayElementBase()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
+            stride: 4, extent: 8, alignment: 4,
+            includePlaceSelectionBody: true, arrayFieldSelection: true);
+
+        ValidateBodyMaps(artifact);
+    }
+
+    [Test]
+    public void RejectsA2FieldPlaceWithReadonlyField()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
+            stride: 4, extent: 8, alignment: 4,
+            includePlaceSelectionBody: true, arrayFieldSelection: true,
+            fieldWritable: false);
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
+    [Test]
+    public void RejectsA2FieldPlaceWithReadonlyRoot()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
+            stride: 4, extent: 8, alignment: 4,
+            includePlaceSelectionBody: true, arrayFieldSelection: true,
+            baseWritable: false);
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
+    [Test]
+    public void RejectsA2FieldPlaceForDifferentFieldType()
+    {
+        var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
+            stride: 4, extent: 8, alignment: 4,
+            includePlaceSelectionBody: true, arrayFieldSelection: true,
+            fieldSelectionTargetRef: 2);
+
+        _ = Assert.Throws<InvalidDataException>(
+            () => ValidateBodyMaps(artifact));
+    }
+
+    [Test]
     public void RejectsA2PlaceSelectionWithUnknownLayoutRow()
     {
         var artifact = CreateAggregateArrayArtifact(declaredCopy: true,
@@ -5640,7 +5686,9 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         bool registerIndex = false, uint pack = 16,
         uint explicitAlignment = 0, bool pointerElement = false,
         byte pointerQualifiers = 0, bool declaredUniqueFlag = false,
-        byte layoutKind = 1)
+        byte layoutKind = 1, bool arrayFieldSelection = false,
+        bool fieldWritable = true, bool baseWritable = true,
+        uint fieldSelectionTargetRef = 1)
     {
         const TrRmArtifactSchema schema
             = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
@@ -5660,7 +5708,14 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         ], strings, 0, 1, methodCount, 0, 1);
         var modules = new TrRmModuleTableReader(modulesBytes, 1, strings,
             0, 1, methodCount, 0, 1);
-        ReadOnlyMemory<byte>[] typeSpecRows = pointerElement
+        ReadOnlyMemory<byte>[] typeSpecRows = arrayFieldSelection
+            ? [
+                TrRmTypeSpecTableWriter.Builtin(0x0B),
+                TrRmTypeSpecTableWriter.Builtin(0x0D),
+                TrRmTypeSpecTableWriter.Reference(0x02, 1),
+                TrRmTypeSpecTableWriter.FixedInlineArray(2, 2),
+            ]
+            : pointerElement
             ? [
                 TrRmTypeSpecTableWriter.Builtin(0x0B),
                 TrRmTypeSpecTableWriter.Builtin(0x0D),
@@ -5689,7 +5744,9 @@ internal sealed class TrRmFixedArrayLayoutTableTests
         var typeDefs = new TrRmTypeDefTableReader(typeDefsBytes, 1,
             strings, modules, 2, 0, 2, 0, schema);
         var fieldBytes = TrRmFieldDefTableWriter.Encode([
-            new TrRmFieldDefRow(1, 4, 1, 0),
+            new TrRmFieldDefRow(1, 4,
+                arrayFieldSelection ? (uint)arrayTypeSpecRow : 1,
+                arrayFieldSelection ? fieldWritable ? 6u : 2u : 0u),
             new TrRmFieldDefRow(1, 5, 2, 0),
         ], strings, typeDefs, typeSpecs);
         var fields = new TrRmFieldDefTableReader(fieldBytes, 2, strings,
@@ -5733,7 +5790,8 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             ], strings, modules, typeDefs, signatures, 0, 1);
             var homeMap = new byte[]
             {
-                3, 1, 0, 0, 0, 0, 0, 0,
+                3, (byte)(baseWritable ? 1 : 0),
+                    (byte)(arrayFieldSelection ? 2 : 0), 0, 0, 0, 0, 0,
                 3, 0, 1, 0, 0, 0, 0, 0,
             };
             var typeMap = new byte[3 * sizeof(uint)];
@@ -5743,18 +5801,37 @@ internal sealed class TrRmFixedArrayLayoutTableTests
             BinaryPrimitives.WriteUInt32LittleEndian(
                 typeMap.AsSpan(2 * sizeof(uint)), 0x1100_0003);
             var selection = TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
-                targetKind: 3, accessKind: 1, destinationKind: 1, baseKind: 2,
-                destinationIndex: 0, baseIndex: 0,
+                targetKind: 3, accessKind: 1, destinationKind: 1,
+                baseKind: arrayFieldSelection ? (byte)1 : (byte)2,
+                destinationIndex: arrayFieldSelection ? (ushort)1 : (ushort)0,
+                baseIndex: 0,
                 indexKind: registerIndex ? (byte)1 : (byte)2,
                 targetRefKind: 3, indexIndex: 1, targetRef: targetLayoutRow,
-                referentTypeMapIndex: 2, schema);
-            byte[] code = registerIndex
-                ? [0xD5, 0x01, 0x01, 0, 0xD8, 0, 1, 0, 0xB5, 0]
-                : [0xD8, 0, 1, 0, 0xB5, 0];
+                referentTypeMapIndex: arrayFieldSelection
+                    ? (ushort)1 : (ushort)2, schema);
+            var fieldSelection = arrayFieldSelection
+                ? TrRmRegisterBodyRecordWriter.EncodePlaceSelection(
+                    targetKind: 2, accessKind: 2, destinationKind: 1,
+                    baseKind: 2, destinationIndex: 0, baseIndex: 0,
+                    indexKind: 0, targetRefKind: 1, indexIndex: 0,
+                    targetRef: fieldSelectionTargetRef,
+                    referentTypeMapIndex: 0, schema)
+                : [];
+            byte[] code = arrayFieldSelection
+                ? [0xD8, 0, 1, 0, 0xD8, 1, 2, 0, 0xB5, 0]
+                : registerIndex
+                    ? [0xD5, 0x01, 0x01, 0, 0xD8, 0, 1, 0, 0xB5, 0]
+                    : [0xD8, 0, 1, 0, 0xB5, 0];
             bodyBytes = TrRmRegisterBodyWriter.Encode(homeMap, typeMap,
                 default, default, default,
                 [new TrRmRegisterBodyBlock(0, (uint)code.Length, 0)],
-                [
+                arrayFieldSelection
+                    ? [
+                    new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
+                    fieldSelection,
+                    selection,
+                ]
+                    : [
                     new byte[] { 1, 0, 0, 0, 0, 0, 0, 0 },
                     selection,
                 ],
