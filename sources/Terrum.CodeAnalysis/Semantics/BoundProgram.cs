@@ -55,7 +55,7 @@ public enum PrimitiveType
     NativeUtf16ZPointer,
     /// <summary>Retained ordinal for the retired catalog-selected callback carrier.</summary>
     LegacyNativeCallbackAddress = 19,
-    /// <summary>Inline storage whose closed geometry is carried by selected native fixed-array metadata.</summary>
+    /// <summary>Retained ordinal for the replaced singleton fixed-array carrier.</summary>
     NativeFixedArray,
     /// <summary>A compiler-owned ASCII UTF-8-NUL image address for a matching nonescaping native parameter.</summary>
     NativeUtf8ZPointer,
@@ -1293,15 +1293,61 @@ public sealed record BoundNativeFixedArrayElement(int Variable, BoundNativeFixed
         Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
 }
 
+internal readonly record struct BoundNativeFixedArrayProjection(
+    BoundNativeFixedArrayLayout Layout, BoundExpression Index);
+
+/// <summary>A checked selection through multiple nested fixed-array dimensions.</summary>
+internal sealed record BoundNativeFixedArrayPathElement(int Variable,
+    ImmutableArray<BoundNativeFixedArrayProjection> Projections,
+    PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        !Projections.IsDefaultOrEmpty
+        && Projections.All(static projection => projection.Index is not null);
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Projections.IsDefault
+            ? [] : [.. Projections.Select(static projection => projection.Index)];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Projections.IsDefault
+            ? this : this with {
+                Projections = [.. Projections.Select(projection => projection with {
+                    Index = rewrite(projection.Index),
+                })],
+            };
+}
+
 /// <summary>Forms an unsafe typed pointer to one element of a bounded native fixed-array local.</summary>
 public sealed record BoundNativeFixedArrayPointerAddress(int Variable, BoundNativeFixedArrayLayout Layout,
     BoundExpression Index, PrimitiveType Type, TextSpan Span) : BoundExpression(Type, Span)
 {
     internal bool IsUnsafeAuthorized { get; init; }
+    internal ImmutableArray<BoundNativeFixedArrayProjection> Projections { get; init; } = [];
 
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Projections.IsDefaultOrEmpty
+            ? [Index] : [.. Projections.Select(static projection => projection.Index)];
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+        Func<BoundExpression, BoundExpression> rewrite)
+    {
+        if (Projections.IsDefaultOrEmpty)
+        {
+            return this with { Index = rewrite(Index) };
+        }
+
+        var projections = ImmutableArray.CreateBuilder<BoundNativeFixedArrayProjection>(
+            Projections.Length);
+        foreach (var projection in Projections)
+        {
+            projections.Add(projection with {
+                Index = rewrite(projection.Index),
+            });
+        }
+        var rewrittenProjections = projections.MoveToImmutable();
+        return this with {
+            Index = rewrittenProjections[^1].Index,
+            Projections = rewrittenProjections,
+        };
+    }
 }
 
 /// <summary>A checked write to one element of a mutable bounded native fixed-array local.</summary>
@@ -1316,6 +1362,31 @@ public sealed record BoundNativeFixedArrayWrite(int Variable, BoundNativeFixedAr
         };
 }
 
+/// <summary>A checked write through multiple nested fixed-array dimensions.</summary>
+internal sealed record BoundNativeFixedArrayPathWrite(int Variable,
+    ImmutableArray<BoundNativeFixedArrayProjection> Projections,
+    BoundExpression Value, TextSpan Span) : BoundExpression(PrimitiveType.Void,
+        Span)
+{
+    internal override bool HasValidNestedExpressions =>
+        !Projections.IsDefaultOrEmpty
+        && Projections.All(static projection => projection.Index is not null)
+        && Value is not null;
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Projections.IsDefault
+            ? [Value] : [.. Projections.Select(static projection => projection.Index),
+                Value];
+    internal override BoundExpression RewriteNestedExpressions(
+        Func<BoundExpression, BoundExpression> rewrite) => Projections.IsDefault
+            ? this with { Value = rewrite(Value) }
+            : this with {
+                Projections = [.. Projections.Select(projection => projection with {
+                    Index = rewrite(projection.Index),
+                })],
+                Value = rewrite(Value),
+            };
+}
+
 /// <summary>A bounded address into initialized contiguous local storage.</summary>
 public sealed record BoundNativeStorageAddress(
     int Variable,
@@ -1323,15 +1394,38 @@ public sealed record BoundNativeStorageAddress(
     PrimitiveType CarrierType,
     PrimitiveType ElementType,
     PrimitiveType AddressType,
-    int ElementCount,
-    int ElementStride,
-    int ByteExtent,
+    ulong ElementCount,
+    ulong ElementStride,
+    ulong ByteExtent,
     bool IsReadonly,
     TextSpan Span) : BoundExpression(AddressType, Span)
 {
-    internal override ImmutableArray<BoundExpression> NestedExpressions => [Index];
+    internal ImmutableArray<BoundNativeFixedArrayProjection> Projections { get; init; } = [];
+
+    internal override ImmutableArray<BoundExpression> NestedExpressions =>
+        Projections.IsDefaultOrEmpty
+            ? [Index] : [.. Projections.Select(static projection => projection.Index)];
+
     internal override BoundExpression RewriteNestedExpressions(
-        Func<BoundExpression, BoundExpression> rewrite) => this with { Index = rewrite(Index) };
+        Func<BoundExpression, BoundExpression> rewrite)
+    {
+        if (Projections.IsDefaultOrEmpty)
+        {
+            return this with { Index = rewrite(Index) };
+        }
+
+        var projections = ImmutableArray.CreateBuilder<BoundNativeFixedArrayProjection>(
+            Projections.Length);
+        foreach (var projection in Projections)
+        {
+            projections.Add(projection with { Index = rewrite(projection.Index) });
+        }
+
+        return this with {
+            Index = projections[^1].Index,
+            Projections = projections.MoveToImmutable(),
+        };
+    }
 }
 
 /// <summary>A call-extent reservation of vacant local storage for a native output formal.</summary>

@@ -531,6 +531,8 @@ internal static class BoundTreeTraversal
                 CarrierType = rewriteType(address.CarrierType),
                 ElementType = rewriteType(address.ElementType),
                 AddressType = rewriteType(address.AddressType),
+                Projections = RewriteArrayProjections(
+                    address.Projections, rewriteType),
             },
             BoundNativeFixedArrayInitialization fixedArray => fixedArray with {
                 Type = type,

@@ -369,7 +369,8 @@ public static class NativeEmitter
 
     private static bool HasNativeFixedArrayStorage(BoundProgram program) =>
         program.Functions.Any(static function =>
-            function.Variables.Any(static variable => variable.NativeFixedArrayLayout is not null));
+            function.Variables.Any(static variable =>
+                NativeFixedArrayTypes.IsType(variable.Type)));
 
     private static ImmutableArray<NativeImportBinding> UsedImports(NativeCode code,
         Dictionary<int, NativeImportBinding>? bindings)
@@ -1481,11 +1482,27 @@ internal sealed partial class PeCompiler
                     at = (at + 15) & ~15;
                 }
                 slots[variable] = at;
-                var variableSize = function.Variables[variable]
-                    .NativeFixedArrayLayout is BoundNativeFixedArrayLayout fixedArrayLayout
-                        ? fixedArrayLayout.ByteExtent
-                        : checked((ulong)((IsIndirect(function.Variables[variable].Type)
-                                && IsStruct(function.Variables[variable].Type))
+                ulong variableSize;
+                if (NativeFixedArrayTypes.IsType(
+                        function.Variables[variable].Type))
+                {
+                    if (!NativeFixedArrayContract.TryGetLayout(
+                            function.Variables[variable].Type,
+                            _program.Structures,
+                            _program.NativeFixedArrayTypes,
+                            out var fixedArrayLayout))
+                    {
+                        throw new InvalidOperationException(
+                            "The native fixed-array local has no structural type row.");
+                    }
+
+                    variableSize = fixedArrayLayout.ByteExtent;
+                }
+                else
+                {
+                    variableSize = checked((ulong)(
+                        (IsIndirect(function.Variables[variable].Type)
+                            && IsStruct(function.Variables[variable].Type))
                             ? Size(function.Variables[variable].Type)
                             : (IsIndirect(function.Variables[variable].Type)
                                 || function.Variables[variable].Type
@@ -1493,6 +1510,7 @@ internal sealed partial class PeCompiler
                                         or PrimitiveType.MutableInt32BufferView)
                                     && !function.Variables[variable].IsOut
                                 ? 16 : 8));
+                }
                 if (variableSize > (ulong)(int.MaxValue - at))
                 {
                     throw new InvalidOperationException(
@@ -2393,7 +2411,21 @@ internal sealed partial class PeCompiler
                     1 + ExpressionSpills(pathWrite.Value,
                         ref maximumArguments)));
             case BoundNativeStorageAddress address:
-                return ExpressionSpills(address.Index, ref maximumArguments);
+                if (address.Projections.IsDefaultOrEmpty)
+                {
+                    return ExpressionSpills(address.Index,
+                        ref maximumArguments);
+                }
+                var storagePathSpills = 0;
+                for (var index = 0;
+                     index < address.Projections.Length; index++)
+                {
+                    storagePathSpills = Math.Max(storagePathSpills,
+                        (index == 0 ? 0 : 1) + ExpressionSpills(
+                            address.Projections[index].Index,
+                            ref maximumArguments));
+                }
+                return storagePathSpills;
             case BoundNativeOutputReservation:
                 return 0;
             case BoundNativePointerAddress:
@@ -2800,7 +2832,17 @@ internal sealed partial class PeCompiler
                     VisitExpression(pathWrite.Value);
                     break;
                 case BoundNativeStorageAddress address:
-                    VisitExpression(address.Index);
+                    if (address.Projections.IsDefaultOrEmpty)
+                    {
+                        VisitExpression(address.Index);
+                    }
+                    else
+                    {
+                        foreach (var projection in address.Projections)
+                        {
+                            VisitExpression(projection.Index);
+                        }
+                    }
                     break;
                 case BoundNativeOutputReservation reservation:
                     _ = variables.Add(reservation.Variable);

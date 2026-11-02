@@ -23,16 +23,18 @@ internal sealed partial class PeCompiler
 
     private void EmitNativeArrayElementAddressFromBase(int baseAddressSlot,
         BoundExpression index, int spill, ulong elementCount,
-        ulong elementStride)
+        ulong elementStride, ulong requiredElementCount = 1)
     {
-        EmitNativeArrayElementOffset(index, spill, elementCount, elementStride);
+        EmitNativeArrayElementOffset(index, spill, elementCount, elementStride,
+            requiredElementCount);
         _code.Bytes(0x48, 0x89, 0xC2);
         _code.Load64(baseAddressSlot);
         _code.Bytes(0x48, 0x01, 0xD0);
     }
 
     private void EmitNativeFixedArrayPathAddress(int variable,
-        ImmutableArray<BoundNativeFixedArrayProjection> projections, int spill)
+        ImmutableArray<BoundNativeFixedArrayProjection> projections, int spill,
+        ulong requiredElementCount = 1)
     {
         if (projections.IsDefaultOrEmpty)
         {
@@ -42,14 +44,17 @@ internal sealed partial class PeCompiler
 
         var first = projections[0];
         EmitNativeArrayElementAddress(variable, first.Index, spill,
-            first.Layout.ElementCount, first.Layout.ElementStride);
+            first.Layout.ElementCount, first.Layout.ElementStride,
+            projections.Length == 1 ? requiredElementCount : 1);
         for (var index = 1; index < projections.Length; index++)
         {
             var projection = projections[index];
             _code.Store64(Spill(spill));
             EmitNativeArrayElementAddressFromBase(Spill(spill),
                 projection.Index, spill + 1, projection.Layout.ElementCount,
-                projection.Layout.ElementStride);
+                projection.Layout.ElementStride,
+                index + 1 == projections.Length
+                    ? requiredElementCount : 1);
         }
     }
 
@@ -142,9 +147,22 @@ internal sealed partial class PeCompiler
         {
             throw new InvalidOperationException("The native storage address exceeds its carrier.");
         }
-        if (NativeFixedArrayContract.IsConstantIndex(address.Index, 0))
+        if (address.Projections.IsDefaultOrEmpty
+            && NativeFixedArrayContract.IsConstantIndex(address.Index, 0))
         {
             _code.Address(Slot(address.Variable));
+        }
+        else if (!address.Projections.IsDefaultOrEmpty)
+        {
+            if (address.Projections.Length < 2
+                || address.Index != address.Projections[^1].Index)
+            {
+                throw new InvalidOperationException(
+                    "The native storage address has an invalid nested path.");
+            }
+
+            EmitNativeFixedArrayPathAddress(address.Variable,
+                address.Projections, spill, requiredElementCount);
         }
         else
         {
