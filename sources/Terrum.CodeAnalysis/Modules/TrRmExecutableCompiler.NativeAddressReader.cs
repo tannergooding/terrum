@@ -1296,7 +1296,7 @@ public static partial class TrRmExecutableCompiler
             BinaryPrimitives.ReadUInt16LittleEndian(block[8..]),
         };
         var storageRecordIndexes = new HashSet<int>();
-        var directUnitCallRecordIndexes = new HashSet<int>();
+        var directInitializerCallRecordIndexes = new HashSet<int>();
         var nativeAddressRecordIndex = -1;
         var callSiteRecordIndex = -1;
         var returnHome = -1;
@@ -1536,12 +1536,13 @@ public static partial class TrRmExecutableCompiler
                         }
                         else if (callSiteTargetKind == 1
                             && body.Schema
-                                .UsesForeignInvocationStorageFixedArrayUnitInitialization())
+                                .UsesForeignInvocationStorageFixedArrays())
                         {
-                            if (!directUnitCallRecordIndexes.Add(recordIndex))
+                            if (!directInitializerCallRecordIndexes.Add(
+                                    recordIndex))
                             {
                                 throw Invalid(
-                                    "An A2EU direct CallSite is referenced more than once.");
+                                    "A direct initializer CallSite is referenced more than once.");
                             }
                         }
                         else
@@ -1699,6 +1700,20 @@ public static partial class TrRmExecutableCompiler
             _ = nonLocalHomeResults.Add(captureHome);
         }
 
+        var hasBaseSchemaDirectInitializerCalls = false;
+        if (!body.Schema
+            .UsesForeignInvocationStorageFixedArrayUnitInitialization())
+        {
+            foreach (var instruction in instructions)
+            {
+                if (instruction.Opcode == 0xE0
+                    && body.GetRecord(instruction.Index)[4] == 1)
+                {
+                    hasBaseSchemaDirectInitializerCalls = true;
+                    break;
+                }
+            }
+        }
         var arrayInitializationIndexHomes = new HashSet<int>();
         for (var recordIndex = 0; recordIndex < body.RecordCount;
             recordIndex++)
@@ -1741,7 +1756,8 @@ public static partial class TrRmExecutableCompiler
         {
             if (!initializationIndexHomeStoreCounts.TryGetValue(indexHome,
                     out var storeCount)
-                || storeCount < 2)
+                || (storeCount < 2
+                    && !hasBaseSchemaDirectInitializerCalls))
             {
                 continue;
             }
@@ -1878,7 +1894,7 @@ public static partial class TrRmExecutableCompiler
         var registerConstants
             = new Dictionary<int, NativeAddressRegisterConstant>();
         var registerExpressions = new Dictionary<int, BoundExpression>();
-        if (directUnitCallRecordIndexes.Count > 0)
+        if (directInitializerCallRecordIndexes.Count > 0)
         {
             registerConstants.Add(14, new NativeAddressRegisterConstant(
                 PrimitiveType.Int32, 0));
@@ -3136,11 +3152,26 @@ public static partial class TrRmExecutableCompiler
                     var sourceRegister
                         = BinaryPrimitives.ReadUInt16LittleEndian(
                             storePayload[6..]);
+                    var placeSelectionInstruction = previousInstruction;
+                    var hasValidStoreSource
+                        = previousInstruction.Opcode == 0xD8;
+                    if (previousInstruction.Opcode == 0xD5
+                        && instructionOrdinal >= 2
+                        && sourceRegister == previousInstruction.Register
+                        && sourceRegister != placeRegister)
+                    {
+                        placeSelectionInstruction
+                            = instructions[instructionOrdinal - 2];
+                        hasValidStoreSource
+                            = placeSelectionInstruction.Opcode == 0xD8;
+                    }
+                    var hasInitializationSelection
+                        = placeSelectionsByRegister.TryGetValue(
+                            placeRegister, out var initializationSelection);
                     var isEmptyArrayInitialization
                         = storePayload[1] == 0;
-                    if (instructionOrdinal == 0
-                        || previousInstruction.Opcode != 0xD8
-                        || previousInstruction.Register != placeRegister
+                    if (!hasValidStoreSource
+                        || placeSelectionInstruction.Register != placeRegister
                         || storeRecord[0] != 0x05
                         || storePayload[0] != 1
                         || storePayload[2] != 1
@@ -3156,11 +3187,10 @@ public static partial class TrRmExecutableCompiler
                                 .UsesForeignInvocationStorageFixedArrayEmptyInitialization()
                                 || sourceRegister != 0
                             : storePayload[1] != 1
-                                || sourceRegister is not (14 or 15))
-                        || !placeSelectionsByRegister.TryGetValue(
-                            placeRegister, out var initializationSelection)
+                                || sourceRegister > 15)
+                        || !hasInitializationSelection
                         || initializationSelection.RecordIndex
-                            != previousInstruction.Index
+                            != placeSelectionInstruction.Index
                         || initializationSelection.AccessKind != 3)
                     {
                         throw Invalid(
@@ -3255,15 +3285,41 @@ public static partial class TrRmExecutableCompiler
                         if (initializationSelection.TargetKind != 3
                             || initializationSelection.ElementCount == 0
                             || localInitializedByHome[
-                                initializationSelection.BaseHome]
-                            || !TryGetContextualConstant(
-                                checked((byte)sourceRegister),
-                                initializationSelection.ElementType,
-                                body.Schema,
-                                out var initializationValue))
+                                initializationSelection.BaseHome])
                         {
                             throw Invalid(
                                 "The F+S SemanticStore does not initialize its selected array element.");
+                        }
+
+                        BoundExpression initializationValue;
+                        if (TryGetContextualConstant(
+                                checked((byte)sourceRegister),
+                                initializationSelection.ElementType,
+                                body.Schema, out var contextualValue))
+                        {
+                            initializationValue = new BoundConstant(
+                                contextualValue,
+                                initializationSelection.ElementType, default);
+                        }
+                        else if (sourceRegister < 14
+                            && registerExpressions.TryGetValue(
+                                sourceRegister, out var sourceExpression)
+                            && sourceExpression is BoundRead sourceRead
+                            && sourceRead.Type
+                                == initializationSelection.ElementType
+                            && (uint)sourceRead.Variable
+                                < (uint)variables.Count
+                            && variables[sourceRead.Variable].Type
+                                == sourceRead.Type
+                            && DirectNativeImportContract.IsScalar(
+                                sourceRead.Type))
+                        {
+                            initializationValue = sourceRead;
+                        }
+                        else
+                        {
+                            throw Invalid(
+                                "The F+S SemanticStore source has no matching typed scalar value.");
                         }
 
                         var selectedElementIndex
@@ -3280,8 +3336,7 @@ public static partial class TrRmExecutableCompiler
                         AppendArrayInitializationElement(body,
                             initializationSelection.ArrayInstanceKey,
                             selectedElementIndex,
-                            new BoundConstant(initializationValue,
-                                initializationSelection.ElementType, default));
+                            initializationValue);
                     }
 
                     if (initializationSelection.ArrayValueInstanceKey >= 0)
@@ -3613,16 +3668,16 @@ public static partial class TrRmExecutableCompiler
                     break;
 
                 case 0xE0:
-                    if (directUnitCallRecordIndexes.Contains(
+                    if (directInitializerCallRecordIndexes.Contains(
                             instruction.Index))
                     {
                         if (sawCallSite)
                         {
                             throw Invalid(
-                                "An A2EU unit initializer CallSite follows the indirect call.");
+                                "A direct initializer CallSite follows the indirect call.");
                         }
 
-                        var directUnitCall
+                        var directInitializerCall
                             = ReadForeignInvocationUnitInitializerCall(
                                 body, body.GetRecord(instruction.Index),
                                 imports, directCallTargets,
@@ -3638,15 +3693,13 @@ public static partial class TrRmExecutableCompiler
                             if ((uint)directCallResultHome
                                     >= (uint)body.HomeCount
                                 || body.HomeMap[directCallResultHome * 8] != 3
-                                || localVariableByHome[
-                                    directCallResultHome] < 0
                                 || localInitializedByHome[
                                     directCallResultHome]
                                 || storageAddressesByHome.ContainsKey(
                                     directCallResultHome))
                             {
                                 throw Invalid(
-                                    "The A2EU direct-call result Home is invalid.");
+                                    "The direct-call result Home is invalid.");
                             }
 
                             var resultTypeMapIndex
@@ -3661,22 +3714,44 @@ public static partial class TrRmExecutableCompiler
                                 structureTypeByTypeDef,
                                 arrayTypeByTypeSpecRow:
                                     arrayTypeByTypeSpecRow);
-                            if (resultHomeType != directUnitCall.Type)
+                            if (resultHomeType != directInitializerCall.Type)
                             {
                                 throw Invalid(
-                                    "The A2EU direct-call result Home has the wrong type.");
+                                    "The direct-call result Home has the wrong type.");
                             }
 
                             var resultVariable = localVariableByHome[
                                 directCallResultHome];
+                            if (resultVariable < 0)
+                            {
+                                var resultHomeMap = body.HomeMap.Slice(
+                                    directCallResultHome * 8, 8);
+                                if (nonLocalHomeResults.Contains(
+                                        directCallResultHome)
+                                    || arrayInitializationCounterHomes
+                                        .Contains(directCallResultHome)
+                                    || resultHomeMap[0] != 3
+                                    || resultHomeMap[1] != 0)
+                                {
+                                    throw Invalid(
+                                        "The direct-call result Home is not an unowned value Home.");
+                                }
+
+                                resultVariable = variables.Count;
+                                variables.Add(new BoundVariable(
+                                    $"__trrm_result_{directCallResultHome}",
+                                    directInitializerCall.Type, false, default));
+                                localVariableByHome[directCallResultHome]
+                                    = resultVariable;
+                            }
                             localInitializedByHome[directCallResultHome] = true;
                             currentStatements.Add(new BoundLocal(resultVariable,
-                                directUnitCall, default));
+                                directInitializerCall, default));
                         }
                         else
                         {
                             currentStatements.Add(new BoundExpressionStatement(
-                                directUnitCall, default));
+                                directInitializerCall, default));
                         }
                         for (var register = 0; register < 14; register++)
                         {
@@ -4960,17 +5035,19 @@ public static partial class TrRmExecutableCompiler
         var callResultKind = record[5];
         var callResultHome = BinaryPrimitives.ReadUInt16LittleEndian(
             record[10..]);
-        if (!body.Schema
-                .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+        if (!body.Schema.UsesForeignInvocationStorageFixedArrays()
             || !callTargets.TryGetValue(targetMethodRow,
                 out var callTarget)
             || record[0] != 0x02 || record[4] != 1
             || inputCount != (uint)callTarget.ParameterTypes.Length
             || preparationCount != 0
-            || (long)record.Length != 20L + (inputCount * 4L))
+            || (long)record.Length != 20L + (inputCount * 4L)
+            || (!body.Schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization()
+                && callTarget.ReturnType == PrimitiveType.Void))
         {
             throw Invalid(
-                "The A2EU direct CallSite does not match a retained NativeImport.");
+                "The direct initializer CallSite does not match an admitted retained NativeImport.");
         }
 
         if (callTarget.ReturnType == PrimitiveType.Void)

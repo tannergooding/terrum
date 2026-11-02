@@ -3463,8 +3463,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 reencodedConsumer),
             consumerIdentity, [providerInput]);
         AssertCapturedNestedIndex(reloaded);
-        Assert.That(NativeModuleCompiler.ExecuteStandard(combinedInput,
-            consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        var standardJitResult = NativeModuleCompiler.ExecuteStandard(
+            combinedInput, consumerIdentity, [],
+            NativeRuntimePolicy.FailFast);
+        TestContext.WriteLine(
+            $"A2 nested scalar call initializer standard JIT: policy=FailFast; expected=1; actual={standardJitResult}.");
+        Assert.That(standardJitResult, Is.EqualTo(1));
         await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
             combinedInput, consumerSource, 1,
             "co-located provider Body remap", runJit: false,
@@ -3872,6 +3876,471 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         }));
         Assert.That(TrRmExecutableCompiler.EmitStandard(loaded,
             moduleIdentity, schemaIdentity, 1), Is.EqualTo(artifact));
+    }
+
+    [Test]
+    public async Task StandardA2NestedScalarCallInitializersPreserveOrderAndFailure()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string schemaIdentity
+            = "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2";
+        const TrRmArtifactSchema schema
+            = TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft;
+        const string providerIdentity = "a2-nested-call-value-provider";
+        const string consumerIdentity = "a2-nested-call-value-consumer";
+        const string providerSource = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            public extern void Observe(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            internal int32 ProviderBody() {
+                int32 zeroIndex = 0;
+                mut [int32; 2] values = [0, -1];
+                mut int32 observed = values[zeroIndex];
+                uint64 byteCount = 0;
+                unsafe {
+                    var callback = &Observe;
+                    callback(&observed, &values[zeroIndex], byteCount);
+                }
+                return observed;
+            }
+            """;
+        var core = new CompilationReference([], [],
+            BoundRuntimePolicy.FailFast,
+            nativeCoreRegistration: NativeCoreRegistrationTests.CreateRegistration());
+        var providerCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(providerSource), core);
+        Assert.That(providerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                providerCompilation.Diagnostics));
+        var providerArtifact = TrRmExecutableCompiler.EmitStandard(
+            providerCompilation.Program!, providerIdentity, schemaIdentity, 1);
+        var providerInput = new TrRmStandardArtifactInput(schemaIdentity,
+            providerArtifact);
+        var providerReference = TrRmExecutableCompiler.CreateStandardReference(
+            providerInput, providerIdentity, []);
+
+        const string consumerTemplate = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetDriveTypeW",
+                CallConv: Terrum.Interop.NativeCallingConvention.Unmanaged)]
+            [Terrum.Interop.NativeParameter(1, Read, NoEscape, 1)]
+            internal extern int32 GetDriveTypeW(ptr<char16> rootPath);
+
+            int32 Main() {
+                unsafe {
+                    int32 zeroIndex = 0;
+                    mut int32 badIndex = -1;
+                    mut [char16; 1] guard = [char16(0)];
+                    mut [char16; 1] pathA = [char16(0)];
+                    mut [char16; 1] pathB = [char16(0)];
+                    int32 selectedIndex
+                        = GetDriveTypeW(&pathA[zeroIndex]);
+                    mut [[int32; 2]; 2] values = [
+                        [GetDriveTypeW(&pathA[zeroIndex]),
+                            SECOND_INITIALIZER],
+                        [GetDriveTypeW(&pathB[zeroIndex]),
+                            GetDriveTypeW(&pathA[zeroIndex])]];
+                    mut int32 observed
+                        = values[selectedIndex][zeroIndex];
+                    uint64 byteCount = 0;
+                    var callback = &Observe;
+                    callback(&observed, &values[zeroIndex][zeroIndex],
+                        byteCount);
+                    return observed;
+                }
+            }
+            """;
+        var consumerSource = consumerTemplate.Replace("SECOND_INITIALIZER",
+            "GetDriveTypeW(&pathB[zeroIndex])", StringComparison.Ordinal);
+        var failureSource = consumerTemplate.Replace("SECOND_INITIALIZER",
+            "GetDriveTypeW(&guard[badIndex++])",
+            StringComparison.Ordinal);
+
+        BoundProgram? consumerProgram = null;
+        byte[] EmitConsumer(string source)
+        {
+            var compilation = Compilation.Create(SyntaxTree.Parse(source),
+                providerReference, new CompilationOptions {
+                    RuntimePolicy = BoundRuntimePolicy.FailFast,
+                    NativeCoreRegistration
+                        = NativeCoreRegistrationTests.CreateRegistration(),
+                });
+            Assert.That(compilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine, compilation.Diagnostics));
+            if (StringComparer.Ordinal.Equals(source, consumerSource))
+            {
+                consumerProgram = compilation.Program;
+            }
+
+            return TrRmExecutableCompiler.EmitStandard(
+                compilation.Program!, consumerIdentity, schemaIdentity, 1);
+        }
+
+        var consumerArtifact = EmitConsumer(consumerSource);
+        var originalProgram = consumerProgram
+            ?? throw new InvalidOperationException(
+                "The source-bound consumer program was not retained.");
+        var originalMain = originalProgram.Functions.Single(
+            static function => function.Name == "Main");
+        var consumerTables = TrRmStructuralMetadataValidator
+            .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        consumerArtifact));
+        var mainRow = 0;
+        for (var methodRow = 1;
+            methodRow <= consumerTables.Methods.Count; methodRow++)
+        {
+            if (consumerTables.Methods.GetName(methodRow) == "Main")
+            {
+                mainRow = methodRow;
+                break;
+            }
+        }
+        Assert.That(mainRow, Is.GreaterThan(0));
+        consumerTables.ValidateRegisterBodyMapsForMethod(mainRow);
+        var mainBody = consumerTables.Bodies.GetRegisterBody(
+            consumerTables.Methods.GetBodyRow(mainRow),
+            consumerTables.Contracts.Count);
+        var directCallTargets = new List<string>();
+        for (var blockIndex = 0; blockIndex < mainBody.BlockCount;
+            blockIndex++)
+        {
+            var code = mainBody.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], mainBody.Schema);
+                if (code[position] == 0xE0)
+                {
+                    var callRecord = mainBody.GetRecord(
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            code[(position + 2)..]));
+                    if (callRecord[4] == 1)
+                    {
+                        var methodMapIndex
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                callRecord[8..]);
+                        var methodToken
+                            = BinaryPrimitives.ReadUInt32LittleEndian(
+                                mainBody.MethodMap[
+                                    (methodMapIndex * sizeof(uint))..]);
+                        var methodRow = checked((int)(methodToken
+                            & 0x00FF_FFFF));
+                        directCallTargets.Add(
+                            consumerTables.Methods.GetName(methodRow));
+                    }
+                }
+
+                position += instructionLength;
+            }
+        }
+        Assert.That(directCallTargets, Is.EqualTo(
+            Enumerable.Repeat("GetDriveTypeW", 5).ToArray()));
+
+        var localHomeCount
+            = originalMain.Variables.Length - originalMain.ParameterCount;
+        var pathAHome
+            = Array.FindIndex(originalMain.Variables.ToArray(),
+                static variable => variable.Name == "pathA")
+                - originalMain.ParameterCount;
+        Assert.That(pathAHome, Is.GreaterThanOrEqualTo(0));
+        var malformedHomeMap = mainBody.HomeMap.ToArray();
+        var wrongResultHome = -1;
+        for (var blockIndex = 0; blockIndex < mainBody.BlockCount
+            && wrongResultHome < 0; blockIndex++)
+        {
+            var code = mainBody.GetBlockCode(blockIndex);
+            for (var position = 0; position < code.Length;)
+            {
+                var instructionLength
+                    = TrRmRegisterBodyReader.InstructionLength(
+                        code[position], mainBody.Schema);
+                if (code[position] == 0xE0)
+                {
+                    var callSite = mainBody.GetRecord(
+                        BinaryPrimitives.ReadUInt16LittleEndian(
+                            code[(position + 2)..]));
+                    if (callSite[4] == 1 && callSite[5] == 2)
+                    {
+                        var resultHome
+                            = BinaryPrimitives.ReadUInt16LittleEndian(
+                                callSite[10..]);
+                        if (resultHome >= localHomeCount)
+                        {
+                            wrongResultHome = resultHome;
+                            break;
+                        }
+                    }
+                }
+
+                position += instructionLength;
+            }
+        }
+        Assert.That(wrongResultHome, Is.GreaterThanOrEqualTo(0));
+        var wrongResultTypeMapIndex
+            = BinaryPrimitives.ReadUInt16LittleEndian(
+                malformedHomeMap.AsSpan((pathAHome * 8) + 2));
+        BinaryPrimitives.WriteUInt16LittleEndian(
+            malformedHomeMap.AsSpan((wrongResultHome * 8) + 2),
+            wrongResultTypeMapIndex);
+        var malformedBlocks = new TrRmRegisterBodyBlock[
+            mainBody.BlockCount];
+        for (var blockIndex = 0; blockIndex < malformedBlocks.Length;
+            blockIndex++)
+        {
+            var block = mainBody.GetBlock(blockIndex);
+            malformedBlocks[blockIndex] = new(
+                BinaryPrimitives.ReadUInt32LittleEndian(block),
+                BinaryPrimitives.ReadUInt32LittleEndian(block[4..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(block[8..]));
+        }
+        var malformedRecords = new ReadOnlyMemory<byte>[
+            mainBody.RecordCount];
+        for (var recordIndex = 0;
+            recordIndex < malformedRecords.Length; recordIndex++)
+        {
+            malformedRecords[recordIndex]
+                = mainBody.GetRecord(recordIndex).ToArray();
+        }
+        var malformedBody = TrRmRegisterBodyWriter.Encode(
+            malformedHomeMap, mainBody.TypeMap.ToArray(),
+            mainBody.MethodMap.ToArray(), mainBody.FieldMap.ToArray(),
+            mainBody.ConstantMap.ToArray(), malformedBlocks,
+            malformedRecords, mainBody.Code.ToArray(),
+            consumerTables.Contracts.Count, schema);
+        var consumerIndex = TrRmArtifactIndex
+            .ForForeignInvocationStorageFixedArrayCopyDraft(
+                consumerArtifact);
+        Assert.That(consumerIndex.TryGetSection(0x0020, out var bodySection,
+            out var bodyCount), Is.True);
+        var bodyTable = new TrRmBodyTableReader(bodySection, bodyCount,
+            schema);
+        var malformedBodyRows = new ReadOnlyMemory<byte>[bodyTable.Count];
+        var mainBodyRow
+            = consumerTables.Methods.GetBodyRow(mainRow);
+        for (var bodyRow = 1; bodyRow <= bodyTable.Count; bodyRow++)
+        {
+            malformedBodyRows[bodyRow - 1]
+                = bodyRow == mainBodyRow
+                    ? malformedBody
+                    : bodyTable.GetRow(bodyRow).ToArray();
+        }
+        var malformedBodySection
+            = TrRmVariableTableWriter.EncodeBodies(malformedBodyRows);
+        var malformedSections
+            = new List<TrRmSection>(consumerIndex.SectionCount);
+        for (var sectionIndex = 0;
+            sectionIndex < consumerIndex.SectionCount; sectionIndex++)
+        {
+            consumerIndex.GetSection(sectionIndex, out var kind,
+                out var flags, out var section, out var recordCount);
+            malformedSections.Add(new TrRmSection(kind, flags,
+                checked((uint)recordCount),
+                kind == 0x0020 ? malformedBodySection : section.ToArray()));
+        }
+        var malformedResultHomeArtifact
+            = TrRmArtifactWriter.Encode(malformedSections, schema);
+        _ = Assert.Throws<InvalidDataException>(() =>
+        {
+            var loadedMalformedResultHome
+                = TrRmExecutableCompiler.LoadStandard(
+                    new TrRmStandardArtifactInput(schemaIdentity,
+                        malformedResultHomeArtifact),
+                    consumerIdentity, [providerInput]);
+            Assert.That(loadedMalformedResultHome, Is.Not.Null);
+        });
+
+        var consumerCombinedArtifact
+            = CombinePopulatedNativeAddressModules(providerArtifact,
+                consumerArtifact, schema);
+        var combinedInput = new TrRmStandardArtifactInput(schemaIdentity,
+            consumerCombinedArtifact);
+        var loaded = TrRmExecutableCompiler.LoadStandard(combinedInput,
+            consumerIdentity, []);
+        var reencodedConsumer = TrRmExecutableCompiler.EmitStandard(loaded,
+            consumerIdentity, schemaIdentity, 1);
+        Assert.That(reencodedConsumer, Is.EqualTo(consumerArtifact));
+        var loadedMain = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var initializations
+            = new List<BoundNativeFixedArrayInitialization>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(loadedMain.Body,
+            expression =>
+            {
+                if (expression
+                    is BoundNativeFixedArrayInitialization initialization)
+                {
+                    initializations.Add(initialization);
+                }
+            }), Is.True);
+        var initializerCalls = new List<BoundCall>();
+        void CollectLoadedCalls(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        CollectLoadedCalls(nested);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    CollectLoadedCalls(unsafeBlock.Body);
+                    break;
+                case BoundLocal { Initializer: BoundCall call }:
+                    if (loaded.Functions[call.Function].Name == "GetDriveTypeW")
+                    {
+                        initializerCalls.Add(call);
+                    }
+                    break;
+            }
+        }
+        CollectLoadedCalls(loadedMain.Body);
+        Assert.That(initializerCalls, Has.Count.EqualTo(5));
+        var initializerAddressVariables = initializerCalls.Select(call =>
+        {
+            Assert.That(call.Arguments, Has.Length.EqualTo(1));
+            Assert.That(call.Arguments[0],
+                Is.TypeOf<BoundNativeStorageAddress>());
+            return ((BoundNativeStorageAddress)call.Arguments[0]).Variable;
+        }).ToArray();
+        var sourceInitializerCalls = new List<BoundCall>();
+        void CollectInitializerCalls(BoundNativeFixedArrayInitialization
+            initialization)
+        {
+            foreach (var element in initialization.Elements)
+            {
+                if (element is BoundCall call
+                    && originalProgram.Functions[call.Function].Name
+                        == "GetDriveTypeW")
+                {
+                    sourceInitializerCalls.Add(call);
+                }
+                else if (element
+                    is BoundNativeFixedArrayInitialization nested)
+                {
+                    CollectInitializerCalls(nested);
+                }
+            }
+        }
+        void CollectSourceCalls(BoundStatement statement)
+        {
+            switch (statement)
+            {
+                case BoundBlock block:
+                    foreach (var nested in block.Statements)
+                    {
+                        CollectSourceCalls(nested);
+                    }
+                    break;
+                case BoundUnsafe unsafeBlock:
+                    CollectSourceCalls(unsafeBlock.Body);
+                    break;
+                case BoundLocal local when local.Initializer is BoundCall call
+                    && originalProgram.Functions[call.Function].Name
+                        == "GetDriveTypeW":
+                    sourceInitializerCalls.Add(call);
+                    break;
+                case BoundLocal {
+                    Initializer: BoundNativeFixedArrayInitialization
+                        initialization,
+                }:
+                    CollectInitializerCalls(initialization);
+                    break;
+            }
+        }
+        CollectSourceCalls(originalMain.Body);
+        Assert.That(sourceInitializerCalls, Has.Count.EqualTo(5));
+        var pathAVariable = Array.FindIndex(originalMain.Variables.ToArray(),
+            static variable => variable.Name == "pathA");
+        var pathBVariable = Array.FindIndex(originalMain.Variables.ToArray(),
+            static variable => variable.Name == "pathB");
+        Assert.That(pathAVariable, Is.GreaterThanOrEqualTo(0));
+        Assert.That(pathBVariable, Is.GreaterThanOrEqualTo(0));
+        var sourceInitializerAddressVariables = sourceInitializerCalls
+            .Select(static call =>
+                ((BoundNativeStorageAddress)call.Arguments[0]).Variable)
+            .ToArray();
+        Assert.That(sourceInitializerAddressVariables, Is.EqualTo([
+            pathAVariable,
+            pathAVariable,
+            pathBVariable,
+            pathBVariable,
+            pathAVariable,
+        ]));
+        Assert.That(initializerAddressVariables,
+            Is.EqualTo(sourceInitializerAddressVariables));
+        var outerInitialization = initializations.Single(
+            static initialization => NativeFixedArrayTypes.IsType(
+                initialization.Layout.ElementType));
+        var scalarResults = new List<BoundRead>();
+        void CollectScalarResults(
+            BoundNativeFixedArrayInitialization initialization)
+        {
+            foreach (var element in initialization.Elements)
+            {
+                if (element
+                    is BoundNativeFixedArrayInitialization nested)
+                {
+                    CollectScalarResults(nested);
+                }
+                else
+                {
+                    Assert.That(element, Is.TypeOf<BoundRead>());
+                    scalarResults.Add((BoundRead)element);
+                }
+            }
+        }
+        CollectScalarResults(outerInitialization);
+        Assert.That(scalarResults, Has.Count.EqualTo(4));
+        Assert.That(scalarResults.All(static value =>
+            value.Type == PrimitiveType.Int32), Is.True);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(
+            TrRmExecutableCompiler.LoadStandard(
+                new TrRmStandardArtifactInput(schemaIdentity,
+                    reencodedConsumer),
+                consumerIdentity, [providerInput]),
+            consumerIdentity, schemaIdentity, 1),
+            Is.EqualTo(consumerArtifact));
+
+        Assert.That(NativeModuleCompiler.ExecuteStandard(combinedInput,
+            consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.EqualTo(1));
+        await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
+            combinedInput, providerSource + Environment.NewLine
+                + consumerSource, 1,
+            "nested scalar call initializer results", runJit: false,
+            expectedReemitted: consumerArtifact).ConfigureAwait(true);
+
+        var failureArtifact = EmitConsumer(failureSource);
+        var failureCombinedArtifact
+            = CombinePopulatedNativeAddressModules(providerArtifact,
+                failureArtifact, schema);
+        var failureInput = new TrRmStandardArtifactInput(schemaIdentity,
+            failureCombinedArtifact);
+        var failureLoaded = TrRmExecutableCompiler.LoadStandard(failureInput,
+            consumerIdentity, []);
+        Assert.That(TrRmExecutableCompiler.EmitStandard(failureLoaded,
+            consumerIdentity, schemaIdentity, 1),
+            Is.EqualTo(failureArtifact));
+        await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
+            failureInput, providerSource + Environment.NewLine
+                + failureSource,
+            unchecked((int)0xE0540004),
+            "nested initializer address failure before later calls",
+            runJit: false, expectedReemitted: failureArtifact)
+            .ConfigureAwait(true);
     }
 
     [TestCase(14, 1, false)]
@@ -5548,7 +6017,7 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var importPath = Path.Combine(Environment.SystemDirectory,
             "kernel32.dll");
         TestContext.WriteLine(
-            $"A2 nested source-free runtime input: scenario={scenario}; schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; import={importPath}!RtlMoveMemory; import-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
+            $"A2 nested source-free runtime input: scenario={scenario}; schema={schemaIdentity}; module={moduleIdentity}; source-sha256={Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source)))}; artifact-sha256={Convert.ToHexString(SHA256.HashData(artifact))}; compiler={compilerPath}; compiler-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(compilerPath)))}; native-library={importPath}; native-library-sha256={Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(importPath)))}.");
         if (runJit)
         {
             var jitResult = NativeJit.Execute(loaded,

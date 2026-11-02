@@ -2105,6 +2105,45 @@ public static partial class TrRmExecutableCompiler
             };
         }
 
+        bool AddArrayInitializerCalls(
+            BoundNativeFixedArrayInitialization initialization,
+            int rootArrayVariable)
+        {
+            using var frame = resourceLedger?.EnterFrame();
+            resourceLedger?.ConsumeWork();
+            foreach (var element in initialization.Elements)
+            {
+                resourceLedger?.ConsumeWork();
+                if (element is BoundCall initializerCall)
+                {
+                    if (!AddUnitInitializerCall(initializerCall,
+                            rootArrayVariable, -1))
+                    {
+                        return false;
+                    }
+                }
+                else if (element is BoundConditional {
+                        Type: PrimitiveType.Void,
+                    } unitConditional)
+                {
+                    if (!AddUnitInitializerExpression(unitConditional,
+                            rootArrayVariable))
+                    {
+                        return false;
+                    }
+                }
+                else if (element
+                    is BoundNativeFixedArrayInitialization nested
+                    && !AddArrayInitializerCalls(nested,
+                        rootArrayVariable))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         bool AddUnitConditionalControlFlow(BoundExpression condition,
             Func<bool> appendTrue, Func<bool> appendFalse)
         {
@@ -2264,21 +2303,10 @@ public static partial class TrRmExecutableCompiler
                 if (local.Initializer
                     is BoundNativeFixedArrayInitialization initialization)
                 {
-                    foreach (var element in initialization.Elements)
+                    if (!AddArrayInitializerCalls(initialization,
+                            local.Variable))
                     {
-                        resourceLedger?.ConsumeWork();
-                        if (element is BoundCall initializerCall
-                            && !AddUnitInitializerCall(initializerCall,
-                                local.Variable, -1))
-                        {
-                            return false;
-                        }
-                        if (element is BoundConditional conditional
-                            && !AddUnitInitializerExpression(conditional,
-                                local.Variable))
-                        {
-                            return false;
-                        }
+                        return false;
                     }
                 }
                 return true;
@@ -2753,6 +2781,22 @@ public static partial class TrRmExecutableCompiler
 
             foreach (var element in current.Initialization.Elements)
             {
+                if (element is BoundCall initializerCall
+                    && initializerCall.Type == layout.ElementType
+                    && DirectNativeImportContract.IsScalar(
+                        layout.ElementType))
+                {
+                    continue;
+                }
+
+                if (element is BoundRead initializerRead
+                    && initializerRead.Type == layout.ElementType
+                    && DirectNativeImportContract.IsScalar(
+                        layout.ElementType))
+                {
+                    continue;
+                }
+
                 if (element is BoundConstant constant
                     && TryGetContextualInitializationRegister(constant,
                         layout.ElementType, schema, out _))
@@ -3306,6 +3350,10 @@ public static partial class TrRmExecutableCompiler
             }
         }
 
+        var usesArrayInitializationCounterHomes
+            = !storageCall.UnitInitializerCalls.IsEmpty
+                && !schema
+                    .UsesForeignInvocationStorageFixedArrayUnitInitialization();
         var arrayInitializationCounterDepths = new SortedSet<int>();
         void CollectArrayInitializationCounterDepths(
             BoundNativeFixedArrayInitialization initialization, int depth)
@@ -3318,7 +3366,9 @@ public static partial class TrRmExecutableCompiler
                     "The A2 nested array initializer exceeds the semantic depth limit.");
             }
 
-            if (depth >= 11 && initialization.Layout.ElementCount > 1)
+            if ((depth >= 11 && initialization.Layout.ElementCount > 1)
+                || (usesArrayInitializationCounterHomes
+                    && initialization.Layout.ElementCount != 0))
             {
                 _ = arrayInitializationCounterDepths.Add(depth);
             }
@@ -4042,6 +4092,9 @@ public static partial class TrRmExecutableCompiler
             storageCall.UnitInitializerCalls.Length);
         var emittedUnitCallPlans = new HashSet<int>(
             storageCall.UnitInitializerCalls.Length);
+        var arrayInitializerCallResultHomes
+            = new Dictionary<BoundCall, int>(
+                ReferenceEqualityComparer.Instance);
 
         int AppendUnitInitializerCall(BoundCall unitCall)
         {
@@ -4924,8 +4977,20 @@ public static partial class TrRmExecutableCompiler
                 resourceLedger?.ConsumeWork();
                 switch (element)
                 {
-                    case BoundCall { Type: PrimitiveType.Void } unitCall:
-                        _ = AppendUnitInitializerCall(unitCall);
+                    case BoundCall initializerCall:
+                        var resultHome
+                            = AppendUnitInitializerCall(initializerCall);
+                        if (initializerCall.Type
+                            != PrimitiveType.Void
+                            && (resultHome < 0
+                                || !TryAddA3Staged(
+                                    arrayInitializerCallResultHomes,
+                                    initializerCall, resultHome,
+                                    resourceLedger)))
+                        {
+                            throw Unsupported(
+                                "The A2 nested scalar initializer has no unique result Home.");
+                        }
                         break;
 
                     case BoundConditional
@@ -5012,7 +5077,7 @@ public static partial class TrRmExecutableCompiler
 
             byte indexKind;
             ushort indexIndex;
-            if (depth < 11)
+            if (depth < 11 && !usesArrayInitializationCounterHomes)
             {
                 var indexRegister = checked((byte)(depth + 2));
                 indexKind = 1;
@@ -5022,7 +5087,8 @@ public static partial class TrRmExecutableCompiler
                     AppendZeroArrayIndex(indexHome, indexRegister);
                 }
             }
-            else if (layout.ElementCount > 1)
+            else if (layout.ElementCount > 1
+                || usesArrayInitializationCounterHomes)
             {
                 if (!arrayInitializationCounterHomeByDepth.TryGetValue(
                         depth, out var counterHome))
@@ -5131,15 +5197,37 @@ public static partial class TrRmExecutableCompiler
                 else
                 {
                     var storeIndex = checked((ushort)records.Count);
+                    byte sourceRegister;
                     if (element is BoundConstant initializerConstant
                         && TryGetContextualInitializationRegister(
                             initializerConstant, elementType, schema,
                             out var initializerRegister))
                     {
-                        records.Add(
-                            TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
-                                1, 1, 1, 1, placeRegister,
-                                initializerRegister));
+                        sourceRegister = initializerRegister;
+                    }
+                    else if (element is BoundCall initializerCall
+                        && initializerCall.Type == elementType
+                        && DirectNativeImportContract.IsScalar(elementType)
+                        && arrayInitializerCallResultHomes.TryGetValue(
+                            initializerCall, out var callResultHome))
+                    {
+                        AppendHomeLoad(code, 13, callResultHome);
+                        sourceRegister = 13;
+                    }
+                    else if (element is BoundRead initializerRead
+                        && initializerRead.Type == elementType
+                        && DirectNativeImportContract.IsScalar(elementType))
+                    {
+                        var sourceHome = GetCallerHome(
+                            initializerRead.Variable);
+                        if (sourceHome < 0)
+                        {
+                            throw Unsupported(
+                                "The A2 nested scalar initializer read has no source Home.");
+                        }
+
+                        AppendHomeLoad(code, 13, sourceHome);
+                        sourceRegister = 13;
                     }
                     else if (element is BoundCall
                             { Type: PrimitiveType.Void }
@@ -5147,9 +5235,7 @@ public static partial class TrRmExecutableCompiler
                         && schema
                             .UsesForeignInvocationStorageFixedArrayUnitInitialization())
                     {
-                        records.Add(
-                            TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
-                                1, 1, 1, 1, placeRegister, 14));
+                        sourceRegister = 14;
                     }
                     else
                     {
@@ -5157,6 +5243,10 @@ public static partial class TrRmExecutableCompiler
                             "The A2 nested array element has no admitted store encoding.");
                     }
 
+                    records.Add(
+                        TrRmRegisterBodyRecordWriter.EncodeSemanticStore(
+                            1, 1, 1, 1, placeRegister,
+                            sourceRegister));
                     code.Add(0xD9);
                     code.Add(0);
                     code.Add(unchecked((byte)storeIndex));
@@ -5277,7 +5367,11 @@ public static partial class TrRmExecutableCompiler
                                 "The A2 nested array initializer exceeds the semantic depth limit.");
                         }
 
-                        AppendZeroArrayIndex(indexHome, 2);
+                        if (!usesArrayInitializationCounterHomes)
+                        {
+                            AppendZeroArrayIndex(indexHome, 2);
+                        }
+
                         AppendArrayInitializationElements(
                             arrayInitialization, local.Variable, 0,
                             maximumDepth, indexHome);
