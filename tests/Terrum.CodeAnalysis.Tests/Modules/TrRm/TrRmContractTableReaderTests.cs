@@ -659,6 +659,16 @@ public sealed class TrRmContractTableReaderTests
     }
 
     [Test]
+    public void A2R1ReturnCoverageReadsHugeCompactRepeatWithoutExpanding()
+    {
+        _ = Create(Section(ReturnCoverageContract(byteLength: 1,
+                repetitions: [(ulong.MaxValue, 1)])),
+            recordCount: 1, declaredCount: 1,
+            typeFirst: 0, typeCount: 0, methodFirst: 1, methodCount: 1,
+            developmentProfile: false, a2r1ReturnCoverageDraft: true);
+    }
+
+    [Test]
     public void A2R1WriterCoalescesAdjacentAndDuplicateByteRanges()
     {
         var emitted = Create(Section(ReturnCoverageContractWithRegions(
