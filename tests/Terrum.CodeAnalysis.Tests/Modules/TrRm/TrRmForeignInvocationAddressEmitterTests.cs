@@ -3649,6 +3649,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             .AsSpan(0, addressOffset + 56).ToArray();
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(truncatedPath));
+        var maximumTruncatedPath = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            maximumTruncatedPath.AsSpan(addressOffset + 50, sizeof(int)),
+            127);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(maximumTruncatedPath));
         var initializerOffset
             = FindPrivateNestedArrayInitializerOffset(producer);
         var shortInitializer = producer.ToArray();
@@ -3664,11 +3670,13 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             () => ModuleCompiler.CreateReference(mismatchedChild));
 
         var reference = ModuleCompiler.CreateReference(producer);
-        var consumerSource = CreatePrivateNestedAddressSource(
-            dimensionCount, "ConsumerBacking", "RtlMoveMemoryConsumer",
-            "RtlMoveMemory")
-            + Environment.NewLine
-            + "int32 Main() { return Exercise() + ConsumerBacking(); }";
+        const string consumerSource = """
+            int32 Marker() {
+                mut [uint64; 3] values = [9, 1, 2];
+                return int32(values[0]);
+            }
+            int32 Main() { return Exercise() + Marker() - 9; }
+            """;
         var consumerCompilation = Compilation.Create(
             SyntaxTree.Parse(consumerSource), reference,
             BoundRuntimePolicy.FailFast);
@@ -3701,15 +3709,62 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             reemittedProducer);
 
         Assert.That(NativeJit.Execute(linked,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(156));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(78));
         Assert.That(NativeJit.Execute(reemittedLinked,
-            NativeRuntimePolicy.FailFast), Is.EqualTo(156));
+            NativeRuntimePolicy.FailFast), Is.EqualTo(78));
         await AssertPrivateNestedBackingAotAsync(linked,
-            $"private-nested-address-{dimensionCount}-first", 156)
+            $"private-nested-address-{dimensionCount}-first", 78)
             .ConfigureAwait(true);
         await AssertPrivateNestedBackingAotAsync(reemittedLinked,
-            $"private-nested-address-{dimensionCount}-reemitted", 156)
+            $"private-nested-address-{dimensionCount}-reemitted", 78)
             .ConfigureAwait(true);
+    }
+
+    [Test]
+    public void SourceDepthRejectsMaximumNestedAddressPath()
+    {
+        var source = CreateDeepPrivateNestedAddressSource(128);
+        var compilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(compilation.HasErrors, Is.True);
+        Assert.That(compilation.Diagnostics.Any(static diagnostic =>
+            diagnostic.Code == "TRM1004"), Is.True);
+    }
+
+    private static string CreateDeepPrivateNestedAddressSource(int dimensions)
+    {
+        var arrayType = "int32";
+        var initializer = "77";
+        for (var depth = 0; depth < dimensions; depth++)
+        {
+            arrayType = $"[{arrayType}; 1]";
+            initializer = $"[{initializer}]";
+        }
+
+        var selectedPath = string.Concat(
+            Enumerable.Repeat("[0]", dimensions));
+        return $$"""
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            public int32 Exercise() {
+                mut {{arrayType}} values = {{initializer}};
+                mut int32 observed = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    RtlMoveMemory(&observed,
+                        &values{{selectedPath}}, byteCount);
+                }
+                return observed;
+            }
+            """;
     }
 
     private static string CreatePrivateNestedAddressSource(int dimensionCount)
@@ -4107,7 +4162,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var providers = new[] { arrayProvider, biasProvider };
         var reference = NativeModuleCompiler.CreateReferenceSet(providers);
         var consumerCompilation = Compilation.Create(
-            SyntaxTree.Parse("int32 Main() { return Exercise() + Bias(); }"),
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    mut [uint64; 3] marker = [9, 1, 2];
+                    return Exercise() + Bias() + int32(marker[0]) - 9;
+                }
+                """),
             reference, BoundRuntimePolicy.FailFast);
         Assert.That(consumerCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
@@ -4158,7 +4218,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var rootReference
             = NativeModuleCompiler.CreateGraphReference(dependencies);
         var rootCompilation = Compilation.Create(
-            SyntaxTree.Parse("int32 Main() { return Exercise() + Bias(); }"),
+            SyntaxTree.Parse("""
+                int32 Main() {
+                    mut [uint64; 3] marker = [9, 1, 2];
+                    return Exercise() + Bias() + int32(marker[0]) - 9;
+                }
+                """),
             rootReference, BoundRuntimePolicy.FailFast);
         Assert.That(rootCompilation.HasErrors, Is.False,
             string.Join(Environment.NewLine,
