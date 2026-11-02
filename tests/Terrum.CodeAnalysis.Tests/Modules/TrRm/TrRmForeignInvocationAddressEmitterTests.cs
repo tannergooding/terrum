@@ -3645,6 +3645,23 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             (int)PrimitiveType.Int32);
         Assert.Throws<ModuleFormatException>(() =>
             ModuleCompiler.CreateReference(mismatchedParent));
+        var badLeafCount = producer.ToArray();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            badLeafCount.AsSpan(addressOffset + 25, sizeof(ulong)), 3);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(badLeafCount));
+        var badByteExtent = producer.ToArray();
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            badByteExtent.AsSpan(addressOffset + 41, sizeof(ulong)), 12);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(badByteExtent));
+        Assert.That(producer[addressOffset + 58], Is.EqualTo(2));
+        var badAncestorIndexType = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            badAncestorIndexType.AsSpan(addressOffset + 59, sizeof(int)),
+            (int)PrimitiveType.Float32);
+        Assert.Throws<ModuleFormatException>(() =>
+            ModuleCompiler.CreateReference(badAncestorIndexType));
         var truncatedPath = producer
             .AsSpan(0, addressOffset + 56).ToArray();
         Assert.Throws<ModuleFormatException>(() =>
@@ -3662,6 +3679,12 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             shortInitializer.AsSpan(initializerOffset + 13, sizeof(int)), 1);
         Assert.Throws<ModuleFormatException>(
             () => ModuleCompiler.CreateReference(shortInitializer));
+        var excessiveInitializer = producer.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(
+            excessiveInitializer.AsSpan(initializerOffset + 13, sizeof(int)),
+            int.MaxValue);
+        Assert.Throws<ModuleFormatException>(
+            () => ModuleCompiler.CreateReference(excessiveInitializer));
         var mismatchedChild = producer.ToArray();
         BinaryPrimitives.WriteInt32LittleEndian(
             mismatchedChild.AsSpan(initializerOffset + 18, sizeof(int)),
@@ -4521,6 +4544,84 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
         var linked = ModuleCompiler.Link(consumer, producer);
         await AssertPrivateNestedBackingAotAsync(linked,
             "private-nested-readonly-backing", 4)
+            .ConfigureAwait(true);
+    }
+
+    [Test]
+    public async Task PrivateRevision101NestedInitializerEffectsRunOnceInOrder()
+    {
+        Assume.That(OperatingSystem.IsWindows()
+            && RuntimeInformation.ProcessArchitecture == Architecture.X64);
+        const string source = """
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "GetLastError")]
+            internal extern uint32 GetLastError();
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "SetLastError")]
+            internal extern void SetLastError(uint32 value);
+
+            [Terrum.Interop.NativeImport(
+                "kernel32.dll",
+                "RtlMoveMemory")]
+            [Terrum.Interop.NativeParameter(1, Write, NoEscape, 1)]
+            [Terrum.Interop.NativeParameter(2, Read, NoEscape, 1)]
+            internal extern void RtlMoveMemory(
+                write ptr<int32> destination,
+                ptr<int32> source,
+                uint64 byteCount);
+
+            int32 NextValue() {
+                unsafe {
+                    uint32 value = GetLastError() + 1;
+                    SetLastError(value);
+                    return int32(value);
+                }
+            }
+
+            public int32 Exercise() {
+                mut int32 observed = 0;
+                mut uint32 counter = 0;
+                uint64 byteCount = 4;
+                unsafe {
+                    SetLastError(0);
+                    mut [[int32; 2]; 2] values = [
+                        [NextValue(), NextValue()],
+                        [NextValue(), NextValue()]];
+                    RtlMoveMemory(&observed, &values[1][1], byteCount);
+                    counter = GetLastError();
+                }
+                return observed + int32(counter) * 100;
+            }
+            """;
+        var libraryCompilation = Compilation.CreateLibrary(
+            SyntaxTree.Parse(source), BoundRuntimePolicy.FailFast);
+        Assert.That(libraryCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                libraryCompilation.Diagnostics));
+        var producer = ModuleCompiler.CreateProducer(
+            libraryCompilation.Program!, ["Exercise"]);
+        var reference = ModuleCompiler.CreateReference(producer);
+        var consumerCompilation = Compilation.Create(
+            SyntaxTree.Parse("int32 Main() { return Exercise(); }"),
+            reference, BoundRuntimePolicy.FailFast);
+        Assert.That(consumerCompilation.HasErrors, Is.False,
+            string.Join(Environment.NewLine,
+                consumerCompilation.Diagnostics));
+        var consumer = ModuleCompiler.CreateConsumer(
+            consumerCompilation.Program!, producer);
+        var jitResult = await RunPrivateModuleJitWorkerAsync(consumer,
+            producer).ConfigureAwait(true);
+        Assert.That(jitResult.ExitCode, Is.EqualTo(404),
+            $"{jitResult.Output}{Environment.NewLine}{jitResult.Error}");
+        Assert.That(jitResult.Output, Is.Empty);
+        Assert.That(jitResult.Error, Is.Empty);
+
+        var linked = ModuleCompiler.Link(consumer, producer);
+        await AssertPrivateNestedBackingAotAsync(linked,
+            "private-nested-initializer-effects", 404)
             .ConfigureAwait(true);
     }
 
