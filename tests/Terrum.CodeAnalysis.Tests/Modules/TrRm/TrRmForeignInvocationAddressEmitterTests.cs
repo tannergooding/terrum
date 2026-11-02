@@ -3301,6 +3301,10 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 consumerCompilation.Diagnostics));
         var consumerArtifact = TrRmExecutableCompiler.EmitStandard(
             consumerCompilation.Program!, consumerIdentity, schemaIdentity, 1);
+        Assert.That(GetA2IndexUpdateControls(
+            new TrRmStandardArtifactInput(schemaIdentity,
+                consumerArtifact)),
+            Is.EqualTo(new byte[] { 0x01 }));
         var consumerTables = TrRmStructuralMetadataValidator
             .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
                 TrRmArtifactIndex
@@ -3384,9 +3388,11 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
 
         void AssertCapturedNestedIndex(BoundProgram program)
         {
+            var caller = program.Functions[program.EntryPoint];
             var addresses = new List<BoundNativeStorageAddress>();
+            var referenceFormations = new List<BoundReferenceFormation>();
             Assert.That(BoundTreeTraversal.VisitExpressions(
-                program.Functions[program.EntryPoint].Body, expression =>
+                caller.Body, expression =>
                 {
                     if (expression is BoundNativeStorageAddress address
                         && address.Projections.Any(static projection =>
@@ -3394,9 +3400,20 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                     {
                         addresses.Add(address);
                     }
+                    else if (expression is BoundReferenceFormation
+                        referenceFormation)
+                    {
+                        referenceFormations.Add(referenceFormation);
+                    }
                 }), Is.True);
             Assert.That(addresses, Has.Count.EqualTo(1));
-            var updates = addresses[0].Projections
+            Assert.That(referenceFormations, Is.Empty);
+            var selectedAddress = addresses[0];
+            Assert.That(selectedAddress.Projections, Has.Length.EqualTo(3));
+            Assert.That(caller.Variables[selectedAddress.Variable].Type,
+                Is.EqualTo(selectedAddress.CarrierType));
+            Assert.That(selectedAddress.IsReadonly, Is.True);
+            var updates = selectedAddress.Projections
                 .Select(static projection => projection.Index)
                 .OfType<BoundUpdate>().ToArray();
             Assert.That(updates, Has.Length.EqualTo(1));
@@ -3405,6 +3422,27 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             Assert.That(updates[0].Type, Is.EqualTo(PrimitiveType.Int32));
             Assert.That(updates[0].OverflowBehavior,
                 Is.EqualTo(BoundIntegerOverflowBehavior.Checked));
+            Assert.That(updates[0].Place, Is.TypeOf<BoundRead>());
+            var indexRead = (BoundRead)updates[0].Place;
+            Assert.That(indexRead.Variable,
+                Is.Not.EqualTo(selectedAddress.Variable));
+            Assert.That(caller.Variables[indexRead.Variable].Type,
+                Is.EqualTo(PrimitiveType.Int32));
+            Assert.That(caller.Variables[indexRead.Variable].IsMutable,
+                Is.True);
+            var parameters = program.Functions.Single(
+                static function => function.Name == "Observe")
+                .DirectNativeImport!.Parameters;
+            Assert.That(parameters, Has.Length.EqualTo(2));
+            Assert.That(parameters.Select(static parameter =>
+                    parameter.Access),
+                Is.EqualTo(new[] {
+                    NativeParameterAccess.Write,
+                    NativeParameterAccess.Read,
+                }));
+            Assert.That(parameters.All(static parameter =>
+                parameter.Retention == NativeParameterRetention.NoEscape
+                && parameter.Extent == 1), Is.True);
         }
 
         var combinedInput = new TrRmStandardArtifactInput(schemaIdentity,
@@ -3425,10 +3463,65 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
                 reencodedConsumer),
             consumerIdentity, [providerInput]);
         AssertCapturedNestedIndex(reloaded);
+        Assert.That(NativeModuleCompiler.ExecuteStandard(combinedInput,
+            consumerIdentity, [], NativeRuntimePolicy.FailFast), Is.EqualTo(1));
         await AssertStandardA2SourceFreeJitAndAotAsync(consumerIdentity,
             combinedInput, consumerSource, 1,
             "co-located provider Body remap", runJit: false,
             expectedReemitted: consumerArtifact).ConfigureAwait(true);
+
+        var boundsFailureSource = consumerSource.Replace(
+            "mut int32 sequence = 0;", "mut int32 sequence = -1;",
+            StringComparison.Ordinal);
+        var updateOverflowSource = consumerSource
+            .Replace("mut int32 sequence = 0;",
+                "mut uint8 sequence = 0;\n"
+                    + "                mut int32 observed = 0;",
+                StringComparison.Ordinal)
+            .Replace("callback(&sequence,", "callback(&observed,",
+                StringComparison.Ordinal)
+            .Replace("sequence++", "sequence--",
+                StringComparison.Ordinal)
+            .Replace("return sequence;", "return observed;",
+                StringComparison.Ordinal);
+        var indexFailures = new[] {
+            (Source: boundsFailureSource,
+                Controls: new byte[] { 0x01 },
+                Status: unchecked((int)0xE0540004),
+                Scenario: "bounds check before provider entry"),
+            (Source: updateOverflowSource,
+                Controls: new byte[] { 0x02 },
+                Status: unchecked((int)0xE0540001),
+                Scenario: "checked update before provider entry"),
+        };
+        foreach (var failure in indexFailures)
+        {
+            var failureCompilation = Compilation.Create(
+                SyntaxTree.Parse(failure.Source), providerReference,
+                new CompilationOptions {
+                    RuntimePolicy = BoundRuntimePolicy.FailFast,
+                    NativeCoreRegistration
+                        = NativeCoreRegistrationTests.CreateRegistration(),
+                });
+            Assert.That(failureCompilation.HasErrors, Is.False,
+                string.Join(Environment.NewLine,
+                    failureCompilation.Diagnostics));
+            var failureArtifact = TrRmExecutableCompiler.EmitStandard(
+                failureCompilation.Program!, consumerIdentity,
+                schemaIdentity, 1);
+            var failureCombinedArtifact
+                = CombinePopulatedNativeAddressModules(providerArtifact,
+                    failureArtifact, schema);
+            var failureInput = new TrRmStandardArtifactInput(schemaIdentity,
+                failureCombinedArtifact);
+            Assert.That(GetA2IndexUpdateControls(failureInput),
+                Is.EqualTo(failure.Controls));
+            await AssertStandardA2SourceFreeJitAndAotAsync(
+                consumerIdentity, failureInput, failure.Source,
+                failure.Status, failure.Scenario, runJit: false,
+                expectedReemitted: failureArtifact)
+                .ConfigureAwait(true);
+        }
 
         var compatibleProviderSource = providerSource.Replace(
             "uint64 byteCount = 0;",
@@ -5257,6 +5350,42 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
             returnSequence: true, effectfulPostfix: true);
         Assert.That(GetA2IndexUpdateControls(input),
             Is.EqualTo(new byte[] { 0x01, 0x01, 0x01 }));
+        var loaded = TrRmExecutableCompiler.LoadStandard(input,
+            moduleIdentity, []);
+        var main = loaded.Functions.Single(static function =>
+            function.Name == "Main");
+        var addresses = new List<BoundNativeStorageAddress>();
+        Assert.That(BoundTreeTraversal.VisitExpressions(main.Body,
+            expression =>
+            {
+                if (expression is BoundNativeStorageAddress address
+                    && address.Projections.Length == 3)
+                {
+                    addresses.Add(address);
+                }
+            }), Is.True);
+        Assert.That(addresses, Has.Count.EqualTo(1));
+        var selectedAddress = addresses[0];
+        Assert.That(main.Variables[selectedAddress.Variable].Type,
+            Is.EqualTo(selectedAddress.CarrierType));
+        Assert.That(selectedAddress.IsReadonly, Is.True);
+        var updates = selectedAddress.Projections
+            .Select(static projection => projection.Index)
+            .OfType<BoundUpdate>().ToArray();
+        Assert.That(updates, Has.Length.EqualTo(3));
+        var indexVariable = ((BoundRead)updates[0].Place).Variable;
+        Assert.That(updates.Select(static update =>
+                ((BoundRead)update.Place).Variable),
+            Is.EqualTo(new[] {
+                indexVariable, indexVariable, indexVariable,
+            }));
+        Assert.That(indexVariable, Is.Not.EqualTo(selectedAddress.Variable));
+        Assert.That(main.Variables[indexVariable].Type,
+            Is.EqualTo(PrimitiveType.Int32));
+        Assert.That(main.Variables[indexVariable].IsMutable, Is.True);
+        Assert.That(updates.All(static update => !update.IsPrefix
+            && update.OverflowBehavior
+                == BoundIntegerOverflowBehavior.Checked), Is.True);
         await AssertStandardA2SourceFreeJitAndAotAsync(
             moduleIdentity, input, source, 3, "nested index count/order")
             .ConfigureAwait(true);
@@ -5497,12 +5626,38 @@ public sealed class TrRmForeignInvocationAddressEmitterTests
     private static byte[] GetA2IndexUpdateControls(
         TrRmStandardArtifactInput input)
     {
-        var index = TrRmArtifactIndex
-            .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
-                input.Artifact.Span);
-        var tables = TrRmStructuralMetadataValidator
-            .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
-                index);
+        var schema = input.SchemaIdentity switch
+        {
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2"
+                => TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyDraft,
+            "trrm/1-draft-foreign-invocation-storage-fixed-arrays-2-empty-unit-initialization-1"
+                => TrRmArtifactSchema
+                    .ForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft,
+            _ => throw new ArgumentException(
+                "The index-control reader requires an exact A2 or A2EU artifact.",
+                nameof(input)),
+        };
+        var index = schema switch
+        {
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                => TrRmArtifactIndex
+                    .ForForeignInvocationStorageFixedArrayCopyDraft(
+                        input.Artifact.Span),
+            _ => TrRmArtifactIndex
+                .ForForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraft(
+                    input.Artifact.Span),
+        };
+        var tables = schema switch
+        {
+            TrRmArtifactSchema.ForeignInvocationStorageFixedArrayCopyDraft
+                => TrRmStructuralMetadataValidator
+                    .ValidateForeignInvocationStorageFixedArrayCopyDraftAndGetExecutionTables(
+                        index),
+            _ => TrRmStructuralMetadataValidator
+                .ValidateForeignInvocationStorageFixedArrayCopyEmptyUnitInitializationDraftAndGetExecutionTables(
+                    index),
+        };
         var methodRow = 0;
         for (var row = 1; row <= tables.Methods.Count; row++)
         {
